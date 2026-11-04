@@ -10,7 +10,7 @@
  *
  * Routes:
  *   POST /webhooks/shopify      Shopify product webhooks
- *   POST /reconcile             manual run (Authorization: Bearer SYNC_SECRET)
+ *   POST /reconcile             manual run (Authorization: Bearer SYNC_SECRET); ?since=all imports everything
  *   GET  /health
  *   GET  /check                 what's configured (with Bearer SYNC_SECRET: also tests the APIs)
  */
@@ -74,7 +74,12 @@ export function createWorker(config, { fetch, sleep } = {}) {
 
         if (url.pathname === '/reconcile' && request.method === 'POST') {
           if (!secretOk(request, env)) return new Response('unauthorized', { status: 401 });
-          const result = await make(env).sync.reconcile();
+          // ?since=all (or an ISO date): a full first import without the CLI. If it doesn't fit
+          // in one run, the cron continues it.
+          const raw = url.searchParams.get('since');
+          const since = raw === 'all' ? '2000-01-01T00:00:00Z' : raw;
+          if (since && Number.isNaN(Date.parse(since))) return new Response('since must be "all" or an ISO date', { status: 400 });
+          const result = await make(env).sync.reconcile(since ? { since } : {});
           return Response.json(result);
         }
         return new Response('not found', { status: 404 });

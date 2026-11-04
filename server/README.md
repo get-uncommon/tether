@@ -33,8 +33,9 @@ The button forks this repo into your GitHub account, creates the Worker, its KV 
 4. Open `https://<worker>/check`: it lists what's configured. With
    `curl -H "Authorization: Bearer $SYNC_SECRET" https://<worker>/check` it also tests both
    APIs and the field mapping, and shows how a sample product would be written.
-5. Add the [webhooks](#6-shopify-webhooks) in Shopify, then run the first [import](#4-check-and-import-node)
-   from your machine (or let the cron pick up products as they change).
+5. Add the [webhooks](#6-shopify-webhooks) in Shopify, then start the first import:
+   `curl -X POST -H "Authorization: Bearer $SYNC_SECRET" "https://<worker>/reconcile?since=all"`.
+   If it doesn't fit in one run, the cron finishes it (or run the [CLI import](#4-check-and-import-node)).
 
 Changing the mapping later: set `FIELD_MAP` (`npx wrangler secret put FIELD_MAP`, or in the
 Cloudflare dashboard) or edit `tether-sync.config.js` in your fork; the fork redeploys on push.
@@ -214,7 +215,7 @@ are listed in [`.dev.vars.example`](.dev.vars.example); for local `npx wrangler 
 `.dev.vars`.
 
 Routes: `POST /webhooks/shopify`, `GET /check` (and `/`), `GET /health`, `POST /reconcile` (needs
-`Authorization: Bearer $SYNC_SECRET`). Every run counts its outgoing requests and stops in time:
+`Authorization: Bearer $SYNC_SECRET`; `?since=all` imports everything, continued by the cron). Every run counts its outgoing requests and stops in time:
 `MAX_SUBREQUESTS` (default 45, for the free plan's 50) can be raised on a paid plan. The Worker keeps its own state in KV. Run the first import
 from Node: the Worker's first reconcile looks back `lookbackMinutes` and finds the imported items
 by `shopify-id`, so nothing is duplicated. The first time the Worker touches an already-imported

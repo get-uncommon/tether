@@ -261,9 +261,10 @@ export function createSync({
       since: sinceOverride,
     } = {}) => serial(async () => {
       const storedSince = await store.get(SINCE);
-      const start = sinceOverride || storedSince || new Date(now() - cfg.reconcile.lookbackMinutes * 60000).toISOString();
+      // A half-done window (also one started with `since`, e.g. a first import) is finished first.
       const resume = sinceOverride ? null : await store.get(PAGE);
-      const resuming = resume && resume.since === start;
+      const start = sinceOverride || resume?.since || storedSince || new Date(now() - cfg.reconcile.lookbackMinutes * 60000).toISOString();
+      const resuming = Boolean(resume) && resume.since === start;
       let after = resuming ? resume.after : null;
       let offset = resuming ? resume.offset || 0 : 0; // products of that page already done
       let newest = resuming ? resume.newest : start;
@@ -335,7 +336,7 @@ export function createSync({
         // Only write what moved: KV's free tier allows 1,000 writes a day.
         if (complete) {
           if (storedSince !== newest) await store.put(SINCE, newest);
-          if (resume) await store.delete(PAGE);
+          if (resume || sinceOverride) await store.delete(PAGE);
         } else if (!resuming || resume.after !== after || resume.offset !== offset || resume.newest !== newest) {
           await store.put(PAGE, { since: start, after, offset, newest });
         }

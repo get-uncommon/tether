@@ -198,3 +198,21 @@ test('file store: batched writes, merged with another process, survives a failed
   await assert.rejects(bad.flush());
   await assert.rejects(bad.flush(), 'still dirty, retried');
 });
+
+test('POST /reconcile?since=all imports everything, and the cron finishes what one run cannot', async () => {
+  const products = Array.from({ length: 10 }, (_, i) => shopifyProduct(i + 1, { updatedAt: `2025-0${(i % 9) + 1}-01T00:00:00Z` }));
+  const apis = createMockApis({ products });
+  const kv = new Map();
+  const TETHER_SYNC = { async get(k, t) { const v = kv.get(k); return v == null ? null : t === 'json' ? JSON.parse(v) : v; }, async put(k, v) { kv.set(k, v); }, async delete(k) { kv.delete(k); } };
+  const worker = createWorker(baseConfig, { fetch: apis.fetch, sleep: instantSleep });
+  const secret = 'a-long-random-sync-secret-123';
+  const wenv = { ...env, TETHER_SYNC, SYNC_SECRET: secret, MAX_SUBREQUESTS: '14' };
+  const res = await worker.fetch(new Request('https://w.test/reconcile?since=all', { method: 'POST', headers: { authorization: `Bearer ${secret}` } }), wenv, {});
+  const first = await res.json();
+  assert.equal(first.complete, false, 'too much for one run');
+  for (let i = 0; i < 10 && !(await worker.scheduled({}, wenv, { waitUntil() {} })).complete; i++);
+  assert.equal(apis.wf.items.size, 10, 'cron finished the import');
+  assert.equal(JSON.parse(kv.get('tether-sync:reconcile:since')), '2025-09-01T00:00:00Z');
+  const bad = await worker.fetch(new Request('https://w.test/reconcile?since=yesterday', { method: 'POST', headers: { authorization: `Bearer ${secret}` } }), wenv, {});
+  assert.equal(bad.status, 400);
+});

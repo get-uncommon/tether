@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.2 (2026-11-04)
+
+- Worker: `POST /reconcile?since=all` (with `SYNC_SECRET`) runs a full first import without
+  the CLI; if it doesn't fit in one run, the cron continues it.
+- Fix: a half-done reconcile window that started from an explicit `since` is now resumed by the
+  next run instead of being dropped.
+
 ## 0.3.1 (2026-11-04)
 
 - Deploy to Cloudflare: the form starts empty (no example values), with clearer descriptions
