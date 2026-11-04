@@ -21,7 +21,7 @@ import { attr, sel, get, qsa, emit, formatMoney, busy, parseJSONAttr, toAttribut
 import { loadPart, coreModules } from './lazy.js';
 import { mountedLists, liveLists, pruneLive, within, mountProduct, retryFailed, hydrateFromPage } from './mounting.js';
 
-export const VERSION = '0.4.0';
+export const VERSION = '0.5.0';
 
 let initPromise = null;
 let observer = null;
