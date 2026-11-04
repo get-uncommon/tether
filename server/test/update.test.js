@@ -8,6 +8,8 @@ import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { pickVersion } from '../scripts/update-tether.mjs';
 
+const WORKFLOW_HASH = 'a369c8e1628b'; // change only together with a plan for existing copies
+
 const TAGS = ['v0.1.0', 'v0.2.0', 'v0.3.0', 'v0.3.1', 'v0.3.3', 'v0.3.2', 'v0.4.0', 'v1.0.0', 'not-a-version'];
 
 test('version ranges work like jsDelivr', () => {
@@ -45,8 +47,16 @@ test('updating a copy replaces the code and keeps config, wrangler ids and TETHE
   assert.match(await readFile(join(copy, 'tether-sync.config.js'), 'utf8'), /metafield:custom\.material/, 'mapping kept');
   assert.match(await readFile(join(copy, 'wrangler.jsonc'), 'utf8'), /kv-123/, 'Cloudflare ids kept');
   assert.equal((await readFile(join(copy, 'TETHER_VERSION'), 'utf8')).trim(), '0.3');
-  assert.ok(existsSync(join(copy, '.github', 'workflows', 'update-tether.yml')), 'updater updates itself');
+  assert.ok(!existsSync(join(copy, '.github')), 'workflow files are never touched (GitHub refuses that from an Action)');
+  assert.ok(existsSync(join(copy, 'scripts', 'update-tether.mjs')), 'the updater script updates itself');
 
   const again = execFileSync('node', [join(copy, 'scripts', 'update-tether.mjs'), '--from', release], { encoding: 'utf8' });
   assert.match(again, /up to date/);
+});
+
+test('the shipped workflow stays identical, so copies made with any earlier version keep updating', async () => {
+  // Copies from 0.3.3/0.3.4 copied .github/ too: a changed workflow would block their next update.
+  const { createHash } = await import('node:crypto');
+  const wf = await readFile(new URL('../.github/workflows/update-tether.yml', import.meta.url));
+  assert.equal(createHash('sha256').update(wf).digest('hex').slice(0, 12), WORKFLOW_HASH);
 });

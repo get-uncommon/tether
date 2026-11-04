@@ -21,7 +21,7 @@ import { diagnose } from './diagnose.js';
 import { detectMarket, rememberMarket, getLocalization, clearLocalization, toCountry, toLanguage } from './markets.js';
 import { attr, sel, get, qsa, emit, formatMoney, busy, parseJSONAttr, toAttributes } from './dom.js';
 
-export const VERSION = '0.3.5';
+export const VERSION = '0.3.6';
 
 const mountedProducts = new WeakSet();
 const mountedLists = new WeakSet();

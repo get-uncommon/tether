@@ -48,7 +48,7 @@ Site settings → Custom code → **Head**:
 <script src="https://cdn.jsdelivr.net/gh/ravi-klaassens/tether@0.3/dist/tether.min.js" defer></script>
 ```
 
-**Versions:** `@0.3` gets every 0.3.x fix automatically (recommended), `@v0.3.5` pins one release,
+**Versions:** `@0.3` gets every 0.3.x fix automatically (recommended), `@v0.3.6` pins one release,
 `@latest` always takes the newest.
 
 ## 3. Add attributes in the Designer
@@ -117,7 +117,7 @@ npm run smoke     # live test against Shopify's public demo store
 npm run build
 ```
 
-Bundlers: `npm install github:ravi-klaassens/tether#v0.3.5`, then `import Tether from "@occluze/tether"`.
+Bundlers: `npm install @occluze/tether`, then `import Tether from "@occluze/tether"`.
 JavaScript API, config, releases and the Shopify API version policy are in the [reference](docs/reference.md).
 
 ## License

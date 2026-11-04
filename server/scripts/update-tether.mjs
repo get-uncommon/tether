@@ -7,8 +7,10 @@
  *   0.3.3    pinned: never changes
  *   latest   newest release, including new minor versions
  *
- * Replaces the code (src/, bin/, scripts/, test/, docs/, package.json, README, .github/) and keeps what
- * is yours: tether-sync.config.js (mapping), wrangler.jsonc (Cloudflare ids), TETHER_VERSION.
+ * Replaces the code (src/, bin/, scripts/, test/, docs/, package.json, README) and keeps what is
+ * yours: tether-sync.config.js (mapping), wrangler.jsonc (Cloudflare ids), TETHER_VERSION.
+ * .github/ is never touched: GitHub doesn't let an Action's token change workflow files, so the
+ * workflow stays as it is and all update logic lives in this script (which does update itself).
  * Run by .github/workflows/update-tether.yml (weekly + "Run workflow"), or by hand:
  *
  *   node scripts/update-tether.mjs            # check + update the working tree
@@ -32,7 +34,7 @@ const fromIdx = args.indexOf('--from');
 const fromDir = fromIdx > -1 ? resolve(args[fromIdx + 1]) : null;
 
 // What a release replaces. Everything else in the copy is left alone.
-export const MANAGED = ['src', 'bin', 'scripts', 'test', 'docs', 'package.json', 'README.md', '.dev.vars.example', '.github', '.gitignore'];
+export const MANAGED = ['src', 'bin', 'scripts', 'test', 'docs', 'package.json', 'README.md', '.dev.vars.example', '.gitignore'];
 export const KEPT = ['tether-sync.config.js', 'wrangler.jsonc', 'TETHER_VERSION'];
 
 export const parse = (v) => {

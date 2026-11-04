@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.6 (2026-11-04)
+
+- Fix: updates of deployed sync copies could be rejected by GitHub, because an Action's token may
+  not change workflow files. The updater no longer touches `.github/`; the workflow file stays as
+  it was deployed, and all update logic lives in `scripts/update-tether.mjs`, which updates itself.
+  (Reverts the 0.3.5 workflow step.)
+- On npm: `npm install @occluze/tether`.
+
 ## 0.3.5 (2026-11-04)
 
 - Sync updates can't silently stall: after committing an update, the Update Tether action waits
