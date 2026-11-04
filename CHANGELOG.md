@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.5 (2026-11-04)
+
+- Sync updates can't silently stall: after committing an update, the Update Tether action waits
+  until Cloudflare has started the build, pushes again once if it hasn't, and fails visibly
+  otherwise (GitHub emails you).
+- New [comparison page](docs/comparison.md): Tether vs Smootify vs Storesynk (formerly Shopyflow),
+  with sources. Fixed the competitor's name (Shopyflow, not "Shopiflow") in the description.
+
 ## 0.3.4 (2026-11-04)
 
 - Shorter READMEs with what everyone needs; the full reference moved to `docs/reference.md`, the

@@ -1,7 +1,8 @@
 # Tether
 
 **Shopify products, cart and subscriptions in Webflow, with HTML attributes.**
-An open-source, free alternative to Smootify and Shopiflow: one script tag, no monthly fee.
+An open-source, free alternative to Smootify and Storesynk (formerly Shopyflow): one script tag, no monthly fee.
+[How it compares →](docs/comparison.md)
 
 ```html
 <div tether-product="coffee-box">
@@ -15,10 +16,10 @@ An open-source, free alternative to Smootify and Shopiflow: one script tag, no m
 - **Subscriptions:** Shopify selling plans (Shopify Subscriptions, Recharge, Skio, Loop, Appstle, …).
 - **With or without the CMS:** bind products to CMS items, or let one page show any product from the URL.
 - **Markets:** local prices and currency, a country selector, Webflow Localization.
-- **Optional CMS sync:** a Webflow CMS item per Shopify product, kept up to date automatically.
+- **Optional CMS sync:** a Webflow CMS item per Shopify product, kept up to date automatically ([one-click deploy](#sync-shopify-products-to-the-webflow-cms-optional)).
 - **Hand-over ready:** loading, error and not-found states, `Tether.diagnose()`, error reporting.
 
-MIT licensed · ~60 KB · no dependencies · [full reference](docs/reference.md) · [changelog](CHANGELOG.md)
+MIT licensed · ~60 KB · no dependencies · [full reference](docs/reference.md) · [comparison](docs/comparison.md) · [changelog](CHANGELOG.md)
 
 ---
 
@@ -47,7 +48,7 @@ Site settings → Custom code → **Head**:
 <script src="https://cdn.jsdelivr.net/gh/ravi-klaassens/tether@0.3/dist/tether.min.js" defer></script>
 ```
 
-**Versions:** `@0.3` gets every 0.3.x fix automatically (recommended), `@v0.3.4` pins one release,
+**Versions:** `@0.3` gets every 0.3.x fix automatically (recommended), `@v0.3.5` pins one release,
 `@latest` always takes the newest.
 
 ## 3. Add attributes in the Designer
@@ -116,7 +117,7 @@ npm run smoke     # live test against Shopify's public demo store
 npm run build
 ```
 
-Bundlers: `npm install github:ravi-klaassens/tether#v0.3.4`, then `import Tether from "@occluze/tether"`.
+Bundlers: `npm install github:ravi-klaassens/tether#v0.3.5`, then `import Tether from "@occluze/tether"`.
 JavaScript API, config, releases and the Shopify API version policy are in the [reference](docs/reference.md).
 
 ## License

@@ -12,6 +12,7 @@ on:
 permissions:
   contents: write
   actions: write   # to keep this schedule alive (below)
+  checks: read     # to see that Cloudflare picked up the update
 
 concurrency:
   group: update-tether
@@ -56,3 +57,21 @@ jobs:
           git commit -m "Update Tether to v$VERSION"
           git push
           echo "### Updated to v$VERSION" >> "$GITHUB_STEP_SUMMARY"
+
+      # Cloudflare builds on GitHub's push notification, which can (rarely) get lost. Wait until
+      # Cloudflare has started a build for the update; if it doesn't, push again once, then fail
+      # loudly (GitHub emails you about failed runs) instead of staying silently on the old version.
+      - name: Make sure Cloudflare deploys it
+        if: steps.up.outputs.version != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          built() { [ "$(gh api "repos/$GITHUB_REPOSITORY/commits/$(git rev-parse HEAD)/check-runs" --jq '.total_count' 2>/dev/null || echo 0)" -gt 0 ]; }
+          wait_build() { for i in $(seq 1 12); do built && return 0; sleep 10; done; return 1; }
+          if wait_build; then echo "Cloudflare is building it."; exit 0; fi
+          echo "No Cloudflare build after 2 minutes: pushing again."
+          git commit --allow-empty -m "Redeploy Tether (Cloudflare missed the last push)"
+          git push
+          if wait_build; then echo "Cloudflare is building it."; exit 0; fi
+          echo "::error::Cloudflare didn't start a build. Open Cloudflare -> Workers & Pages -> your Worker -> Deployments, or check that the Git connection still works."
+          exit 1
