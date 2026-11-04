@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.6.1 (2026-11-04)
+
+**Customer accounts, server mode: fixes from an independent security review** (nothing critical
+was found; every finding is fixed and has a test):
+- Login CSRF: the pending login is now sealed in an HttpOnly cookie in the browser that started
+  it, so a login link from someone else can't log a visitor into the wrong account. As a result,
+  nothing is written to KV before a real login (no quota abuse by anonymous requests).
+- `/login` no longer takes a cart; carts are only linked through the protected `POST /cart`.
+- Logout can't fail open: the session is ended and the cookie cleared first, even when Shopify is
+  down. The id token for Shopify's logout goes through a one-time HttpOnly cookie, never the page.
+- Sessions have an absolute lifetime (`ACCOUNT_SESSION_DAYS`), end when Shopify ends them, and
+  survive two requests refreshing at once.
+- A separate encryption key per purpose, bound to its KV key; optional `ACCOUNT_SECRET`.
+- Order links must be https; stricter cart ids; no setup details in public errors.
+
+**Sync:** new deploys follow every release (`TETHER_VERSION` is `latest`).
+
+**Docs:** the comparison covers 0.6 (accounts, search, analytics, frameworks).
+
 ## 0.6.0 (2026-11-04)
 
 Found by 10 agents building stores from the docs alone (Astro static and SSR, plain HTML, Vite,

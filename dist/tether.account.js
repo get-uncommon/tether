@@ -104,7 +104,6 @@
     if (server()) {
       const u2 = new URL(`${server()}/login`);
       u2.searchParams.set("returnTo", returnTo);
-      if (Cart.id()) u2.searchParams.set("cart", Cart.id());
       const lang2 = locale || cfg.account.locale || (cfg.locale || "").split("-")[0];
       if (lang2) u2.searchParams.set("locale", lang2);
       if (cfg.country) u2.searchParams.set("country", String(cfg.country).toUpperCase());
@@ -284,6 +283,13 @@
     u.searchParams.set("post_logout_redirect_uri", returnTo);
     go(u.toString());
   }
+  var https = (u) => {
+    try {
+      return new URL(u).protocol === "https:";
+    } catch {
+      return false;
+    }
+  };
   var date = (s) => {
     try {
       return new Date(s).toLocaleDateString(cfg.locale || void 0);
@@ -320,13 +326,13 @@
         qsa(node, sel("order-bind")).forEach((el) => {
           const k = get(el, "order-bind");
           if (k === "url") {
-            el.setAttribute("href", o.statusPageUrl);
+            if (https(o.statusPageUrl)) el.setAttribute("href", o.statusPageUrl);
             return;
           }
           const v = { name: o.name, date: date(o.processedAt), total: formatMoney(o.totalPrice), status: o.financialStatus?.toLowerCase(), fulfillment: o.fulfillmentStatus?.toLowerCase(), items: o.lineItems.nodes.map((l) => `${l.quantity}\xD7 ${l.title}`).join(", ") }[k];
           if (v != null) setText(el, v);
         });
-        if (get(node, "order-bind") === "url") node.setAttribute("href", o.statusPageUrl);
+        if (get(node, "order-bind") === "url" && https(o.statusPageUrl)) node.setAttribute("href", o.statusPageUrl);
       }));
     }
   }

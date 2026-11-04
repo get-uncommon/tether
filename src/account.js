@@ -81,8 +81,7 @@ export function isLoggedIn() { return server() ? Boolean(serverState?.loggedIn) 
 export async function login({ returnTo = window.location.href, locale } = {}) {
   if (server()) {
     const u = new URL(`${server()}/login`);
-    u.searchParams.set('returnTo', returnTo);
-    if (Cart.id()) u.searchParams.set('cart', Cart.id());
+    u.searchParams.set('returnTo', returnTo); // the cart is linked later, through the Worker's protected POST /cart
     const lang = locale || cfg.account.locale || (cfg.locale || '').split('-')[0];
     if (lang) u.searchParams.set('locale', lang);
     if (cfg.country) u.searchParams.set('country', String(cfg.country).toUpperCase());
@@ -251,6 +250,7 @@ export async function logout({ returnTo = cfg.account?.logoutUrl || `${window.lo
 
 // ---------------------------------------------------------------- markup
 
+const https = (u) => { try { return new URL(u).protocol === 'https:'; } catch { return false; } }; // links from Shopify: https only
 const date = (s) => { try { return new Date(s).toLocaleDateString(cfg.locale || undefined); } catch { return s; } };
 
 export async function render(root = document) {
@@ -275,11 +275,11 @@ export async function render(root = document) {
     lists.forEach((c) => repeat(c, list, (node, o) => {
       qsa(node, sel('order-bind')).forEach((el) => {
         const k = get(el, 'order-bind');
-        if (k === 'url') { el.setAttribute('href', o.statusPageUrl); return; }
+        if (k === 'url') { if (https(o.statusPageUrl)) el.setAttribute('href', o.statusPageUrl); return; }
         const v = { name: o.name, date: date(o.processedAt), total: formatMoney(o.totalPrice), status: o.financialStatus?.toLowerCase(), fulfillment: o.fulfillmentStatus?.toLowerCase(), items: o.lineItems.nodes.map((l) => `${l.quantity}× ${l.title}`).join(', ') }[k];
         if (v != null) setText(el, v);
       });
-      if (get(node, 'order-bind') === 'url') node.setAttribute('href', o.statusPageUrl);
+      if (get(node, 'order-bind') === 'url' && https(o.statusPageUrl)) node.setAttribute('href', o.statusPageUrl);
     }));
   }
 }

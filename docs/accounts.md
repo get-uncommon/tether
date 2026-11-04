@@ -10,7 +10,7 @@ There are two ways to run it. **Use the server mode for live sites.**
 |---|---|---|
 | Where the login lives | your [sync Worker](../server/README.md), encrypted | the visitor's browser |
 | What the browser holds | a session cookie scripts can't read | the Shopify tokens |
-| A malicious script on your site | can't steal the login | could take the tokens |
+| A malicious script on your site | can't take the login away; while the page is open it can act as the customer there | could take the tokens and use them anywhere |
 | Setup | the Worker on your shop's domain (a route) | nothing extra |
 
 Either way, there's no Tether server: the data goes between the visitor, Shopify and your own
@@ -20,9 +20,21 @@ Worker.
 
 The Worker does the login with Shopify (OAuth with PKCE, the id token's signature checked against
 Shopify's keys), keeps the tokens **encrypted** in its KV storage (AES-GCM, under a hash of the
-session id), and gives the browser one cookie: `__Host-tether-account`, `HttpOnly`, `Secure`,
-`SameSite=Lax`. The browser can only ask for the profile and the orders, link its cart, and log out;
-only from your site's address, and changes need a header other sites can't send.
+session id, bound to its key), and gives the browser one cookie: `__Host-tether-account`, `HttpOnly`,
+`Secure`, `SameSite=Lax`. The browser can only ask for the profile and the orders, link its cart,
+and log out; only from your site's address, and changes need a header other sites can't send.
+
+- **Login CSRF:** the pending login is sealed in a cookie in the browser that started it, so
+  nobody can log a visitor into someone else's account by sending them a login link.
+- **Nothing is stored before a real login**, so anonymous login requests can't fill your KV quota.
+- **Logout always works:** the session is ended and the cookie cleared first, even when Shopify is
+  slow or down. The id token for Shopify's logout goes through a one-time HttpOnly cookie, never
+  through the page.
+- **Sessions end:** after `ACCOUNT_SESSION_DAYS` (14) from login, however much they're used, and
+  as soon as Shopify ends them.
+- **What it can't stop:** a malicious script running on your own page can still act as the
+  customer while that page is open (read their profile and orders, link carts). Keep third-party
+  scripts off account pages, and use a Content-Security-Policy.
 
 ### 1. Shopify
 
@@ -49,10 +61,11 @@ Then the Worker's secrets (Settings → Variables and Secrets):
 | `ACCOUNT_CLIENT_SECRET` | the client secret (Confidential client only) |
 | `ACCOUNT_ORIGINS` | your site, e.g. `https://your-shop.com` (more with commas) |
 | `STOREFRONT_TOKEN` | the public Storefront token (to link carts, so checkout knows the customer) |
-| `ACCOUNT_SESSION_DAYS` | optional, how long a login lasts (default 14) |
+| `ACCOUNT_SESSION_DAYS` | optional, how long a login lasts at most (default 14) |
+| `ACCOUNT_SECRET` | optional, 24+ characters: the encryption key for sessions, instead of deriving it from `SYNC_SECRET` |
 
-`SHOPIFY_DOMAIN` and `SYNC_SECRET` are already set; the session encryption key is derived from
-`SYNC_SECRET`. The Worker's `/check` (e.g. `https://tether-sync.your-name.workers.dev/check`) says
+`SHOPIFY_DOMAIN` and `SYNC_SECRET` are already set; the encryption keys are derived from
+`SYNC_SECRET` (or `ACCOUNT_SECRET`). The Worker's `/check` (e.g. `https://tether-sync.your-name.workers.dev/check`) says
 whether accounts are set up, whether the Worker answers on your domain, and which URLs to register
 in Shopify.
 
@@ -126,5 +139,7 @@ server mode answers only the profile and the orders, on purpose. Events: `tether
 Both modes on a real store: login, the customer and orders, a checkout that opens logged in, and
 logout. In server mode the browser held no Shopify token at any point (no cookie scripts can read,
 nothing in its storage). Server mode's unit tests also cover the whole flow against a simulated
-Shopify, including the attacks it must refuse: a forged or replayed login, a tampered or wrongly signed id token,
-another site's origin, a cross-site form, and a return address on another site.
+Shopify, including the attacks it must refuse: login CSRF, a replayed or expired login, a tampered
+or wrongly signed id token, another site's origin, a cross-site form, a return address on another
+site, sessions moved between KV keys, logout during a Shopify outage, and two requests refreshing
+at once. An independent security review found nothing critical; its findings are fixed and tested.

@@ -641,7 +641,7 @@ test('customer accounts in server mode: no token in the browser, the Worker does
     await acc.login();
     const to = new URL(nav.pop());
     assert.equal(to.pathname, '/_tether/account/login');
-    assert.ok(to.searchParams.get('cart'), 'the cart goes along, so the Worker links it at login');
+    assert.equal(to.searchParams.get('cart'), null, 'no cart on the login link (linked through POST /cart)');
     window.history.replaceState(null, '', '/account?account=in');
     document.body.innerHTML = '<span id="n" tether-account-bind="first-name"></span><ul tether-orders><li><span tether-order-bind="name"></span></li></ul>';
     await acc.mountAccount(document);
