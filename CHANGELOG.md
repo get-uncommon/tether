@@ -11,7 +11,8 @@ shopping in them (phone, keyboard only, screen reader, German, French, US, barga
   collections and suggested searches; keyboard and screen-reader friendly.
 - **Customer accounts** (`account.clientId`, 3.5 KB): login on Shopify's page (OAuth with PKCE),
   the customer's name and orders, a checkout that knows them. Between the visitor's browser and
-  Shopify only. [Guide](docs/accounts.md).
+  Shopify only. Tested on a real store: login, token refresh, orders, a checkout that opens
+  logged in, logout. [Guide](docs/accounts.md).
 - **Analytics** (`analytics`, 3 KB): GA4 / Tag Manager ecommerce events in `dataLayer`, Shopify's
   own analytics (experimental, through Shopify's scripts), or `onEvent` for any tool. [Guide](docs/analytics.md).
 - **Structured data:** `shop.jsonLd(product)` for Google's product results.

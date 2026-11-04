@@ -596,7 +596,10 @@ test('customer accounts: PKCE login URL, callback checks state/nonce, cart linke
     window.history.replaceState(null, '', '/account?code=abc&state=wrong');
     assert.equal(await acc.handleCallback(), false);
     window.history.replaceState(null, '', `/account?code=abc&state=${state}`);
+    let loginEvent = 0;
+    window.addEventListener('tether:account-login', () => { loginEvent++; });
     assert.equal(await acc.handleCallback(), true);
+    assert.equal(loginEvent, 1, 'tether:account-login reaches window listeners');
     assert.equal(window.location.search, '', 'code removed from the URL');
     assert.equal(Tether.cart.customerAccessToken, 'tok-1');
     assert.equal((await acc.customer()).firstName, 'Ada');

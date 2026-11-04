@@ -78,6 +78,9 @@ Events: `tether:account-login`, `tether:account-logout`, `tether:account-error`.
 - Tokens are kept in `sessionStorage` (gone when the tab closes), or `localStorage` with
   `remember: true`. As on any site where the browser holds a login, don't load untrusted scripts on
   your pages (a strict Content-Security-Policy helps).
-- If your browser setup can't reach Shopify's token endpoint (a CORS error at login), set
+- Tested on a real store: login, the token exchange and refresh straight from the browser, the
+  customer and orders queries, the cart linked to the customer (checkout opens logged in), and
+  logout (cart unlinked, tokens removed).
+- If your setup can't reach Shopify's token endpoint (a CORS error at login), set
   `account.tokenUrl` to a small endpoint on your own server that forwards the form body to
   Shopify's token endpoint.
