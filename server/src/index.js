@@ -8,3 +8,5 @@ export { memoryStore, kvStore } from './store.js';
 export { verifyShopifyHmac, signShopify } from './hmac.js';
 export { handleShopifyWebhook } from './webhook.js';
 export { createWorker } from './worker.js';
+export { ensureWebhooks, webhookStatus, PRODUCT_TOPICS } from './webhooks.js';
+export { VERSION } from './version.js';

@@ -10,7 +10,8 @@
  *
  * Routes:
  *   POST /webhooks/shopify      Shopify product webhooks
- *   POST /reconcile             manual run (Authorization: Bearer SYNC_SECRET); ?since=all imports everything
+ *   POST /reconcile             manual run (Authorization: Bearer SYNC_SECRET); ?since=all imports everything.
+ *                               Also registers this Worker's Shopify product webhooks (once).
  *   GET  /health
  *   GET  /check                 what's configured (with Bearer SYNC_SECRET: also tests the APIs)
  */
@@ -20,6 +21,8 @@ import { handleShopifyWebhook } from './webhook.js';
 import { safeEqual } from './hmac.js';
 import { runCheck } from './check.js';
 import { cleanEnv } from './mapping.js';
+import { ensureWebhooks } from './webhooks.js';
+import { VERSION } from './version.js';
 
 const consoleLog = { info: (...a) => console.log(...a), warn: (...a) => console.warn(...a), error: (...a) => console.error(...a), debug() {} };
 
@@ -49,24 +52,27 @@ export function createWorker(config, { fetch, sleep } = {}) {
     async fetch(request, env, ctx) {
       const url = new URL(request.url);
       try {
-        if (url.pathname === '/health') return Response.json({ ok: true, kv: Boolean(env.TETHER_SYNC) });
+        if (url.pathname === '/health') return Response.json({ ok: true, version: VERSION, kv: Boolean(env.TETHER_SYNC) });
 
         if (url.pathname === '/check' || url.pathname === '/') {
           const deep = secretOk(request, env);
-          const report = await runCheck(config, env, { deep, fetch, sleep, worker: true });
+          const report = await runCheck(config, env, {
+            deep, fetch, sleep, worker: true, webhookUri: `${url.origin}/webhooks/shopify`,
+            version: deep ? VERSION : null, range: cleanEnv(env).TETHER_VERSION || null,
+          });
           if (!deep) {
             // Anyone can open this URL: say what's set, never the values (store, collection id).
             report.steps = report.steps.map((s) => (s.level === 'ok' ? { ...s, message: 'set' } : s));
             report.steps.push({ level: 'info', title: 'Connections', message: 'Send `Authorization: Bearer <SYNC_SECRET>` to also test the Shopify and Webflow APIs.' });
             delete report.config;
           }
-          return Response.json({ ...report, kv: Boolean(env.TETHER_SYNC) }, { status: report.ok ? 200 : 503 });
+          return Response.json({ version: VERSION, ...report, kv: Boolean(env.TETHER_SYNC) }, { status: report.ok ? 200 : 503 });
         }
 
         if (url.pathname === '/webhooks/shopify') {
           const app = make(env, 'webhook');
           const { response, task } = await handleShopifyWebhook(request, {
-            sync: app.sync, secret: app.webhookSecret, shopDomain: app.config.shopify.domain, log: consoleLog, sleep,
+            sync: app.sync, secret: app.webhookSecret, secrets: app.webhookSecrets, shopDomain: app.config.shopify.domain, log: consoleLog, sleep,
           });
           if (task) ctx.waitUntil(task);
           return response;
@@ -79,8 +85,14 @@ export function createWorker(config, { fetch, sleep } = {}) {
           const raw = url.searchParams.get('since');
           const since = raw === 'all' ? '2000-01-01T00:00:00Z' : raw;
           if (since && Number.isNaN(Date.parse(since))) return new Response('since must be "all" or an ISO date', { status: 400 });
-          const result = await make(env).sync.reconcile(since ? { since } : {});
-          return Response.json(result);
+          const app = make(env);
+          // First run: register this Worker's product webhooks through the app (once).
+          let webhooks;
+          try { webhooks = await ensureWebhooks({ shopify: app.shopify, store: app.store, uri: `${url.origin}/webhooks/shopify` }); } catch (err) {
+            webhooks = { error: err.message };
+          }
+          const result = await app.sync.reconcile(since ? { since } : {});
+          return Response.json({ ...result, webhooks });
         }
         return new Response('not found', { status: 404 });
       } catch (err) {

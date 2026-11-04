@@ -37,13 +37,13 @@ To also have a Webflow CMS item per product (SEO, CMS lists, editor content), se
 **Script tag (Webflow, any HTML):** pin a version from jsDelivr:
 
 ```html
-<script src="https://cdn.jsdelivr.net/gh/ravi-klaassens/tether@v0.3.2/dist/tether.min.js" defer></script>
+<script src="https://cdn.jsdelivr.net/gh/ravi-klaassens/tether@v0.3.3/dist/tether.min.js" defer></script>
 ```
 
 **Bundled (Vite, esbuild, Webpack, …):** copy `dist/tether.esm.js` into your project, or install from GitHub:
 
 ```bash
-npm install github:ravi-klaassens/tether#v0.3.2
+npm install github:ravi-klaassens/tether#v0.3.3
 ```
 
 ```js
@@ -80,7 +80,7 @@ and payments need a test payment provider or Shopify Payments in test mode.
     productPath: '/product',      // your Webflow product template path
   };
 </script>
-<script src="https://cdn.jsdelivr.net/gh/ravi-klaassens/tether@v0.3.2/dist/tether.min.js" defer></script>
+<script src="https://cdn.jsdelivr.net/gh/ravi-klaassens/tether@v0.3.3/dist/tether.min.js" defer></script>
 ```
 
 **Try it locally:** `npm install && npm run build`, then serve the folder and open
@@ -485,8 +485,10 @@ TETHER_API_VERSION=2026-10 npm run smoke                        # try a newer Sh
 node scripts/api-version.mjs --next                             # the next quarterly version
 ```
 
-Releases: bump `package.json`, update `CHANGELOG.md`, `npm run build`, commit `dist/`, tag `vX.Y.Z`.
-jsDelivr serves the tag immediately.
+Releases: bump `package.json`, `server/package.json` and `server/src/version.js`, update `CHANGELOG.md`, `npm run build`,
+commit `dist/`, tag `vX.Y.Z`. jsDelivr serves the tag immediately, and deployed sync Workers pick it
+up through their Update Tether action (within their `TETHER_VERSION` range). For a new minor
+version, also set `server/TETHER_VERSION` to it, so new deploys follow that line.
 
 ## Subscriptions: what Shopify handles, not Tether
 

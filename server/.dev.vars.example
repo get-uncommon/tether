@@ -1,17 +1,9 @@
-# Values for the Deploy to Cloudflare button (and `npx wrangler dev`: copy to .dev.vars).
-# Leave a value empty when you don't use it. Descriptions: package.json -> cloudflare.bindings.
-
-# Required
+# What the Deploy to Cloudflare button asks for. Descriptions: package.json -> cloudflare.bindings.
+# Optional settings (SHOPIFY_ADMIN_TOKEN, SHOPIFY_WEBHOOK_SECRET, FIELD_MAP, WEBFLOW_OWNED,
+# MAX_SUBREQUESTS) can be added later as secrets in the Worker's settings: see README.
 SHOPIFY_DOMAIN=
 WEBFLOW_COLLECTION_ID=
 WEBFLOW_TOKEN=
-
-# Shopify access: a Dev Dashboard app (client id + secret), or SHOPIFY_ADMIN_TOKEN for an existing custom app
 SHOPIFY_CLIENT_ID=
 SHOPIFY_CLIENT_SECRET=
-SHOPIFY_ADMIN_TOKEN=
-
-# Optional
-SHOPIFY_WEBHOOK_SECRET=
 SYNC_SECRET=
-FIELD_MAP=

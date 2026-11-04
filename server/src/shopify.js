@@ -123,6 +123,21 @@ export function createShopify({
       const data = await gql('query TetherSyncShop { shop { name myshopifyDomain } }');
       return data.shop;
     },
+
+    /** This app's webhook subscriptions: [{ id, topic, uri }]. */
+    async listWebhooks() {
+      const data = await gql('query TetherSyncWebhooks { webhookSubscriptions(first: 100) { nodes { id topic uri } } }');
+      return data.webhookSubscriptions.nodes;
+    },
+
+    async createWebhook(topic, uri) {
+      const data = await gql(`mutation TetherSyncWebhookCreate($topic: WebhookSubscriptionTopic!, $sub: WebhookSubscriptionInput!) {
+  webhookSubscriptionCreate(topic: $topic, webhookSubscription: $sub) { webhookSubscription { id topic uri } userErrors { field message } }
+}`, { topic, sub: { uri } });
+      const res = data.webhookSubscriptionCreate;
+      if (res.userErrors?.length) throw new SyncError(`webhook ${topic}: ${res.userErrors.map((e) => e.message).join(' | ')}`);
+      return res.webhookSubscription;
+    },
   };
 
   async function listPage(first, after, query) {

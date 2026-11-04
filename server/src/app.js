@@ -43,5 +43,7 @@ export function createApp(rawConfig, rawEnv, { store, fetch, log, dryRun = false
     ...(sleep ? { sleep } : {}),
   });
   const sync = createSync({ config, shopify, webflow, store, log, dryRun, budget });
-  return { config, shopify, webflow, sync, store, webhookSecret: env.SHOPIFY_WEBHOOK_SECRET || env.SHOPIFY_CLIENT_SECRET };
+  // App-registered webhooks are signed with the client secret, admin-created ones with their own key.
+  const webhookSecrets = [env.SHOPIFY_WEBHOOK_SECRET, env.SHOPIFY_CLIENT_SECRET].filter(Boolean);
+  return { config, shopify, webflow, sync, store, webhookSecret: webhookSecrets[0], webhookSecrets };
 }

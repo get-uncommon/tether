@@ -1,6 +1,6 @@
 {
   "name": "@occluze/tether-sync",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "private": true,
   "description": "Shopify -> Webflow CMS sync for Tether: webhooks, reconcile cron and initial import. Runs as a Cloudflare Worker or a Node CLI.",
   "type": "module",
@@ -36,22 +36,13 @@
         "description": "**Required.** Webflow site API token with **CMS read and write** (Site settings \u2192 Apps & integrations \u2192 API access)."
       },
       "SHOPIFY_CLIENT_ID": {
-        "description": "Client id of a Shopify [Dev Dashboard](https://shopify.dev/docs/apps/build/dev-dashboard) app installed on your store, with `read_products`. Fill this and the secret, **or** SHOPIFY_ADMIN_TOKEN."
+        "description": "Client id of a Shopify [Dev Dashboard](https://dev.shopify.com/dashboard) app with the `read_products` scope, installed on your store (app and store in the same organization)."
       },
       "SHOPIFY_CLIENT_SECRET": {
-        "description": "Client secret of that app. Also verifies the webhooks."
-      },
-      "SHOPIFY_ADMIN_TOKEN": {
-        "description": "Only for an existing admin-created custom app: its `shpat_\u2026` token. Leave empty when you use a Dev Dashboard app."
-      },
-      "SHOPIFY_WEBHOOK_SECRET": {
-        "description": "Optional. Only for webhooks created under Shopify Settings \u2192 Notifications: the signing key shown there. Leave empty to use the client secret."
+        "description": "Client secret of that app (Dev Dashboard \u2192 your app \u2192 Credentials). Also verifies the webhooks, which the Worker registers itself."
       },
       "SYNC_SECRET": {
-        "description": "Optional. A random string of **at least 24 characters** (e.g. from a password manager). Unlocks the API tests on `/check` and `POST /reconcile`. Empty: both stay off."
-      },
-      "FIELD_MAP": {
-        "description": "Optional. JSON to change the field mapping, e.g. `{\"material\":\"metafield:custom.material\"}`. Leave empty for the default mapping."
+        "description": "A random string of **at least 24 characters** (e.g. `openssl rand -hex 24`). **Save it**: you need it for the first import and for `/check`."
       }
     }
   }

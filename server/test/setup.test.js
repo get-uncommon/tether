@@ -1,7 +1,7 @@
 // Deploy/first-run path: default config, env overrides, skipMissingFields, guided check, Worker /check.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import defaultConfig from '../tether-sync.config.js';
+import defaultConfig from './default-config.js';
 import { createApp, memoryStore, createWorker } from '../src/index.js';
 import { runCheck, formatCheck } from '../src/check.js';
 import { cleanEnv, applyEnv, normalizeConfig } from '../src/mapping.js';
@@ -63,7 +63,10 @@ test('check with everything set tests the APIs, reports mapping problems and a s
   const by = (t) => r.steps.filter((s) => s.title === t);
   assert.match(by('Shopify API')[0].message, /Shop \(API 2026-07\)/);
   assert.match(by('Webflow API')[0].message, /collection "Products"/);
-  assert.ok(by('Field mapping').some((s) => s.level === 'warn' && /"gallery" doesn't exist/.test(s.message)));
+  const skippedLine = by('Field mapping').filter((s) => /not synced/.test(s.message));
+  assert.equal(skippedLine.length, 1, 'missing fields folded into one line');
+  assert.match(skippedLine[0].message, /gallery/);
+  assert.ok(!by('Field mapping').some((s) => s.level === 'warn'), 'no warnings for expected missing fields');
   assert.equal(by('Sample')[0].sample.slug, 'product-3');
   assert.ok(!('gallery' in by('Sample')[0].sample));
   assert.ok(!JSON.stringify(r).includes('csecret'), 'no secrets in the report');
@@ -128,12 +131,67 @@ test('worker: placeholder SYNC_SECRET never unlocks /reconcile or the deep check
   assert.equal(apis.calls.length, 0);
 });
 
-test('.dev.vars.example has no values, so the deploy form starts empty', async () => {
+test('.dev.vars.example: only the six fields a deploy needs, all empty and described', async () => {
   const { readFile } = await import('node:fs/promises');
   const text = await readFile(new URL('../.dev.vars.example', import.meta.url), 'utf8');
   const lines = text.split('\n').filter((l) => l.trim() && !l.trim().startsWith('#'));
-  assert.ok(lines.length >= 9);
+  assert.deepEqual(lines.map((l) => l.slice(0, -1)), ['SHOPIFY_DOMAIN', 'WEBFLOW_COLLECTION_ID', 'WEBFLOW_TOKEN', 'SHOPIFY_CLIENT_ID', 'SHOPIFY_CLIENT_SECRET', 'SYNC_SECRET']);
   lines.forEach((l) => assert.match(l, /^[A-Z_]+=$/, l));
   const pkg = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
   lines.forEach((l) => assert.ok(pkg.cloudflare.bindings[l.slice(0, -1)]?.description, `description for ${l}`));
+});
+
+test('webhooks: the first reconcile registers them through the app, once; check reports them', async () => {
+  const apis = createMockApis({ products: [shopifyProduct(1)] });
+  const kv = new Map();
+  const TETHER_SYNC = { async get(k, t) { const v = kv.get(k); return v == null ? null : t === 'json' ? JSON.parse(v) : v; }, async put(k, v) { kv.set(k, v); }, async delete(k) { kv.delete(k); } };
+  const worker = createWorker(defaultConfig, { fetch: apis.fetch, sleep: instantSleep });
+  const wenv = { ...deployEnv, TETHER_SYNC };
+  const auth = { authorization: `Bearer ${deployEnv.SYNC_SECRET}` };
+
+  let c = await (await worker.fetch(new Request('https://w.test/check', { headers: auth }), wenv, {})).json();
+  assert.match(c.steps.find((s) => s.title === 'Shopify webhooks').message, /not registered yet/);
+
+  const r = await (await worker.fetch(new Request('https://w.test/reconcile?since=all', { method: 'POST', headers: auth }), wenv, {})).json();
+  assert.deepEqual(r.webhooks.created, ['PRODUCTS_CREATE', 'PRODUCTS_UPDATE', 'PRODUCTS_DELETE']);
+  assert.ok(apis.shop.webhooks.every((w) => w.uri === 'https://w.test/webhooks/shopify'));
+  const again = await (await worker.fetch(new Request('https://w.test/reconcile', { method: 'POST', headers: auth }), wenv, {})).json();
+  assert.equal(again.webhooks.cached, true);
+  assert.equal(apis.shop.webhooks.length, 3, 'no duplicates');
+
+  c = await (await worker.fetch(new Request('https://w.test/check', { headers: auth }), wenv, {})).json();
+  assert.equal(c.steps.find((s) => s.title === 'Shopify webhooks').level, 'ok');
+});
+
+test('webhooks signed with either the client secret or SHOPIFY_WEBHOOK_SECRET are accepted', async () => {
+  const apis = createMockApis({ products: [shopifyProduct(1)] });
+  const worker = createWorker(defaultConfig, { fetch: apis.fetch, sleep: instantSleep });
+  const { signShopify } = await import('../src/hmac.js');
+  const send = async (key) => {
+    const body = JSON.stringify({ id: 1 });
+    return worker.fetch(new Request('https://w.test/webhooks/shopify', { method: 'POST', body, headers: { 'x-shopify-topic': 'products/update', 'x-shopify-hmac-sha256': await signShopify(body, key) } }), { ...deployEnv, SHOPIFY_WEBHOOK_SECRET: 'admin-key' }, { waitUntil() {} });
+  };
+  assert.equal((await send('csecret')).status, 200);
+  assert.equal((await send('admin-key')).status, 200);
+  assert.equal((await send('wrong')).status, 401);
+});
+
+test('the shipped config equals the test copy (skipped in a deployed, customizable copy)', async (t) => {
+  const repo = process.env.GITHUB_REPOSITORY;
+  if (repo && repo !== 'ravi-klaassens/tether') return t.skip('deployed copy: its config may be customized');
+  const shipped = (await import('../tether-sync.config.js')).default;
+  assert.deepEqual(shipped, defaultConfig);
+});
+
+test('check says when a newer release in the range exists (a stalled updater shows up)', async () => {
+  const apis = createMockApis({ products: [shopifyProduct(1)] });
+  const tags = (names) => async (url, init) => (String(url).startsWith('https://api.github.com/') ? new Response(JSON.stringify(names.map((name) => ({ name }))), { status: 200 }) : apis.fetch(url, init));
+  let r = await runCheck(defaultConfig, deployEnv, { fetch: tags(['v0.3.3', 'v0.3.9', 'v0.4.0']), version: '0.3.3', sleep: instantSleep });
+  const v = r.steps.find((s) => s.title === 'Tether version');
+  assert.equal(v.level, 'warn');
+  assert.match(v.message, /0\.3\.9 is available \(range 0\.3\)/);
+  r = await runCheck(defaultConfig, deployEnv, { fetch: tags(['v0.3.3', 'v0.4.0']), version: '0.3.3', sleep: instantSleep });
+  assert.equal(r.steps.find((s) => s.title === 'Tether version').level, 'ok');
+  r = await runCheck(defaultConfig, deployEnv, { fetch: tags(['v0.3.3', 'v0.4.0']), version: '0.3.3', range: 'latest', sleep: instantSleep });
+  assert.match(r.steps.find((s) => s.title === 'Tether version').message, /0\.4\.0 is available/);
 });

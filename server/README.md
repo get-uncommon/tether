@@ -23,22 +23,57 @@ The button forks this repo into your GitHub account, creates the Worker, its KV 
 
 ## Quick start (Deploy button)
 
-1. Create the Webflow collection with the [standard fields](#1-webflow-collection) (at least Name,
-   Slug and **Shopify ID**; every other standard field is optional).
-2. Create the Shopify app and the Webflow token ([Tokens](#2-tokens)).
-3. Click **Deploy to Cloudflare** (above) and fill in the form: the three required values, and
-   either `SHOPIFY_CLIENT_ID` + `SHOPIFY_CLIENT_SECRET` or `SHOPIFY_ADMIN_TOKEN`. Leave the rest
-   empty if you don't use them. Example values (`your-…`, `choose-…`) count as not set, and
-   `SYNC_SECRET` needs at least 24 characters.
-4. Open `https://<worker>/check`: it lists what's configured. With
-   `curl -H "Authorization: Bearer $SYNC_SECRET" https://<worker>/check` it also tests both
-   APIs and the field mapping, and shows how a sample product would be written.
-5. Add the [webhooks](#6-shopify-webhooks) in Shopify, then start the first import:
-   `curl -X POST -H "Authorization: Bearer $SYNC_SECRET" "https://<worker>/reconcile?since=all"`.
-   If it doesn't fit in one run, the cron finishes it (or run the [CLI import](#4-check-and-import-node)).
+1. **Webflow:** a Products collection with at least Name, Slug and a Plain text field **Shopify ID**
+   (the other [standard fields](#1-webflow-collection) are optional). Then Site settings → Apps &
+   integrations → API access → generate a token with **CMS read and write**.
+2. **Shopify:** in the [Dev Dashboard](https://dev.shopify.com/dashboard), create an app with the
+   scope `read_products`, release it and install it on your store. Copy its client id and secret.
+3. **Deploy:** click **Deploy to Cloudflare** (above). Connect a GitHub (or GitLab) account for the
+   copy of the code (tick "private"), and fill in the six fields: store domain, collection id,
+   Webflow token, client id, client secret, and a `SYNC_SECRET` (`openssl rand -hex 24`; **save it**).
+4. **First import** (also registers the Shopify webhooks, so there's nothing to set up in Shopify):
+   ```bash
+   curl -X POST -H "Authorization: Bearer $SYNC_SECRET" "https://<worker>.workers.dev/reconcile?since=all"
+   ```
+   The Worker URL is in Cloudflare → Workers & Pages → tether-sync → Domains.
+5. **Check** any time: `curl -H "Authorization: Bearer $SYNC_SECRET" https://<worker>.workers.dev/check`
+   tests both APIs, the field mapping and the webhooks, and shows how a sample product is written.
 
-Changing the mapping later: set `FIELD_MAP` (`npx wrangler secret put FIELD_MAP`, or in the
-Cloudflare dashboard) or edit `tether-sync.config.js` in your fork; the fork redeploys on push.
+From then on product changes reach Webflow within seconds (webhooks), and the cron catches
+anything missed every 10 minutes.
+
+**Optional settings**, added later as secrets (Cloudflare → the Worker → Settings → Variables and
+Secrets) only when you need them:
+
+| Secret | When |
+|---|---|
+| `FIELD_MAP` | Change the mapping without editing code: `{"material":"metafield:custom.material","gallery":null}` |
+| `WEBFLOW_OWNED` | Fields written only when an item is created: `description,intro` |
+| `SHOPIFY_ADMIN_TOKEN` | A store with an old admin-created custom app (`shpat_…`) instead of a Dev Dashboard app |
+| `SHOPIFY_WEBHOOK_SECRET` | Webhooks you created yourself under Shopify Settings → Notifications (their signing key) |
+| `MAX_SUBREQUESTS` | On a paid Workers plan, to let a run do more (default 45) |
+
+**Updates:** each deployed copy updates itself, like a jsDelivr version range. Its
+`TETHER_VERSION` file says which releases it takes:
+
+| `TETHER_VERSION` | Gets |
+|---|---|
+| `0.3` (default) | every 0.3.x patch, automatically |
+| `0.3.3` | nothing: pinned |
+| `latest` | every release, including new minor versions (which may change behaviour) |
+
+`GET /health` shows the version a Worker runs. The copy's GitHub Action **Update Tether** checks every Monday; to update right away, open the copy
+on GitHub → Actions → Update Tether → Run workflow. It tests the new version first, commits it,
+and Cloudflare redeploys. Only the code changes: your `tether-sync.config.js` (mapping),
+`wrangler.jsonc` (Cloudflare ids) and the secrets stay as they are. To change the range, edit
+`TETHER_VERSION` in the copy on GitHub. A run takes seconds, well inside GitHub's free Actions minutes.
+The Action keeps its own weekly schedule alive (GitHub otherwise pauses schedules in public repos
+after 60 quiet days), and `/check` warns when a newer release in the range is out but not installed.
+
+**Several stores:** one deploy per store and Webflow collection (each click creates its own Worker,
+storage and cron). The Shopify app must be in the same organization as the store, so for a client
+store, create it in the client's Dev Dashboard. Cloudflare's free plan allows 5 cron triggers per
+account.
 
 ## How it works
 
@@ -229,9 +264,10 @@ The Node CLI runs on any host with cron.
 
 ### 6. Shopify webhooks
 
-Subscribe to `products/create`, `products/update` and `products/delete` (JSON) with the URL
-`https://<your-worker>/webhooks/shopify`, in the app's `shopify.app.toml` / Dev Dashboard, or
-under Settings → Notifications → Webhooks. The endpoint answers within Shopify's 5-second limit
+The Worker registers `products/create`, `products/update` and `products/delete` through the app on
+its first `POST /reconcile` (signed with the app's client secret, so no extra key). On a Node host,
+run `tether-sync webhooks https://your-host` once. Webhooks you create yourself under Settings →
+Notifications also work: put their signing key in `SHOPIFY_WEBHOOK_SECRET`. The endpoint answers within Shopify's 5-second limit
 and does the work afterwards. A failed webhook is picked up by the next reconcile.
 
 ## Costs on free tiers

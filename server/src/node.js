@@ -100,7 +100,7 @@ export function serve(app, { port = 8787, log = console } = {}) {
       if (req.url === '/health') { res.writeHead(200, { 'content-type': 'application/json' }); res.end('{"ok":true}'); return; }
       if (req.url !== '/webhooks/shopify') { res.writeHead(404); res.end('not found'); return; }
       const { response, task } = await handleShopifyWebhook(toRequest(req, body), {
-        sync: app.sync, secret: app.webhookSecret, shopDomain: app.config.shopify.domain, log,
+        sync: app.sync, secret: app.webhookSecret, secrets: app.webhookSecrets, shopDomain: app.config.shopify.domain, log,
       });
       res.writeHead(response.status, Object.fromEntries(response.headers));
       res.end(await response.text());

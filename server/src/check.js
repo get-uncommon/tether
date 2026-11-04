@@ -8,8 +8,9 @@
 import { normalizeConfig, cleanEnv, applyEnv, checkMapping, mapProduct, envProblems, MIN_SYNC_SECRET } from './mapping.js';
 import { createShopify } from './shopify.js';
 import { createWebflow } from './webflow.js';
+import { webhookStatus } from './webhooks.js';
 
-export async function runCheck(rawConfig, rawEnv, { deep = true, fetch, sleep, worker = false } = {}) {
+export async function runCheck(rawConfig, rawEnv, { deep = true, fetch, sleep, worker = false, webhookUri = null, version = null, range = null } = {}) {
   const steps = [];
   const step = (level, title, message, fix) => { steps.push({ level, title, message, ...(fix ? { fix } : {}) }); return level !== 'error'; };
   const env = cleanEnv(rawEnv);
@@ -73,8 +74,10 @@ export async function runCheck(rawConfig, rawEnv, { deep = true, fetch, sleep, w
     apiVersion: config.shopify.apiVersion, metafields: config.shopify.metafields, inventory: config.shopify.inventory, retries: 0, ...opts,
   });
   let sample = null;
+  let shopifyOk = false;
   try {
     const shop = await shopify.shopName();
+    shopifyOk = true;
     step('ok', 'Shopify API', `${shop.name} (API ${config.shopify.apiVersion})`);
     try {
       const { products } = await shopify.listProducts({ first: 1 });
@@ -93,13 +96,28 @@ export async function runCheck(rawConfig, rawEnv, { deep = true, fetch, sleep, w
     step('error', 'Shopify API', err.message, fix);
   }
 
+  if (webhookUri && shopifyOk) {
+    try {
+      const w = await webhookStatus({ shopify, uri: webhookUri });
+      if (w.missing.length === 0) step('ok', 'Shopify webhooks', `registered for ${webhookUri}`);
+      else step('warn', 'Shopify webhooks', `not registered yet: ${w.missing.join(', ')}.`, 'Run the first import (POST /reconcile?since=all): it registers them. Until then the cron syncs every 10 minutes.');
+    } catch (err) {
+      step('warn', 'Shopify webhooks', `couldn't list them: ${err.message}`);
+    }
+  }
+
   const webflow = createWebflow({ token: env.WEBFLOW_TOKEN, collectionId, perMinute: 0, retries: 0, ...opts });
   try {
     const col = await webflow.getCollection();
     step('ok', 'Webflow API', `collection "${col.displayName}" (${col.fields?.length || 0} fields)`);
     const problems = checkMapping(config, col);
-    problems.forEach((p) => step(p.level, 'Field mapping', p.message, p.fix));
-    if (!problems.some((p) => p.level === 'error')) step('ok', 'Field mapping', problems.length ? 'usable (see warnings)' : 'every mapped field exists');
+    // Fields this collection doesn't have are expected with the default mapping: one line, not ten.
+    const existing0 = new Set((col.fields || []).map((f) => f.slug));
+    const skipped = config.webflow.skipMissingFields ? Object.keys(config.fields).filter((k) => !existing0.has(k) && k !== 'name' && k !== 'slug') : [];
+    const isSkipNote = (p) => p.level === 'warn' && (/doesn't exist in .*it is skipped/.test(p.message) || (skipped.length && /^webflowOwned ".*" isn't a field/.test(p.message)));
+    problems.filter((p) => !isSkipNote(p)).forEach((p) => step(p.level, 'Field mapping', p.message, p.fix));
+    if (skipped.length) step('info', 'Field mapping', `not in this collection, so not synced: ${skipped.join(', ')}`, 'Add a field with that slug to the collection to sync it.');
+    if (!problems.some((p) => p.level === 'error')) step('ok', 'Field mapping', problems.some((p) => !isSkipNote(p)) ? 'usable (see warnings)' : 'ok');
     if (sample) {
       const existing = new Set((col.fields || []).map((f) => f.slug));
       const fd = mapProduct(sample, config);
@@ -113,7 +131,34 @@ export async function runCheck(rawConfig, rawEnv, { deep = true, fetch, sleep, w
     step('error', 'Webflow API', err.message, fix);
   }
 
+  if (version) {
+    try {
+      const res = await (fetch || globalThis.fetch)('https://api.github.com/repos/ravi-klaassens/tether/tags?per_page=100', { headers: { 'user-agent': 'tether-sync', accept: 'application/vnd.github+json' } });
+      if (res.ok) {
+        const tags = (await res.json()).map((t) => t.name);
+        const spec = range || version.split('.').slice(0, 2).join('.');
+        const newest = pickVersion(tags, spec);
+        if (newest && newest !== version && newerThan(newest, version)) {
+          step('warn', 'Tether version', `${version} runs, ${newest} is available (range ${spec}).`, 'The copy\'s Update Tether action installs it on Monday; to update now: GitHub → your copy → Actions → Update Tether → Run workflow.');
+        } else step('ok', 'Tether version', `${version} (newest in range ${spec})`);
+      }
+    } catch { /* offline or rate-limited: not worth an error */ }
+  }
+
   return done({ config: summary(config) });
+}
+
+const semver = (v) => String(v).replace(/^v/, '').split('.').map(Number);
+const newerThan = (a, b) => { const x = semver(a); const y = semver(b); for (let i = 0; i < 3; i++) { if (x[i] !== y[i]) return x[i] > y[i]; } return false; };
+/** Newest tag in a jsDelivr-style range ('latest', '0.3', '0.3.3'); same rules as scripts/update-tether.mjs. */
+export function pickVersion(tags, spec) {
+  const s = String(spec || '').trim().replace(/^v/, '').toLowerCase();
+  const all = tags.map((t) => /^v?(\d+)\.(\d+)\.(\d+)$/.exec(t)).filter(Boolean).map((m) => [m[1], m[2], m[3]].join('.'));
+  const ok = s === 'latest' || s === '' ? () => true
+    : /^\d+$/.test(s) ? (v) => v.split('.')[0] === s
+      : /^\d+\.\d+$/.test(s) ? (v) => v.split('.').slice(0, 2).join('.') === s
+        : (v) => v === s;
+  return all.filter(ok).sort((a, b) => (newerThan(a, b) ? 1 : -1)).pop() || null;
 }
 
 const summary = (c) => ({

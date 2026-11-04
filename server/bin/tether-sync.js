@@ -7,6 +7,7 @@
  *   tether-sync reconcile [--since ISO]    products changed since the last run (cron)
  *   tether-sync serve [--port 8787]        webhook endpoint
  *   tether-sync sync <handle|id>           one product
+ *   tether-sync webhooks <public-url>      register the product webhooks (Node hosts)
  *
  * Options: --config path, --state path (default .tether-sync-state.json), --dry-run, --max N
  * Secrets from the environment (or a .env file next to the config).
@@ -27,7 +28,7 @@ const log = {
   error: (...a) => console.error('error:', ...a), debug: (...a) => { if (verbose) console.log(...a); },
 };
 
-const HELP = `tether-sync <check|import|reconcile|serve|sync> [options]
+const HELP = `tether-sync <check|import|reconcile|serve|sync|webhooks> [options]
   --config <file>   tether-sync.config.js (default: ./tether-sync.config.{js,mjs,json})
   --state <file>    state file (default: .tether-sync-state.json next to the config)
   --dry-run         show what would change, write nothing
@@ -93,6 +94,15 @@ async function main() {
       }
       const r = await sync.syncById(id);
       log.info(r.action, r.itemId || '', r.reason || '');
+      return 0;
+    }
+    case 'webhooks': {
+      const base = argv[1];
+      if (!base || !/^https:\/\//.test(base)) { log.error('usage: tether-sync webhooks https://your-host (where `serve` is reachable)'); return 2; }
+      const { ensureWebhooks } = await import('../src/webhooks.js');
+      const r = await ensureWebhooks({ shopify, store, uri: `${base.replace(/\/$/, '')}/webhooks/shopify`, force: true });
+      log.info(r.created.length ? `registered ${r.created.join(', ')}` : 'already registered', `-> ${r.uri}`);
+      if (r.others?.length) log.warn(`also registered for other URLs: ${r.others.join(', ')}`);
       return 0;
     }
     case 'serve':

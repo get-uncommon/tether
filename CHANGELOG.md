@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.3.3 (2026-11-04)
+
+Tested live: Deploy to Cloudflare → first import into a Webflow collection → webhooks registered by
+the Worker → create, rename, draft, re-activate and delete a Shopify product, each reflected in
+Webflow within seconds.
+
+- The Deploy form asks only for what a deploy needs: store domain, collection id, Webflow token,
+  Shopify client id + secret, `SYNC_SECRET`. Optional settings are documented as secrets to add
+  later (`FIELD_MAP`, `WEBFLOW_OWNED`, `SHOPIFY_ADMIN_TOKEN`, `SHOPIFY_WEBHOOK_SECRET`, `MAX_SUBREQUESTS`).
+- No manual webhook setup: the Worker registers the product webhooks through the app on its first
+  `POST /reconcile` (signed with the client secret). `/check` reports them; the CLI has
+  `tether-sync webhooks <url>`. Webhooks signed with either the client secret or
+  `SHOPIFY_WEBHOOK_SECRET` are accepted.
+- `check` folds fields the collection doesn't have into one line instead of a warning per field.
+- Deployed copies update themselves: `TETHER_VERSION` (`0.3` patches only, `0.3.3` pinned,
+  `latest`) and an **Update Tether** GitHub Action in the copy (weekly, or Run workflow) that
+  takes the newest matching release, tests it, commits it and lets Cloudflare redeploy. Mapping,
+  Cloudflare ids and secrets are kept. The Action keeps its schedule alive, `/health` shows the
+  running version, and `/check` warns when an update in the range hasn't been installed.
+
 ## 0.3.2 (2026-11-04)
 
 - Worker: `POST /reconcile?since=all` (with `SYNC_SECRET`) runs a full first import without

@@ -12,12 +12,15 @@ const TOPICS = new Set(['products/create', 'products/update', 'products/delete']
 const reply = (status, text) => new Response(text, { status, headers: { 'content-type': 'text/plain' } });
 
 export async function handleShopifyWebhook(request, {
-  sync, secret, shopDomain, log, createDelayMs = 3000, sleep = realSleep,
+  sync, secret, secrets, shopDomain, log, createDelayMs = 3000, sleep = realSleep,
 }) {
   if (request.method !== 'POST') return { response: reply(405, 'POST only') };
   const raw = await request.arrayBuffer();
   const hmac = request.headers.get('x-shopify-hmac-sha256');
-  if (!(await verifyShopifyHmac(raw, hmac, secret))) {
+  const keys = (secrets && secrets.length ? secrets : [secret]).filter(Boolean);
+  let valid = false;
+  for (const k of keys) { if (await verifyShopifyHmac(raw, hmac, k)) { valid = true; break; } }
+  if (!valid) {
     log?.warn?.('webhook rejected: bad HMAC');
     return { response: reply(401, 'invalid signature') };
   }

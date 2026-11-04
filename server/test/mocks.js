@@ -29,7 +29,7 @@ export function shopifyProduct(n, over = {}) {
 }
 
 export function createMockApis({ products = [], items = [], failCreateFor = null, rateLimitOnce = false, maxFirst = Infinity } = {}) {
-  const shop = { products: new Map(products.map((p) => [p.id, p])) };
+  const shop = { products: new Map(products.map((p) => [p.id, p])), webhooks: [] };
   const wf = { items: new Map(items.map((it) => [it.id, it])), live: new Set(), nextId: 1 };
   const calls = [];
   let limited = !rateLimitOnce;
@@ -46,7 +46,13 @@ export function createMockApis({ products = [], items = [], failCreateFor = null
     if (u.pathname === '/admin/oauth/access_token') return json(200, { access_token: 'shpat_fresh', scope: 'read_products', expires_in: 86399 });
 
     if (u.pathname.startsWith('/admin/api/')) {
-      const op = body.query.match(/query\s+(\w+)/)[1];
+      const op = body.query.match(/(?:query|mutation)\s+(\w+)/)[1];
+      if (op === 'TetherSyncWebhooks') return json(200, { data: { webhookSubscriptions: { nodes: shop.webhooks } } });
+      if (op === 'TetherSyncWebhookCreate') {
+        const w = { id: `gid://shopify/WebhookSubscription/${shop.webhooks.length + 1}`, topic: body.variables.topic, uri: body.variables.sub.uri };
+        shop.webhooks.push(w);
+        return json(200, { data: { webhookSubscriptionCreate: { webhookSubscription: w, userErrors: [] } } });
+      }
       if (op === 'TetherSyncGetProduct') return json(200, { data: { product: shop.products.get(body.variables.id) || null } });
       if (op === 'TetherSyncShop') return json(200, { data: { shop: { name: 'Shop', myshopifyDomain: 'shop.myshopify.com' } } });
       if (op === 'TetherSyncProducts' && body.variables.first > maxFirst) {
