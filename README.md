@@ -47,10 +47,10 @@ Site settings → Custom code → **Head**:
     productPath: '/product',     // your Webflow product template
   };
 </script>
-<script src="https://cdn.jsdelivr.net/gh/ravi-klaassens/tether@0.5/dist/tether.min.js" defer></script>
+<script src="https://cdn.jsdelivr.net/gh/ravi-klaassens/tether@0.6/dist/tether.min.js" defer></script>
 ```
 
-**Versions:** `@0.5` gets every 0.5.x fix automatically (recommended), `@v0.5.0` pins one release,
+**Versions:** `@0.6` gets every 0.6.x fix automatically (recommended), `@v0.6.0` pins one release,
 `@latest` always takes the newest. Hosting the file yourself? Put the optional parts next to it (`tether.markets.min.js`,
 `tether.search.min.js`, `tether.account.min.js`, `tether.analytics.min.js`, `tether.extras.min.js`,
 `tether.diagnose.min.js`): each loads only when a page uses it.
