@@ -8,6 +8,8 @@ const PARTS = {
   markets: () => import('./markets-ui.js'),
   search: () => import('./search.js'),
   extras: () => import('./extras.js'),
+  account: () => import('./account.js'),
+  analytics: () => import('./analytics.js'),
 };
 export const loadPart = (name) => PARTS[name]();
 

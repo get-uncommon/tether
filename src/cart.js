@@ -70,6 +70,8 @@ export const Cart = {
   get count() { return this.state?.totalQuantity || 0; },
 
   lastError: null,
+  /** Set by the account part while a customer is logged in (Customer Account API token). */
+  customerAccessToken: null,
   /** line id -> { qty, done }: what quick +/- clicks asked for, shown until Shopify has answered. */
   pendingQty: new Map(),
   /** Shopify's notes on the last change, e.g. less stock than asked: [{ code, message }]. */
@@ -138,7 +140,10 @@ export const Cart = {
   },
 
   async _create(input = {}) {
-    const buyerIdentity = cfg.country ? { countryCode: String(cfg.country).toUpperCase() } : undefined;
+    const buyerIdentity = cfg.country || this.customerAccessToken ? {
+      ...(cfg.country ? { countryCode: String(cfg.country).toUpperCase() } : {}),
+      ...(this.customerAccessToken ? { customerAccessToken: this.customerAccessToken } : {}),
+    } : undefined;
     const data = await gql(
       mutation('cartCreate', '$input: CartInput!', 'input: $input'),
       { input: { buyerIdentity, ...input } },
@@ -305,7 +310,8 @@ export const Cart = {
 
     try {
       const data = await gql('query TetherCheckout($id: ID!) { cart(id: $id) { checkoutUrl } }', { id });
-      const url = data.cart?.checkoutUrl;
+      let url = data.cart?.checkoutUrl;
+      if (url && this.customerAccessToken) url += `${url.includes('?') ? '&' : '?'}logged_in=true`;
       if (!url) throw new TetherError('No checkoutUrl (cart empty or expired)');
       emit('checkout', { url, cart: this.state });
       if (tab && !tab.closed) tab.location.href = url;

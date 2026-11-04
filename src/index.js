@@ -50,6 +50,12 @@ export function mount(root = document) {
     loadPart('markets').then((m) => m.renderCountrySelects(root)).catch((err) => reportError(err, 'markets'));
   }
 
+  // Customer accounts: their own optional part, when configured and the page (or a login) needs it.
+  if (cfg.account?.clientId && (within(root, `[${attr('account-login')}],[${attr('account-bind')}],[${attr('orders')}],[${attr('show')}^="logged-"]`).length
+    || /[?&]code=/.test(window.location.search) || hasAccountSession())) {
+    loadPart('account').then((m) => m.mountAccount(root)).catch((err) => reportError(err, 'account'));
+  }
+
   // Search as you type: its own optional part, only for pages that have it.
   if (within(root, sel('search')).length) {
     loadPart('search').then((m) => m.mountSearch(root)).catch((err) => reportError(err, 'search'));
@@ -235,6 +241,8 @@ export const addGroup = (btn) => loadPart('extras').then((m) => m.addGroup(btn))
 // Init
 // ---------------------------------------------------------------------------
 
+let analyticsQueue = null;
+
 export function init(overrides = {}) {
   if (initPromise && !Object.keys(overrides).length) return initPromise;
   configure({ ...(window.TETHER_CONFIG || {}), ...overrides });
@@ -247,6 +255,13 @@ export function init(overrides = {}) {
 
   bindControls();
   if (cfg.observe) startObserver();
+  // Analytics (optional part): buffer Tether's events until it has loaded, so none are missed.
+  if (cfg.analytics && !analyticsQueue) {
+    analyticsQueue = [];
+    ['product-ready', 'list-ready', 'cart-updated', 'cart-toggled', 'checkout', 'search'].forEach((n) => document.addEventListener(`${cfg.prefix}:${n}`, (e) => analyticsQueue.push(e)));
+    document.addEventListener('astro:page-load', () => analyticsQueue.push(new CustomEvent(`${cfg.prefix}:page`)));
+    loadPart('analytics').then((m) => m.startAnalytics(analyticsQueue)).catch((err) => reportError(err, 'analytics'));
+  }
 
   initPromise = applyMarket(overrides).then(() => Cart.init()).then(async (cart) => {
     // A saved cart from another market: move it to this one, so prices match the page.
@@ -304,6 +319,13 @@ async function applyMarket(overrides) {
   log('market', market);
 }
 
+function hasAccountSession() {
+  try { return Boolean(sessionStorage[`${cfg.prefix}:account:${cfg.domain}`] || localStorage[`${cfg.prefix}:account:${cfg.domain}`]); } catch { return false; }
+}
+
+/** Customer accounts (optional part, loaded on first use). See src/account.js. */
+const accountApi = new Proxy({}, { get: (_, n) => (...a) => loadPart('account').then((m) => m[n](...a)) });
+
 /** Tether.setCountry('DE'): loads the markets part on first use. */
 export function setCountry(code, opts) {
   return loadPart('markets').then((m) => m.setCountry(code, opts));
@@ -336,6 +358,7 @@ export const api = {
   getRecommendations,
   getScope,
   addGroup,
+  account: accountApi,
   primeProduct,
   normalizeProductKey,
   clearProductCache,

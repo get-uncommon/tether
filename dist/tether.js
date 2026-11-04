@@ -877,6 +877,8 @@
       return this.state?.totalQuantity || 0;
     },
     lastError: null,
+    /** Set by the account part while a customer is logged in (Customer Account API token). */
+    customerAccessToken: null,
     /** line id -> { qty, done }: what quick +/- clicks asked for, shown until Shopify has answered. */
     pendingQty: /* @__PURE__ */ new Map(),
     /** Shopify's notes on the last change, e.g. less stock than asked: [{ code, message }]. */
@@ -953,7 +955,10 @@
       return this.state;
     },
     async _create(input = {}) {
-      const buyerIdentity = cfg.country ? { countryCode: String(cfg.country).toUpperCase() } : void 0;
+      const buyerIdentity = cfg.country || this.customerAccessToken ? {
+        ...cfg.country ? { countryCode: String(cfg.country).toUpperCase() } : {},
+        ...this.customerAccessToken ? { customerAccessToken: this.customerAccessToken } : {}
+      } : void 0;
       const data = await gql(
         mutation("cartCreate", "$input: CartInput!", "input: $input"),
         { input: { buyerIdentity, ...input } }
@@ -1114,7 +1119,8 @@
       }
       try {
         const data = await gql("query TetherCheckout($id: ID!) { cart(id: $id) { checkoutUrl } }", { id });
-        const url = data.cart?.checkoutUrl;
+        let url = data.cart?.checkoutUrl;
+        if (url && this.customerAccessToken) url += `${url.includes("?") ? "&" : "?"}logged_in=true`;
         if (!url) throw new TetherError("No checkoutUrl (cart empty or expired)");
         emit("checkout", { url, cart: this.state });
         if (tab && !tab.closed) tab.location.href = url;
@@ -2250,6 +2256,9 @@
     if (within(root, `${sel("country-select")},${sel("country-bind")}`).length) {
       loadPart("markets").then((m) => m.renderCountrySelects(root)).catch((err) => reportError(err, "markets"));
     }
+    if (cfg.account?.clientId && (within(root, `[${attr("account-login")}],[${attr("account-bind")}],[${attr("orders")}],[${attr("show")}^="logged-"]`).length || /[?&]code=/.test(window.location.search) || hasAccountSession())) {
+      loadPart("account").then((m) => m.mountAccount(root)).catch((err) => reportError(err, "account"));
+    }
     if (within(root, sel("search")).length) {
       loadPart("search").then((m) => m.mountSearch(root)).catch((err) => reportError(err, "search"));
     }
@@ -2434,6 +2443,7 @@
     return `[data-${cfg.prefix}-key]`;
   }
   var addGroup = (btn) => loadPart("extras").then((m) => m.addGroup(btn));
+  var analyticsQueue = null;
   function init(overrides = {}) {
     if (initPromise && !Object.keys(overrides).length) return initPromise;
     configure({ ...window.TETHER_CONFIG || {}, ...overrides });
@@ -2444,6 +2454,12 @@
     }
     bindControls();
     if (cfg.observe) startObserver();
+    if (cfg.analytics && !analyticsQueue) {
+      analyticsQueue = [];
+      ["product-ready", "list-ready", "cart-updated", "cart-toggled", "checkout", "search"].forEach((n) => document.addEventListener(`${cfg.prefix}:${n}`, (e) => analyticsQueue.push(e)));
+      document.addEventListener("astro:page-load", () => analyticsQueue.push(new CustomEvent(`${cfg.prefix}:page`)));
+      loadPart("analytics").then((m) => m.startAnalytics(analyticsQueue)).catch((err) => reportError(err, "analytics"));
+    }
     initPromise = applyMarket(overrides).then(() => Cart.init()).then(async (cart) => {
       const want = cfg.country ? String(cfg.country).toUpperCase() : null;
       if (cart && want && cart.buyerIdentity?.countryCode && cart.buyerIdentity.countryCode !== want) {
@@ -2498,6 +2514,14 @@
     if (market.locale && !overrides.locale) cfg.locale = market.locale;
     log("market", market);
   }
+  function hasAccountSession() {
+    try {
+      return Boolean(sessionStorage[`${cfg.prefix}:account:${cfg.domain}`] || localStorage[`${cfg.prefix}:account:${cfg.domain}`]);
+    } catch {
+      return false;
+    }
+  }
+  var accountApi = new Proxy({}, { get: (_, n) => (...a) => loadPart("account").then((m) => m[n](...a)) });
   function setCountry(code, opts) {
     return loadPart("markets").then((m) => m.setCountry(code, opts));
   }
@@ -2538,6 +2562,7 @@
     getRecommendations,
     getScope,
     addGroup,
+    account: accountApi,
     primeProduct,
     normalizeProductKey,
     clearProductCache,

@@ -123,6 +123,27 @@ export interface TetherConfig {
   revalidate?: boolean;
   /** Seconds a Shopify answer may be cached (default 60). Shopify caches identical queries, prices included, for hours otherwise; 0 = Shopify's caching. */
   maxAge?: number;
+  /** Analytics (optional part): GA4/GTM dataLayer events, Shopify's analytics (experimental), or your own handler. */
+  analytics?: {
+    dataLayer?: boolean | string;
+    shopify?: boolean | { consent?: 'no-banner' | 'default-banner' | 'custom-banner'; proxy?: string };
+    onEvent?: (name: string, data: Record<string, unknown>) => void;
+  } | null;
+  /** Customer accounts (optional part): the Headless channel's Customer Account API client id, and options. */
+  account?: {
+    clientId: string;
+    /** The page Shopify sends the visitor back to after login (registered as callback URI). Default: the current page. */
+    callbackUrl?: string;
+    /** Where Shopify sends the visitor after logout (registered as logout URI). Default: the home page. */
+    logoutUrl?: string;
+    /** Keep the login across tabs and browser restarts (localStorage instead of sessionStorage). */
+    remember?: boolean;
+    /** Your own token endpoint, if the browser can't call Shopify's (it forwards the form body). */
+    tokenUrl?: string;
+    /** The *.myshopify.com domain, if domain is something else. */
+    shopDomain?: string;
+    locale?: string;
+  } | null;
   /** tether-show="low-stock" at this many or fewer (default 5). */
   lowStock?: number;
   /** true: ?variant= (and selling_plan=) follow the visitor's choice on the page's main product. */
@@ -322,6 +343,15 @@ export interface Tether {
   getRecommendations(product: string | Pick<ShopifyProduct, 'id'>, intent?: 'RELATED' | 'COMPLEMENTARY'): Promise<ShopifyProduct[]>;
   getScope(el: Element | null | undefined): ProductScope | null;
   addGroup(button: Element): Promise<ShopifyCart | null>;
+  /** Customer accounts (loads the account part): login(), logout(), customer(), orders(), query(gql, vars), getToken(). */
+  account: {
+    login(opts?: { returnTo?: string; locale?: string }): Promise<void>;
+    logout(opts?: { returnTo?: string }): Promise<void>;
+    customer(): Promise<{ id: string; firstName?: string | null; lastName?: string | null; displayName?: string; emailAddress?: { emailAddress: string } | null } | null>;
+    orders(opts?: { first?: number }): Promise<Array<{ id: string; name: string; processedAt: string; financialStatus?: string; fulfillmentStatus?: string; statusPageUrl: string; totalPrice: Money }>>;
+    query<T = any>(query: string, variables?: Record<string, unknown>): Promise<T>;
+    getToken(): Promise<string | null>;
+  };
   primeProduct(product: ShopifyProduct): void;
   normalizeProductKey(raw: string | number): string | null;
   clearProductCache(): void;

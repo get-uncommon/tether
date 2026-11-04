@@ -531,3 +531,85 @@ test('a page built for another market: html.tether-market-pending until the live
   await tick(80);
   assert.ok(!document.documentElement.classList.contains('tether-market-pending'));
 });
+
+// ---- analytics, customer accounts -------------------------------------------
+
+test('analytics: GA4 dataLayer events from Tether (view_item, add_to_cart from cart changes, view_cart, begin_checkout)', async () => {
+  window.dataLayer = [];
+  const a = await import('../src/analytics.js');
+  const prev = Tether.config.analytics;
+  Tether.config.analytics = { dataLayer: true };
+  const q = [];
+  await a.startAnalytics(q);
+  Tether.clearProductCache(); Tether.primeProduct(product);
+  document.body.innerHTML = '<div tether-product="coffee-box"></div>';
+  Tether.mount(document);
+  await tick(20);
+  const root = document.querySelector('[tether-product]');
+  q.push(new window.CustomEvent('tether:product-ready', { detail: { product, scope: Tether.getScope(root) } }));
+  const line = (qty) => cartFrom([{ merchandiseId: product.variants.nodes[0].id, quantity: qty }]);
+  q.push(new window.CustomEvent('tether:cart-updated', { detail: { cart: line(1), reason: 'load' } }));
+  q.push(new window.CustomEvent('tether:cart-updated', { detail: { cart: line(3), reason: 'add' } }));
+  q.push(new window.CustomEvent('tether:checkout', { detail: { cart: line(3) } }));
+  const events = window.dataLayer.filter((x) => x.event).map((x) => x.event);
+  assert.deepEqual(events, ['view_item', 'add_to_cart', 'begin_checkout']);
+  const add = window.dataLayer.find((x) => x.event === 'add_to_cart');
+  assert.equal(add.ecommerce.items[0].quantity, 2, 'the difference');
+  assert.equal(typeof add.ecommerce.value, 'number');
+  assert.ok(window.dataLayer.some((x) => x.ecommerce === null), 'cleared before each push');
+  Tether.config.analytics = prev;
+});
+
+test('customer accounts: PKCE login URL, callback checks state/nonce, cart linked, logout', async () => {
+  const acc = await import('../src/account.js');
+  const nav = [];
+  Tether.config.account = { clientId: 'client-1', navigate: (u) => nav.push(u) };
+  const realFetch = globalThis.fetch;
+  let idTokenNonce = null;
+  globalThis.fetch = async (url, init) => {
+    const u = String(url);
+    const json = (data, status = 200) => ({ ok: status < 400, status, json: async () => data });
+    if (u.endsWith('/.well-known/openid-configuration')) return json({ issuer: 'https://shopify.com/authentication/1', authorization_endpoint: 'https://shopify.com/authentication/1/oauth/authorize', token_endpoint: 'https://shopify.com/authentication/1/oauth/token', end_session_endpoint: 'https://shopify.com/authentication/1/logout' });
+    if (u.endsWith('/.well-known/customer-account-api')) return json({ graphql_api: 'https://shopify.com/1/account/customer/api/2026-10/graphql' });
+    if (u.endsWith('/oauth/token')) {
+      const body = new URLSearchParams(init.body);
+      assert.equal(init.headers, undefined, 'a simple request: no custom headers');
+      assert.equal(body.get('grant_type'), 'authorization_code');
+      assert.ok(body.get('code_verifier').length >= 43);
+      const payload = btoa(JSON.stringify({ iss: 'https://shopify.com/authentication/1', aud: 'client-1', nonce: idTokenNonce, exp: Date.now() / 1000 + 3600 }));
+      return json({ access_token: 'tok-1', refresh_token: 'ref-1', id_token: `x.${payload}.y`, expires_in: 3600 });
+    }
+    if (u.includes('/account/customer/api/')) {
+      assert.equal(init.headers.Authorization, 'tok-1');
+      return json({ data: { customer: { id: 'c1', firstName: 'Ada', lastName: 'L', displayName: 'Ada L', emailAddress: { emailAddress: 'a@x.test' } } } });
+    }
+    return realFetch(url, init);
+  };
+  try {
+    await acc.login({ returnTo: 'https://astro.test/account' });
+    const authorize = new URL(nav.pop());
+    assert.equal(authorize.searchParams.get('code_challenge_method'), 'S256');
+    assert.equal(authorize.searchParams.get('client_id'), 'client-1');
+    const state = authorize.searchParams.get('state');
+    idTokenNonce = authorize.searchParams.get('nonce');
+    // A wrong state is ignored.
+    window.history.replaceState(null, '', '/account?code=abc&state=wrong');
+    assert.equal(await acc.handleCallback(), false);
+    window.history.replaceState(null, '', `/account?code=abc&state=${state}`);
+    assert.equal(await acc.handleCallback(), true);
+    assert.equal(window.location.search, '', 'code removed from the URL');
+    assert.equal(Tether.cart.customerAccessToken, 'tok-1');
+    assert.equal((await acc.customer()).firstName, 'Ada');
+    document.body.innerHTML = '<span id="n" tether-account-bind="first-name"></span><p id="out" tether-show="logged-out">x</p>';
+    await acc.render(document);
+    assert.equal(document.getElementById('n').textContent, 'Ada');
+    assert.equal(window.getComputedStyle(document.getElementById('out')).display, 'none');
+    await acc.logout();
+    assert.match(nav.pop(), /\/logout\?id_token_hint=/);
+    assert.equal(Tether.cart.customerAccessToken, null);
+  } finally {
+    globalThis.fetch = realFetch;
+    Tether.config.account = null;
+    window.history.replaceState(null, '', '/');
+  }
+});
