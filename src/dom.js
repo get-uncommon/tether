@@ -174,7 +174,7 @@ function template(container) {
 /** Rebuilds the list on every render. Fine for images, tags, options. */
 export function repeat(container, items, render) {
   const tpl = template(container);
-  if (!tpl) { warn('repeater without a template child', container); return; }
+  if (!tpl) { if (items.length) warn('repeater without a template child', container); return; }
   container.innerHTML = '';
   items.forEach((item, i) => {
     const node = tpl.cloneNode(true);

@@ -711,7 +711,7 @@
   function repeat(container, items, render) {
     const tpl = template(container);
     if (!tpl) {
-      warn("repeater without a template child", container);
+      if (items.length) warn("repeater without a template child", container);
       return;
     }
     container.innerHTML = "";
@@ -2398,7 +2398,7 @@
       });
     });
     if (cfg.astro !== false) {
-      document.addEventListener("astro:page-load", () => {
+      document.addEventListener("astro:page-load", () => (initPromise || Promise.resolve()).then(() => {
         let target = pageMarket();
         if (!target && onPageMarket) {
           try {
@@ -2412,7 +2412,7 @@
         const differs = target?.country && (String(target.country).toUpperCase() !== String(cfg.country || "").toUpperCase() || String(target.language || "").toUpperCase() !== String(cfg.language || "").toUpperCase());
         if (differs) setCountry(target.country, { language: target.language ?? null, locale: target.locale, remember: false }).then(() => mount(document), () => mount(document));
         else mount(document);
-      });
+      }));
       document.addEventListener("astro:before-swap", () => unmount());
     }
     window.addEventListener("online", () => {

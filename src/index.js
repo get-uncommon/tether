@@ -188,7 +188,8 @@ function bindControls() {
 
   // Astro View Transitions (<ClientRouter />): mount every new page, close the cart while leaving.
   if (cfg.astro !== false) {
-    document.addEventListener('astro:page-load', () => {
+    // Astro fires this on the first load too: wait for init (the visitor's saved market) first.
+    document.addEventListener('astro:page-load', () => (initPromise || Promise.resolve()).then(() => {
       // Navigated to a page of another market (e.g. /de/): switch first, then mount in that market.
       // Back on a normal page after one: the visitor's own choice, else the default market.
       let target = pageMarket();
@@ -201,7 +202,7 @@ function bindControls() {
         || String(target.language || '').toUpperCase() !== String(cfg.language || '').toUpperCase());
       if (differs) setCountry(target.country, { language: target.language ?? null, locale: target.locale, remember: false }).then(() => mount(document), () => mount(document));
       else mount(document);
-    });
+    }));
     document.addEventListener('astro:before-swap', () => unmount());
   }
 

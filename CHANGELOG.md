@@ -16,7 +16,9 @@ shopping in them (phone, keyboard only, screen reader, German, French, US, barga
   own analytics (experimental, through Shopify's scripts), or `onEvent` for any tool. [Guide](docs/analytics.md).
 - **Structured data:** `shop.jsonLd(product)` for Google's product results.
 - **Other markets on static sites:** `html.tether-market-pending` until the visitor's prices are in.
-- **Real-browser tests:** the starter in Chromium, WebKit, Firefox and a phone, on every push.
+- **Real-browser tests** (36, in Chromium, WebKit, Firefox and a phone, on every push): the
+  starter, a plain HTML page with the `<script>` build and its optional parts, GA4 events, the
+  market marker, and Shopify analytics with Shopify's real scripts (their sends intercepted).
 
 **Fixes**
 - **Stale prices:** Shopify caches the answer to an identical query text, prices included, for
