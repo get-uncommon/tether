@@ -1,0 +1,54 @@
+{
+  "name": "@occluze/tether",
+  "version": "0.1.0",
+  "description": "Open-source alternative to Smootify/Shopiflow: Shopify Storefront API for Webflow and any HTML (products, cart, subscriptions). Use via jsDelivr or self-host.",
+  "type": "module",
+  "main": "dist/tether.esm.js",
+  "module": "dist/tether.esm.js",
+  "exports": {
+    ".": "./dist/tether.esm.js",
+    "./presets/barba": "./dist/presets/barba.esm.js"
+  },
+  "files": [
+    "dist",
+    "src",
+    "LICENSE",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "dev": "node scripts/build.mjs --watch",
+    "test": "node --test test/*.test.js",
+    "smoke": "node scripts/smoke.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0",
+    "jsdom": "^26.0.0"
+  },
+  "license": "MIT",
+  "author": "Ravi Klaassens",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ravi-klaassens/tether.git"
+  },
+  "homepage": "https://github.com/ravi-klaassens/tether#readme",
+  "bugs": {
+    "url": "https://github.com/ravi-klaassens/tether/issues"
+  },
+  "keywords": [
+    "cart",
+    "ecommerce",
+    "headless",
+    "selling-plans",
+    "shopiflow-alternative",
+    "shopify",
+    "smootify-alternative",
+    "storefront-api",
+    "subscriptions",
+    "webflow",
+    "webflow-shopify"
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
+}
