@@ -2219,7 +2219,7 @@ function print(r) {
 }
 
 // src/index.js
-var VERSION = "0.3.3";
+var VERSION = "0.3.4";
 var mountedProducts = /* @__PURE__ */ new WeakSet();
 var mountedLists = /* @__PURE__ */ new WeakSet();
 var liveProducts = /* @__PURE__ */ new Set();

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.4 (2026-11-04)
+
+- Shorter READMEs with what everyone needs; the full reference moved to `docs/reference.md`, the
+  sync's technical details to `server/docs/advanced.md`.
+- The README recommends `@0.3` on jsDelivr (every 0.3.x fix), with `@v0.3.4` to pin and `@latest`.
+- Sync `/check`: the "update available" note reads versions from jsDelivr (GitHub's API rate-limits
+  unauthenticated calls from Cloudflare). The updater also updates `docs/`.
+
 ## 0.3.3 (2026-11-04)
 
 Tested live: Deploy to Cloudflare → first import into a Webflow collection → webhooks registered by

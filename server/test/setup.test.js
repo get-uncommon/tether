@@ -185,7 +185,7 @@ test('the shipped config equals the test copy (skipped in a deployed, customizab
 
 test('check says when a newer release in the range exists (a stalled updater shows up)', async () => {
   const apis = createMockApis({ products: [shopifyProduct(1)] });
-  const tags = (names) => async (url, init) => (String(url).startsWith('https://api.github.com/') ? new Response(JSON.stringify(names.map((name) => ({ name }))), { status: 200 }) : apis.fetch(url, init));
+  const tags = (names) => async (url, init) => (String(url).startsWith('https://data.jsdelivr.com/') ? new Response(JSON.stringify({ versions: names.map((n) => ({ version: n.replace(/^v/, '') })) }), { status: 200 }) : apis.fetch(url, init));
   let r = await runCheck(defaultConfig, deployEnv, { fetch: tags(['v0.3.3', 'v0.3.9', 'v0.4.0']), version: '0.3.3', sleep: instantSleep });
   const v = r.steps.find((s) => s.title === 'Tether version');
   assert.equal(v.level, 'warn');

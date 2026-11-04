@@ -133,9 +133,10 @@ export async function runCheck(rawConfig, rawEnv, { deep = true, fetch, sleep, w
 
   if (version) {
     try {
-      const res = await (fetch || globalThis.fetch)('https://api.github.com/repos/ravi-klaassens/tether/tags?per_page=100', { headers: { 'user-agent': 'tether-sync', accept: 'application/vnd.github+json' } });
+      // jsDelivr's version list (GitHub's API rate-limits unauthenticated calls from shared IPs).
+      const res = await (fetch || globalThis.fetch)('https://data.jsdelivr.com/v1/packages/gh/ravi-klaassens/tether', { headers: { accept: 'application/json' } });
       if (res.ok) {
-        const tags = (await res.json()).map((t) => t.name);
+        const tags = ((await res.json()).versions || []).map((t) => t.version);
         const spec = range || version.split('.').slice(0, 2).join('.');
         const newest = pickVersion(tags, spec);
         if (newest && newest !== version && newerThan(newest, version)) {
