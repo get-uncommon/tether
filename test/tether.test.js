@@ -196,6 +196,14 @@ test('binds on the product root itself (card link)', async () => {
   assert.equal(document.querySelector('a').getAttribute('href'), '/product/coffee-box');
 });
 
+test('image:N binds the nth product image, background for non-img', async () => {
+  document.body.innerHTML = '<div tether-product="coffee-box"><div id="bg" tether-bind="image:1"></div><img id="i9" tether-bind="image:9"></div>';
+  Tether.mount(document);
+  await tick();
+  assert.match(document.querySelector('#bg').style.backgroundImage, /a\.jpg/);
+  assert.match(document.querySelector('#i9').getAttribute('src'), /a\.jpg/);
+});
+
 test('custom prefix keeps old wfs- markup working', async () => {
   await Tether.init({ domain: 'shop.test', token: 't', autoMount: false, prefix: 'wfs' });
   document.body.innerHTML = '<div wfs-product="coffee-box"><h2 wfs-bind="title"></h2></div>';

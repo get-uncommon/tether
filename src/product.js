@@ -277,6 +277,11 @@ export class ProductScope {
           return repeat(el, p.tags.filter((t) => !exclude.includes(t)), (node, tag) => setText(node, tag));
         }
         default:
+          // image:2 = the second product image (falls back to the featured image)
+          if (key && /^image:\d+$/.test(key)) {
+            const img = p.images.nodes[parseInt(key.slice(6), 10) - 1] || p.featuredImage;
+            return setImage(el, img?.url, img?.altText || p.title);
+          }
           if (key && key.startsWith('metafield:')) {
             const mf = metafieldValue(p, key.slice('metafield:'.length));
             if (!mf) return setText(el, '');

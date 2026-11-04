@@ -28,13 +28,13 @@ Prices, stock and variants always come live from Shopify. Webflow only holds con
 **Script tag (Webflow, any HTML):** pin a version from jsDelivr:
 
 ```html
-<script src="https://cdn.jsdelivr.net/gh/ravi-klaassens/tether@v0.1.2/dist/tether.min.js" defer></script>
+<script src="https://cdn.jsdelivr.net/gh/ravi-klaassens/tether@v0.1.3/dist/tether.min.js" defer></script>
 ```
 
 **Bundled (Vite, esbuild, Webpack, …):** copy `dist/tether.esm.js` into your project, or install from GitHub:
 
 ```bash
-npm install github:ravi-klaassens/tether#v0.1.2
+npm install github:ravi-klaassens/tether#v0.1.3
 ```
 
 ```js
@@ -71,7 +71,7 @@ and payments need a test payment provider or Shopify Payments in test mode.
     productPath: '/product',      // your Webflow product template path
   };
 </script>
-<script src="https://cdn.jsdelivr.net/gh/ravi-klaassens/tether@v0.1.2/dist/tether.min.js" defer></script>
+<script src="https://cdn.jsdelivr.net/gh/ravi-klaassens/tether@v0.1.3/dist/tether.min.js" defer></script>
 ```
 
 **Try it locally:** `npm install && npm run build`, then serve the folder and open
@@ -139,7 +139,7 @@ Markup written for an older `wfs-*` prefix keeps working with `prefix: 'wfs'`.
 `tether-bind` values: `title`, `description` (HTML), `description-text`, `vendor`, `type`,
 `handle`, `published-at`, `price`, `total-price`, `compare-at-price`, `unit-price`, `min-price`,
 `max-price`, `discount-percentage`, `discount-amount`, `variant-title`, `variant-id`, `sku`,
-`barcode`, `stock`, `quantity`, `featured-image`, `variant-image`, `images` (repeater), `tags`
+`barcode`, `stock`, `quantity`, `featured-image`, `variant-image`, `image:N` (nth image), `images` (repeater), `tags`
 (repeater, `exclude="a,b"`), `link`/`url` (href to `productPath`), `metafield:namespace.key`
 (add the metafield to `config.metafields`), plus the subscription binds below.
 

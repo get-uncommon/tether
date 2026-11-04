@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.3 (2026-11-04)
+
+- `tether-bind="image:N"` binds the nth product image (e.g. a lifestyle shot), falling back to the featured image.
+
 ## 0.1.2 (2026-11-04)
 
 - `tether-plan-list="true"` / `"all"` / `"*"` now list every plan, like an empty value (Webflow often can't save empty attribute values).
