@@ -1119,7 +1119,7 @@
       }
       try {
         const data = await gql("query TetherCheckout($id: ID!) { cart(id: $id) { checkoutUrl } }", { id });
-        let url = data.cart?.checkoutUrl;
+        let url = this.beforeCheckout && await this.beforeCheckout().catch(() => null) || data.cart?.checkoutUrl;
         if (url && this.customerAccessToken) url += `${url.includes("?") ? "&" : "?"}logged_in=true`;
         if (!url) throw new TetherError("No checkoutUrl (cart empty or expired)");
         emit("checkout", { url, cart: this.state });
@@ -2256,7 +2256,7 @@
     if (within(root, `${sel("country-select")},${sel("country-bind")}`).length) {
       loadPart("markets").then((m) => m.renderCountrySelects(root)).catch((err) => reportError(err, "markets"));
     }
-    if (cfg.account?.clientId && (within(root, `[${attr("account-login")}],[${attr("account-bind")}],[${attr("orders")}],[${attr("show")}^="logged-"]`).length || /[?&]code=/.test(window.location.search) || hasAccountSession())) {
+    if ((cfg.account?.clientId || cfg.account?.server) && (within(root, `[${attr("account-login")}],[${attr("account-bind")}],[${attr("orders")}],[${attr("show")}^="logged-"]`).length || /[?&]code=/.test(window.location.search) || hasAccountSession())) {
       loadPart("account").then((m) => m.mountAccount(root)).catch((err) => reportError(err, "account"));
     }
     if (within(root, sel("search")).length) {
@@ -2516,7 +2516,7 @@
   }
   function hasAccountSession() {
     try {
-      return Boolean(sessionStorage[`${cfg.prefix}:account:${cfg.domain}`] || localStorage[`${cfg.prefix}:account:${cfg.domain}`]);
+      return Boolean(sessionStorage[`${cfg.prefix}:account:${cfg.domain}`] || localStorage[`${cfg.prefix}:account:${cfg.domain}`] || localStorage[`${cfg.prefix}:account-hint:${cfg.domain}`]);
     } catch {
       return false;
     }

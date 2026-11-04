@@ -5,6 +5,7 @@
  *   const report = await runCheck(config, env, { deep: true });
  *   report.ok, report.steps -> [{ level: 'ok' | 'warn' | 'error', title, message, fix }]
  */
+import { accountSettings, accountProblems } from './account.js';
 import { normalizeConfig, cleanEnv, applyEnv, checkMapping, mapProduct, envProblems, MIN_SYNC_SECRET } from './mapping.js';
 import { createShopify } from './shopify.js';
 import { createWebflow } from './webflow.js';
@@ -45,6 +46,21 @@ export async function runCheck(rawConfig, rawEnv, { deep = true, fetch, sleep, w
     step('error', 'Shopify access', half ? 'Only one of SHOPIFY_CLIENT_ID / SHOPIFY_CLIENT_SECRET is set.' : 'No Shopify credentials.',
       'Create an app in the Shopify Dev Dashboard with the read_products scope, install it on the store, and set SHOPIFY_CLIENT_ID + SHOPIFY_CLIENT_SECRET (or SHOPIFY_ADMIN_TOKEN for an existing custom app).');
   } else step('ok', 'Shopify access', `using ${auth}`);
+
+  // Customer accounts through this Worker (the safe mode).
+  const acct = accountSettings(rawEnv);
+  if (acct) {
+    const problems = accountProblems(acct);
+    if (problems.length) problems.forEach((p) => step(/STOREFRONT_TOKEN/.test(p) ? 'warn' : 'error', 'Customer accounts', p));
+    else step('ok', 'Customer accounts', `on for ${acct.origins.join(', ')}${acct.clientSecret ? ' (confidential client)' : ''}`);
+    if (worker && webhookUri) {
+      const here = new URL(webhookUri).origin;
+      if (!acct.origins.some((o) => new URL(o).hostname === new URL(here).hostname || new URL(here).hostname.endsWith(`.${new URL(o).hostname.replace(/^www\./, '')}`))) {
+        step('error', 'Customer accounts', `this Worker runs on ${new URL(here).hostname}, not on your site's domain, so browsers won't send its login cookie.`,
+          `Cloudflare → Workers → tether-sync → Settings → Domains & Routes → add the route ${acct.origins[0].replace(/^https:\/\//, '')}/_tether/* (or a custom domain like account.${new URL(acct.origins[0]).hostname.replace(/^www\./, '')}). Then register ${acct.origins[0]}/_tether/account/callback as callback URI in Shopify.`);
+      } else step('ok', 'Customer accounts callback', `register ${here}/_tether/account/callback (callback), ${acct.origins[0]} (JavaScript origin) and ${acct.origins[0]}/ (logout) in Shopify → Headless → Customer Account API`);
+    }
+  }
 
   // Static sites: a deploy hook instead of (or next to) Webflow.
   const deployOnly = Boolean(env.DEPLOY_HOOK_URL) && !env.WEBFLOW_TOKEN;

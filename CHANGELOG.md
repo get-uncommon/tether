@@ -9,10 +9,11 @@ shopping in them (phone, keyboard only, screen reader, German, French, US, barga
 **New: optional parts** (each loads only on pages that use it; the main script stays 20 KB)
 - **Search as you type** (`tether-search`, 2 KB): Shopify's predictive search with products,
   collections and suggested searches; keyboard and screen-reader friendly.
-- **Customer accounts** (`account.clientId`, 3.5 KB): login on Shopify's page (OAuth with PKCE),
-  the customer's name and orders, a checkout that knows them. Between the visitor's browser and
-  Shopify only. Tested on a real store: login, token refresh, orders, a checkout that opens
-  logged in, logout. [Guide](docs/accounts.md).
+- **Customer accounts** (4 KB): login on Shopify's page, the customer's name and orders, a checkout
+  that knows them. **Server mode** (recommended): your sync Worker does the login (OAuth with PKCE,
+  the id token's signature checked), keeps the tokens encrypted in KV and gives the browser only an
+  HttpOnly session cookie, so no Shopify token ever reaches the browser. Browser mode for quick
+  starts. Both tested on a real store. [Guide](docs/accounts.md).
 - **Analytics** (`analytics`, 3 KB): GA4 / Tag Manager ecommerce events in `dataLayer`, Shopify's
   own analytics (experimental, through Shopify's scripts), or `onEvent` for any tool. [Guide](docs/analytics.md).
 - **Structured data:** `shop.jsonLd(product)` for Google's product results.

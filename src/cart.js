@@ -310,7 +310,7 @@ export const Cart = {
 
     try {
       const data = await gql('query TetherCheckout($id: ID!) { cart(id: $id) { checkoutUrl } }', { id });
-      let url = data.cart?.checkoutUrl;
+      let url = (this.beforeCheckout && await this.beforeCheckout().catch(() => null)) || data.cart?.checkoutUrl;
       if (url && this.customerAccessToken) url += `${url.includes('?') ? '&' : '?'}logged_in=true`;
       if (!url) throw new TetherError('No checkoutUrl (cart empty or expired)');
       emit('checkout', { url, cart: this.state });

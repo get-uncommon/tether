@@ -51,7 +51,7 @@ export function mount(root = document) {
   }
 
   // Customer accounts: their own optional part, when configured and the page (or a login) needs it.
-  if (cfg.account?.clientId && (within(root, `[${attr('account-login')}],[${attr('account-bind')}],[${attr('orders')}],[${attr('show')}^="logged-"]`).length
+  if ((cfg.account?.clientId || cfg.account?.server) && (within(root, `[${attr('account-login')}],[${attr('account-bind')}],[${attr('orders')}],[${attr('show')}^="logged-"]`).length
     || /[?&]code=/.test(window.location.search) || hasAccountSession())) {
     loadPart('account').then((m) => m.mountAccount(root)).catch((err) => reportError(err, 'account'));
   }
@@ -321,7 +321,7 @@ async function applyMarket(overrides) {
 }
 
 function hasAccountSession() {
-  try { return Boolean(sessionStorage[`${cfg.prefix}:account:${cfg.domain}`] || localStorage[`${cfg.prefix}:account:${cfg.domain}`]); } catch { return false; }
+  try { return Boolean(sessionStorage[`${cfg.prefix}:account:${cfg.domain}`] || localStorage[`${cfg.prefix}:account:${cfg.domain}`] || localStorage[`${cfg.prefix}:account-hint:${cfg.domain}`]); } catch { return false; }
 }
 
 /** Customer accounts (optional part, loaded on first use). See src/account.js. */

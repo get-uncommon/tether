@@ -23,6 +23,7 @@ import { runCheck } from './check.js';
 import { cleanEnv } from './mapping.js';
 import { ensureWebhooks } from './webhooks.js';
 import { VERSION } from './version.js';
+import { handleAccount } from './account.js';
 
 const consoleLog = { info: (...a) => console.log(...a), warn: (...a) => console.warn(...a), error: (...a) => console.error(...a), debug() {} };
 
@@ -52,6 +53,10 @@ export function createWorker(config, { fetch, sleep } = {}) {
     async fetch(request, env, ctx) {
       const url = new URL(request.url);
       try {
+        // Customer accounts (/_tether/account/*): the browser never holds a Shopify token.
+        const account = await handleAccount(request, env, { fetch });
+        if (account) return account;
+
         if (url.pathname === '/health') return Response.json({ ok: true, version: VERSION, kv: Boolean(env.TETHER_SYNC) });
 
         if (url.pathname === '/check' || url.pathname === '/') {

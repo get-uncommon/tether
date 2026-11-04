@@ -616,3 +616,50 @@ test('customer accounts: PKCE login URL, callback checks state/nonce, cart linke
     window.history.replaceState(null, '', '/');
   }
 });
+
+test('customer accounts in server mode: no token in the browser, the Worker does the work', async () => {
+  const acc = await import('../src/account.js');
+  const nav = [];
+  Tether.config.account = { server: 'https://astro.test/_tether/account', navigate: (u) => nav.push(u) };
+  const realFetch = globalThis.fetch;
+  const asked = [];
+  globalThis.fetch = async (url, init = {}) => {
+    const u = String(url);
+    if (u.startsWith('https://astro.test/_tether/account')) {
+      asked.push({ path: new URL(u).pathname.split('/').pop(), init });
+      assert.equal(init.credentials, 'include');
+      const json = (d) => ({ ok: true, status: 200, json: async () => d });
+      if (u.endsWith('/me')) return json({ loggedIn: true, customer: { firstName: 'Ada', email: 'ada@x.test' } });
+      if (u.includes('/orders')) return json({ orders: [{ id: 'o1', name: '#1001', processedAt: '2026-11-01', statusPageUrl: 'https://x/o1', totalPrice: { amount: '10', currencyCode: 'EUR' }, lineItems: { nodes: [] } }] });
+      if (u.endsWith('/cart')) { assert.equal(init.headers['X-Tether-Account'], '1'); return json({ linked: true, checkoutUrl: 'https://shop.test/checkouts/c/1' }); }
+      if (u.endsWith('/logout')) return json({ logoutUrl: 'https://shopify.com/logout?x' });
+    }
+    return realFetch(url, init);
+  };
+  try {
+    Tether.cart._commit(cartFrom([{ merchandiseId: product.variants.nodes[0].id, quantity: 1 }]), 'test');
+    await acc.login();
+    const to = new URL(nav.pop());
+    assert.equal(to.pathname, '/_tether/account/login');
+    assert.ok(to.searchParams.get('cart'), 'the cart goes along, so the Worker links it at login');
+    window.history.replaceState(null, '', '/account?account=in');
+    document.body.innerHTML = '<span id="n" tether-account-bind="first-name"></span><ul tether-orders><li><span tether-order-bind="name"></span></li></ul>';
+    await acc.mountAccount(document);
+    assert.equal(window.location.search, '', '?account=in removed');
+    assert.equal(document.getElementById('n').textContent, 'Ada');
+    assert.equal(document.querySelector('[tether-order-bind="name"]').textContent, '#1001');
+    assert.equal(await acc.getToken(), null, 'never a token');
+    await assert.rejects(acc.query('{ customer { id } }'), /server mode/);
+    const url = await Tether.cart.beforeCheckout();
+    assert.match(url, /checkouts\/c\/1\?logged_in=true/);
+    const stored = JSON.stringify({ ...window.localStorage }) + JSON.stringify({ ...window.sessionStorage });
+    assert.ok(!/access|refresh|token/i.test(stored.replace(/account-hint/g, '')), 'nothing secret stored in the browser');
+    await acc.logout();
+    assert.match(nav.pop(), /shopify\.com\/logout/);
+  } finally {
+    globalThis.fetch = realFetch;
+    Tether.config.account = null;
+    Tether.cart.beforeCheckout = undefined;
+    window.history.replaceState(null, '', '/');
+  }
+});

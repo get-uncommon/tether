@@ -62,6 +62,29 @@
   var session = null;
   var refreshing = null;
   var customerCache = null;
+  var server = () => cfg.account?.server ? String(cfg.account.server).replace(/\/$/, "") : "";
+  var HINT = () => `${cfg.prefix}:account-hint:${cfg.domain}`;
+  var serverState = null;
+  async function serverFetch(path, { method = "GET", body } = {}) {
+    const res = await fetch(`${server()}${path}`, {
+      method,
+      credentials: "include",
+      headers: method === "POST" ? { "Content-Type": "application/json", "X-Tether-Account": "1" } : {},
+      body: body ? JSON.stringify(body) : void 0
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok && res.status !== 401) throw new TetherError(`Customer accounts: ${data.error || res.status}`, { status: res.status });
+    return data;
+  }
+  async function serverMe() {
+    serverState || (serverState = await serverFetch("/me"));
+    try {
+      if (serverState.loggedIn) window.localStorage.setItem(HINT(), "1");
+      else window.localStorage.removeItem(HINT());
+    } catch {
+    }
+    return serverState;
+  }
   async function discover() {
     if (discovery) return discovery;
     const shop = cfg.account?.shopDomain || cfg.domain;
@@ -75,9 +98,19 @@
   }
   var callbackUrl = () => cfg.account?.callbackUrl || `${window.location.origin}${window.location.pathname}`;
   function isLoggedIn() {
-    return Boolean(session?.refresh || session?.access && session.expiresAt > Date.now());
+    return server() ? Boolean(serverState?.loggedIn) : Boolean(session?.refresh || session?.access && session.expiresAt > Date.now());
   }
   async function login({ returnTo = window.location.href, locale } = {}) {
+    if (server()) {
+      const u2 = new URL(`${server()}/login`);
+      u2.searchParams.set("returnTo", returnTo);
+      if (Cart.id()) u2.searchParams.set("cart", Cart.id());
+      const lang2 = locale || cfg.account.locale || (cfg.locale || "").split("-")[0];
+      if (lang2) u2.searchParams.set("locale", lang2);
+      if (cfg.country) u2.searchParams.set("country", String(cfg.country).toUpperCase());
+      go(u2.toString());
+      return;
+    }
     if (!cfg.account?.clientId) throw new TetherError("Customer accounts: set account.clientId", { code: "NOT_CONFIGURED" });
     const d = await discover();
     const state = random();
@@ -159,6 +192,7 @@
     return true;
   }
   async function getToken() {
+    if (server()) return null;
     if (!session) session = read(store(), KEY());
     if (!session) return null;
     if (session.access && session.expiresAt > Date.now()) return session.access;
@@ -193,6 +227,7 @@
     }
   }
   async function query(q, variables = {}) {
+    if (server()) throw new TetherError("Customer accounts in server mode only answer customer() and orders()", { code: "NOT_ALLOWED" });
     const token = await getToken();
     if (!token) throw new TetherError("Not logged in", { code: "NOT_LOGGED_IN" });
     const d = await discover();
@@ -207,16 +242,33 @@
     return json.data;
   }
   async function customer() {
+    if (server()) {
+      const me = await serverMe();
+      return me.loggedIn ? { ...me.customer, emailAddress: { emailAddress: me.customer.email }, defaultAddress: { formatted: me.customer.address } } : null;
+    }
     if (customerCache) return customerCache;
     const data = await query(`query TetherCustomer{customer{id firstName lastName displayName emailAddress{emailAddress}defaultAddress{formatted}}}`);
     customerCache = data.customer;
     return customerCache;
   }
   async function orders({ first = 10 } = {}) {
+    if (server()) return (await serverFetch(`/orders?first=${first}`)).orders || [];
     const data = await query(`query TetherOrders($first:Int!){customer{orders(first:$first,sortKey:PROCESSED_AT,reverse:true){nodes{id name processedAt financialStatus fulfillmentStatus statusPageUrl totalPrice{amount currencyCode}lineItems(first:20){nodes{title variantTitle quantity image{url altText}}}}}}}`, { first });
     return data.customer?.orders?.nodes || [];
   }
   async function logout({ returnTo = cfg.account?.logoutUrl || `${window.location.origin}/` } = {}) {
+    if (server()) {
+      const r = await serverFetch("/logout", { method: "POST", body: { returnTo, cartId: Cart.id() } });
+      serverState = { loggedIn: false };
+      try {
+        window.localStorage.removeItem(HINT());
+      } catch {
+      }
+      emit("account-logout", {});
+      if (r.logoutUrl) go(r.logoutUrl);
+      else render(document);
+      return;
+    }
     const idToken = session?.idToken || read(store(), KEY())?.idToken;
     if (Cart.id()) await Cart.setBuyerIdentity({ customerAccessToken: null }, { create: false }).catch(() => {
     });
@@ -240,7 +292,7 @@
     }
   };
   async function render(root = document) {
-    const logged = isLoggedIn() || Boolean(await getToken().catch(() => null));
+    const logged = server() ? Boolean((await serverMe().catch(() => ({ loggedIn: false }))).loggedIn) : isLoggedIn() || Boolean(await getToken().catch(() => null));
     qsa(root, sel("show")).forEach((el) => {
       const k = get(el, "show");
       if (k === "logged-in") show(el, logged);
@@ -292,12 +344,26 @@
           logout().catch((err) => reportError(err, "logout"));
         }
       });
-      try {
-        await handleCallback();
-      } catch (err) {
-        reportError(err, "login");
+      if (server()) {
+        const u = new URL(window.location.href);
+        if (u.searchParams.get("account")) {
+          u.searchParams.delete("account");
+          window.history.replaceState(window.history.state, "", u);
+          emit("account-login", {});
+        }
+        Cart.beforeCheckout = async () => {
+          if (!(await serverMe()).loggedIn || !Cart.id()) return null;
+          const r = await serverFetch("/cart", { method: "POST", body: { cartId: Cart.id() } }).catch(() => null);
+          return r?.checkoutUrl ? `${r.checkoutUrl}${r.checkoutUrl.includes("?") ? "&" : "?"}logged_in=true` : null;
+        };
+      } else {
+        try {
+          await handleCallback();
+        } catch (err) {
+          reportError(err, "login");
+        }
+        if (!Cart.customerAccessToken && await getToken().catch(() => null)) Cart.customerAccessToken = session.access;
       }
-      if (!Cart.customerAccessToken && await getToken().catch(() => null)) Cart.customerAccessToken = session.access;
       log("account", isLoggedIn() ? "logged in" : "logged out");
     }
     await render(root);
