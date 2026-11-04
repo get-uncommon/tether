@@ -1939,7 +1939,7 @@
   }
 
   // src/index.js
-  var VERSION = "0.3.6";
+  var VERSION = "0.4.0";
   var initPromise = null;
   var observer = null;
   function mount(root = document) {

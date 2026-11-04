@@ -2,7 +2,7 @@
 
 ## 0.4.0 (2026-11-04)
 
-**Smaller:** the script every visitor loads went from 62.9 KB to 49 KB (20.7 → 16.5 KB gzipped).
+**Smaller:** the script every visitor loads went from 62.9 KB to 50.8 KB (20.7 → 17.1 KB gzipped, 15.4 KB brotli), while gaining the fixes below.
 - Diagnose and markets are optional parts, loaded on first use (`tether.diagnose.min.js`,
   `tether.markets.min.js`, next to the main script; split chunks for bundlers). Self-hosting: copy
   them too, or set `partsUrl`. `Tether.detectMarket()` and `Tether.getLocalization()` now return

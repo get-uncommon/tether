@@ -19,7 +19,7 @@ An open-source, free alternative to Smootify and Storesynk (formerly Shopyflow):
 - **Optional CMS sync:** a Webflow CMS item per Shopify product, kept up to date automatically ([one-click deploy](#sync-shopify-products-to-the-webflow-cms-optional)).
 - **Hand-over ready:** loading, error and not-found states, `Tether.diagnose()`, error reporting.
 
-MIT licensed · 16 KB gzipped · no dependencies · TypeScript types · [full reference](docs/reference.md) · [comparison](docs/comparison.md) · [changelog](CHANGELOG.md)
+MIT licensed · 17 KB gzipped · no dependencies · TypeScript types · [full reference](docs/reference.md) · [comparison](docs/comparison.md) · [changelog](CHANGELOG.md)
 
 ---
 
