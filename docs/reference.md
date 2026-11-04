@@ -289,6 +289,26 @@ sort keys (`BEST_SELLING`, `PRICE`, `CREATED`, `TITLE`, …), with `tether-rever
 
 Using Webflow CMS lists instead? Put `tether-product` on each CMS item, bound to the handle.
 
+### Search as you type
+
+```html
+<form tether-search action="/search">            <!-- Enter without a choice: your results page -->
+  <input tether-search-input name="q" type="search" placeholder="Search">
+  <div tether-search-results>
+    <div tether-search-products><a><img tether-search-bind="image" max-width="80" alt=""><span tether-search-bind="title"></span> <span tether-search-bind="price"></span></a></div>
+    <div tether-search-collections><a><span tether-search-bind="title"></span></a></div>
+    <div tether-search-queries><a><span tether-search-bind="text"></span></a></div>
+    <p tether-show="search-empty">No results</p>
+  </div>
+</form>
+```
+
+Shopify's predictive search, in its own optional part (2 KB) that loads only on pages with
+`tether-search`. Each list's first child is the template; lists without results are hidden. The
+root gets `is-open` and `tether-search-state` (`loading`, `ready`, `empty`, `error`); the input is
+a combobox (arrow keys, Enter, Escape) for screen readers. `tether-search-limit` (default 6),
+`tether-search-min` (characters, default 2). Event: `tether:search`.
+
 ### Bundles / build-a-box
 
 ```html
@@ -327,6 +347,17 @@ Place these anywhere, typically in a drawer outside the Barba container.
 | `tether-country-bind` | `name`, `code`, `currency`, `symbol` of the current country |
 
 ---
+
+### Customer accounts and analytics
+
+Login, orders and a checkout that knows the customer: [customer accounts](accounts.md).
+GA4 / Tag Manager events and Shopify's analytics: [analytics](analytics.md).
+
+### Other markets on static sites
+
+While a visitor's market differs from the one a page was built for, `<html>` has the class
+`tether-market-pending` until the live prices are in (one request). Hide prices meanwhile:
+`html.tether-market-pending [tether-bind*="price"] { visibility: hidden }`.
 
 ## JavaScript API
 

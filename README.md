@@ -17,6 +17,7 @@ An open-source, free alternative to Smootify and Storesynk (formerly Shopyflow):
 - **With or without the CMS:** bind products to CMS items, or let one page show any product from the URL.
 - **Markets:** local prices and currency, a country selector, Webflow Localization.
 - **Optional CMS sync:** a Webflow CMS item per Shopify product, kept up to date automatically ([one-click deploy](#sync-shopify-products-to-the-webflow-cms-optional)).
+- **Search as you type, customer accounts, analytics:** optional parts that load only where you use them ([accounts](docs/accounts.md), [analytics](docs/analytics.md): GA4/Tag Manager and Shopify's own).
 - **Astro too:** build-time product pages with live prices and cart, View Transitions included ([Astro guide](docs/astro.md)).
 - **Hand-over ready:** loading, error and not-found states, `Tether.diagnose()`, error reporting.
 
@@ -50,9 +51,9 @@ Site settings → Custom code → **Head**:
 ```
 
 **Versions:** `@0.5` gets every 0.5.x fix automatically (recommended), `@v0.5.0` pins one release,
-`@latest` always takes the newest. Hosting the file yourself? Put `tether.markets.min.js` and
-`tether.diagnose.min.js` next to it: those optional parts load only when a page uses markets or
-`Tether.diagnose()`.
+`@latest` always takes the newest. Hosting the file yourself? Put the optional parts next to it (`tether.markets.min.js`,
+`tether.search.min.js`, `tether.account.min.js`, `tether.analytics.min.js`, `tether.extras.min.js`,
+`tether.diagnose.min.js`): each loads only when a page uses it.
 
 ## 3. Add attributes in the Designer
 

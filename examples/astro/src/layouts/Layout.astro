@@ -20,11 +20,27 @@ const { title = 'Tether + Astro' } = Astro.props;
       .is-selected { background: #111; color: #fff; }
       .is-unavailable { opacity: .4; }
       .is-disabled { opacity: .4; pointer-events: none; }
+      header { align-items: center; gap: 1rem; }
+      .search { position: relative; flex: 1; max-width: 360px; }
+      .search input { width: 100%; padding: .4rem .6rem; font: inherit; }
+      .results { position: absolute; top: 100%; left: 0; right: 0; background: #fff; box-shadow: 0 8px 24px #0002; z-index: 5; }
+      .results a { display: grid; grid-template-columns: 40px 1fr auto; gap: .5rem; align-items: center; padding: .4rem .6rem; text-decoration: none; }
+      .results a[aria-selected="true"], .results a:hover { background: #f4f4f4; }
+      .results img { width: 40px; height: 40px; object-fit: cover; }
+      .results p { padding: .6rem; margin: 0; }
+      html.tether-market-pending [tether-bind="price"] { visibility: hidden; }
     </style>
   </head>
   <body>
     <header transition:persist>
       <a href="/">Shop</a>
+      <form tether-search class="search" action="/" role="search">
+        <input tether-search-input name="q" type="search" placeholder="Search products" aria-label="Search products" />
+        <div tether-search-results class="results">
+          <div tether-search-products><a><img tether-search-bind="image" max-width="80" alt="" /><span tether-search-bind="title"></span><span tether-search-bind="price"></span></a></div>
+          <p tether-show="search-empty" hidden>No products found.</p>
+        </div>
+      </form>
       <button tether-cart-open>Cart (<span tether-cart-count>0</span>)</button>
     </header>
     <main><slot /></main>

@@ -1,0 +1,26 @@
+# Real-browser tests: the Astro starter in Chromium, WebKit, Firefox and a phone, against Shopify's
+# public demo store. Public repos run Actions for free. Nothing is uploaded (no storage used).
+name: e2e
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '41 6 * * 1'   # Mondays: catches changes on Shopify's side
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  browsers:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium webkit firefox
+      - run: npm run e2e

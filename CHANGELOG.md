@@ -1,10 +1,22 @@
 # Changelog
 
-## 0.6.0 (unreleased)
+## 0.6.0 (2026-11-04)
 
 Found by 10 agents building stores from the docs alone (Astro static and SSR, plain HTML, Vite,
 SvelteKit, Next.js, Eleventy, subscriptions, multi-market, an accessible React cart) and 10 more
 shopping in them (phone, keyboard only, screen reader, German, French, US, bargain hunter, …).
+
+**New: optional parts** (each loads only on pages that use it; the main script stays 20 KB)
+- **Search as you type** (`tether-search`, 2 KB): Shopify's predictive search with products,
+  collections and suggested searches; keyboard and screen-reader friendly.
+- **Customer accounts** (`account.clientId`, 3.5 KB): login on Shopify's page (OAuth with PKCE),
+  the customer's name and orders, a checkout that knows them. Between the visitor's browser and
+  Shopify only. [Guide](docs/accounts.md).
+- **Analytics** (`analytics`, 3 KB): GA4 / Tag Manager ecommerce events in `dataLayer`, Shopify's
+  own analytics (experimental, through Shopify's scripts), or `onEvent` for any tool. [Guide](docs/analytics.md).
+- **Structured data:** `shop.jsonLd(product)` for Google's product results.
+- **Other markets on static sites:** `html.tether-market-pending` until the visitor's prices are in.
+- **Real-browser tests:** the starter in Chromium, WebKit, Firefox and a phone, on every push.
 
 **Fixes**
 - **Stale prices:** Shopify caches the answer to an identical query text, prices included, for
@@ -46,7 +58,8 @@ shopping in them (phone, keyboard only, screen reader, German, French, US, barga
 - Docs: [other frameworks](docs/frameworks.md) (Next.js, SvelteKit, Vite, Eleventy); many
   attributes and classes that were only in the code are now in the reference.
 
-The main script is 19.9 KB gzipped (18.5 KB in 0.5).
+The main script is 20.1 KB gzipped (18.5 KB in 0.5): the fixes above. Bundles, tab sync and
+variant links moved to the optional `extras` part (1 KB).
 
 ## 0.5.0 (2026-11-04)
 

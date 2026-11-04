@@ -103,6 +103,7 @@ const state = shop.initialState(product); // what Tether will show first
   </article>
 
   <Fragment set:html={shop.hydrate(product)} />
+  <Fragment set:html={shop.jsonLd(product, { url: Astro.url.href })} />
 </Layout>
 ```
 
@@ -128,6 +129,8 @@ const state = shop.initialState(product); // what Tether will show first
   [starter's product page](https://github.com/ravi-klaassens/tether/blob/main/examples/astro/src/pages/products/%5Bhandle%5D.astro)
   has a complete block. A product that can only be bought on a subscription shows the one-time
   price as the compare-at price.
+- `shop.jsonLd(product, { url })` adds the product for search engines (Google's product results:
+  price, stock and currency per variant); set `siteUrl` in `shop.config.js` to leave out `url`.
 - Images: give `shop.imageUrl()` the same width as the `max-width` attribute, and Tether keeps the
   server-rendered image instead of loading it again.
 - The attributes are the same as in Webflow: see the [attribute reference](reference.md#attribute-reference)
@@ -185,6 +188,9 @@ Shopify searches the store's default language only.
 convert currencies see this often (exchange rates move). Rebuild regularly, or use SSR for pages
 where it matters. Shopify can also round the cart price differently from the product price in some
 markets (a cent or a euro): the cart is what's charged.
+
+**Search as you type:** a `tether-search` form in your header ([markup](reference.md#search-as-you-type));
+the starter has one.
 
 ## 4. Cart and View Transitions
 
@@ -291,7 +297,9 @@ Also there: `Tether.cart.add(variantId, quantity)` (or `add({ variantId, quantit
 
 The build renders one market: the `country` / `locale` in `shop.config.js`. A visitor who picks
 another one gets live prices for it in the browser (one batched request; the page shows the build
-market's prices until then). Their choice is remembered, and the cart moves with it.
+market's prices until then: hide them with
+`html.tether-market-pending [tether-bind*="price"] { visibility: hidden }`). Their choice is
+remembered, and the cart moves with it.
 
 ```astro
 <select tether-country-select tether-countries="NL,DE"></select>  <!-- your markets, your order -->
@@ -352,6 +360,7 @@ and the markup, and tells you what to fix.
 | `getRecommendations(handleOrId)` | related products |
 | `initialState(product, { variant })` | what Tether shows first: `variant`, `selected`, `price`, `compareAtPrice`, `available`, `purchase`, `plan`, `plans`, `savings`, `show`, `isUnavailable()` |
 | `hydrate(products, { card })` | the `<script>` tag for the browser (see above) |
+| `jsonLd(product, { url })`, `jsonLdData(product)` | schema.org Product / ProductGroup for search engines |
 | `formatMoney(money)`, `formatPercent(n)`, `productUrl(handle)`, `imageUrl(url, { width })` | strings, same rules as the browser |
 | `query(graphql, variables)` | any Storefront API query, in the configured market |
 

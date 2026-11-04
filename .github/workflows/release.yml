@@ -42,4 +42,4 @@ jobs:
             echo '```bash'; echo 'npm install @occluze/tether'; echo '```'
           } >> notes.md
           gh release create "$GITHUB_REF_NAME" --title "Tether $V" --notes-file notes.md --latest \
-            dist/tether.min.js dist/tether.markets.min.js dist/tether.diagnose.min.js dist/tether.esm.js
+            dist/tether.min.js dist/tether.markets.min.js dist/tether.diagnose.min.js dist/tether.search.min.js dist/tether.account.min.js dist/tether.analytics.min.js dist/tether.extras.min.js dist/tether.esm.js

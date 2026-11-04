@@ -42,9 +42,12 @@
     "pretest": "node scripts/build.mjs",
     "presmoke": "node scripts/build.mjs",
     "test:types": "tsc -p types/tsconfig.json",
-    "release": "node scripts/release.mjs"
+    "release": "node scripts/release.mjs",
+    "e2e:build": "npm run build && cd examples/astro && (test -f .env || cp .env.example .env) && npm install --no-audit --no-fund --silent && npm install --no-save --silent ../.. && npx astro build",
+    "e2e": "npm run e2e:build && playwright test -c e2e/playwright.config.js"
   },
   "devDependencies": {
+    "@playwright/test": "^1.64.1",
     "esbuild": "^0.25.0",
     "jsdom": "^26.0.0",
     "typescript": "^5.9.3"
