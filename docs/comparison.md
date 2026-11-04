@@ -1,10 +1,10 @@
 # Tether vs Smootify vs Storesynk (Shopyflow)
 
-Three ways to sell Shopify products on a Webflow site. Tether is free and open source; Smootify
+Three ways to sell Shopify products on a Webflow site (Tether also works in Astro, Next.js, SvelteKit and plain HTML). Tether is free and open source; Smootify
 and Storesynk (formerly Shopyflow) are paid services with support and visual tooling. This page
 tries to be fair: where something couldn't be confirmed from the vendor's own pages, it says so.
 
-*Checked on 4 November 2026 from the vendors' public pages (links below). Prices and features
+*Tether as of 0.6. Checked on 4 November 2026 from the vendors' public pages (links below). Prices and features
 change, so check the sources before you decide. Corrections are welcome: open an issue.*
 
 ## At a glance
@@ -21,9 +21,12 @@ change, so check the sources before you decide. Corrections are welcome: open an
 | **Cart drawer, discount codes, notes** | Yes | Cart, mini cart, upsells, free-shipping bar; discount codes unconfirmed | Unconfirmed |
 | **Markets / multi-currency** | Yes: country selector, Webflow Localization, cart follows | Yes, with a markets switcher | Unconfirmed |
 | **Bundles / build-a-box** | Yes (`tether-group`, Shopify Bundles) | Yes (Shopify Bundles, Magic Box) | Yes (sub-products, cross-sells) |
-| **Customer accounts** | Links to Shopify customer accounts | Yes (orders, subscriptions) | Unconfirmed |
-| **Search** | Product lists from Shopify search queries | Predictive search, Search & Discovery | Unconfirmed |
+| **Customer accounts** | Yes: login, orders, a checkout that knows the customer; tokens kept off the browser by your own Worker ([how](accounts.md)) | Yes (orders, subscriptions) | Unconfirmed |
+| **Search** | Search as you type (Shopify predictive search) and search result lists | Predictive search, Search & Discovery | Unconfirmed |
 | **Page transitions (Barba, Swup)** | Yes, with a preset | Unconfirmed | Unconfirmed |
+| **Analytics** | GA4 / Tag Manager ecommerce events; Shopify's own analytics (experimental) ([how](analytics.md)) | Unconfirmed | Unconfirmed |
+| **SEO** | Server-rendered product pages and structured data (Astro, any server); CMS items via the sync | Via the Webflow CMS | Via the Webflow CMS |
+| **Frameworks besides Webflow** | Astro integration and starter; Next.js, SvelteKit, Vite, Eleventy, plain HTML | Webflow | Webflow |
 | **B2B / wholesale pricing** | No | Unconfirmed | Yes |
 | **Source code** | Open (GitHub) | Closed | Closed |
 | **Runs on** | jsDelivr or your own hosting; the sync on your own Cloudflare | Their app and, for sync, their server | Their apps and sync |
@@ -45,8 +48,8 @@ project, while Tether and its sync stay free.
 ## When a paid tool is the better fit
 
 - **You want a visual setup** inside Webflow, without custom attributes.
-- **You need vendor support** with a response time, or features Tether doesn't have: predictive
-  search, upsells, B2B/wholesale pricing, a built-in customer login, reviews or forms.
+- **You need vendor support** with a response time, or features Tether doesn't have: upsells,
+  B2B/wholesale pricing, reviews or forms.
 - **Your team doesn't want** to own any setup at all, not even a Cloudflare deploy.
 
 ## When Tether fits
@@ -56,6 +59,10 @@ project, while Tether and its sync stay free.
 - **Subscriptions through selling plans**, page transitions, and markets handled in the open.
 - **You can read the code**, fix things yourself, and keep everything running without depending
   on a vendor.
+- **Not only Webflow:** the same attributes work in Astro (with an integration and a starter) and
+  any other framework or plain HTML.
+- **Customer data stays between the visitor, Shopify and your own Worker:** no third-party server
+  in between.
 
 ## Sources
 

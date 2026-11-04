@@ -47,10 +47,7 @@ await edit('server/src/version.js', (s) => s.replace(/export const VERSION = '[^
 // Pinned examples in the README (ranges like @0.3 follow the minor version).
 await edit('README.md', (s) => s.replace(/@v\d+\.\d+\.\d+/g, `@v${version}`).replace(/@\d+\.\d+\/dist/g, `@${x}.${y}/dist`)
   .replace(/`@\d+\.\d+` gets every \d+\.\d+\.x fix/, `\`@${x}.${y}\` gets every ${x}.${y}.x fix`), { optional: true });
-if (x !== a || y !== b) {
-  // New deploys of the sync follow the new minor line; existing copies keep their own range.
-  await writeFile(join(ROOT, 'server/TETHER_VERSION'), `${x}.${y}\n`);
-}
+// server/TETHER_VERSION stays 'latest': deployed sync copies follow every release (daily updater).
 
 run('npm', ['install', '--package-lock-only', '--no-audit', '--no-fund', '--silent']);
 run('npm', ['test']);

@@ -6,7 +6,7 @@ name: Update Tether
 
 on:
   schedule:
-    - cron: '23 5 * * 1'
+    - cron: '23 5 * * *'   # daily: new Tether releases arrive the next morning
   workflow_dispatch:
 
 permissions:

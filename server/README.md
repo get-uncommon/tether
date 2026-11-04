@@ -57,11 +57,11 @@ Your copy updates itself, like a jsDelivr version. The `TETHER_VERSION` file in 
 
 | `TETHER_VERSION` | Gets |
 |---|---|
-| `0.4` (default) | every 0.4.x fix, automatically |
-| `0.4.0` | pinned: never changes |
-| `latest` | every release, also new minor versions |
+| `latest` (default) | every release, automatically |
+| `0.6` | only 0.6.x fixes |
+| `0.6.0` | pinned: never changes |
 
-It checks every Monday. To update right away: your copy on GitHub → **Actions** → **Update Tether**
+It checks every day, and only updates when the new version's tests pass. To update right away: your copy on GitHub → **Actions** → **Update Tether**
 → **Run workflow**. It tests the new version, then Cloudflare redeploys. Your settings stay as they are.
 `https://YOUR-WORKER/health` shows the version that's running.
 
