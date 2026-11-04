@@ -2233,7 +2233,7 @@
   }
 
   // src/index.js
-  var VERSION = "0.6.0";
+  var VERSION = "0.6.1";
   var initPromise = null;
   var observer = null;
   function mount(root = document) {
