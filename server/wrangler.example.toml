@@ -1,0 +1,18 @@
+# Copy to wrangler.toml. Nothing is deployed until you run `npx wrangler deploy` yourself.
+name = "tether-sync"
+main = "worker.js"
+compatibility_date = "2026-10-01"
+
+# Every 10 minutes. Free plan: 5 cron triggers per account. Reconcile only writes KV when something changed.
+[triggers]
+crons = ["*/10 * * * *"]
+
+[[kv_namespaces]]
+binding = "TETHER_SYNC"
+id = "YOUR_KV_NAMESPACE_ID"   # npx wrangler kv namespace create TETHER_SYNC
+
+# Secrets (not in this file):
+#   npx wrangler secret put WEBFLOW_TOKEN
+#   npx wrangler secret put SHOPIFY_ADMIN_TOKEN        (or SHOPIFY_CLIENT_ID + SHOPIFY_CLIENT_SECRET)
+#   npx wrangler secret put SHOPIFY_WEBHOOK_SECRET     (defaults to SHOPIFY_CLIENT_SECRET)
+#   npx wrangler secret put SYNC_SECRET                (optional, for POST /reconcile)

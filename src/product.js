@@ -8,6 +8,7 @@ import {
   setSelected, repeat, productUrl, notifyLayoutChanged, watchImages, busy, parseJSONAttr, toAttributes,
 } from './dom.js';
 import { Cart } from './cart.js';
+import { STATUS_KEYS, ownedBy } from './status.js';
 import {
   allPlans, allocationFor, planPrice, planCheckoutCharge, planSavings, planAdjustment, findPlan, GID,
 } from './selling-plans.js';
@@ -37,6 +38,7 @@ export class ProductScope {
 
     scopes.set(root, this);
     root.setAttribute(attr('state'), 'ready');
+    root.removeAttribute(attr('error'));
 
     this.initSelection();
     this.initPurchase();
@@ -264,7 +266,7 @@ export class ProductScope {
         case 'featured-image': return setImage(el, p.featuredImage?.url, p.featuredImage?.altText || p.title);
         case 'url':
         case 'link':
-          el.setAttribute('href', productUrl(p.handle));
+          el.setAttribute('href', productUrl(p.handle, p.id));
           if (key === 'url' && !el.firstElementChild && !el.textContent.trim()) setText(el, p.title);
           return undefined;
         case 'images':
@@ -471,10 +473,18 @@ export class ProductScope {
       'subscription-selected': sub,
       'one-time-selected': !sub,
       'has-savings': sub ? savings.percentage > 0 : Boolean(onSale),
+      // scope state (see status.js)
+      'loading': false,
+      'ready': true,
+      'error': false,
+      'not-found': false,
     };
     this.$(sel('show')).forEach((el) => {
       const k = get(el, 'show');
-      if (k in conds) show(el, conds[k]);
+      if (!(k in conds)) return;
+      // State blocks of a list nested in this product belong to that list.
+      if (STATUS_KEYS.includes(k) && !ownedBy(el, this.root)) return;
+      show(el, conds[k]);
     });
 
     this.root.classList.toggle('is-subscription', sub);

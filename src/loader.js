@@ -3,7 +3,7 @@
  * the lifetime of the page (survives Barba/Swup page swaps).
  */
 import { cfg, log } from './config.js';
-import { gql } from './client.js';
+import { gql, TetherError } from './client.js';
 import { productFragment, collectionFields } from './fragments.js';
 
 const productCache = new Map(); // key -> Promise<product>
@@ -33,7 +33,7 @@ export function primeProduct(product) {
 
 export function getProduct(rawKey) {
   const key = normalizeProductKey(rawKey);
-  if (!key) return Promise.reject(new Error('empty product key'));
+  if (!key) return Promise.reject(new TetherError('empty product key', { code: 'NOT_FOUND' }));
   if (productCache.has(key)) return productCache.get(key);
 
   const p = new Promise((resolve, reject) => {
@@ -88,7 +88,7 @@ async function flush() {
     keys.forEach((k) => settle(k, (r) => {
       if (got.has(k)) { primeProduct(got.get(k)); r.resolve(got.get(k)); } else {
         productCache.delete(k); // don't cache misses: a fix in Shopify works on next load
-        r.reject(new Error(`Product not found: ${k}`));
+        r.reject(new TetherError(`Product not found: ${k}`, { code: 'NOT_FOUND' }));
       }
     }));
   } catch (err) {
@@ -120,7 +120,7 @@ export async function getProducts({
 ${fragment}`, {
       handle: collection, first, after, sortKey: sortKey || undefined, reverse, filters: filters || undefined,
     });
-    if (!data.collection) throw new Error(`Collection not found: ${collection}`);
+    if (!data.collection) throw new TetherError(`Collection not found: ${collection}`, { code: 'NOT_FOUND' });
     const { products, ...rest } = data.collection;
     products.nodes.forEach(primeProduct);
     return { collection: rest, products: products.nodes, pageInfo: products.pageInfo };

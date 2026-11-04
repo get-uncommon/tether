@@ -1,0 +1,18 @@
+{
+  "name": "@occluze/tether-sync",
+  "version": "0.2.0",
+  "private": true,
+  "description": "Shopify -> Webflow CMS sync for Tether: webhooks, reconcile cron and initial import. Runs as a Cloudflare Worker or a Node CLI.",
+  "type": "module",
+  "bin": { "tether-sync": "bin/tether-sync.js" },
+  "exports": {
+    ".": "./src/index.js",
+    "./worker": "./src/worker.js"
+  },
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  },
+  "license": "MIT",
+  "author": "Ravi Klaassens"
+}

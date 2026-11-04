@@ -95,9 +95,10 @@ function reportError(err, context) {
 
 // src/client.js
 var TetherError = class extends Error {
-  constructor(message, { status, errors, userErrors } = {}) {
+  constructor(message, { status, errors, userErrors, code } = {}) {
     super(message);
     this.name = "TetherError";
+    this.code = code || (status ? `HTTP_${status}` : "ERROR");
     this.status = status;
     this.errors = errors;
     this.userErrors = userErrors;
@@ -120,7 +121,7 @@ var sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function gql(query, variables = {}, { context = true } = {}) {
   var _a;
   if (!cfg.domain || !cfg.token) {
-    throw new TetherError("Tether is not configured: domain and token are required");
+    throw new TetherError("Tether is not configured: domain and token are required", { code: "NOT_CONFIGURED" });
   }
   const body = JSON.stringify({ query: context ? withContext(query) : query, variables });
   let attempt = 0;
@@ -140,7 +141,7 @@ async function gql(query, variables = {}, { context = true } = {}) {
         await sleep(300 * 2 ** attempt);
         continue;
       }
-      throw new TetherError(`Network error: ${err.message}`);
+      throw new TetherError(`Network error: ${err.message}`, { code: "NETWORK" });
     }
     if (res.status === 430) throw new TetherError("Shopify security rejection (430)", { status: 430 });
     const retryable = res.status === 429 || res.status >= 500;
@@ -339,7 +340,7 @@ function primeProduct(product) {
 }
 function getProduct(rawKey) {
   const key = normalizeProductKey(rawKey);
-  if (!key) return Promise.reject(new Error("empty product key"));
+  if (!key) return Promise.reject(new TetherError("empty product key", { code: "NOT_FOUND" }));
   if (productCache.has(key)) return productCache.get(key);
   const p = new Promise((resolve, reject) => {
     resolvers.set(key, { resolve, reject });
@@ -396,7 +397,7 @@ ${productFragment()}`;
         r.resolve(got.get(k));
       } else {
         productCache.delete(k);
-        r.reject(new Error(`Product not found: ${k}`));
+        r.reject(new TetherError(`Product not found: ${k}`, { code: "NOT_FOUND" }));
       }
     }));
   } catch (err) {
@@ -437,7 +438,7 @@ ${fragment}`, {
       reverse,
       filters: filters || void 0
     });
-    if (!data2.collection) throw new Error(`Collection not found: ${collection}`);
+    if (!data2.collection) throw new TetherError(`Collection not found: ${collection}`, { code: "NOT_FOUND" });
     const { products, ...rest } = data2.collection;
     products.nodes.forEach(primeProduct);
     return { collection: rest, products: products.nodes, pageInfo: products.pageInfo };
@@ -563,9 +564,11 @@ var sel = (name, value) => value === void 0 ? `[${attr(name)}]` : `[${attr(name)
 var get = (el, name) => el.getAttribute(attr(name));
 var has = (el, name) => el.hasAttribute(attr(name));
 var dataKey = () => `data-${cfg.prefix}-key`;
-function productUrl(handle) {
+function productUrl(handle, id) {
   const path = cfg.productPath || "/product";
-  return path.includes("{handle}") ? path.replace("{handle}", encodeURIComponent(handle)) : `${path.replace(/\/$/, "")}/${handle}`;
+  if (!/\{(handle|id)\}/.test(path)) return `${path.replace(/\/$/, "")}/${handle}`;
+  const numeric = id ? String(id).split("/").pop() : "";
+  return path.replace(/\{handle\}/g, encodeURIComponent(handle || "")).replace(/\{id\}/g, encodeURIComponent(numeric));
 }
 var qsa = (root, s) => root ? [...root.querySelectorAll(s)] : [];
 var scoped = (root, s, scopeSelector) => qsa(root, s).filter((el) => el.closest(scopeSelector) === root);
@@ -664,6 +667,7 @@ function setSelected(el, selected) {
   if (input) input.checked = selected;
 }
 var templates = /* @__PURE__ */ new WeakMap();
+var hasTemplate = (container) => Boolean(templates.get(container));
 function template(container) {
   var _a, _b;
   if (!templates.has(container)) {
@@ -836,8 +840,20 @@ var Cart = {
     var _a;
     return ((_a = this.state) == null ? void 0 : _a.totalQuantity) || 0;
   },
+  lastError: null,
   _queue(fn) {
-    const run = this._chain.then(fn, fn);
+    const run = this._chain.then(fn, fn).then((value) => {
+      if (this.lastError) {
+        this.lastError = null;
+        this.render();
+      }
+      return value;
+    }, (err) => {
+      this.lastError = err;
+      this.render();
+      emit("cart-error", { error: err });
+      throw err;
+    });
     this._chain = run.catch(() => {
     });
     return run;
@@ -865,7 +881,8 @@ ${cartFragment()}`, { id });
       } else this.state = data.cart;
     } catch (err) {
       reportError(err, "cart load failed");
-      this._setId(null);
+      this.lastError = err;
+      if (isMissingCart(err)) this._setId(null);
       this.state = null;
     }
     this.render();
@@ -1060,7 +1077,8 @@ ${cartFragment()}`, { id });
       "cart-filled": count > 0,
       "cart-has-subscription": hasSub,
       "cart-no-subscription": !hasSub,
-      "cart-has-discount": ((cart == null ? void 0 : cart.discountCodes) || []).some((d) => d.applicable)
+      "cart-has-discount": ((cart == null ? void 0 : cart.discountCodes) || []).some((d) => d.applicable),
+      "cart-error": Boolean(this.lastError)
     };
     qsa(document, sel("show")).forEach((el) => {
       const k = get(el, "show");
@@ -1137,10 +1155,10 @@ function renderLine(node, line) {
   node.setAttribute(attr("line-id"), line.id);
   node.classList.toggle("is-subscription", isSub);
   qsa(node, sel("line")).forEach((el) => {
-    var _a2, _b2, _c2, _d2, _e;
+    var _a2, _b2, _c2, _d2, _e, _f;
     const key = get(el, "line");
     if (key === "image") return setImage(el, ((_a2 = m.image) == null ? void 0 : _a2.url) || ((_c2 = (_b2 = m.product) == null ? void 0 : _b2.featuredImage) == null ? void 0 : _c2.url), (_d2 = m.product) == null ? void 0 : _d2.title);
-    if (key === "url") return el.setAttribute("href", productUrl((_e = m.product) == null ? void 0 : _e.handle));
+    if (key === "url") return el.setAttribute("href", productUrl((_e = m.product) == null ? void 0 : _e.handle, (_f = m.product) == null ? void 0 : _f.id));
     const v = lineValue(line, key);
     if (v !== void 0) setTextTracked(el, v);
     return void 0;
@@ -1184,6 +1202,57 @@ function renderLine(node, line) {
   });
 }
 
+// src/status.js
+function resolveProductKey(el, location = window.location) {
+  const raw = (get(el, "product") || "").trim();
+  if (!raw.toLowerCase().startsWith("url:")) return { key: raw || null, fromUrl: false, raw };
+  const what = raw.slice(4).trim();
+  let key = null;
+  if (what.toLowerCase() === "path") {
+    const parts = location.pathname.split("/").filter(Boolean);
+    key = parts.length ? safeDecode(parts[parts.length - 1]) : null;
+  } else {
+    key = new URLSearchParams(location.search).get(what || "handle");
+  }
+  key = key && key.trim() ? key.trim() : null;
+  return { key, fromUrl: true, raw };
+}
+function safeDecode(s) {
+  try {
+    return decodeURIComponent(s);
+  } catch {
+    return s;
+  }
+}
+var STATUS_KEYS = ["loading", "ready", "error", "not-found"];
+var isNotFound = (err) => (err == null ? void 0 : err.code) === "NOT_FOUND";
+var boundary = () => ["product", "collection", "products", "recommendations"].map((n) => sel(n)).join(",");
+var ownedBy = (el, root) => {
+  var _a;
+  return el === root || ((_a = el.parentElement) == null ? void 0 : _a.closest(boundary())) === root;
+};
+function setScopeStatus(root, status, err) {
+  const notFound = status === "not-found";
+  root.setAttribute(attr("state"), notFound ? "error" : status);
+  if (status === "error" || notFound) root.setAttribute(attr("error"), notFound ? "not-found" : (err == null ? void 0 : err.code) || "error");
+  else root.removeAttribute(attr("error"));
+  scoped(root, sel("show"), boundary()).forEach((el) => {
+    const k = get(el, "show");
+    if (!STATUS_KEYS.includes(k)) return;
+    const visible = k === status;
+    show(el, visible);
+    if (visible && typeof getComputedStyle === "function" && getComputedStyle(el).display === "none") {
+      el.style.display = el.getAttribute(attr("display")) || "block";
+    }
+  });
+  if (status === "error" || notFound) {
+    scoped(root, sel("add-to-cart"), boundary()).forEach((btn) => {
+      btn.classList.add("is-disabled");
+      if ("disabled" in btn) btn.disabled = true;
+    });
+  }
+}
+
 // src/product.js
 var scopes = /* @__PURE__ */ new WeakMap();
 var productSel = () => sel("product");
@@ -1207,6 +1276,7 @@ var ProductScope = class {
     this.planId = null;
     scopes.set(root, this);
     root.setAttribute(attr("state"), "ready");
+    root.removeAttribute(attr("error"));
     this.initSelection();
     this.initPurchase();
     this.renderProduct();
@@ -1433,7 +1503,7 @@ var ProductScope = class {
           return setImage(el, (_a = p.featuredImage) == null ? void 0 : _a.url, ((_b = p.featuredImage) == null ? void 0 : _b.altText) || p.title);
         case "url":
         case "link":
-          el.setAttribute("href", productUrl(p.handle));
+          el.setAttribute("href", productUrl(p.handle, p.id));
           if (key === "url" && !el.firstElementChild && !el.textContent.trim()) setText(el, p.title);
           return void 0;
         case "images":
@@ -1661,11 +1731,18 @@ var ProductScope = class {
       "one-time-available": !p.requiresSellingPlan,
       "subscription-selected": sub,
       "one-time-selected": !sub,
-      "has-savings": sub ? savings.percentage > 0 : Boolean(onSale)
+      "has-savings": sub ? savings.percentage > 0 : Boolean(onSale),
+      // scope state (see status.js)
+      "loading": false,
+      "ready": true,
+      "error": false,
+      "not-found": false
     };
     this.$(sel("show")).forEach((el) => {
       const k = get(el, "show");
-      if (k in conds) show(el, conds[k]);
+      if (!(k in conds)) return;
+      if (STATUS_KEYS.includes(k) && !ownedBy(el, this.root)) return;
+      show(el, conds[k]);
     });
     this.root.classList.toggle("is-subscription", sub);
     this.root.setAttribute(attr("purchase-mode"), sub ? "subscription" : "one-time");
@@ -1702,7 +1779,7 @@ var ListScope = class {
     this.products = [];
     this.pageInfo = null;
     this.collection = null;
-    root.setAttribute(attr("state"), "loading");
+    setScopeStatus(root, "loading");
     root.addEventListener("click", (e) => {
       var _a, _b;
       const more = (_b = (_a = e.target).closest) == null ? void 0 : _b.call(_a, sel("load-more"));
@@ -1742,11 +1819,12 @@ var ListScope = class {
         this.products = more ? [...this.products, ...res.products] : res.products;
       }
       this.render();
-      this.root.setAttribute(attr("state"), "ready");
+      setScopeStatus(this.root, "ready");
       emit("list-ready", { products: this.products, collection: this.collection }, this.root);
     } catch (err) {
-      this.root.setAttribute(attr("state"), "error");
+      if (!more) setScopeStatus(this.root, isNotFound(err) ? "not-found" : "error", err);
       reportError(err, "list load failed");
+      emit("error", { error: err, context: "list" }, this.root);
     }
   }
   render() {
@@ -1788,8 +1866,188 @@ var ListScope = class {
   }
 };
 
+// src/diagnose.js
+function apiVersionStatus(version, now = /* @__PURE__ */ new Date()) {
+  const m = /^(\d{4})-(\d{2})$/.exec(String(version || ""));
+  if (!m) return { version, ok: version === "unstable", note: "not a dated version" };
+  const released = new Date(Date.UTC(+m[1], +m[2] - 1, 1));
+  const supportedUntil = new Date(Date.UTC(+m[1] + 1, +m[2] - 1, 1));
+  const monthsLeft = (supportedUntil - now) / (30.44 * 24 * 3600 * 1e3);
+  let note = `supported until about ${supportedUntil.toISOString().slice(0, 7)}`;
+  if (released > now) note = "not released yet";
+  else if (monthsLeft <= 0) note = "no longer supported: Shopify falls back to the oldest supported version. Upgrade (see README)";
+  else if (monthsLeft < 3) note = `${note}: plan the upgrade (see README)`;
+  return { version, ok: released <= now && monthsLeft > 0, monthsLeft: Math.round(monthsLeft), note };
+}
+var mask = (t) => t ? `${String(t).slice(0, 4)}\u2026${String(t).slice(-4)} (${String(t).length} chars)` : "(missing)";
+function describe(el) {
+  const id = el.id ? `#${el.id}` : "";
+  const cls = el.className && typeof el.className === "string" ? `.${el.className.trim().split(/\s+/).slice(0, 2).join(".")}` : "";
+  return `<${el.tagName.toLowerCase()}${id}${cls}>`;
+}
+function checkMarkup(root = document) {
+  const problems = [];
+  const add = (level, message, el) => problems.push({ level, message, element: el ? describe(el) : void 0, el });
+  const inProduct = (el) => Boolean(el.closest(sel("product")));
+  const listSel = `${sel("collection")},${sel("products")},${sel("recommendations")}`;
+  qsa(root, sel("product")).forEach((el) => {
+    if (el.closest(listSel) && el.closest(sel("list"))) return;
+    const { key, fromUrl, raw } = resolveProductKey(el);
+    if (!raw) add("error", `${attr("product")} has no value. Bind it to the Shopify handle (CMS field), or use "url:handle".`, el);
+    else if (fromUrl && !key) add("warn", `${attr("product")}="${raw}" but this URL has no value for it (e.g. ?handle=my-product).`, el);
+  });
+  const productOnly = ["bind", "option-list", "option", "variant-select", "add-to-cart", "purchase", "plan-list", "plan", "qty", "line-attribute"];
+  productOnly.forEach((name) => {
+    qsa(root, sel(name)).forEach((el) => {
+      if (inProduct(el)) return;
+      if (name === "line-attribute" && el.closest(sel("group"))) return;
+      add("warn", `${attr(name)} outside any ${attr("product")}: it does nothing here.`, el);
+    });
+  });
+  qsa(root, sel("group-add")).forEach((el) => {
+    if (!el.closest(sel("group"))) add("warn", `${attr("group-add")} outside a ${attr("group")}.`, el);
+  });
+  [...qsa(root, sel("option-list")), ...qsa(root, sel("plan-list")), ...qsa(root, sel("cart-lines")), ...qsa(root, sel("list"))].forEach((el) => {
+    if (!el.firstElementChild && !hasTemplate(el)) {
+      add("warn", "Repeater without a template child: put one example element inside it.", el);
+    }
+  });
+  qsa(root, listSel).forEach((el) => {
+    if (!qsa(el, sel("list")).length) add("error", `List without a ${attr("list")} child: products have nowhere to render.`, el);
+  });
+  const known = /* @__PURE__ */ new Set([
+    "in-stock",
+    "out-of-stock",
+    "backorder",
+    "low-stock",
+    "on-sale",
+    "not-on-sale",
+    "has-variants",
+    "single-variant",
+    "subscription-available",
+    "subscription-unavailable",
+    "subscription-only",
+    "one-time-available",
+    "subscription-selected",
+    "one-time-selected",
+    "has-savings",
+    "loading",
+    "ready",
+    "error",
+    "not-found",
+    "cart-empty",
+    "cart-filled",
+    "cart-has-subscription",
+    "cart-no-subscription",
+    "cart-has-discount",
+    "cart-error",
+    "list-empty",
+    "list-filled"
+  ]);
+  qsa(root, sel("show")).forEach((el) => {
+    const k = get(el, "show");
+    if (!known.has(k)) add("warn", `Unknown ${attr("show")}="${k}".`, el);
+  });
+  qsa(root, sel("bind")).forEach((el) => {
+    const k = get(el, "bind") || "";
+    if (!k.startsWith("metafield:")) return;
+    const ref = k.slice(10);
+    const listed = (cfg.metafields || []).some((m) => (typeof m === "string" ? m : `${m.namespace}.${m.key}`) === ref);
+    if (!listed) add("error", `${attr("bind")}="${k}" but "${ref}" is not in config.metafields, so it stays empty.`, el);
+  });
+  if (qsa(root, sel("cart-open")).length && !qsa(root, sel("cart-drawer")).length) {
+    add("warn", `${attr("cart-open")} exists but there is no ${attr("cart-drawer")} on this page.`);
+  }
+  if (qsa(root, sel("cart-drawer")).length > 1) add("warn", `More than one ${attr("cart-drawer")}.`);
+  qsa(root, `[${attr("state")}="error"]`).forEach((el) => {
+    if (el.matches(boundary())) add("error", `Scope failed to load (${get(el, "error") || "error"}).`, el);
+  });
+  return problems;
+}
+async function diagnose({ root = document, silent = false, version, now = /* @__PURE__ */ new Date() } = {}) {
+  var _a, _b, _c, _d, _e, _f;
+  const report = {
+    version,
+    config: {
+      domain: cfg.domain || "(missing)",
+      token: mask(cfg.token),
+      apiVersion: cfg.apiVersion,
+      endpoint: cfg.domain ? endpoint() : null,
+      country: cfg.country,
+      language: cfg.language,
+      locale: cfg.locale,
+      prefix: cfg.prefix,
+      productPath: cfg.productPath,
+      metafields: cfg.metafields,
+      autoMount: cfg.autoMount,
+      observe: cfg.observe,
+      onError: typeof cfg.onError === "function"
+    },
+    apiVersion: apiVersionStatus(cfg.apiVersion, now),
+    reachable: false,
+    shop: null,
+    latencyMs: null,
+    products: [],
+    sellingPlans: [],
+    problems: []
+  };
+  if (!isConfigured()) {
+    report.problems.push({ level: "error", message: "TETHER_CONFIG needs domain and token." });
+  } else {
+    const t0 = Date.now();
+    try {
+      const data = await gql("query TetherDiagnose { shop { name primaryDomain { url } paymentSettings { currencyCode } } }", {}, { context: false });
+      report.reachable = true;
+      report.shop = { name: (_a = data.shop) == null ? void 0 : _a.name, url: (_c = (_b = data.shop) == null ? void 0 : _b.primaryDomain) == null ? void 0 : _c.url, currency: (_e = (_d = data.shop) == null ? void 0 : _d.paymentSettings) == null ? void 0 : _e.currencyCode };
+    } catch (err) {
+      const hint = err.status === 401 || err.status === 403 ? "Token rejected: use the public Storefront token from the Headless channel, not an Admin token." : err.status === 404 ? "Store or API version not found: check domain (x.myshopify.com) and apiVersion." : "";
+      report.problems.push({ level: "error", message: `Storefront API not reachable: ${err.message}${hint ? `. ${hint}` : ""}` });
+    }
+    report.latencyMs = Date.now() - t0;
+    if (report.reachable) {
+      const keys = [...new Set(qsa(root, sel("product")).map((el) => resolveProductKey(el).key).filter(Boolean))].slice(0, 20);
+      const results = await Promise.allSettled(keys.map((k) => getProduct(k)));
+      results.forEach((r, i) => {
+        var _a2, _b2;
+        if (r.status === "fulfilled") {
+          const p = r.value;
+          const plans = allPlans(p);
+          report.products.push({ key: keys[i], handle: p.handle, title: p.title, plans: plans.length, requiresSellingPlan: p.requiresSellingPlan });
+          plans.forEach((pl) => {
+            var _a3;
+            return report.sellingPlans.push({ product: p.handle, group: (_a3 = pl.group) == null ? void 0 : _a3.name, plan: pl.name, id: pl.id });
+          });
+        } else {
+          report.products.push({ key: keys[i], error: (_a2 = r.reason) == null ? void 0 : _a2.message });
+          report.problems.push({ level: "error", message: `Product "${keys[i]}": ${(_b2 = r.reason) == null ? void 0 : _b2.message}. Is it published to the Headless channel?` });
+        }
+      });
+    }
+  }
+  if (!report.apiVersion.ok || ((_f = report.apiVersion.monthsLeft) != null ? _f : 99) < 3) {
+    report.problems.push({ level: report.apiVersion.ok ? "warn" : "error", message: `apiVersion ${cfg.apiVersion}: ${report.apiVersion.note}` });
+  }
+  if (typeof document !== "undefined") report.problems.push(...checkMarkup(root));
+  if (!silent) print(report);
+  return report;
+}
+function print(r) {
+  var _a, _b, _c;
+  const c = console;
+  const errors = r.problems.filter((p) => p.level === "error").length;
+  (_a = c.group) == null ? void 0 : _a.call(c, `[${cfg.prefix}] diagnose: ${errors ? `${errors} error(s)` : "no errors"}, ${r.problems.length - errors} warning(s)`);
+  c.log("version", r.version, "| API", r.apiVersion.version, `(${r.apiVersion.note})`);
+  c.log("config", r.config);
+  c.log(r.reachable ? `Storefront API reachable: ${(_b = r.shop) == null ? void 0 : _b.name} (${r.latencyMs} ms)` : "Storefront API NOT reachable");
+  if (r.products.length) (c.table || c.log)(r.products);
+  if (r.sellingPlans.length) (c.table || c.log)(r.sellingPlans);
+  else if (r.reachable) c.log("No selling plans on the products of this page.");
+  r.problems.forEach((p) => (p.level === "error" ? c.error : c.warn)(p.message, p.el || ""));
+  (_c = c.groupEnd) == null ? void 0 : _c.call(c);
+}
+
 // src/index.js
-var VERSION = "0.1.3";
+var VERSION = "0.2.0";
 var mountedProducts = /* @__PURE__ */ new WeakSet();
 var mountedLists = /* @__PURE__ */ new WeakSet();
 var initPromise = null;
@@ -1811,17 +2069,34 @@ function mount(root = document) {
   });
   within(root, sel("product")).forEach((el) => {
     if (mountedProducts.has(el)) return;
-    const key = get(el, "product");
+    const { key, fromUrl, raw } = resolveProductKey(el);
     if (!key) {
-      if (!el.closest(listSelector())) warn(`[${attr("product")}] without a value. Bind it to the Shopify handle field.`, el);
+      if (fromUrl) {
+        mountedProducts.add(el);
+        setScopeStatus(el, "not-found");
+        emit("product-not-found", { key: null, source: raw }, el);
+      } else if (!el.closest(listSelector())) {
+        warn(`[${attr("product")}] without a value. Bind it to the Shopify handle field, or use "url:handle".`, el);
+      }
       return;
     }
     mountedProducts.add(el);
     count++;
-    el.setAttribute(attr("state"), "loading");
-    getProduct(key).then((p) => new ProductScope(el, p)).catch((err) => {
-      el.setAttribute(attr("state"), "error");
-      reportError(err, `product ${key}`);
+    setScopeStatus(el, "loading");
+    getProduct(key).then((p) => {
+      new ProductScope(el, p);
+      applyPageTitle(el, p);
+    }).catch((err) => {
+      const notFound = isNotFound(err);
+      setScopeStatus(el, notFound ? "not-found" : "error", err);
+      if (notFound) {
+        emit("product-not-found", { key, source: raw }, el);
+        if (fromUrl) log(`product not found: ${key}`);
+        else reportError(err, `product ${key}`);
+      } else {
+        reportError(err, `product ${key}`);
+        emit("error", { error: err, context: "product", key }, el);
+      }
     });
   });
   qsa(root, sel("account-link")).forEach((a) => {
@@ -1830,6 +2105,11 @@ function mount(root = document) {
   Cart.render();
   log(`mounted ${count} scope(s)`, root);
   return count;
+}
+function applyPageTitle(el, p) {
+  const tpl = get(el, "page-title");
+  if (!tpl || typeof document === "undefined") return;
+  document.title = tpl.replace(/\{title\}/g, p.title).replace(/\{vendor\}/g, p.vendor || "").replace(/\{type\}/g, p.productType || "");
 }
 function unmount() {
   Cart.close();
@@ -2022,6 +2302,8 @@ var api = {
   formatMoney,
   plans: selling_plans_exports,
   TetherError,
+  resolveProductKey,
+  diagnose: (opts) => diagnose({ ...opts, version: VERSION }),
   on(name, fn) {
     const h = (e) => fn(e.detail, e);
     document.addEventListener(`${cfg.prefix}:${name}`, h);

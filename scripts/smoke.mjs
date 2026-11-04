@@ -4,6 +4,7 @@
  *
  *   npm run smoke                                   # Shopify's public Hydrogen demo store
  *   TETHER_DOMAIN=x.myshopify.com TETHER_TOKEN=... TETHER_COLLECTION=all npm run smoke
+ *   TETHER_API_VERSION=2026-10 npm run smoke         # check a newer API version first
  *
  * Creates (and empties) a throwaway cart on that store. Run against your own
  * dev store to also test selling plans.
@@ -22,8 +23,9 @@ const domain = process.env.TETHER_DOMAIN || 'hydrogen-preview.myshopify.com';
 const token = process.env.TETHER_TOKEN || '3b580e70970c4528da70c98e097c2fa0'; // public demo token
 const country = process.env.TETHER_COUNTRY || 'NL';
 const collection = process.env.TETHER_COLLECTION || null;
+const apiVersion = process.env.TETHER_API_VERSION || undefined; // try a new version before bumping the default
 
-await Tether.init({ domain, token, country, metafields: ['custom.material'], autoMount: false });
+await Tether.init({ domain, token, country, metafields: ['custom.material'], autoMount: false, ...(apiVersion ? { apiVersion } : {}) });
 
 const ok = (m) => console.log(`  ok  ${m}`);
 let failed = 0;
@@ -31,7 +33,13 @@ async function step(name, fn) {
   try { await fn(); ok(name); } catch (e) { failed++; console.log(`  FAIL ${name}: ${e.message}`); }
 }
 
-console.log(`Smoke test against ${domain} (country ${country})`);
+console.log(`Smoke test against ${domain} (country ${country}, API ${Tether.config.apiVersion})`);
+
+await step('diagnose: token reachable', async () => {
+  const r = await Tether.diagnose({ silent: true });
+  if (!r.reachable) throw new Error(r.problems.map((p) => p.message).join('; '));
+  if (!r.apiVersion.ok) throw new Error(`apiVersion ${r.apiVersion.version}: ${r.apiVersion.note}`);
+});
 
 let products = [];
 await step('search products', async () => {
@@ -63,6 +71,14 @@ await step('product by numeric id', async () => {
 });
 
 await step('recommendations', async () => { await Tether.getRecommendations(product.id); });
+
+await step('unknown handle rejects with NOT_FOUND', async () => {
+  try { await Tether.getProduct('tether-smoke-does-not-exist'); } catch (e) {
+    if (e.code !== 'NOT_FOUND') throw new Error(`code ${e.code}`);
+    return;
+  }
+  throw new Error('resolved');
+});
 
 const withPlans = products.find((p) => Tether.plans.hasPlans(p));
 console.log(withPlans

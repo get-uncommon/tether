@@ -7,6 +7,7 @@
 import { reportError } from './config.js';
 import { attr, sel, get, has, scoped, emit, setText, setImage, repeat, notifyLayoutChanged, busy } from './dom.js';
 import { getProducts, getRecommendations, getProduct } from './loader.js';
+import { setScopeStatus, isNotFound } from './status.js';
 
 export const listSelector = () => `${sel('collection')},${sel('products')},${sel('recommendations')}`;
 
@@ -16,7 +17,7 @@ export class ListScope {
     this.products = [];
     this.pageInfo = null;
     this.collection = null;
-    root.setAttribute(attr('state'), 'loading');
+    setScopeStatus(root, 'loading');
     root.addEventListener('click', (e) => {
       const more = e.target.closest?.(sel('load-more'));
       if (more && more.closest(listSelector()) === root) {
@@ -55,11 +56,13 @@ export class ListScope {
         this.products = more ? [...this.products, ...res.products] : res.products;
       }
       this.render();
-      this.root.setAttribute(attr('state'), 'ready');
+      setScopeStatus(this.root, 'ready');
       emit('list-ready', { products: this.products, collection: this.collection }, this.root);
     } catch (err) {
-      this.root.setAttribute(attr('state'), 'error');
+      // Keep what's already rendered on a failed "load more"; otherwise show the error state.
+      if (!more) setScopeStatus(this.root, isNotFound(err) ? 'not-found' : 'error', err);
       reportError(err, 'list load failed');
+      emit('error', { error: err, context: 'list' }, this.root);
     }
   }
 

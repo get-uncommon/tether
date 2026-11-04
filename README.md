@@ -8,18 +8,23 @@ with no Shopify theme involved.
 No subscription, no per-site fee: use it straight from jsDelivr, or host the single file
 yourself (Cloudflare, Webflow assets, your own bundle).
 
-MIT licensed. Status: 0.1, tested against a Shopify dev store with Shopify Subscriptions
+MIT licensed. Status: 0.2, tested against a Shopify dev store with Shopify Subscriptions
 (product page, plans, cart, subscription checkout) and with Barba page transitions.
 
-- One script tag, no dependencies, ~45 KB minified
-- Works with Webflow CMS: bind `tether-product` to the CMS field that holds the Shopify handle
+- One script tag, no dependencies, ~55 KB minified
+- Works with Webflow CMS (bind `tether-product` to the handle field) **or without**: one static
+  page can render any product from the URL (`tether-product="url:handle"`)
+- Optional server-side sync ([`server/`](server/README.md)): Shopify webhooks + cron keep a Webflow
+  CMS collection in step with your products (Cloudflare Worker or Node)
+- Loading, error and not-found states, `Tether.diagnose()` and an `onError` hook for handover
 - Subscriptions via Shopify selling plans (Shopify Subscriptions, Recharge, Skio, Loop, Appstle, …)
 - Bundles / build-a-box: add multiple products in one request
 - Barba/Swup-friendly: `Tether.mount(container)` per page, cart drawer lives outside the container
 - Preset for page-transition sites: Barba/Swup + Lenis + GSAP, scroll lock and cart line animations
 
 Prices, stock and variants always come live from Shopify. Webflow only holds content and layout.
-(A server-side sync that writes Shopify data into the Webflow CMS is on the roadmap.)
+To also have a Webflow CMS item per product (SEO, CMS lists, editor content), see the
+[Shopify → Webflow CMS sync](server/README.md).
 
 ---
 
@@ -28,13 +33,13 @@ Prices, stock and variants always come live from Shopify. Webflow only holds con
 **Script tag (Webflow, any HTML):** pin a version from jsDelivr:
 
 ```html
-<script src="https://cdn.jsdelivr.net/gh/ravi-klaassens/tether@v0.1.3/dist/tether.min.js" defer></script>
+<script src="https://cdn.jsdelivr.net/gh/ravi-klaassens/tether@v0.2.0/dist/tether.min.js" defer></script>
 ```
 
 **Bundled (Vite, esbuild, Webpack, …):** copy `dist/tether.esm.js` into your project, or install from GitHub:
 
 ```bash
-npm install github:ravi-klaassens/tether#v0.1.3
+npm install github:ravi-klaassens/tether#v0.2.0
 ```
 
 ```js
@@ -71,12 +76,67 @@ and payments need a test payment provider or Shopify Payments in test mode.
     productPath: '/product',      // your Webflow product template path
   };
 </script>
-<script src="https://cdn.jsdelivr.net/gh/ravi-klaassens/tether@v0.1.3/dist/tether.min.js" defer></script>
+<script src="https://cdn.jsdelivr.net/gh/ravi-klaassens/tether@v0.2.0/dist/tether.min.js" defer></script>
 ```
 
 **Try it locally:** `npm install && npm run build`, then serve the folder and open
 `examples/index.html`. It runs against Shopify's public demo store by default; add
 `?domain=x.myshopify.com&token=...` to use yours.
+
+---
+
+## Products without a CMS item (dynamic product page)
+
+One static Webflow page can show any Shopify product, so products don't need a CMS item:
+
+```html
+<!-- page /product, opened as /product?handle=coffee-box -->
+<div tether-product="url:handle" tether-page-title="{title} | My shop">
+  <div tether-show="loading">Loading…</div>
+  <div tether-show="ready">
+    <h1 tether-bind="title"></h1>
+    …
+  </div>
+  <div tether-show="not-found">This product doesn't exist (anymore). <a href="/shop">See all products</a></div>
+  <div tether-show="error">The shop can't be reached right now. Please try again in a minute.</div>
+</div>
+```
+
+```js
+window.TETHER_CONFIG = { …, productPath: '/product?handle={handle}' };  // every tether-bind="link" points here
+```
+
+| Value | Reads |
+|---|---|
+| `url:handle` | `?handle=` (any parameter works: `url:p` reads `?p=`) |
+| `url:path` | the last path segment: `/shop/coffee-box` → `coffee-box` (needs a host that serves one page for every path, e.g. a Cloudflare rewrite; Webflow alone 404s) |
+
+`productPath` templates: `{handle}` and `{id}` (numeric product id), e.g. `/product?handle={handle}`.
+`tether-page-title` sets `document.title` (`{title}`, `{vendor}`, `{type}`).
+
+Search engines index dynamic pages poorly (one URL, content loaded by JavaScript). For SEO,
+use CMS items, filled by the [sync](server/README.md).
+
+## Loading, error and not-found states
+
+Every product scope and product list gets `tether-state="loading | ready | error"`. On failure
+it also gets `tether-error="not-found"` or an error code (`NETWORK`, `HTTP_401`, …).
+Inside a scope, `tether-show` follows the state:
+
+| `tether-show` | Visible when |
+|---|---|
+| `loading` | waiting for Shopify |
+| `ready` | the product/list rendered |
+| `not-found` | the handle doesn't exist, isn't published to the Headless channel, or the URL has no handle |
+| `error` | Shopify couldn't be reached or refused the request (bad token, outage, network) |
+| `cart-error` | (outside products) the last cart action failed; hidden again after the next one succeeds |
+
+Give the `error` / `not-found` blocks a class with `display: none` in Webflow, so they stay hidden
+if JavaScript doesn't run at all. Tether shows them when needed (as `block`, or the value of
+`tether-display`, e.g. `tether-display="flex"`). Add-to-cart buttons in a failed scope are
+disabled. Events: `tether:product-not-found`, `tether:error`, `tether:cart-error`.
+
+CSS works too: `[tether-state="loading"] .price { opacity: .3 }`.
 
 ---
 
@@ -122,7 +182,8 @@ Markup written for an older `wfs-*` prefix keeps working with `prefix: 'wfs'`.
 
 | Attribute | Value | |
 |---|---|---|
-| `tether-product` | handle, numeric id, gid or product URL | Root of a product. Bind to the CMS handle field |
+| `tether-product` | handle, numeric id, gid, product URL, `url:handle` or `url:path` | Root of a product. Bind to the CMS handle field, or read it from the URL |
+| `tether-page-title` | e.g. `{title} \| Shop` | Sets the page title when the product loads |
 | `tether-variant` | variant id | Preselect a variant (`?variant=` in the URL also works) |
 | `tether-quantity` | number | Start quantity (allows 0, for build-a-box) |
 | `tether-bind` | see below | Fill text / image / link |
@@ -174,7 +235,9 @@ Product: `in-stock`, `out-of-stock`, `backorder`, `low-stock`, `on-sale`, `not-o
 `has-savings`.
 
 Cart (outside product scopes): `cart-empty`, `cart-filled`, `cart-has-subscription`,
-`cart-no-subscription`, `cart-has-discount`.
+`cart-no-subscription`, `cart-has-discount`, `cart-error`.
+
+State (products and lists): `loading`, `ready`, `error`, `not-found` (see above).
 
 Lists: `list-empty`, `list-filled`.
 
@@ -254,11 +317,13 @@ Tether.query(`query { shop { name } }`);          // anything else in the Storef
 Tether.plans.planSavings(variant, planId);        // selling plan helpers
 
 Tether.on('cart-updated', ({ cart }) => {});
+await Tether.diagnose();                          // what's wrong on this page (see Troubleshooting)
 ```
 
 Events (on `document`, prefixed `tether:`): `ready`, `product-ready`, `variant-changed`,
 `product-added`, `added`, `group-added`, `cart-updated`, `cart-toggled`, `checkout`,
-`list-ready`, `discount-applied`, `discount-invalid`, `layout-changed`, `error`.
+`list-ready`, `discount-applied`, `discount-invalid`, `layout-changed`, `product-not-found`,
+`cart-error`, `error`.
 
 ## Config
 
@@ -268,6 +333,51 @@ See [`src/config.js`](src/config.js) for every option with comments. The ones yo
 later, e.g. Finsweet load-more), `prefix`, and the hooks `onLayoutChange`, `onCartOpen`,
 `onCartClose`, `onLineEnter`, `onLineLeave`, `onValueChange`, `onError`.
 
+## Troubleshooting and handover
+
+**`Tether.diagnose()`**: run it in the browser console on any page:
+
+```js
+await Tether.diagnose()
+```
+
+It logs the version, the config (token masked), the API version and how long it's still supported,
+whether the token reaches the Storefront API, the selling plans of the products on the page, and
+markup problems: product scopes without a handle, `url:handle` pages opened without one, product
+attributes outside a product scope, repeaters without a template, unknown `tether-show` values,
+metafield binds missing from `config.metafields`. It returns the same report as an object.
+
+**Error reporting (`onError`)**: every failure that reaches the visitor (product or list that
+didn't load, add to cart, cart actions, discount codes) goes through `onError(error, context)`.
+Errors are `TetherError`s with `code` (`NOT_FOUND`, `NETWORK`, `HTTP_401`, `NOT_CONFIGURED`, …),
+`status`, `errors` (GraphQL) and `userErrors` (cart). For Sentry:
+
+```js
+window.TETHER_CONFIG = {
+  …,
+  onError(error, context) {
+    if (error.code === 'NOT_FOUND') return;        // optional: deleted products are reported too
+    window.Sentry?.captureException(error, { tags: { tether: context, code: error.code } });
+  },
+};
+```
+
+Any other tool works the same (LogRocket, Bugsnag, a `fetch` to your own endpoint). Not-found
+products on `url:handle` pages are not reported (that's a mistyped URL); a CMS item pointing at a
+deleted Shopify product is.
+
+**Shopify API version.** `apiVersion` is pinned (`2026-07`) on purpose: Shopify changes the
+Storefront API every quarter, and a pinned version keeps working until Shopify retires it,
+12 months after release. `diagnose()` warns 3 months before that. To upgrade:
+
+1. Read the Storefront API release notes for the versions in between (shopify.dev → API versioning).
+2. `TETHER_API_VERSION=2027-01 npm run smoke` (and against your dev store with
+   `TETHER_DOMAIN`/`TETHER_TOKEN`) to check every Tether query against the new version.
+3. Bump `apiVersion` in `src/config.js` (and `DEFAULT_API_VERSION` in `server/src/shopify.js` for the sync), run
+   `npm test`, release. Sites can also set `apiVersion` in `TETHER_CONFIG` themselves.
+
+Run `npm test` and `npm run smoke` before every release; the smoke test needs no setup.
+
 ---
 
 ## Development
@@ -276,9 +386,10 @@ later, e.g. Finsweet load-more), `prefix`, and the hooks `onLayoutChange`, `onCa
 npm install
 npm run build     # dist/tether.js, tether.min.js, tether.esm.js
 npm run dev       # watch
-npm test          # unit tests (jsdom, mocked Storefront API)
+npm test          # unit tests: client (jsdom, mocked Storefront API) + server/ sync (mocked APIs)
 npm run smoke     # live test against a real store (default: Shopify's public demo store)
 TETHER_DOMAIN=x.myshopify.com TETHER_TOKEN=... npm run smoke   # your dev store, incl. selling plans
+TETHER_API_VERSION=2027-01 npm run smoke                        # try a newer Shopify API version
 ```
 
 Releases: bump `package.json`, update `CHANGELOG.md`, `npm run build`, commit `dist/`, tag `vX.Y.Z`.

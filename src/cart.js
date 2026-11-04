@@ -51,8 +51,19 @@ export const Cart = {
   get lines() { return this.state?.lines?.nodes || []; },
   get count() { return this.state?.totalQuantity || 0; },
 
+  lastError: null,
+
   _queue(fn) {
-    const run = this._chain.then(fn, fn);
+    const run = this._chain.then(fn, fn).then((value) => {
+      if (this.lastError) { this.lastError = null; this.render(); }
+      return value;
+    }, (err) => {
+      // tether-show="cart-error" becomes visible until the next successful cart call.
+      this.lastError = err;
+      this.render();
+      emit('cart-error', { error: err });
+      throw err;
+    });
     this._chain = run.catch(() => {});
     return run;
   },
@@ -73,7 +84,9 @@ export const Cart = {
       if (!data.cart) { this._setId(null); this.state = null; } else this.state = data.cart;
     } catch (err) {
       reportError(err, 'cart load failed');
-      this._setId(null);
+      this.lastError = err;
+      // Keep the cart id on network/API errors: the cart is probably fine, Shopify isn't reachable.
+      if (isMissingCart(err)) this._setId(null);
       this.state = null;
     }
     this.render();
@@ -270,6 +283,7 @@ export const Cart = {
       'cart-has-subscription': hasSub,
       'cart-no-subscription': !hasSub,
       'cart-has-discount': (cart?.discountCodes || []).some((d) => d.applicable),
+      'cart-error': Boolean(this.lastError),
     };
     qsa(document, sel('show')).forEach((el) => {
       const k = get(el, 'show');
@@ -337,7 +351,7 @@ function renderLine(node, line) {
   qsa(node, sel('line')).forEach((el) => {
     const key = get(el, 'line');
     if (key === 'image') return setImage(el, m.image?.url || m.product?.featuredImage?.url, m.product?.title);
-    if (key === 'url') return el.setAttribute('href', productUrl(m.product?.handle));
+    if (key === 'url') return el.setAttribute('href', productUrl(m.product?.handle, m.product?.id));
     const v = lineValue(line, key);
     if (v !== undefined) setTextTracked(el, v);
     return undefined;

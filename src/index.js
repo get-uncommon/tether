@@ -16,9 +16,11 @@ import {
   getProduct, getProducts, getRecommendations, clearProductCache, primeProduct, normalizeProductKey,
 } from './loader.js';
 import * as plans from './selling-plans.js';
+import { resolveProductKey, setScopeStatus, isNotFound } from './status.js';
+import { diagnose } from './diagnose.js';
 import { attr, sel, get, qsa, emit, formatMoney, busy, parseJSONAttr, toAttributes } from './dom.js';
 
-export const VERSION = '0.1.3';
+export const VERSION = '0.2.0';
 
 const mountedProducts = new WeakSet();
 const mountedLists = new WeakSet();
@@ -45,18 +47,40 @@ export function mount(root = document) {
 
   within(root, sel('product')).forEach((el) => {
     if (mountedProducts.has(el)) return;
-    const key = get(el, 'product');
+    const { key, fromUrl, raw } = resolveProductKey(el);
     if (!key) {
-      // List cards get their handle when the list renders.
-      if (!el.closest(listSelector())) warn(`[${attr('product')}] without a value. Bind it to the Shopify handle field.`, el);
+      if (fromUrl) {
+        // Dynamic product page opened without ?handle= (or an empty path).
+        mountedProducts.add(el);
+        setScopeStatus(el, 'not-found');
+        emit('product-not-found', { key: null, source: raw }, el);
+      } else if (!el.closest(listSelector())) {
+        // List cards get their handle when the list renders.
+        warn(`[${attr('product')}] without a value. Bind it to the Shopify handle field, or use "url:handle".`, el);
+      }
       return;
     }
     mountedProducts.add(el);
     count++;
-    el.setAttribute(attr('state'), 'loading');
+    setScopeStatus(el, 'loading');
     getProduct(key)
-      .then((p) => new ProductScope(el, p))
-      .catch((err) => { el.setAttribute(attr('state'), 'error'); reportError(err, `product ${key}`); });
+      .then((p) => {
+        // eslint-disable-next-line no-new
+        new ProductScope(el, p);
+        applyPageTitle(el, p);
+      })
+      .catch((err) => {
+        const notFound = isNotFound(err);
+        setScopeStatus(el, notFound ? 'not-found' : 'error', err);
+        if (notFound) {
+          emit('product-not-found', { key, source: raw }, el);
+          // A typo in a URL isn't worth an alert; a CMS item pointing at a deleted product is.
+          if (fromUrl) log(`product not found: ${key}`); else reportError(err, `product ${key}`);
+        } else {
+          reportError(err, `product ${key}`);
+          emit('error', { error: err, context: 'product', key }, el);
+        }
+      });
   });
 
   qsa(root, sel('account-link')).forEach((a) => {
@@ -66,6 +90,13 @@ export function mount(root = document) {
   Cart.render();
   log(`mounted ${count} scope(s)`, root);
   return count;
+}
+
+/** tether-page-title="{title} | My shop" on a product root sets document.title (dynamic product pages). */
+function applyPageTitle(el, p) {
+  const tpl = get(el, 'page-title');
+  if (!tpl || typeof document === 'undefined') return;
+  document.title = tpl.replace(/\{title\}/g, p.title).replace(/\{vendor\}/g, p.vendor || '').replace(/\{type\}/g, p.productType || '');
 }
 
 /** Call before a page transition removes `root` (closes the drawer etc.). */
@@ -246,6 +277,8 @@ export const api = {
   formatMoney,
   plans,
   TetherError,
+  resolveProductKey,
+  diagnose: (opts) => diagnose({ ...opts, version: VERSION }),
   on(name, fn) {
     const h = (e) => fn(e.detail, e);
     document.addEventListener(`${cfg.prefix}:${name}`, h);

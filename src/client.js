@@ -5,9 +5,10 @@
 import { cfg, log } from './config.js';
 
 export class TetherError extends Error {
-  constructor(message, { status, errors, userErrors } = {}) {
+  constructor(message, { status, errors, userErrors, code } = {}) {
     super(message);
     this.name = 'TetherError';
+    this.code = code || (status ? `HTTP_${status}` : 'ERROR');
     this.status = status;
     this.errors = errors;
     this.userErrors = userErrors;
@@ -40,7 +41,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 export async function gql(query, variables = {}, { context = true } = {}) {
   if (!cfg.domain || !cfg.token) {
-    throw new TetherError('Tether is not configured: domain and token are required');
+    throw new TetherError('Tether is not configured: domain and token are required', { code: 'NOT_CONFIGURED' });
   }
 
   const body = JSON.stringify({ query: context ? withContext(query) : query, variables });
@@ -59,7 +60,7 @@ export async function gql(query, variables = {}, { context = true } = {}) {
       });
     } catch (err) {
       if (attempt++ < cfg.retries) { await sleep(300 * 2 ** attempt); continue; }
-      throw new TetherError(`Network error: ${err.message}`);
+      throw new TetherError(`Network error: ${err.message}`, { code: 'NETWORK' });
     }
 
     if (res.status === 430) throw new TetherError('Shopify security rejection (430)', { status: 430 });

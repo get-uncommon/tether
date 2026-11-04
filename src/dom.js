@@ -11,10 +11,16 @@ export const get = (el, name) => el.getAttribute(attr(name));
 export const has = (el, name) => el.hasAttribute(attr(name));
 export const dataKey = () => `data-${cfg.prefix}-key`;
 
-/** productPath '/product' -> /product/<handle>; '/shop?p={handle}' -> template. */
-export function productUrl(handle) {
+/**
+ * productPath '/product' -> /product/<handle>.
+ * Templates: '/product?handle={handle}' (one static page for every product,
+ * with tether-product="url:handle"), '/p/{id}' (numeric product id).
+ */
+export function productUrl(handle, id) {
   const path = cfg.productPath || '/product';
-  return path.includes('{handle}') ? path.replace('{handle}', encodeURIComponent(handle)) : `${path.replace(/\/$/, '')}/${handle}`;
+  if (!/\{(handle|id)\}/.test(path)) return `${path.replace(/\/$/, '')}/${handle}`;
+  const numeric = id ? String(id).split('/').pop() : '';
+  return path.replace(/\{handle\}/g, encodeURIComponent(handle || '')).replace(/\{id\}/g, encodeURIComponent(numeric));
 }
 
 export const qsa = (root, s) => (root ? [...root.querySelectorAll(s)] : []);
@@ -123,6 +129,9 @@ export function setSelected(el, selected) {
 // ---------------------------------------------------------------------------
 
 const templates = new WeakMap();
+
+/** True once a repeater's template has been captured (it may be empty after that). */
+export const hasTemplate = (container) => Boolean(templates.get(container));
 
 function template(container) {
   if (!templates.has(container)) {
