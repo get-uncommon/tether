@@ -74,3 +74,13 @@ jobs:
           else
             gh issue create --title "$title" --label smoke-failure --body "$body"
           fi
+
+      - name: Close the issue once it passes again
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          gh issue list --state open --label smoke-failure --json number --jq '.[].number' | while read -r num; do
+            gh issue close "$num" --reason completed --comment "Passing again: $RUN_URL"
+          done
