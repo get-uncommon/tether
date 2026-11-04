@@ -5,7 +5,7 @@
 import { cfg, reportError } from './config.js';
 import {
   attr, sel, get, has, qsa, scoped, emit, formatMoney, formatDate, setText, setImage, show,
-  setSelected, repeat, productUrl, notifyLayoutChanged, watchImages, busy, parseJSONAttr, toAttributes, sameImage, hasTemplate,
+  setSelected, repeat, productUrl, notifyLayoutChanged, watchImages, busy, parseJSONAttr, toAttributes, sameImage, hasTemplate, formatPercent,
 } from './dom.js';
 import { Cart } from './cart.js';
 import { STATUS_KEYS, ownedBy } from './status.js';
@@ -167,7 +167,16 @@ export class ProductScope {
 
   select(name, value) {
     if (this.selected[name] === value) return;
-    this.selected[name] = value;
+    const vs = this.product.variants.nodes.filter((v) => v.selectedOptions.some((o) => o.name === name && o.value === value));
+    if (!vs.length) return; // a value no variant has: nothing to select, keep the visitor's choice
+    const next = { ...this.selected, [name]: value };
+    if (!vs.some((v) => v.selectedOptions.every((o) => next[o.name] === o.value))) {
+      // That combination doesn't exist: the closest variant with this value (most other choices kept, available first).
+      const score = (v) => v.selectedOptions.filter((o) => o.name !== name && this.selected[o.name] === o.value).length * 2 + (v.availableForSale ? 1 : 0);
+      const best = vs.reduce((a, b) => (score(b) > score(a) ? b : a));
+      best.selectedOptions.forEach((o) => { next[o.name] = o.value; });
+    }
+    this.selected = next;
     this.renderVariant();
   }
 
@@ -419,7 +428,7 @@ export class ProductScope {
     const total = { amount: (parseFloat(price.amount) * Math.max(1, this.quantity)).toFixed(2), currencyCode: price.currencyCode };
 
     const fm = formatMoney;
-    const pct = (n) => (n ? `${n}%` : '');
+    const pct = (n) => formatPercent(n);
     // Text binds: name -> value (functions, so only the binds on the page are computed).
     const text = {
       price: () => fm(price),
@@ -428,7 +437,8 @@ export class ProductScope {
       'subscription-price': () => fm(subPrice),
       'subscription-savings': () => pct(savings.percentage),
       'subscription-savings-amount': () => fm(savings.amount),
-      'checkout-charge': () => fm(sub ? planCheckoutCharge(v, this.planId) : price),
+      // What the visitor pays today for the chosen quantity (prepaid plans charge more up front).
+      'checkout-charge': () => { const c = sub ? planCheckoutCharge(v, this.planId) : price; return c && fm({ amount: (parseFloat(c.amount) * Math.max(1, this.quantity)).toFixed(2), currencyCode: c.currencyCode }); },
       'plan-name': () => plan?.name,
       'plan-description': () => plan?.description,
       'plan-group': () => plan?.group?.name,
@@ -486,6 +496,7 @@ export class ProductScope {
         const k = get(el, 'plan-bind');
         const val = {
           name: () => planObj?.name,
+          option: () => (planObj?.options || []).map((o) => o.value).join(', '), // e.g. "1 month", without the store's price text
           description: () => planObj?.description,
           price: () => fm(planPrice(v, id)),
           savings: () => pct(s.percentage),
@@ -498,6 +509,7 @@ export class ProductScope {
 
     this.$(`select${sel('plan')}`).forEach((s) => { s.value = sub ? this.planId : ''; });
 
+    const low = v.quantityAvailable != null && v.quantityAvailable > 0 && v.quantityAvailable <= (cfg.lowStock ?? 5);
     const conds = {
       'in-stock': v.availableForSale,
       'out-of-stock': !v.availableForSale,
@@ -506,7 +518,8 @@ export class ProductScope {
       'not-on-sale': !onSale,
       'has-variants': p.variants.nodes.length > 1,
       'single-variant': p.variants.nodes.length === 1,
-      'low-stock': v.quantityAvailable != null && v.quantityAvailable > 0 && v.quantityAvailable <= 5,
+      'low-stock': low,
+      'plenty-in-stock': v.availableForSale && !low,
       'subscription-available': this.subscriptionAvailable,
       'subscription-unavailable': !this.subscriptionAvailable,
       'subscription-only': Boolean(p.requiresSellingPlan),
@@ -552,5 +565,18 @@ export class ProductScope {
       product: p, variant: v, selected: { ...this.selected },
       purchase: this.purchase, sellingPlanId: sub ? this.planId : null,
     }, this.root);
+
+    // Shareable links: the visitor's choice in ?variant= (variantUrl: true, for the page's main product,
+    // or tether-variant-url on a scope). Only after a change, never on the first render.
+    const key = `${v.id}|${sub ? this.planId : ''}`;
+    if (this.urlKey && this.urlKey !== key && (has(this.root, 'variant-url') || (cfg.variantUrl && document.querySelector(productSel()) === this.root))) {
+      try {
+        const u = new URL(window.location.href);
+        u.searchParams.set('variant', v.id.split('/').pop());
+        if (sub) u.searchParams.set('selling_plan', this.planId.split('/').pop()); else u.searchParams.delete('selling_plan');
+        window.history.replaceState(window.history.state, '', u);
+      } catch { /* ignore */ }
+    }
+    this.urlKey = key;
   }
 }

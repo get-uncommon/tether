@@ -33,6 +33,12 @@ export function emit(name, detail, target = document) {
   target.dispatchEvent(new CustomEvent(`${cfg.prefix}:${name}`, { detail, bubbles: true }));
 }
 
+/** 30 -> "30%" (en, nl) or "30 %" (de, fr), in the configured locale. */
+export function formatPercent(n, locale = cfg.locale) {
+  if (!n) return '';
+  try { return new Intl.NumberFormat(locale || undefined, { style: 'percent', maximumFractionDigits: 0 }).format(n / 100); } catch { return `${n}%`; }
+}
+
 export function formatMoney(money) {
   if (!money) return '';
   if (typeof cfg.formatMoney === 'function') return cfg.formatMoney(money, cfg.locale);

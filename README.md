@@ -20,7 +20,7 @@ An open-source, free alternative to Smootify and Storesynk (formerly Shopyflow):
 - **Astro too:** build-time product pages with live prices and cart, View Transitions included ([Astro guide](docs/astro.md)).
 - **Hand-over ready:** loading, error and not-found states, `Tether.diagnose()`, error reporting.
 
-MIT licensed · 18 KB gzipped · no dependencies · TypeScript types · [full reference](docs/reference.md) · [comparison](docs/comparison.md) · [changelog](CHANGELOG.md)
+MIT licensed · 20 KB gzipped · no dependencies · TypeScript types · [full reference](docs/reference.md) · [comparison](docs/comparison.md) · [changelog](CHANGELOG.md)
 
 ---
 
@@ -122,7 +122,8 @@ npm run build
 
 Bundlers: `npm install @occluze/tether`, then `import Tether from "@occluze/tether"` (TypeScript
 types included; markets and diagnose are split into their own chunks). Server-side data:
-`@occluze/tether/server`. Astro: `@occluze/tether/astro` ([guide](docs/astro.md), [starter](examples/astro)).
+`@occluze/tether/server`. Astro: `@occluze/tether/astro` ([guide](docs/astro.md), [starter](examples/astro)). Next.js,
+SvelteKit, Vite, Eleventy: [other frameworks](docs/frameworks.md).
 JavaScript API, config, releases and the Shopify API version policy are in the [reference](docs/reference.md).
 
 ## License

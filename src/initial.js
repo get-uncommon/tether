@@ -6,7 +6,7 @@
  */
 import { GID, allPlans, allocationFor, findPlan, planPrice, planSavings } from './selling-plans.js';
 
-export function initialState(product, { variant, sellingPlan, defaultPurchase = 'one-time' } = {}) {
+export function initialState(product, { variant, sellingPlan, defaultPurchase = 'one-time', lowStock = 5 } = {}) {
   const vs = product?.variants?.nodes || [];
   const gid = variant ? GID.variant(variant) : null;
   const v = (gid && vs.find((x) => x.id === gid)) || vs.find((x) => x.availableForSale) || vs[0] || null;
@@ -26,6 +26,8 @@ export function initialState(product, { variant, sellingPlan, defaultPurchase = 
   const compareAt = sub ? (allocationFor(v, plan.id)?.priceAdjustments?.[0]?.compareAtPrice || v.compareAtPrice) : v.compareAtPrice;
   const onSale = Boolean(compareAt && parseFloat(compareAt.amount) > parseFloat(price.amount));
   const q = v.quantityAvailable;
+  const low = q != null && q > 0 && q <= lowStock;
+  const savingsNow = sub ? planSavings(v, plan.id).percentage : 0;
 
   return {
     variant: v,
@@ -51,16 +53,23 @@ export function initialState(product, { variant, sellingPlan, defaultPurchase = 
       'not-on-sale': !onSale,
       'has-variants': vs.length > 1,
       'single-variant': vs.length === 1,
-      'low-stock': q != null && q > 0 && q <= 5,
+      'low-stock': low,
+      'plenty-in-stock': v.availableForSale && !low,
       'subscription-available': subscriptionAvailable,
       'subscription-unavailable': !subscriptionAvailable,
       'subscription-only': Boolean(product.requiresSellingPlan),
       'one-time-available': !product.requiresSellingPlan,
       'subscription-selected': sub,
       'one-time-selected': !sub,
+      'has-savings': sub ? savingsNow > 0 : onSale,
     },
+    /** Option values without an available variant, as plain data (for frameworks that serialise props). */
+    unavailable: Object.fromEntries((product.options || []).map((o) => [o.name, o.optionValues.map((x) => x.name).filter((n) => isUnavail(o.name, n))])),
     /** Option values with no available variant (given the other selected options): class is-unavailable. */
-    isUnavailable: (name, value) => !vs.some((x) => x.availableForSale && x.selectedOptions.every((o) =>
-      (o.name === name ? o.value === value : selected[o.name] === o.value))),
+    isUnavailable: (name, value) => isUnavail(name, value),
   };
+  function isUnavail(name, value) {
+    return !vs.some((x) => x.availableForSale && x.selectedOptions.every((o) =>
+      (o.name === name ? o.value === value : selected[o.name] === o.value)));
+  }
 }

@@ -1,5 +1,53 @@
 # Changelog
 
+## 0.6.0 (unreleased)
+
+Found by 10 agents building stores from the docs alone (Astro static and SSR, plain HTML, Vite,
+SvelteKit, Next.js, Eleventy, subscriptions, multi-market, an accessible React cart) and 10 more
+shopping in them (phone, keyboard only, screen reader, German, French, US, bargain hunter, …).
+
+**Fixes**
+- **Stale prices:** Shopify caches the answer to an identical query text, prices included, for
+  hours after a change. Tether's queries now carry a one-minute time marker (`maxAge`, default 60
+  seconds), so the server module, builds and pages get current prices. (The cart always had them,
+  so a page could show one price and checkout charge another.)
+- Two quick clicks on cart +/− counted once; they now add up, show at once, and the line gets
+  `is-busy` until Shopify answers. `Tether.cart.changeQuantity(lineId, ±1)` does the same for your
+  own buttons; `Tether.cart.quantityOf(line)` shows the pending quantity.
+- Clicking an option value that's unavailable with the current choices threw the other choices
+  away. It now picks the closest variant that has the value; a value no variant has is ignored.
+- View Transitions into a page built for another market (`/de/`) kept the old market. New:
+  `<meta name="tether-page-country|language|locale">` makes a page that market, also back again.
+- With the Astro integration, a visitor's saved money format lost to the config on every page.
+- The country select now takes the language (or none) from the `markets.locales` entry for that
+  country, instead of keeping the previous one.
+- `Tether.cart.open()` did nothing without a `tether-cart-drawer` (React/Svelte/Vue carts); it now
+  sets the open state for `subscribe`.
+- `tether-show="list-empty"`, `list-filled` and `tether-load-more` ignored the `hidden` attribute.
+- A closed cart drawer is `inert`: its buttons are no longer in the Tab order.
+- `applyDiscount()` with a code Shopify doesn't accept rejects (`INVALID_DISCOUNT`) and doesn't keep
+  the code; the form also sets `aria-invalid`. Repeated warnings are shown once.
+- Recommendations for a missing product are no longer reported to `onError`.
+
+**New**
+- Cart warnings per line: `tether-line="warning"`, `is-warning`, `tether-line-show="warning"`, and
+  `warningText(w)` to translate Shopify's messages. Cart lines carry `merchandise.quantityAvailable`.
+- Shareable variant links: `variantUrl: true` (or `tether-variant-url`) keeps `?variant=` in the URL.
+- Tabs stay in sync: a cart change or market switch in one tab updates the others. The cart count
+  shows its last known value at once on the next page, instead of 0.
+- `tether-show="plenty-in-stock"`, `lowStock` (default 5), `tether-plan-bind="option"`,
+  `tether-recommendations="url:handle"` (or empty inside a product).
+- Savings in the locale's format (`30 %` in German and French); `shop.formatPercent()`.
+- `checkout-charge` counts the quantity.
+- Server: `hydrate(products, { card: true })` for lists (about 40% smaller); `initialState()` gains
+  `has-savings`, `plenty-in-stock`, `plans`, `savings` and a plain `unavailable` map; `lowStock`.
+- `diagnose()` shows the market in use and warns about product options the page offers no way to choose.
+- Types: `seo`, `setCountry` options (`locale`, `language: null`), the new config options.
+- Docs: [other frameworks](docs/frameworks.md) (Next.js, SvelteKit, Vite, Eleventy); many
+  attributes and classes that were only in the code are now in the reference.
+
+The main script is 19.9 KB gzipped (18.5 KB in 0.5).
+
 ## 0.5.0 (2026-11-04)
 
 **Astro** ([guide](docs/astro.md), [starter](examples/astro)): Shopify product pages built at build

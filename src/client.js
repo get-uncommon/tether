@@ -48,7 +48,12 @@ export async function request(conf, query, variables = {}, { context = true } = 
     throw new TetherError('Tether is not configured: domain and token are required', { code: 'NOT_CONFIGURED' });
   }
 
-  const body = JSON.stringify({ query: context ? withContext(query, conf) : query, variables });
+  // Shopify caches the response of an identical query text (prices included, for hours after a
+  // change). A time bucket in a comment keeps answers at most maxAge seconds old (default 60).
+  let text = context ? withContext(query, conf) : query;
+  const age = conf.maxAge ?? 60;
+  if (age > 0 && !/^\s*mutation\b/.test(text)) text += ` #${Math.floor(Date.now() / (age * 1000))}`;
+  const body = JSON.stringify({ query: text, variables });
   let attempt = 0;
 
   for (;;) {
@@ -89,8 +94,8 @@ export async function request(conf, query, variables = {}, { context = true } = 
         return request(conf, query.replace(/\bquantityAvailable\b/g, ''), variables, { context });
       }
       // An older apiVersion without cart warnings (before 2024-07): retry without them.
-      if (json.errors.some((e) => /'warnings'/.test(e.message || '')) && /warnings \{ code message \}/.test(query)) {
-        return request(conf, query.replace(/ warnings \{ code message \}/g, ''), variables, { context });
+      if (json.errors.some((e) => /'warnings'/.test(e.message || '')) && /warnings \{ code message target \}/.test(query)) {
+        return request(conf, query.replace(/ warnings \{ code message target \}/g, ''), variables, { context });
       }
       const throttled = json.errors.some((e) => e.extensions?.code === 'THROTTLED');
       if (throttled && attempt++ < conf.retries) { await sleep(500 * 2 ** attempt); continue; }

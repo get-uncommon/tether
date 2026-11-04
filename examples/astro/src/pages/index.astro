@@ -11,7 +11,7 @@ const products = (await shop.getProducts({ first: 12, sortKey: 'BEST_SELLING' })
   <div class="grid">
     {products.map((product) => <ProductCard product={product} />)}
   </div>
-  <Fragment set:html={shop.hydrate(products)} />
+  <Fragment set:html={shop.hydrate(products, { card: true })} />
 </Layout>
 <style>
   .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 1.5rem; }

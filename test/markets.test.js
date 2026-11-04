@@ -264,3 +264,18 @@ test('tether-countries limits a country select to your list, in your order', asy
   await tick(80);
   assert.deepEqual([...document.getElementById('cs2').options].map((o) => o.value), ['NL', 'DE']);
 });
+
+test('page market: <meta name="tether-page-country"> pages switch on View Transitions, and back again', async () => {
+  await Tether.setCountry('NL', { language: null, remember: false });
+  document.head.innerHTML = '<meta name="tether-page-country" content="DE"><meta name="tether-page-language" content="DE"><meta name="tether-page-locale" content="de-DE">';
+  document.body.innerHTML = '';
+  document.dispatchEvent(new window.Event('astro:page-load'));
+  await tick(80);
+  assert.equal(Tether.config.country, 'DE');
+  assert.equal(Tether.config.language, 'DE');
+  assert.equal(Tether.config.locale, 'de-DE');
+  document.head.innerHTML = '';
+  document.dispatchEvent(new window.Event('astro:page-load'));
+  await tick(80);
+  assert.notEqual(Tether.config.language, 'DE', 'left the German page');
+});

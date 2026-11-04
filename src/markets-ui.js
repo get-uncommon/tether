@@ -59,7 +59,8 @@ export async function setCountry(code, { language, locale, remember = true } = {
   const entry = Object.values(cfg.markets?.locales || {}).find((m) => toCountry(m?.country) === country);
   const own = locale || entry?.locale;
   const loc = own || cfg.locale;
-  const lang = language === undefined ? cfg.language : toLanguage(language);
+  // Language: the option, else the markets.locales entry for this country (which may have none), else unchanged.
+  const lang = language !== undefined ? toLanguage(language) : entry ? (entry.language ? toLanguage(entry.language) : undefined) : cfg.language;
   const changed = country !== String(cfg.country || '').toUpperCase() || lang !== cfg.language || loc !== cfg.locale;
   cfg.country = country;
   cfg.language = lang || undefined;

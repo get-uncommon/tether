@@ -29,7 +29,7 @@ export function toLineInput(input, quantity = 1, opts = {}) {
 
 function mutation(name, args, inner) {
   return `mutation Tether_${name}(${args}) {
-  ${name}(${inner}) { cart { ...TetherCart } userErrors { field message } warnings { code message } }
+  ${name}(${inner}) { cart { ...TetherCart } userErrors { field message } warnings { code message target } }
 }
 ${cartFragment()}`;
 }
@@ -47,7 +47,8 @@ function ariaState(open) {
     if (!d.hasAttribute('role')) d.setAttribute('role', 'dialog');
     if (!d.hasAttribute('aria-label') && !d.hasAttribute('aria-labelledby')) d.setAttribute('aria-label', get(d, 'cart-label') || 'Cart');
     d.setAttribute('aria-modal', String(open));
-    if (!d.classList.contains(cfg.cartDrawerOpenClass)) d.setAttribute('aria-hidden', 'true');
+    // Closed: hidden from screen readers and out of the Tab order (inert), like a closed dialog.
+    if (!d.classList.contains(cfg.cartDrawerOpenClass)) { d.setAttribute('aria-hidden', 'true'); if (cfg.cartFocus !== false) d.inert = true; }
   });
 }
 
@@ -69,6 +70,8 @@ export const Cart = {
   get count() { return this.state?.totalQuantity || 0; },
 
   lastError: null,
+  /** line id -> { qty, done }: what quick +/- clicks asked for, shown until Shopify has answered. */
+  pendingQty: new Map(),
   /** Shopify's notes on the last change, e.g. less stock than asked: [{ code, message }]. */
   warnings: [],
   /** true once the saved cart (or the absence of one) is known. */
@@ -76,7 +79,9 @@ export const Cart = {
 
   _take(payload, name) {
     const p = unwrap(payload, name);
-    this.warnings = p.warnings || [];
+    // Shopify can repeat a warning per line or code: each message once.
+    this.warnings = (p.warnings || []).filter((w, i, all) => all.findIndex((x) => x.message === w.message) === i)
+      .map((w) => ({ ...w, message: (typeof cfg.warningText === 'function' && cfg.warningText(w)) || w.message }));
     if (this.warnings.length) emit('cart-warning', { warnings: this.warnings });
     return p.cart;
   },
@@ -99,6 +104,8 @@ export const Cart = {
   _commit(cart, reason) {
     this.state = cart;
     if (cart?.id) this._setId(cart.id);
+    // Other tabs reload the cart (storage event); the count also shows at once on the next page.
+    try { localStorage.setItem(`${cfg.storageKey}:seen`, `${Date.now()}|${cart?.totalQuantity || 0}`); } catch { /* private mode */ }
     this.render();
     emit('cart-updated', { cart, reason });
     return cart;
@@ -107,6 +114,13 @@ export const Cart = {
   async init() {
     const id = this.id();
     if (!id) { this.state = null; this.loaded = true; this.render(); emit('cart-updated', { cart: null, reason: 'load' }); return null; }
+    // Until the saved cart has loaded, show its last known count instead of the page's 0.
+    if (!this.loaded) {
+      try {
+        const n = (localStorage.getItem(`${cfg.storageKey}:seen`) || '').split('|')[1];
+        if (n) qsa(document, sel('cart-count')).forEach((el) => { if (/^\s*0?\s*$/.test(el.textContent)) el.textContent = n; });
+      } catch { /* private mode */ }
+    }
     try {
       const data = await gql(`query TetherCart($id: ID!) { cart(id: $id) { ...TetherCart } }\n${cartFragment()}`, { id });
       if (!data.cart) { this._setId(null); this.state = null; } else this.state = data.cart;
@@ -186,6 +200,26 @@ export const Cart = {
     ));
   },
 
+  /**
+   * +1 / -1 for a line. Quick clicks add up: each builds on the quantity the last click asked for,
+   * which shows at once (tether-line="quantity", Cart.lines) until Shopify has answered.
+   */
+  changeQuantity(lineId, delta) {
+    const current = this.lines.find((l) => l.id === lineId);
+    if (!current) return Promise.resolve(this.state);
+    const target = Math.max(0, (this.pendingQty.get(lineId)?.qty ?? current.quantity) + delta);
+    const job = { qty: target, done: false };
+    this.pendingQty.set(lineId, job);
+    this.render();
+    emit('cart-updated', { cart: this.state, reason: 'pending' });
+    return this.updateLine(lineId, target).finally(() => {
+      if (this.pendingQty.get(lineId) === job) { this.pendingQty.delete(lineId); this.render(); emit('cart-updated', { cart: this.state, reason: 'settled' }); }
+    });
+  },
+
+  /** Quantity to show for a line: the one asked for while an update is on its way. */
+  quantityOf(line) { return this.pendingQty.get(line.id)?.qty ?? line.quantity; },
+
   removeLine(lineIds) {
     const ids = Array.isArray(lineIds) ? lineIds : [lineIds];
     return this._queue(async () => this._commit(
@@ -227,9 +261,17 @@ export const Cart = {
     ));
   },
 
-  applyDiscount(code) {
+  /**
+   * Adds a code. A code Shopify doesn't accept isn't kept in the cart (it would warn on every change):
+   * it's removed again and the promise rejects with code INVALID_DISCOUNT.
+   */
+  async applyDiscount(code) {
     const current = (this.state?.discountCodes || []).map((d) => d.code);
-    return this.setDiscountCodes([...new Set([...current, code])]);
+    const cart = await this.setDiscountCodes([...new Set([...current, code])]);
+    const hit = (cart?.discountCodes || []).find((d) => d.code.toLowerCase() === String(code).toLowerCase());
+    if (hit?.applicable) return cart;
+    await this.removeDiscount(code).catch(() => {});
+    throw new TetherError(`Discount code not valid: ${code}`, { code: 'INVALID_DISCOUNT' });
   },
 
   removeDiscount(code) {
@@ -280,12 +322,18 @@ export const Cart = {
 
   drawers() { return qsa(document, sel('cart-drawer')); },
 
-  isOpen() { return this.drawers().some((d) => d.classList.contains(cfg.cartDrawerOpenClass)); },
+  /** Without a tether-cart-drawer (a React/Svelte/Vue cart), open/close still work: as state for subscribe. */
+  _open: false,
+  isOpen() {
+    const ds = this.drawers();
+    return ds.length ? ds.some((d) => d.classList.contains(cfg.cartDrawerOpenClass)) : this._open;
+  },
 
   open() {
     if (this.isOpen()) return;
+    this._open = true;
     const ds = this.drawers().filter((d) => get(d, 'cart-drawer') !== 'manual');
-    ds.forEach((d) => { d.classList.add(cfg.cartDrawerOpenClass); d.setAttribute('aria-hidden', 'false'); });
+    ds.forEach((d) => { d.inert = false; d.classList.add(cfg.cartDrawerOpenClass); d.setAttribute('aria-hidden', 'false'); });
     ariaState(true);
     if (cfg.cartFocus !== false && ds[0]) {
       // Move focus into the cart (after the open transition has made it visible).
@@ -302,9 +350,10 @@ export const Cart = {
 
   close() {
     if (!this.isOpen()) return;
+    this._open = false;
     const ds = this.drawers();
     const hadFocus = ds.some((d) => d.contains(document.activeElement));
-    ds.forEach((d) => { d.classList.remove(cfg.cartDrawerOpenClass); d.setAttribute('aria-hidden', 'true'); });
+    ds.forEach((d) => { d.classList.remove(cfg.cartDrawerOpenClass); d.setAttribute('aria-hidden', 'true'); if (cfg.cartFocus !== false) d.inert = true; });
     ariaState(false);
     if (hadFocus && returnFocus?.isConnected) returnFocus.focus({ preventScroll: true });
     returnFocus = null;
@@ -397,7 +446,7 @@ function lineValue(line, key) {
     case 'compare-at-price': return formatMoney(line.cost?.compareAtAmountPerQuantity || m.compareAtPrice);
     case 'line-total': return formatMoney(line.cost?.totalAmount);
     case 'line-subtotal': return formatMoney(line.cost?.subtotalAmount);
-    case 'quantity': return line.quantity;
+    case 'quantity': return Cart.quantityOf(line);
     case 'plan': return plan?.name || '';
     case 'plan-description': return plan?.description || '';
     case 'components': return (line.lineComponents || [])
@@ -434,11 +483,19 @@ function renderLine(node, line) {
     return undefined;
   });
 
+  // Shopify's note about this line (e.g. less stock than asked): class is-warning, tether-line="warning".
+  const warning = Cart.warnings.find((w) => w.target === line.id);
+  node.classList.toggle('is-warning', Boolean(warning));
+  const pending = Cart.pendingQty.has(line.id);
+  node.classList.toggle('is-busy', pending);
+  if (pending) node.setAttribute('aria-busy', 'true'); else node.removeAttribute('aria-busy');
+  qsa(node, sel('line', 'warning')).forEach((el) => setTextTracked(el, warning?.message || ''));
   const lineConds = {
     subscription: isSub,
     'one-time': !isSub,
     'on-sale': parseFloat(line.cost?.compareAtAmountPerQuantity?.amount) > parseFloat(line.cost?.amountPerQuantity?.amount),
     'has-components': (line.lineComponents || []).length > 0,
+    warning: Boolean(warning),
   };
   qsa(node, sel('line-show')).forEach((el) => {
     const k = get(el, 'line-show');

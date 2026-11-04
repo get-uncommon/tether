@@ -32,9 +32,16 @@ globalThis.fetch = async (url, init) => {
     const page = all.slice(start, start + variables.first);
     return ok({ products: { nodes: page, pageInfo: { hasNextPage: start + page.length < all.length, endCursor: String(start + page.length) } } });
   }
+  if (op === 'TetherSearch') return ok({ products: { nodes: [], pageInfo: { hasNextPage: false, endCursor: null } } });
   if (op === 'TetherCart') return ok({ cart: null });
   if (op === 'Tether_cartCreate') return ok({ cartCreate: { cart: cartFrom(variables.input.lines), userErrors: [] } });
   if (op === 'Tether_cartLinesAdd') return ok({ cartLinesAdd: { cart: cartFrom([...variables.lines, ...variables.lines]), userErrors: [] } });
+  if (op === 'Tether_cartLinesUpdate') {
+    await new Promise((r) => setTimeout(r, 30)); // a slow network, so clicks overlap
+    const c = cartFrom([{ merchandiseId: product.variants.nodes[0].id, quantity: variables.lines[0].quantity }]);
+    c.lines.nodes[0].id = variables.lines[0].id;
+    return ok({ cartLinesUpdate: { cart: c, userErrors: [] } });
+  }
   throw new Error(`unexpected ${op}`);
 };
 
@@ -318,7 +325,7 @@ test('cart warnings: less stock than asked is shown, and subscribe reports loade
   globalThis.fetch = async (url, init) => {
     const { query, variables } = JSON.parse(init.body);
     if (/Tether_cartLinesAdd|Tether_cartCreate/.test(query)) {
-      assert.match(query, /warnings \{ code message \}/);
+      assert.match(query, /warnings \{ code message target \}/);
       const lines = variables.lines || variables.input.lines;
       const key = /cartCreate/.test(query) ? 'cartCreate' : 'cartLinesAdd';
       return { ok: true, status: 200, json: async () => ({ data: { [key]: { cart: cartFrom(lines), userErrors: [], warnings: [{ code: 'MERCHANDISE_NOT_ENOUGH_STOCK', message: 'Only 1 left' }] } } }) };
@@ -358,4 +365,113 @@ test('another language: translated option names (Size -> Größe) still match th
   assert.equal(scope.variant.selectedOptions[0].value, '1 kg');
   assert.equal(document.getElementById('sel').textContent, '1 kg');
   void shop;
+});
+
+
+// ---- reported by the 10 store builders / shoppers ---------------------------
+
+test('cart: quick +/+ clicks add up (each builds on the last one asked for), the line is busy meanwhile', async () => {
+  const cart = cartFrom([{ merchandiseId: product.variants.nodes[0].id, quantity: 1 }]);
+  Tether.cart._commit(cart, 'test');
+  const lineId = cart.lines.nodes[0].id;
+  document.body.innerHTML = `<div tether-cart-lines><div><span tether-line="quantity"></span><button tether-line-plus>+</button></div></div>`;
+  Tether.cart.render();
+  const line = document.querySelector('[tether-cart-lines] > *');
+  const plus = line.querySelector('[tether-line-plus]');
+  plus.click(); plus.click();
+  assert.equal(line.querySelector('[tether-line="quantity"]').textContent, '3', 'shown at once');
+  assert.ok(line.classList.contains('is-busy'));
+  await tick(150);
+  const updates = calls.filter((c) => c.op === 'Tether_cartLinesUpdate').map((c) => c.variables.lines[0].quantity);
+  assert.deepEqual(updates, [2, 3]);
+  assert.equal(Tether.cart.lines[0].quantity, 3);
+  assert.ok(!document.querySelector('[tether-cart-lines] > *').classList.contains('is-busy'));
+  void lineId;
+});
+
+test('cart.open() works without a tether-cart-drawer (framework carts), subscribe reports it', async () => {
+  document.body.innerHTML = '';
+  let open = null;
+  const off = Tether.cart.subscribe((c, m) => { open = m.open; });
+  Tether.cart.open();
+  assert.equal(Tether.cart.isOpen(), true);
+  assert.equal(open, true);
+  Tether.cart.close();
+  assert.equal(open, false);
+  off();
+});
+
+test('options: a value no variant has is ignored; an impossible combination keeps the most choices', async () => {
+  const two = JSON.parse(JSON.stringify(product));
+  two.options = [{ name: 'Size', optionValues: [{ name: '250g' }, { name: '1kg' }] }, { name: 'Roast', optionValues: [{ name: 'Light' }, { name: 'Dark' }, { name: 'Ember' }] }];
+  const mk = (i, size, roast) => ({ ...two.variants.nodes[0], id: `gid://shopify/ProductVariant/9${i}`, availableForSale: true, selectedOptions: [{ name: 'Size', value: size }, { name: 'Roast', value: roast }] });
+  two.variants.nodes = [mk(1, '250g', 'Light'), mk(2, '1kg', 'Light'), mk(3, '1kg', 'Dark')];
+  Tether.clearProductCache(); Tether.primeProduct(two);
+  document.body.innerHTML = '<div tether-product="coffee-box"></div>';
+  Tether.mount(document);
+  await tick(20);
+  const scope = Tether.getScope(document.querySelector('[tether-product]'));
+  scope.select('Size', '1kg');
+  assert.equal(scope.variant.id, 'gid://shopify/ProductVariant/92');
+  scope.select('Roast', 'Ember'); // no variant at all
+  assert.equal(scope.variant.id, 'gid://shopify/ProductVariant/92', 'choice kept');
+  scope.select('Size', '250g'); scope.select('Roast', 'Dark'); // 250g/Dark doesn't exist -> 1kg/Dark
+  assert.deepEqual(scope.selected, { Size: '1kg', Roast: 'Dark' });
+});
+
+test('variantUrl: the choice goes into ?variant= after a change (not on first render)', async () => {
+  await Tether.init({ domain: 'shop.test', token: 't', autoMount: false, country: 'NL', locale: 'nl-NL', variantUrl: true });
+  window.history.replaceState(null, '', '/products/coffee-box');
+  Tether.clearProductCache(); Tether.primeProduct(product);
+  document.body.innerHTML = '<div tether-product="coffee-box"></div>';
+  Tether.mount(document);
+  await tick(20);
+  assert.equal(window.location.search, '', 'nothing on first render');
+  Tether.getScope(document.querySelector('[tether-product]')).select('Size', '1kg');
+  assert.match(window.location.search, /variant=\d+/);
+  await Tether.init({ domain: 'shop.test', token: 't', autoMount: false, country: 'NL', locale: 'nl-NL' });
+  window.history.replaceState(null, '', '/');
+});
+
+test('tether-show="list-empty" with a hidden attribute is shown for an empty list', async () => {
+  document.body.innerHTML = '<div tether-products="nothing-matches"><div tether-list><div></div></div><p id="e" tether-show="list-empty" hidden>None</p></div>';
+  Tether.mount(document);
+  await tick(80);
+  assert.notEqual(window.getComputedStyle(document.getElementById('e')).display, 'none');
+});
+
+test('initialState has has-savings, plenty-in-stock, a plain unavailable map, and honours lowStock', () => {
+  const shop = server.createStorefront({ domain: 'shop.test', token: 't', lowStock: 2 });
+  const p = JSON.parse(JSON.stringify(product));
+  p.variants.nodes.forEach((v) => { v.quantityAvailable = 3; });
+  const st = shop.initialState(p);
+  assert.equal(typeof st.show['has-savings'], 'boolean');
+  assert.equal(st.show['low-stock'], false, '3 > lowStock 2');
+  assert.equal(st.show['plenty-in-stock'], true);
+  assert.ok(Array.isArray(st.unavailable.Size));
+  assert.doesNotThrow(() => JSON.stringify(st.unavailable));
+});
+
+test('hydrate({ card: true }) is smaller and still renders a card without a request', async () => {
+  const shop = server.createStorefront({ domain: 'shop.test', token: 't', country: 'NL', locale: 'nl-NL' });
+  const full = shop.hydrate(product);
+  const card = shop.hydrate(product, { card: true });
+  assert.ok(card.length < full.length);
+  document.body.innerHTML = `${card}<div tether-product="coffee-box"><span id="p" tether-bind="price"></span></div>`;
+  Tether.mount(document);
+  await Promise.resolve(); await Promise.resolve();
+  assert.equal(document.querySelector('[tether-product]').getAttribute('tether-state'), 'ready');
+  assert.match(document.getElementById('p').textContent, /30/);
+});
+
+test('queries carry a maxAge bucket (Shopify caches identical query texts); mutations and maxAge: 0 do not', async () => {
+  const bodies = [];
+  const shop = server.createStorefront({ domain: 'shop.test', token: 't', fetch: async (u, i) => { bodies.push(JSON.parse(i.body).query); return { ok: true, status: 200, json: async () => ({ data: { product: null } }) }; } });
+  await shop.getProduct('x');
+  assert.match(bodies[0], / #\d+$/);
+  const none = server.createStorefront({ domain: 'shop.test', token: 't', maxAge: 0, fetch: async (u, i) => { bodies.push(JSON.parse(i.body).query); return { ok: true, status: 200, json: async () => ({ data: { product: null } }) }; } });
+  await none.getProduct('x');
+  assert.doesNotMatch(bodies[1], /#\d+$/);
+  await none.query('mutation M { a }').catch(() => {});
+  assert.doesNotMatch(bodies[2] || '', /#\d+$/);
 });

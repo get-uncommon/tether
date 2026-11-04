@@ -36,7 +36,7 @@
 
   // tether-core:dom.js
   var m6 = window.Tether.__core["dom.js"];
-  var { attr, busy, cdnUrl, dataKey, emit, formatDate, formatMoney, get, has, hasTemplate, imageUrl, notifyLayoutChanged, parseJSONAttr, productUrl, qsa, readText, repeat, repeatKeyed, sameImage, scoped, sel, setImage, setSelected, setText, setTextTracked, show, toAttributes, watchImages } = m6;
+  var { attr, busy, cdnUrl, dataKey, emit, formatDate, formatMoney, formatPercent, get, has, hasTemplate, imageUrl, notifyLayoutChanged, parseJSONAttr, productUrl, qsa, readText, repeat, repeatKeyed, sameImage, scoped, sel, setImage, setSelected, setText, setTextTracked, show, toAttributes, watchImages } = m6;
 
   // tether-core:mounting.js
   var m7 = window.Tether.__core["mounting.js"];
@@ -181,7 +181,7 @@
     const entry = Object.values(cfg.markets?.locales || {}).find((m8) => toCountry(m8?.country) === country);
     const own = locale || entry?.locale;
     const loc = own || cfg.locale;
-    const lang = language === void 0 ? cfg.language : toLanguage(language);
+    const lang = language !== void 0 ? toLanguage(language) : entry ? entry.language ? toLanguage(entry.language) : void 0 : cfg.language;
     const changed = country !== String(cfg.country || "").toUpperCase() || lang !== cfg.language || loc !== cfg.locale;
     cfg.country = country;
     cfg.language = lang || void 0;

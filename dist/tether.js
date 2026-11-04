@@ -60,6 +60,12 @@
     // Subscriptions
     defaultPurchase: "one-time",
     // 'one-time' | 'subscription'
+    variantUrl: false,
+    // true: ?variant= follows the visitor's choice on the main product (shareable links)
+    maxAge: 60,
+    // seconds a Shopify answer may be cached (0 = Shopify's own caching, can be hours)
+    lowStock: 5,
+    // tether-show="low-stock" at this many or fewer (needs inventory access)
     // Mounting
     autoMount: true,
     // mount document on DOMContentLoaded
@@ -152,7 +158,10 @@
     if (!conf.domain || !conf.token) {
       throw new TetherError("Tether is not configured: domain and token are required", { code: "NOT_CONFIGURED" });
     }
-    const body = JSON.stringify({ query: context ? withContext(query, conf) : query, variables });
+    let text = context ? withContext(query, conf) : query;
+    const age = conf.maxAge ?? 60;
+    if (age > 0 && !/^\s*mutation\b/.test(text)) text += ` #${Math.floor(Date.now() / (age * 1e3))}`;
+    const body = JSON.stringify({ query: text, variables });
     let attempt = 0;
     for (; ; ) {
       let res;
@@ -191,8 +200,8 @@
           log("no inventory permission, retrying without quantityAvailable");
           return request(conf, query.replace(/\bquantityAvailable\b/g, ""), variables, { context });
         }
-        if (json.errors.some((e) => /'warnings'/.test(e.message || "")) && /warnings \{ code message \}/.test(query)) {
-          return request(conf, query.replace(/ warnings \{ code message \}/g, ""), variables, { context });
+        if (json.errors.some((e) => /'warnings'/.test(e.message || "")) && /warnings \{ code message target \}/.test(query)) {
+          return request(conf, query.replace(/ warnings \{ code message target \}/g, ""), variables, { context });
         }
         const throttled = json.errors.some((e) => e.extensions?.code === "THROTTLED");
         if (throttled && attempt++ < conf.retries) {
@@ -259,7 +268,7 @@
     return ` fragment TetherProduct on Product{id handle title description descriptionHtml productType vendor tags availableForSale publishedAt onlineStoreUrl requiresSellingPlan seo{title description}featuredImage{${IMAGE}}images(first:${o.imagesFirst}){nodes{${IMAGE}}}options{name optionValues{name swatch{color image{previewImage{${IMAGE}}}}}}priceRange{minVariantPrice{${MONEY}}maxVariantPrice{${MONEY}}}compareAtPriceRange{minVariantPrice{${MONEY}}maxVariantPrice{${MONEY}}}${metafieldsField(o)} sellingPlanGroups(first:${o.sellingPlanGroupsFirst}){nodes{name appName options{name values}sellingPlans(first:${o.sellingPlansFirst}){nodes{${SELLING_PLAN_FIELDS}}}}}variants(first:${o.variantsFirst}){nodes{id title availableForSale currentlyNotInStock quantityAvailable sku barcode selectedOptions{name value}image{${IMAGE}}price{${MONEY}}compareAtPrice{${MONEY}}unitPrice{${MONEY}}sellingPlanAllocations(first:${o.sellingPlansFirst}){nodes{${ALLOCATION_FIELDS}}}}}}`;
   }
   function cartFragment() {
-    return ` fragment TetherCart on Cart{id checkoutUrl totalQuantity note createdAt updatedAt attributes{key value}buyerIdentity{countryCode email}discountCodes{code applicable}cost{subtotalAmount{${MONEY}}totalAmount{${MONEY}}checkoutChargeAmount{${MONEY}}}lines(first:100){nodes{id quantity attributes{key value}cost{totalAmount{${MONEY}}subtotalAmount{${MONEY}}amountPerQuantity{${MONEY}}compareAtAmountPerQuantity{${MONEY}}}discountAllocations{discountedAmount{${MONEY}}}sellingPlanAllocation{sellingPlan{id name description recurringDeliveries options{name value}}checkoutChargeAmount{${MONEY}}priceAdjustments{price{${MONEY}}compareAtPrice{${MONEY}}perDeliveryPrice{${MONEY}}}}merchandise{... on ProductVariant{id title sku availableForSale requiresShipping image{${IMAGE}}price{${MONEY}}compareAtPrice{${MONEY}}selectedOptions{name value}product{id title handle vendor featuredImage{${IMAGE}}}}}... on ComponentizableCartLine{lineComponents{id quantity merchandise{... on ProductVariant{id title product{title handle}}}}}}}}`;
+    return ` fragment TetherCart on Cart{id checkoutUrl totalQuantity note createdAt updatedAt attributes{key value}buyerIdentity{countryCode email}discountCodes{code applicable}cost{subtotalAmount{${MONEY}}totalAmount{${MONEY}}checkoutChargeAmount{${MONEY}}}lines(first:100){nodes{id quantity attributes{key value}cost{totalAmount{${MONEY}}subtotalAmount{${MONEY}}amountPerQuantity{${MONEY}}compareAtAmountPerQuantity{${MONEY}}}discountAllocations{discountedAmount{${MONEY}}}sellingPlanAllocation{sellingPlan{id name description recurringDeliveries options{name value}}checkoutChargeAmount{${MONEY}}priceAdjustments{price{${MONEY}}compareAtPrice{${MONEY}}perDeliveryPrice{${MONEY}}}}merchandise{... on ProductVariant{id title sku availableForSale requiresShipping quantityAvailable image{${IMAGE}}price{${MONEY}}compareAtPrice{${MONEY}}selectedOptions{name value}product{id title handle vendor featuredImage{${IMAGE}}}}}... on ComponentizableCartLine{lineComponents{id quantity merchandise{... on ProductVariant{id title product{title handle}}}}}}}}`;
   }
   function collectionFields() {
     return `
@@ -362,7 +371,10 @@
           }
           r.resolve(p);
         } else {
-          if (gen === generation) productCache.delete(k);
+          const miss = productCache.get(k);
+          if (gen === generation) setTimeout(() => {
+            if (productCache.get(k) === miss) productCache.delete(k);
+          }, 1e4);
           r.reject(new TetherError(`Product not found: ${k}`, { code: "NOT_FOUND" }));
         }
       }));
@@ -536,6 +548,7 @@
     emit: () => emit,
     formatDate: () => formatDate,
     formatMoney: () => formatMoney,
+    formatPercent: () => formatPercent,
     get: () => get,
     has: () => has,
     hasTemplate: () => hasTemplate,
@@ -573,6 +586,14 @@
   var scoped = (root, s, scopeSelector) => qsa(root, s).filter((el) => el.closest(scopeSelector) === root);
   function emit(name, detail, target = document) {
     target.dispatchEvent(new CustomEvent(`${cfg.prefix}:${name}`, { detail, bubbles: true }));
+  }
+  function formatPercent(n, locale = cfg.locale) {
+    if (!n) return "";
+    try {
+      return new Intl.NumberFormat(locale || void 0, { style: "percent", maximumFractionDigits: 0 }).format(n / 100);
+    } catch {
+      return `${n}%`;
+    }
   }
   function formatMoney(money) {
     if (!money) return "";
@@ -814,7 +835,7 @@
     return line;
   }
   function mutation(name, args, inner) {
-    return `mutation Tether_${name}(${args}){${name}(${inner}){cart{...TetherCart}userErrors{field message}warnings{code message}}}${cartFragment()}`;
+    return `mutation Tether_${name}(${args}){${name}(${inner}){cart{...TetherCart}userErrors{field message}warnings{code message target}}}${cartFragment()}`;
   }
   var FOCUSABLE = 'a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
   var returnFocus = null;
@@ -825,7 +846,10 @@
       if (!d.hasAttribute("role")) d.setAttribute("role", "dialog");
       if (!d.hasAttribute("aria-label") && !d.hasAttribute("aria-labelledby")) d.setAttribute("aria-label", get(d, "cart-label") || "Cart");
       d.setAttribute("aria-modal", String(open));
-      if (!d.classList.contains(cfg.cartDrawerOpenClass)) d.setAttribute("aria-hidden", "true");
+      if (!d.classList.contains(cfg.cartDrawerOpenClass)) {
+        d.setAttribute("aria-hidden", "true");
+        if (cfg.cartFocus !== false) d.inert = true;
+      }
     });
   }
   var isMissingCart = (err) => /does not exist|not found|invalid id/i.test(err?.message || "");
@@ -853,13 +877,15 @@
       return this.state?.totalQuantity || 0;
     },
     lastError: null,
+    /** line id -> { qty, done }: what quick +/- clicks asked for, shown until Shopify has answered. */
+    pendingQty: /* @__PURE__ */ new Map(),
     /** Shopify's notes on the last change, e.g. less stock than asked: [{ code, message }]. */
     warnings: [],
     /** true once the saved cart (or the absence of one) is known. */
     loaded: false,
     _take(payload, name) {
       const p = unwrap(payload, name);
-      this.warnings = p.warnings || [];
+      this.warnings = (p.warnings || []).filter((w, i, all) => all.findIndex((x) => x.message === w.message) === i).map((w) => ({ ...w, message: typeof cfg.warningText === "function" && cfg.warningText(w) || w.message }));
       if (this.warnings.length) emit("cart-warning", { warnings: this.warnings });
       return p.cart;
     },
@@ -883,6 +909,10 @@
     _commit(cart, reason) {
       this.state = cart;
       if (cart?.id) this._setId(cart.id);
+      try {
+        localStorage.setItem(`${cfg.storageKey}:seen`, `${Date.now()}|${cart?.totalQuantity || 0}`);
+      } catch {
+      }
       this.render();
       emit("cart-updated", { cart, reason });
       return cart;
@@ -895,6 +925,15 @@
         this.render();
         emit("cart-updated", { cart: null, reason: "load" });
         return null;
+      }
+      if (!this.loaded) {
+        try {
+          const n = (localStorage.getItem(`${cfg.storageKey}:seen`) || "").split("|")[1];
+          if (n) qsa(document, sel("cart-count")).forEach((el) => {
+            if (/^\s*0?\s*$/.test(el.textContent)) el.textContent = n;
+          });
+        } catch {
+        }
       }
       try {
         const data = await gql(`query TetherCart($id:ID!){cart(id:$id){...TetherCart}}${cartFragment()}`, { id });
@@ -970,6 +1009,30 @@
         "update"
       ));
     },
+    /**
+     * +1 / -1 for a line. Quick clicks add up: each builds on the quantity the last click asked for,
+     * which shows at once (tether-line="quantity", Cart.lines) until Shopify has answered.
+     */
+    changeQuantity(lineId, delta) {
+      const current = this.lines.find((l) => l.id === lineId);
+      if (!current) return Promise.resolve(this.state);
+      const target = Math.max(0, (this.pendingQty.get(lineId)?.qty ?? current.quantity) + delta);
+      const job = { qty: target, done: false };
+      this.pendingQty.set(lineId, job);
+      this.render();
+      emit("cart-updated", { cart: this.state, reason: "pending" });
+      return this.updateLine(lineId, target).finally(() => {
+        if (this.pendingQty.get(lineId) === job) {
+          this.pendingQty.delete(lineId);
+          this.render();
+          emit("cart-updated", { cart: this.state, reason: "settled" });
+        }
+      });
+    },
+    /** Quantity to show for a line: the one asked for while an update is on its way. */
+    quantityOf(line) {
+      return this.pendingQty.get(line.id)?.qty ?? line.quantity;
+    },
     removeLine(lineIds) {
       const ids = Array.isArray(lineIds) ? lineIds : [lineIds];
       return this._queue(async () => this._commit(
@@ -1006,9 +1069,18 @@
         "discount"
       ));
     },
-    applyDiscount(code) {
+    /**
+     * Adds a code. A code Shopify doesn't accept isn't kept in the cart (it would warn on every change):
+     * it's removed again and the promise rejects with code INVALID_DISCOUNT.
+     */
+    async applyDiscount(code) {
       const current = (this.state?.discountCodes || []).map((d) => d.code);
-      return this.setDiscountCodes([.../* @__PURE__ */ new Set([...current, code])]);
+      const cart = await this.setDiscountCodes([.../* @__PURE__ */ new Set([...current, code])]);
+      const hit = (cart?.discountCodes || []).find((d) => d.code.toLowerCase() === String(code).toLowerCase());
+      if (hit?.applicable) return cart;
+      await this.removeDiscount(code).catch(() => {
+      });
+      throw new TetherError(`Discount code not valid: ${code}`, { code: "INVALID_DISCOUNT" });
     },
     removeDiscount(code) {
       const k = String(code).toLowerCase();
@@ -1058,13 +1130,18 @@
     drawers() {
       return qsa(document, sel("cart-drawer"));
     },
+    /** Without a tether-cart-drawer (a React/Svelte/Vue cart), open/close still work: as state for subscribe. */
+    _open: false,
     isOpen() {
-      return this.drawers().some((d) => d.classList.contains(cfg.cartDrawerOpenClass));
+      const ds = this.drawers();
+      return ds.length ? ds.some((d) => d.classList.contains(cfg.cartDrawerOpenClass)) : this._open;
     },
     open() {
       if (this.isOpen()) return;
+      this._open = true;
       const ds = this.drawers().filter((d) => get(d, "cart-drawer") !== "manual");
       ds.forEach((d) => {
+        d.inert = false;
         d.classList.add(cfg.cartDrawerOpenClass);
         d.setAttribute("aria-hidden", "false");
       });
@@ -1082,11 +1159,13 @@
     },
     close() {
       if (!this.isOpen()) return;
+      this._open = false;
       const ds = this.drawers();
       const hadFocus = ds.some((d) => d.contains(document.activeElement));
       ds.forEach((d) => {
         d.classList.remove(cfg.cartDrawerOpenClass);
         d.setAttribute("aria-hidden", "true");
+        if (cfg.cartFocus !== false) d.inert = true;
       });
       ariaState(false);
       if (hadFocus && returnFocus?.isConnected) returnFocus.focus({ preventScroll: true });
@@ -1183,7 +1262,7 @@
       case "line-subtotal":
         return formatMoney(line.cost?.subtotalAmount);
       case "quantity":
-        return line.quantity;
+        return Cart.quantityOf(line);
       case "plan":
         return plan?.name || "";
       case "plan-description":
@@ -1219,11 +1298,19 @@
       if (v !== void 0) setTextTracked(el, v);
       return void 0;
     });
+    const warning = Cart.warnings.find((w) => w.target === line.id);
+    node.classList.toggle("is-warning", Boolean(warning));
+    const pending2 = Cart.pendingQty.has(line.id);
+    node.classList.toggle("is-busy", pending2);
+    if (pending2) node.setAttribute("aria-busy", "true");
+    else node.removeAttribute("aria-busy");
+    qsa(node, sel("line", "warning")).forEach((el) => setTextTracked(el, warning?.message || ""));
     const lineConds = {
       subscription: isSub,
       "one-time": !isSub,
       "on-sale": parseFloat(line.cost?.compareAtAmountPerQuantity?.amount) > parseFloat(line.cost?.amountPerQuantity?.amount),
-      "has-components": (line.lineComponents || []).length > 0
+      "has-components": (line.lineComponents || []).length > 0,
+      warning: Boolean(warning)
     };
     qsa(node, sel("line-show")).forEach((el) => {
       const k = get(el, "line-show");
@@ -1274,8 +1361,8 @@
     resolveProductKey: () => resolveProductKey,
     setScopeStatus: () => setScopeStatus
   });
-  function resolveProductKey(el, location = window.location) {
-    const raw = (get(el, "product") || "").trim();
+  function resolveProductKey(el, location = window.location, name = "product") {
+    const raw = (get(el, name) || "").trim();
     if (!raw.toLowerCase().startsWith("url:")) return { key: raw || null, fromUrl: false, raw };
     const what = raw.slice(4).trim();
     let key = null;
@@ -1457,7 +1544,17 @@
     // ------------------------------------------------------------ actions
     select(name, value) {
       if (this.selected[name] === value) return;
-      this.selected[name] = value;
+      const vs = this.product.variants.nodes.filter((v) => v.selectedOptions.some((o) => o.name === name && o.value === value));
+      if (!vs.length) return;
+      const next = { ...this.selected, [name]: value };
+      if (!vs.some((v) => v.selectedOptions.every((o) => next[o.name] === o.value))) {
+        const score = (v) => v.selectedOptions.filter((o) => o.name !== name && this.selected[o.name] === o.value).length * 2 + (v.availableForSale ? 1 : 0);
+        const best = vs.reduce((a, b) => score(b) > score(a) ? b : a);
+        best.selectedOptions.forEach((o) => {
+          next[o.name] = o.value;
+        });
+      }
+      this.selected = next;
       this.renderVariant();
     }
     selectVariant(id) {
@@ -1704,7 +1801,7 @@
       const plan = this.plan;
       const total = { amount: (parseFloat(price.amount) * Math.max(1, this.quantity)).toFixed(2), currencyCode: price.currencyCode };
       const fm = formatMoney;
-      const pct = (n) => n ? `${n}%` : "";
+      const pct = (n) => formatPercent(n);
       const text = {
         price: () => fm(price),
         "total-price": () => fm(total),
@@ -1712,7 +1809,11 @@
         "subscription-price": () => fm(subPrice),
         "subscription-savings": () => pct(savings.percentage),
         "subscription-savings-amount": () => fm(savings.amount),
-        "checkout-charge": () => fm(sub ? planCheckoutCharge(v, this.planId) : price),
+        // What the visitor pays today for the chosen quantity (prepaid plans charge more up front).
+        "checkout-charge": () => {
+          const c = sub ? planCheckoutCharge(v, this.planId) : price;
+          return c && fm({ amount: (parseFloat(c.amount) * Math.max(1, this.quantity)).toFixed(2), currencyCode: c.currencyCode });
+        },
         "plan-name": () => plan?.name,
         "plan-description": () => plan?.description,
         "plan-group": () => plan?.group?.name,
@@ -1771,6 +1872,8 @@
           const k = get(el, "plan-bind");
           const val = {
             name: () => planObj?.name,
+            option: () => (planObj?.options || []).map((o) => o.value).join(", "),
+            // e.g. "1 month", without the store's price text
             description: () => planObj?.description,
             price: () => fm(planPrice(v, id)),
             savings: () => pct(s.percentage),
@@ -1783,6 +1886,7 @@
       this.$(`select${sel("plan")}`).forEach((s) => {
         s.value = sub ? this.planId : "";
       });
+      const low = v.quantityAvailable != null && v.quantityAvailable > 0 && v.quantityAvailable <= (cfg.lowStock ?? 5);
       const conds = {
         "in-stock": v.availableForSale,
         "out-of-stock": !v.availableForSale,
@@ -1791,7 +1895,8 @@
         "not-on-sale": !onSale,
         "has-variants": p.variants.nodes.length > 1,
         "single-variant": p.variants.nodes.length === 1,
-        "low-stock": v.quantityAvailable != null && v.quantityAvailable > 0 && v.quantityAvailable <= 5,
+        "low-stock": low,
+        "plenty-in-stock": v.availableForSale && !low,
         "subscription-available": this.subscriptionAvailable,
         "subscription-unavailable": !this.subscriptionAvailable,
         "subscription-only": Boolean(p.requiresSellingPlan),
@@ -1836,6 +1941,18 @@
         purchase: this.purchase,
         sellingPlanId: sub ? this.planId : null
       }, this.root);
+      const key = `${v.id}|${sub ? this.planId : ""}`;
+      if (this.urlKey && this.urlKey !== key && (has(this.root, "variant-url") || cfg.variantUrl && document.querySelector(productSel()) === this.root)) {
+        try {
+          const u = new URL(window.location.href);
+          u.searchParams.set("variant", v.id.split("/").pop());
+          if (sub) u.searchParams.set("selling_plan", this.planId.split("/").pop());
+          else u.searchParams.delete("selling_plan");
+          window.history.replaceState(window.history.state, "", u);
+        } catch {
+        }
+      }
+      this.urlKey = key;
     }
   };
 
@@ -1880,9 +1997,11 @@
       const stale2 = () => token !== this.loadToken;
       try {
         if (has(this.root, "recommendations")) {
-          const key = get(this.root, "recommendations");
-          const base = await getProduct(key);
-          const recs = await getRecommendations(base.id, get(this.root, "intent") || "RELATED");
+          let { key } = resolveProductKey(this.root, window.location, "recommendations");
+          const scope = this.root.closest(sel("product"));
+          if (!key && scope) ({ key } = resolveProductKey(scope));
+          if (!key) throw new TetherError("No product for recommendations", { code: "NOT_FOUND" });
+          const recs = await getRecommendations(key, get(this.root, "intent") || "RELATED");
           if (stale2()) return;
           const limit = parseInt(get(this.root, "limit") || "", 10);
           this.products = limit ? recs.slice(0, limit) : recs;
@@ -1899,7 +2018,7 @@
       } catch (err) {
         if (stale2()) return;
         if (!more) setScopeStatus(this.root, isNotFound(err) ? "not-found" : "error", err);
-        reportError(err, "list load failed");
+        if (!(isNotFound(err) && has(this.root, "recommendations"))) reportError(err, "list load failed");
         emit("error", { error: err, context: "list" }, this.root);
       }
     }
@@ -1930,12 +2049,10 @@
       const empty = this.products.length === 0;
       this.$(sel("show")).forEach((el) => {
         const k = get(el, "show");
-        if (k === "list-empty") el.style.display = empty ? "" : "none";
-        if (k === "list-filled") el.style.display = empty ? "none" : "";
+        if (k === "list-empty") show(el, empty);
+        if (k === "list-filled") show(el, !empty);
       });
-      this.$(sel("load-more")).forEach((el) => {
-        el.style.display = this.pageInfo?.hasNextPage ? "" : "none";
-      });
+      this.$(sel("load-more")).forEach((el) => show(el, Boolean(this.pageInfo?.hasNextPage)));
       notifyLayoutChanged("list");
     }
   };
@@ -2170,9 +2287,12 @@
           e.preventDefault();
           fn().catch((err) => reportError(err, "cart line"));
         };
-        if (t.closest(sel("line-remove"))) return run(() => Cart.removeLine(id));
-        if (current && t.closest(sel("line-plus"))) return run(() => Cart.updateLine(id, current.quantity + 1));
-        if (current && t.closest(sel("line-minus"))) return run(() => Cart.updateLine(id, current.quantity - 1));
+        if (t.closest(sel("line-remove"))) {
+          line.classList.add("is-busy");
+          return run(() => Cart.removeLine(id));
+        }
+        if (current && t.closest(sel("line-plus"))) return run(() => Cart.changeQuantity(id, 1));
+        if (current && t.closest(sel("line-minus"))) return run(() => Cart.changeQuantity(id, -1));
       }
       const removeCode = t.closest(sel("discount-remove"));
       if (removeCode) {
@@ -2192,10 +2312,15 @@
       if (!t?.closest) return;
       const lineEl = t.closest(dataKeySel());
       const id = lineEl?.getAttribute(`data-${cfg.prefix}-key`);
+      const busyLine = (p, what) => {
+        lineEl.classList.add("is-busy");
+        lineEl.setAttribute("aria-busy", "true");
+        p.catch((err) => reportError(err, what));
+      };
       if (id && t.matches(`input${sel("line", "quantity")}`)) {
-        Cart.updateLine(id, parseInt(t.value, 10) || 0).catch((err) => reportError(err, "cart line"));
+        busyLine(Cart.updateLine(id, parseInt(t.value, 10) || 0), "cart line");
       } else if (id && t.matches(`select${sel("line-plan")}`)) {
-        Cart.updateLine(id, { sellingPlanId: t.value || null }).catch((err) => reportError(err, "cart line plan"));
+        busyLine(Cart.updateLine(id, { sellingPlanId: t.value || null }), "cart line plan");
       } else if (t.matches(`select${sel("country-select")}`)) {
         if (t.value) setCountry(t.value).catch((err) => reportError(err, "country"));
       } else if (t.matches(sel("cart-note"))) {
@@ -2210,25 +2335,60 @@
       const code = input?.value.trim();
       if (!code) return;
       busy(form, async () => {
+        const mark = (bad) => {
+          form.classList.toggle("is-invalid", bad);
+          if (input) {
+            if (bad) input.setAttribute("aria-invalid", "true");
+            else input.removeAttribute("aria-invalid");
+          }
+        };
         try {
-          const cart = await Cart.applyDiscount(code);
-          const ok = (cart?.discountCodes || []).find((d) => d.code.toLowerCase() === code.toLowerCase())?.applicable;
-          if (!ok) await Cart.removeDiscount(code).catch(() => {
-          });
-          form.classList.toggle("is-invalid", !ok);
-          emit(ok ? "discount-applied" : "discount-invalid", { code }, form);
-          if (ok && input) input.value = "";
+          await Cart.applyDiscount(code);
+          mark(false);
+          emit("discount-applied", { code }, form);
+          if (input) input.value = "";
         } catch (err) {
-          form.classList.add("is-invalid");
-          reportError(err, "discount");
+          mark(true);
+          if (err?.code === "INVALID_DISCOUNT") emit("discount-invalid", { code }, form);
+          else reportError(err, "discount");
         }
       });
     }, true);
     document.addEventListener("input", (e) => {
-      e.target.closest?.(sel("discount-form"))?.classList.remove("is-invalid");
+      const f = e.target.closest?.(sel("discount-form"));
+      if (f) {
+        f.classList.remove("is-invalid");
+        e.target.removeAttribute?.("aria-invalid");
+      }
+    });
+    window.addEventListener("storage", (e) => {
+      if (!e.key || !cfg.domain) return;
+      if (e.key === cfg.storageKey || e.key === `${cfg.storageKey}:seen`) Cart.init();
+      else if (e.key === `${cfg.prefix}:market:${cfg.domain}` && e.newValue) {
+        try {
+          const m = JSON.parse(e.newValue);
+          if (m?.country) setCountry(m.country, { language: m.language ?? null, locale: m.locale, remember: false }).catch(() => {
+          });
+        } catch {
+        }
+      }
     });
     if (cfg.astro !== false) {
-      document.addEventListener("astro:page-load", () => mount(document));
+      document.addEventListener("astro:page-load", () => {
+        let target = pageMarket();
+        if (!target && onPageMarket) {
+          try {
+            target = JSON.parse(localStorage.getItem(`${cfg.prefix}:market:${cfg.domain}`) || "null");
+          } catch {
+            target = null;
+          }
+          target = target?.country ? target : baseMarket;
+        }
+        onPageMarket = Boolean(pageMarket());
+        const differs = target?.country && (String(target.country).toUpperCase() !== String(cfg.country || "").toUpperCase() || String(target.language || "").toUpperCase() !== String(cfg.language || "").toUpperCase());
+        if (differs) setCountry(target.country, { language: target.language ?? null, locale: target.locale, remember: false }).then(() => mount(document), () => mount(document));
+        else mount(document);
+      });
       document.addEventListener("astro:before-swap", () => unmount());
     }
     window.addEventListener("online", () => {
@@ -2306,8 +2466,24 @@
     });
     return initPromise;
   }
+  function pageMarket(doc = document) {
+    const get2 = (n) => doc.querySelector(`meta[name="${cfg.prefix}-page-${n}"]`)?.getAttribute("content") || void 0;
+    const country = get2("country");
+    return country ? { country: country.toUpperCase(), language: get2("language"), locale: get2("locale") } : null;
+  }
+  var baseMarket = null;
+  var onPageMarket = false;
   async function applyMarket(overrides) {
     const m = cfg.markets || {};
+    baseMarket = { country: cfg.country, language: cfg.language, locale: cfg.locale };
+    const page = pageMarket();
+    onPageMarket = Boolean(page);
+    if (page) {
+      cfg.country = page.country;
+      cfg.language = page.language ? page.language.toUpperCase() : void 0;
+      if (page.locale) cfg.locale = page.locale;
+      return;
+    }
     if (m.detect === false) return;
     let market = null;
     if (m.detect) {

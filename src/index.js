@@ -101,9 +101,9 @@ function bindControls() {
       const id = line.getAttribute(`data-${cfg.prefix}-key`);
       const current = Cart.lines.find((l) => l.id === id);
       const run = (fn) => { e.preventDefault(); fn().catch((err) => reportError(err, 'cart line')); };
-      if (t.closest(sel('line-remove'))) return run(() => Cart.removeLine(id));
-      if (current && t.closest(sel('line-plus'))) return run(() => Cart.updateLine(id, current.quantity + 1));
-      if (current && t.closest(sel('line-minus'))) return run(() => Cart.updateLine(id, current.quantity - 1));
+      if (t.closest(sel('line-remove'))) { line.classList.add('is-busy'); return run(() => Cart.removeLine(id)); }
+      if (current && t.closest(sel('line-plus'))) return run(() => Cart.changeQuantity(id, 1));
+      if (current && t.closest(sel('line-minus'))) return run(() => Cart.changeQuantity(id, -1));
     }
 
     const removeCode = t.closest(sel('discount-remove'));
@@ -123,10 +123,12 @@ function bindControls() {
     if (!t?.closest) return;
     const lineEl = t.closest(dataKeySel());
     const id = lineEl?.getAttribute(`data-${cfg.prefix}-key`);
+    // The line shows is-busy / aria-busy until Shopify has answered (removed by the next render).
+    const busyLine = (p, what) => { lineEl.classList.add('is-busy'); lineEl.setAttribute('aria-busy', 'true'); p.catch((err) => reportError(err, what)); };
     if (id && t.matches(`input${sel('line', 'quantity')}`)) {
-      Cart.updateLine(id, parseInt(t.value, 10) || 0).catch((err) => reportError(err, 'cart line'));
+      busyLine(Cart.updateLine(id, parseInt(t.value, 10) || 0), 'cart line');
     } else if (id && t.matches(`select${sel('line-plan')}`)) {
-      Cart.updateLine(id, { sellingPlanId: t.value || null }).catch((err) => reportError(err, 'cart line plan'));
+      busyLine(Cart.updateLine(id, { sellingPlanId: t.value || null }), 'cart line plan');
     } else if (t.matches(`select${sel('country-select')}`)) {
       if (t.value) setCountry(t.value).catch((err) => reportError(err, 'country'));
     } else if (t.matches(sel('cart-note'))) {
@@ -142,22 +144,54 @@ function bindControls() {
     const code = input?.value.trim();
     if (!code) return;
     busy(form, async () => {
+      const mark = (bad) => {
+        form.classList.toggle('is-invalid', bad);
+        if (input) { if (bad) input.setAttribute('aria-invalid', 'true'); else input.removeAttribute('aria-invalid'); }
+      };
       try {
-        const cart = await Cart.applyDiscount(code);
-        const ok = (cart?.discountCodes || []).find((d) => d.code.toLowerCase() === code.toLowerCase())?.applicable;
-        // An invalid code doesn't stay in the cart (Shopify would warn about it on every change).
-        if (!ok) await Cart.removeDiscount(code).catch(() => {});
-        form.classList.toggle('is-invalid', !ok);
-        emit(ok ? 'discount-applied' : 'discount-invalid', { code }, form);
-        if (ok && input) input.value = '';
-      } catch (err) { form.classList.add('is-invalid'); reportError(err, 'discount'); }
+        await Cart.applyDiscount(code);
+        mark(false);
+        emit('discount-applied', { code }, form);
+        if (input) input.value = '';
+      } catch (err) {
+        mark(true);
+        if (err?.code === 'INVALID_DISCOUNT') emit('discount-invalid', { code }, form); else reportError(err, 'discount');
+      }
     });
   }, true); // capture: before a router (Astro's ClientRouter) turns the submit into a navigation
-  document.addEventListener('input', (e) => { e.target.closest?.(sel('discount-form'))?.classList.remove('is-invalid'); });
+  document.addEventListener('input', (e) => {
+    const f = e.target.closest?.(sel('discount-form'));
+    if (f) { f.classList.remove('is-invalid'); e.target.removeAttribute?.('aria-invalid'); }
+  });
+
+  // Other tabs: the cart changed there (reload it here), or the visitor picked another market.
+  window.addEventListener('storage', (e) => {
+    if (!e.key || !cfg.domain) return;
+    if (e.key === cfg.storageKey || e.key === `${cfg.storageKey}:seen`) Cart.init();
+    else if (e.key === `${cfg.prefix}:market:${cfg.domain}` && e.newValue) {
+      try {
+        const m = JSON.parse(e.newValue);
+        if (m?.country) setCountry(m.country, { language: m.language ?? null, locale: m.locale, remember: false }).catch(() => {});
+      } catch { /* ignore */ }
+    }
+  });
 
   // Astro View Transitions (<ClientRouter />): mount every new page, close the cart while leaving.
   if (cfg.astro !== false) {
-    document.addEventListener('astro:page-load', () => mount(document));
+    document.addEventListener('astro:page-load', () => {
+      // Navigated to a page of another market (e.g. /de/): switch first, then mount in that market.
+      // Back on a normal page after one: the visitor's own choice, else the default market.
+      let target = pageMarket();
+      if (!target && onPageMarket) {
+        try { target = JSON.parse(localStorage.getItem(`${cfg.prefix}:market:${cfg.domain}`) || 'null'); } catch { target = null; }
+        target = target?.country ? target : baseMarket;
+      }
+      onPageMarket = Boolean(pageMarket());
+      const differs = target?.country && (String(target.country).toUpperCase() !== String(cfg.country || '').toUpperCase()
+        || String(target.language || '').toUpperCase() !== String(cfg.language || '').toUpperCase());
+      if (differs) setCountry(target.country, { language: target.language ?? null, locale: target.locale, remember: false }).then(() => mount(document), () => mount(document));
+      else mount(document);
+    });
     document.addEventListener('astro:before-swap', () => unmount());
   }
 
@@ -249,8 +283,30 @@ export function init(overrides = {}) {
  * Without markets.detect only the visitor's saved choice applies, read here without loading
  * the markets part.
  */
+/**
+ * A page built for one market (e.g. /de/ pages): <meta name="tether-page-country" content="DE">,
+ * tether-page-language, tether-page-locale. Wins over the visitor's saved choice, isn't remembered.
+ */
+function pageMarket(doc = document) {
+  const get = (n) => doc.querySelector(`meta[name="${cfg.prefix}-page-${n}"]`)?.getAttribute('content') || undefined;
+  const country = get('country');
+  return country ? { country: country.toUpperCase(), language: get('language'), locale: get('locale') } : null;
+}
+
+let baseMarket = null; // the configured market, before a visitor's or page's market applied
+let onPageMarket = false;
+
 async function applyMarket(overrides) {
   const m = cfg.markets || {};
+  baseMarket = { country: cfg.country, language: cfg.language, locale: cfg.locale };
+  const page = pageMarket();
+  onPageMarket = Boolean(page);
+  if (page) {
+    cfg.country = page.country;
+    cfg.language = page.language ? page.language.toUpperCase() : undefined;
+    if (page.locale) cfg.locale = page.locale;
+    return;
+  }
   if (m.detect === false) return;
   let market = null;
   if (m.detect) {

@@ -71,8 +71,9 @@ test('the diagnose part loads on first call and shares the core (same config, sa
 test('parts are small and the core is under budget', async () => {
   const { gzipSync } = await import('node:zlib');
   const gz = async (f) => gzipSync(await readFile(join(DIST, f)), { level: 9 }).length;
-  // 19 KB: includes server hydration for Astro (0.9 KB), cart warnings and translated option names.
-  assert.ok(await gz('tether.min.js') < 19 * 1024, 'core gzip budget');
+  // 20 KB: includes server hydration for Astro (0.9 KB), cart warnings, translated option names,
+  // quick +/- clicks, cross-tab sync and shareable variant links.
+  assert.ok(await gz('tether.min.js') < 20 * 1024, 'core gzip budget');
   assert.ok(await gz('tether.markets.min.js') < 3 * 1024);
   assert.ok(await gz('tether.diagnose.min.js') < 5 * 1024);
 });

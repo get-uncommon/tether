@@ -12,10 +12,10 @@ import { DEFAULTS } from './config.js';
 import { request, withContext, TetherError } from './client.js';
 import { productFragment, collectionFields } from './fragments.js';
 import * as plans from './selling-plans.js';
-import { imageUrl } from './dom.js';
+import { imageUrl, formatPercent } from './dom.js';
 import { initialState } from './initial.js';
 
-export { imageUrl, initialState };
+export { imageUrl, initialState, formatPercent };
 
 export { TetherError, plans, withContext };
 
@@ -154,10 +154,25 @@ ${fragment()}`, byId ? { id: key, intent } : { handle: key, intent });
    * without its own request, then refreshes prices and stock in the background.
    * Put it anywhere in the page (Astro: <Fragment set:html={shop.hydrate(products)} />).
    */
-  function hydrate(products) {
-    const list = (Array.isArray(products) ? products : [products]).filter(Boolean);
+  /**
+   * { card: true } for lists (home, collections, recommendations): about 40% smaller, without
+   * descriptions, extra images and variant images (cards show the main image). Price, stock and
+   * plans per variant stay. The full product comes with the background refresh.
+   */
+  function hydrate(products, { card = false } = {}) {
+    let list = (Array.isArray(products) ? products : [products]).filter(Boolean);
+    if (card) list = list.map(slim);
     const payload = { v: 1, at: new Date().toISOString(), country: conf.country || null, language: conf.language || null, products: list };
     return `<script type="application/json" data-tether-hydrate>${safeJson(payload)}</script>`;
+  }
+
+  function slim(p) {
+    return {
+      ...p,
+      description: '', descriptionHtml: '',
+      images: { nodes: (p.images?.nodes || []).slice(0, 1) },
+      variants: { nodes: (p.variants?.nodes || []).map((v) => ({ ...v, image: null })) },
+    };
   }
 
   return {
@@ -171,8 +186,9 @@ ${fragment()}`, byId ? { id: key, intent } : { handle: key, intent });
     getRecommendations,
     hydrate,
     formatMoney: (money, locale = conf.locale) => formatMoney(money, locale),
+    formatPercent: (n, locale = conf.locale) => formatPercent(n, locale),
     imageUrl,
-    initialState: (product, opts = {}) => initialState(product, { defaultPurchase: conf.defaultPurchase, ...opts }),
+    initialState: (product, opts = {}) => initialState(product, { defaultPurchase: conf.defaultPurchase, lowStock: conf.lowStock, ...opts }),
     productUrl: (handle, opts = {}) => productUrl(handle, { productPath: conf.productPath, ...opts }),
     plans,
   };

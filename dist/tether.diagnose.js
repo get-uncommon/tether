@@ -23,7 +23,7 @@
 
   // tether-core:dom.js
   var m3 = window.Tether.__core["dom.js"];
-  var { attr, busy, cdnUrl, dataKey, emit, formatDate, formatMoney, get, has, hasTemplate, imageUrl, notifyLayoutChanged, parseJSONAttr, productUrl, qsa, readText, repeat, repeatKeyed, sameImage, scoped, sel, setImage, setSelected, setText, setTextTracked, show, toAttributes, watchImages } = m3;
+  var { attr, busy, cdnUrl, dataKey, emit, formatDate, formatMoney, formatPercent, get, has, hasTemplate, imageUrl, notifyLayoutChanged, parseJSONAttr, productUrl, qsa, readText, repeat, repeatKeyed, sameImage, scoped, sel, setImage, setSelected, setText, setTextTracked, show, toAttributes, watchImages } = m3;
 
   // tether-core:loader.js
   var m4 = window.Tether.__core["loader.js"];
@@ -191,6 +191,7 @@
       "out-of-stock",
       "backorder",
       "low-stock",
+      "plenty-in-stock",
       "on-sale",
       "not-on-sale",
       "has-variants",
@@ -256,7 +257,8 @@
         onError: typeof cfg.onError === "function"
       },
       apiVersion: apiVersionStatus(cfg.apiVersion, now),
-      market: cfg.markets?.detect ? detectMarket(cfg.markets) : null,
+      // The market in use (a visitor's choice included), plus what detection would pick.
+      market: { country: cfg.country || null, language: cfg.language || null, locale: cfg.locale || null, detected: cfg.markets?.detect ? detectMarket(cfg.markets) : null },
       reachable: false,
       shop: null,
       latencyMs: null,
@@ -286,6 +288,13 @@
             const plans = allPlans(p);
             report.products.push({ key: keys[i], handle: p.handle, title: p.title, plans: plans.length, requiresSellingPlan: p.requiresSellingPlan });
             plans.forEach((pl) => report.sellingPlans.push({ product: p.handle, group: pl.group?.name, plan: pl.name, id: pl.id }));
+            qsa(root, sel("product")).filter((el) => resolveProductKey(el).key === keys[i] && el.querySelector(sel("add-to-cart"))).forEach((el) => {
+              const shown = new Set(qsa(el, `${sel("option-list")},select${sel("option")}`).map((x) => get(x, "option-list") || get(x, "option")));
+              if (!shown.size && qsa(el, `select${sel("variant-select")}`).length) return;
+              (p.options || []).filter((o) => o.optionValues.length > 1 && !shown.has(o.name)).forEach((o) => {
+                report.problems.push({ level: "warn", message: `Product "${p.handle}": option "${o.name}" (${o.optionValues.length} values) has no tether-option-list, so visitors can't choose it.` });
+              });
+            });
           } else {
             report.products.push({ key: keys[i], error: r.reason?.message });
             report.problems.push({ level: "error", message: `Product "${keys[i]}": ${r.reason?.message}. Is it published to the Headless channel?` });

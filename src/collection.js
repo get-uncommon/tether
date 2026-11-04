@@ -5,9 +5,10 @@
  * quick-add with a subscription toggle).
  */
 import { reportError } from './config.js';
-import { attr, sel, get, has, scoped, emit, setText, setImage, repeat, notifyLayoutChanged, busy } from './dom.js';
-import { getProducts, getRecommendations, getProduct } from './loader.js';
-import { setScopeStatus, isNotFound } from './status.js';
+import { TetherError } from './client.js';
+import { attr, sel, get, has, scoped, emit, setText, setImage, repeat, notifyLayoutChanged, busy, show } from './dom.js';
+import { getProducts, getRecommendations } from './loader.js';
+import { setScopeStatus, isNotFound, resolveProductKey } from './status.js';
 
 export const listSelector = () => `${sel('collection')},${sel('products')},${sel('recommendations')}`;
 
@@ -46,9 +47,12 @@ export class ListScope {
     const stale = () => token !== this.loadToken;
     try {
       if (has(this.root, 'recommendations')) {
-        const key = get(this.root, 'recommendations');
-        const base = await getProduct(key);
-        const recs = await getRecommendations(base.id, get(this.root, 'intent') || 'RELATED');
+        // A handle, url:handle (one dynamic product page), or empty inside a product: that product.
+        let { key } = resolveProductKey(this.root, window.location, 'recommendations');
+        const scope = this.root.closest(sel('product'));
+        if (!key && scope) ({ key } = resolveProductKey(scope));
+        if (!key) throw new TetherError('No product for recommendations', { code: 'NOT_FOUND' });
+        const recs = await getRecommendations(key, get(this.root, 'intent') || 'RELATED');
         if (stale()) return;
         const limit = parseInt(get(this.root, 'limit') || '', 10);
         this.products = limit ? recs.slice(0, limit) : recs;
@@ -66,7 +70,8 @@ export class ListScope {
       if (stale()) return;
       // Keep what's already rendered on a failed "load more"; otherwise show the error state.
       if (!more) setScopeStatus(this.root, isNotFound(err) ? 'not-found' : 'error', err);
-      reportError(err, 'list load failed');
+      // A missing product for recommendations is a page detail, not an error to report.
+      if (!(isNotFound(err) && has(this.root, 'recommendations'))) reportError(err, 'list load failed');
       emit('error', { error: err, context: 'list' }, this.root);
     }
   }
@@ -95,10 +100,10 @@ export class ListScope {
     const empty = this.products.length === 0;
     this.$(sel('show')).forEach((el) => {
       const k = get(el, 'show');
-      if (k === 'list-empty') el.style.display = empty ? '' : 'none';
-      if (k === 'list-filled') el.style.display = empty ? 'none' : '';
+      if (k === 'list-empty') show(el, empty);
+      if (k === 'list-filled') show(el, !empty);
     });
-    this.$(sel('load-more')).forEach((el) => { el.style.display = this.pageInfo?.hasNextPage ? '' : 'none'; });
+    this.$(sel('load-more')).forEach((el) => show(el, Boolean(this.pageInfo?.hasNextPage)));
     notifyLayoutChanged('list');
   }
 }

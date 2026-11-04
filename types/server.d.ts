@@ -2,7 +2,7 @@ import type { ShopifyProduct, ShopifyVariant, Money, TetherError, SellingPlanHel
 export type { ShopifyProduct, ShopifyVariant, ShopifyCart, ShopifyCartLine, Money } from './index.js';
 
 export interface StorefrontOptions extends Partial<Pick<TetherConfig,
-  'apiVersion' | 'country' | 'language' | 'locale' | 'productPath' | 'metafields' | 'imagesFirst' | 'variantsFirst' | 'sellingPlanGroupsFirst' | 'sellingPlansFirst' | 'retries'>> {
+  'apiVersion' | 'country' | 'language' | 'locale' | 'productPath' | 'maxAge' | 'lowStock' | 'defaultPurchase' | 'metafields' | 'imagesFirst' | 'variantsFirst' | 'sellingPlanGroupsFirst' | 'sellingPlansFirst' | 'retries'>> {
   /** your-store.myshopify.com (or pass import.meta.env with PUBLIC_SHOPIFY_DOMAIN). */
   domain?: string;
   /** Public Storefront API token (or PUBLIC_SHOPIFY_STOREFRONT_TOKEN in import.meta.env). */
@@ -49,8 +49,11 @@ export interface Storefront {
    * products without its own request, then refreshes prices and stock once in the background.
    * Astro: <Fragment set:html={shop.hydrate(product)} />
    */
-  hydrate(products: ShopifyProduct | ShopifyProduct[]): string;
+  /** { card: true } for lists: much smaller (no descriptions, one image), the rest comes with the refresh. */
+  hydrate(products: ShopifyProduct | ShopifyProduct[], opts?: { card?: boolean }): string;
   formatMoney(money: Money | null | undefined, locale?: string): string;
+  /** 30 -> '30%' (nl, en) / '30 %' (de, fr), the way Tether shows savings. '' for 0. */
+  formatPercent(n: number, locale?: string): string;
   productUrl(handle: string, opts?: { productPath?: string; id?: string }): string;
   /** Shopify CDN image at a size. Use the element's max-width value, so the browser keeps the image. */
   imageUrl(url: string | null | undefined, size?: ImageSize): string;

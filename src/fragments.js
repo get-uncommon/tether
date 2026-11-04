@@ -117,7 +117,7 @@ fragment TetherCart on Cart {
       }
       merchandise {
         ... on ProductVariant {
-          id title sku availableForSale requiresShipping
+          id title sku availableForSale requiresShipping quantityAvailable
           image { ${IMAGE} }
           price { ${MONEY} }
           compareAtPrice { ${MONEY} }

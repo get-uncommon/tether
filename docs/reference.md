@@ -193,14 +193,15 @@ Markup written for an older `wfs-*` prefix keeps working with `prefix: 'wfs'`.
 | `tether-variant` | variant id | Preselect a variant (`?variant=` in the URL also works) |
 | `tether-quantity` | number | Start quantity (allows 0, for build-a-box) |
 | `tether-bind` | see below | Fill text / image / link |
-| `tether-option-list` | option name, e.g. `Size` | Repeater: first child is the button template |
+| `tether-option-list` | option name, e.g. `Size` | Repeater: first child is the button template. An empty template gets the value as text; or put `tether-bind="option-value"` (and `tether-bind="swatch"`) inside it. `tether-hide-single` hides the list when there's only one value |
 | `select[tether-option]` | option name | Native select for an option |
 | `select[tether-variant-select]` | | One select with all variants |
 | `tether-option-selected` | option name | Shows the selected value |
 | `tether-qty`, `tether-qty-plus`, `tether-qty-minus` | | Quantity input and buttons |
 | `tether-line-attribute` | key | Input/checkbox whose value goes on the cart line (engraving, gift note) |
 | `tether-line-attributes` | JSON | Fixed line attributes, e.g. `{"_source":"pdp"}` |
-| `tether-add-to-cart` | | Button. Optional `tether-adding-text`, `tether-soldout-text`, `tether-subscribe-text`, inner `[tether-add-label]` |
+| `tether-add-to-cart` | | Button. Optional `tether-adding-text` (while adding), `tether-soldout-text` (sold-out variant), `tether-subscribe-text` (a plan is selected), inner `[tether-add-label]` for the text. In React/JSX write value-less attributes as `tether-add-to-cart=""` |
+| `tether-variant-url` | | On a scope: `?variant=` follows the choice (shareable links). Global: `variantUrl: true` for the page's main product |
 | `tether-show` | condition | Shows/hides, see conditions |
 
 `tether-bind` values: `title`, `description` (HTML), `description-text`, `vendor`, `type`,
@@ -211,6 +212,13 @@ Markup written for an older `wfs-*` prefix keeps working with `prefix: 'wfs'`.
 (add the metafield to `config.metafields`), plus the subscription binds below.
 
 Images accept `max-width`, `max-height`, `crop` for Shopify CDN resizing.
+
+Classes Tether sets: option buttons get `is-selected` (+ `aria-pressed`) and `is-unavailable` when no
+available variant has that value with the other choices. Clicking an unavailable value picks the
+closest variant that has it and keeps the other choices where possible; a value no variant has is
+ignored. Add-to-cart gets `is-disabled` (+ `aria-disabled`, `disabled`) when the variant is sold out.
+The variant first selected is the one in `?variant=` / `tether-variant`, else the first available one.
+Cards: `price` is that variant's price; `min-price` shows "from" prices.
 
 ### Subscriptions
 
@@ -226,8 +234,14 @@ product to it. Tether reads the plans via the Storefront API.
 | `tether-default-plan="Every month"` | Plan id, name or option value. `?selling_plan=` in the URL also works |
 
 Binds: `price` follows the selected mode. Also `one-time-price`, `subscription-price`,
-`subscription-savings` (`10%`), `subscription-savings-amount`, `checkout-charge` (prepaid plans),
-`plan-name`, `plan-description`, `plan-group`.
+`subscription-savings` (`10%`, `10 %` in German/French), `subscription-savings-amount`,
+`checkout-charge` (what the visitor pays today for the chosen quantity; more for prepaid plans),
+`plan-name`, `plan-description`, `plan-group`. Inside a plan list, `tether-plan-bind="option"` gives
+the plan's option value ("1 month") without the price text some apps put in plan names.
+
+Products that can only be bought on a subscription (`requiresSellingPlan`): the one-time button gets
+`is-unavailable`, the cart's plan select leaves out one-time, and `cart.add()` without a plan is
+refused by Shopify.
 
 The product root gets class `is-subscription` and `tether-purchase-mode`. Selected buttons get
 `is-selected` + `aria-pressed`. Plans the current variant can't use get `is-unavailable`, and
@@ -235,7 +249,8 @@ Tether switches to a plan the variant does have.
 
 ### Conditions (`tether-show`)
 
-Product: `in-stock`, `out-of-stock`, `backorder`, `low-stock`, `on-sale`, `not-on-sale`,
+Product: `in-stock`, `out-of-stock`, `backorder`, `low-stock` (5 or fewer, `lowStock` to change;
+needs the inventory permission), `plenty-in-stock` (in stock, not low), `on-sale`, `not-on-sale`,
 `has-variants`, `single-variant`, `subscription-available`, `subscription-unavailable`,
 `subscription-only`, `one-time-available`, `subscription-selected`, `one-time-selected`,
 `has-savings`.
@@ -247,6 +262,11 @@ last request, e.g. less stock than asked; the message goes in `[tether-cart-warn
 State (products and lists): `loading`, `ready`, `error`, `not-found` (see above).
 
 Lists: `list-empty`, `list-filled`.
+
+Hidden before the script runs (a class, `style="display:none"` or `hidden`)? Tether shows the element
+when its condition is true: as its normal display, or `block` / `tether-display="flex"` when a class
+hides it. Mind CSS order: a hiding class defined before your layout class (`.grid { display: grid }`)
+loses to it.
 
 ### Product lists
 
@@ -261,7 +281,10 @@ Lists: `list-empty`, `list-filled`.
 ```
 
 `tether-products="tag:coffee"` uses Shopify search syntax instead of a collection.
-`tether-recommendations="<handle>"` lists related products. `tether-sort` takes the Shopify
+`tether-recommendations="<handle>"` lists related products (`url:handle` on a dynamic product page;
+empty inside a `tether-product`: that product). `tether-products=""` lists all products. Search
+syntax caveat: Shopify matches words loosely, so `handle:a OR handle:b` can return other products, and
+search only covers the store's default language. `tether-sort` takes the Shopify
 sort keys (`BEST_SELLING`, `PRICE`, `CREATED`, `TITLE`, …), with `tether-reverse="true"`.
 
 Using Webflow CMS lists instead? Put `tether-product` on each CMS item, bound to the handle.
@@ -286,15 +309,15 @@ Place these anywhere, typically in a drawer outside the Barba container.
 
 | Attribute | |
 |---|---|
-| `tether-cart-drawer` | Gets `is-open` (`cartDrawerOpenClass`). Value `manual` = never auto-opened |
+| `tether-cart-drawer` | Gets `is-open` (`cartDrawerOpenClass`), dialog semantics, focus handling; closed it's `aria-hidden` and `inert`. Value `manual` = never auto-opened. `tether-cart-label` sets its label (default "Cart") |
 | `tether-cart-open` (toggles), `tether-cart-close` | Esc also closes |
 | `tether-cart-count`, `tether-cart-subtotal`, `tether-cart-total`, `tether-cart-checkout-charge` | |
 | `tether-cart-lines` | Keyed repeater; the first child is the line template |
-| `tether-line` | `title`, `variant-title`, `options`, `vendor`, `sku`, `price`, `compare-at-price`, `line-total`, `line-subtotal`, `quantity` (text or input), `image`, `url`, `plan`, `plan-description`, `components`, `attribute:<key>` |
-| `tether-line-plus`, `tether-line-minus`, `tether-line-remove` | |
+| `tether-line` | `warning` (Shopify's note on this line), `title`, `variant-title`, `options`, `vendor`, `sku`, `price`, `compare-at-price`, `line-total`, `line-subtotal`, `quantity` (text or input), `image`, `url`, `plan`, `plan-description`, `components`, `attribute:<key>` |
+| `tether-line-plus`, `tether-line-minus`, `tether-line-remove` | Quick clicks add up; the new quantity shows at once and the line gets `is-busy` / `aria-busy` until Shopify answers |
 | `select[tether-line-plan]` | Change frequency or switch to one-time, inside the cart |
-| `tether-line-show` | `subscription`, `one-time`, `on-sale`, `has-components` |
-| `tether-discount-form` + `tether-discount-input` | Gets `is-invalid` on a bad code |
+| `tether-line-show` | `subscription`, `one-time`, `on-sale`, `has-components`, `warning`. Lines with a warning get `is-warning` |
+| `tether-discount-form` + `tether-discount-input` | A `<form>` with the input and a submit button. A bad code: `is-invalid` on the form, `aria-invalid` on the input, the code isn't kept; show your message with CSS (`.is-invalid .msg`) or on `tether:discount-invalid` |
 | `tether-cart-discounts` | Repeater with `tether-discount="code"` and `tether-discount-remove` |
 | `textarea[tether-cart-note]` | Order note |
 | `tether-checkout` | Goes to Shopify checkout (`checkoutTarget: '_blank'` for a new tab) |
@@ -313,10 +336,15 @@ Tether.cart.add({ variantId, quantity: 2, sellingPlanId, attributes: { Engraving
 Tether.cart.add([lineA, lineB]);                  // one request
 Tether.cart.updateLine(lineId, 3);
 Tether.cart.updateLine(lineId, { sellingPlanId: null });  // to one-time
+Tether.cart.changeQuantity(lineId, +1);           // your own +/- buttons: quick clicks add up
 Tether.cart.removeLine(lineId); Tether.cart.clear();
 Tether.cart.setNote('…'); Tether.cart.setAttributes({ source: 'quiz' });
-Tether.cart.applyDiscount('WELCOME10'); Tether.cart.setBuyerIdentity({ countryCode: 'DE' });
-Tether.cart.open(); Tether.cart.checkout();
+await Tether.cart.applyDiscount('WELCOME10');    // rejects with code INVALID_DISCOUNT (and drops it)
+Tether.cart.removeDiscount('WELCOME10'); Tether.cart.setDiscountCodes(['A', 'B']);
+Tether.cart.setBuyerIdentity({ countryCode: 'DE' });
+Tether.cart.warnings;                             // [{ code, message, target }] from the last change
+Tether.cart.open(); Tether.cart.checkout();      // open/close also work without a drawer (state for subscribe)
+Tether.cart.subscribe((cart, { count, open, loaded, warnings }) => {});  // your own cart UI
 
 const p = await Tether.getProduct('coffee-box');  // batched + cached
 const { products, pageInfo } = await Tether.getProducts({ collection: 'coffee', first: 12 });
@@ -340,7 +368,9 @@ Events (on `document`, prefixed `tether:`): `ready`, `product-ready`, `variant-c
 See [`src/config.js`](../src/config.js) for every option with comments. The ones you'll use most:
 `domain`, `token`, `country`, `language`, `locale`, `markets`, `productPath` (supports `{handle}`),
 `metafields`, `defaultPurchase`, `checkoutTarget`, `autoMount`, `observe` (auto-mount nodes added
-later, e.g. Finsweet load-more), `prefix`, and the hooks `onLayoutChange`, `onCartOpen`,
+later, e.g. Finsweet load-more; off by default, or call `Tether.mount(el)` yourself: mounting twice
+does nothing), `lowStock`, `variantUrl`, `warningText` (your text for Shopify's cart warnings, e.g.
+translated by `code`), `prefix`, and the hooks `onLayoutChange`, `onCartOpen`,
 `onCartClose`, `onLineEnter`, `onLineLeave`, `onValueChange`, `onError`, `cartFocus` (keyboard focus
 in the cart drawer, on by default) and `partsUrl` (folder of the optional parts when self-hosting).
 

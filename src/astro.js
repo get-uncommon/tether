@@ -65,7 +65,10 @@ export default function tether(options = {}) {
         injectScript('head-inline', 'window.TETHER_INTEGRATION="astro";');
         injectScript('page', [
           "import Tether from '@occluze/tether';",
-          `Tether.init({ ...${JSON.stringify({ autoMount: false, ...config })}, ...(window.TETHER_CONFIG || {}) }).then(() => Tether.mount(document));`,
+          // As the base config (like window.TETHER_CONFIG), not as overrides: a visitor's saved market
+          // (country, money format) then wins over the defaults, as on a plain script-tag site.
+          `window.TETHER_CONFIG = { ...${JSON.stringify({ autoMount: false, ...config })}, ...(window.TETHER_CONFIG || {}) };`,
+          'Tether.init().then(() => Tether.mount(document));',
         ].join('\n'));
       },
     },

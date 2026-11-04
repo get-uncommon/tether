@@ -38,7 +38,7 @@ const show = (k) => !state.show[k];
       <div tether-show="subscription-available" hidden={show('subscription-available')}>
         <button tether-purchase="one-time" hidden={show('one-time-available')} class:list={{ 'is-selected': !state.plan }}>One-time</button>
         <button tether-purchase="subscription" class:list={{ 'is-selected': state.plan }}>
-          Subscribe <span tether-bind="subscription-savings">{state.savings ? `${state.savings}%` : ''}</span>
+          Subscribe <span tether-bind="subscription-savings">{shop.formatPercent(state.savings)}</span>
         </button>
         <div tether-show="subscription-selected" hidden={show('subscription-selected')} tether-plan-list="all" class="options">
           {state.plans.map((p) => (

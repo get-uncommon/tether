@@ -123,7 +123,8 @@ const state = shop.initialState(product); // what Tether will show first
   and plan buttons, `is-disabled` on add-to-cart when sold out (and the text of
   `tether-soldout-text`), `is-subscription` on the product when a plan is selected. Low stock is 5 or fewer.
 - Subscriptions: `state.plans` (`name`, `price`, `savings`, `selected`, `available`) and
-  `state.savings` fill `tether-plan-list` and `tether-bind="subscription-savings"`; the
+  `shop.formatPercent(state.savings)` fill `tether-plan-list` and `tether-bind="subscription-savings"`
+(`30%`, or `30 %` in German and French, as Tether writes it); the
   [starter's product page](https://github.com/ravi-klaassens/tether/blob/main/examples/astro/src/pages/products/%5Bhandle%5D.astro)
   has a complete block. A product that can only be bought on a subscription shows the one-time
   price as the compare-at price.
@@ -135,12 +136,17 @@ const state = shop.initialState(product); // what Tether will show first
 **Show and hide:** `tether-show="out-of-stock"` (or `on-sale`, `subscription-available`, …) is
 shown or hidden by Tether. Render the right state on the server so nothing flashes:
 `hidden={!state.show['out-of-stock']}`. Cards too: `shop.initialState(p).price` is the price Tether
-shows (the first available variant, or the plan price), not `priceRange.minVariantPrice`. An element
+shows (the first available variant, or the plan price), not `priceRange.minVariantPrice` (for a
+"from" price use `tether-bind="min-price"`). `show['plenty-in-stock']` is in stock and not low, for an
+"In stock" line next to "Only 2 left". An element
 hidden in the HTML (`hidden`, `style="display:none"` or a class) is shown when its condition is
 true, as its normal display, or `block` / the value of `tether-display` when a class hides it.
 
 **Lists:** `const { products } = await shop.getProducts({ first: 12, sortKey: 'BEST_SELLING' })`,
-then one `tether-product={p.handle}` card each, and `shop.hydrate(products)` once.
+then one `tether-product={p.handle}` card each, and `shop.hydrate(products, { card: true })` once
+(about 40% smaller: no descriptions or extra images, which a card doesn't need). Sort keys differ per
+query: `getProducts` takes Shopify's product sort keys (`CREATED_AT`), `getCollection` the
+collection ones (`CREATED`).
 
 **Collection pages:**
 
@@ -172,6 +178,13 @@ if (!product) return Astro.rewrite('/404'); // your 404 page, with status 404
 
 **Search:** `shop.getProducts({ query: Astro.url.searchParams.get('q'), first: 24 })` (Shopify's
 [search syntax](https://shopify.dev/docs/api/usage/search-syntax): `tag:summer`, `vendor:Acme`, …).
+Shopify searches the store's default language only.
+
+**Prices are live:** a page built yesterday can show yesterday's price until the background refresh
+(one request) replaces it; the cart and checkout always use Shopify's current price. Stores that
+convert currencies see this often (exchange rates move). Rebuild regularly, or use SSR for pages
+where it matters. Shopify can also round the cart price differently from the product price in some
+markets (a cent or a euro): the cart is what's charged.
 
 ## 4. Cart and View Transitions
 
@@ -210,7 +223,11 @@ The full cart markup (quantity buttons, discount codes, notes) is in the
 
 Discount codes: `<form tether-discount-form><input tether-discount-input><button>Apply</button></form>`
 (an invalid code gets `is-invalid` on the form and isn't kept), and `tether-cart-discounts` lists them.
-Shopify's messages (stock, codes) come in the store's language for the visitor's `language`.
+Shopify's messages (stock, codes) come in the store's language for the visitor's `language`; when
+the store doesn't have that language they're English. Translate them yourself with
+`warningText: (w) => ({ MERCHANDISE_NOT_ENOUGH_STOCK: 'Niet meer op voorraad' })[w.code]` in
+`window.TETHER_CONFIG` (functions can't go in `shop.config.js`). A line the warning is about gets
+`is-warning`, and `tether-line="warning"` shows it next to that line.
 
 When the visitor asks for more than is in stock, Shopify adds what it can and Tether shows
 `tether-show="cart-warning"`, with Shopify's message in `[tether-cart-warning]`.
@@ -220,8 +237,9 @@ header is kept with it; Astro can't move a persisted element inside another one)
 
 ## 5. React, Svelte, Vue islands
 
-Tether's attributes work inside islands too (it watches the page). For your own cart UI, read the
-cart from Tether:
+Tether's attributes work inside islands that are in the page when it loads; for ones rendered later,
+call `Tether.mount(el)` (or set `observe: true`). For your own cart UI, read the cart from Tether
+(more patterns, also for Next.js and SvelteKit: [other frameworks](frameworks.md)):
 
 ```jsx
 import { useEffect, useState } from 'react';
@@ -289,8 +307,20 @@ export default {
 
 Or from your own UI: `Tether.setCountry('DE', { locale: 'de-DE' })`. Translations (`language`)
 work too, and option names in your markup (`tether-option-list="Size"`) keep matching when Shopify
-returns them translated. For search engines in each language, build one set of pages per market
-(a `createStorefront` per market and `/de/…` routes).
+returns them translated. The checkout opens in the cart's language when the store has it.
+
+**Pages per market** (for search engines in each language): a `createStorefront` per market and
+`/de/…` routes, and on those pages:
+
+```html
+<meta name="tether-page-country" content="DE">
+<meta name="tether-page-language" content="DE">
+<meta name="tether-page-locale" content="de-DE">
+```
+
+That page is then always Germany, also after a View Transition from a Dutch page, and back. Note that
+Shopify translates **handles** too (`the-h2-snowboard` → `das-h2-snowboard`): build `/de/` links
+from the German products, and map languages by product `id` (for `hreflang` and your switcher).
 
 ## 7. Rebuild when products change
 
@@ -321,8 +351,8 @@ and the markup, and tells you what to fix.
 | `allCollections()` | every collection (`handle`, `title`, `description`, `image`, `seo`) |
 | `getRecommendations(handleOrId)` | related products |
 | `initialState(product, { variant })` | what Tether shows first: `variant`, `selected`, `price`, `compareAtPrice`, `available`, `purchase`, `plan`, `plans`, `savings`, `show`, `isUnavailable()` |
-| `hydrate(products)` | the `<script>` tag for the browser (see above) |
-| `formatMoney(money)`, `productUrl(handle)`, `imageUrl(url, { width })` | strings, same rules as the browser |
+| `hydrate(products, { card })` | the `<script>` tag for the browser (see above) |
+| `formatMoney(money)`, `formatPercent(n)`, `productUrl(handle)`, `imageUrl(url, { width })` | strings, same rules as the browser |
 | `query(graphql, variables)` | any Storefront API query, in the configured market |
 
 A product is the Storefront API product, the same shape the browser uses: `title`, `handle`,

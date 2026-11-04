@@ -45,3 +45,5 @@ import type { ShopifyProduct as SP } from '@occluze/tether/server';
 const sp: SP | null = null; void sp;
 Tether.cart.subscribe((c, { loaded, warnings }) => { if (loaded && warnings.length) console.log(warnings[0].code, c?.lines.nodes[0]?.cost.totalAmount); });
 const im: string = Tether.imageUrl('https://cdn.shopify.com/a.jpg', { width: 160 }); void im;
+void Tether.cart.changeQuantity('gid://shopify/CartLine/1', 1);
+void Tether.setCountry('DE', { locale: 'de-DE', language: null });

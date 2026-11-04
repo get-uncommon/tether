@@ -51,6 +51,8 @@ export interface ShopifyProduct {
   variants: { nodes: ShopifyVariant[] };
   sellingPlanGroups?: { nodes: unknown[] };
   metafields?: ({ namespace: string; key: string; type: string; value: string; reference?: unknown } | null)[];
+  seo?: { title?: string | null; description?: string | null };
+  onlineStoreUrl?: string | null;
   [k: string]: unknown;
 }
 
@@ -119,6 +121,14 @@ export interface TetherConfig {
   retries?: number;
   /** Products handed over by the server (tether/server hydrate()): refresh once in the background (default true). */
   revalidate?: boolean;
+  /** Seconds a Shopify answer may be cached (default 60). Shopify caches identical queries, prices included, for hours otherwise; 0 = Shopify's caching. */
+  maxAge?: number;
+  /** tether-show="low-stock" at this many or fewer (default 5). */
+  lowStock?: number;
+  /** true: ?variant= (and selling_plan=) follow the visitor's choice on the page's main product. */
+  variantUrl?: boolean;
+  /** Your text for Shopify's cart warnings (stock, codes), e.g. translated by code. Return nothing to keep Shopify's. */
+  warningText?: ((warning: CartWarning) => string | null | undefined) | null;
   /** Mount on Astro View Transitions (astro:page-load) and close the cart on navigation (default true). */
   astro?: boolean;
   storageKey?: string | null;
@@ -167,7 +177,8 @@ export interface LineInput {
   attributes?: Attributes;
 }
 
-export interface CartWarning { code: string; message: string }
+/** Shopify's note on the last cart change; target is the cart line id it's about. */
+export interface CartWarning { code: string; message: string; target?: string }
 
 export interface Cart {
   readonly state: ShopifyCart | null;
@@ -185,10 +196,15 @@ export interface Cart {
   /** updateLine(id, 3) · updateLine(id, { sellingPlanId: null }) switches to one-time. */
   updateLine(lineId: string, patch: number | (LineInput & { quantity?: number })): Promise<ShopifyCart>;
   removeLine(lineIds: string | string[]): Promise<ShopifyCart>;
+  /** +1 / -1 for a line; quick clicks add up and show at once (use it for your own +/- buttons). */
+  changeQuantity(lineId: string, delta: number): Promise<ShopifyCart | null>;
+  /** The quantity to show for a line: what the visitor asked for while an update is on its way. */
+  quantityOf(line: ShopifyCartLine): number;
   clear(): Promise<ShopifyCart | null>;
   setNote(note: string): Promise<ShopifyCart>;
   setAttributes(attributes: Attributes): Promise<ShopifyCart>;
   setDiscountCodes(codes: string[]): Promise<ShopifyCart>;
+  /** Rejects with code INVALID_DISCOUNT (and doesn't keep the code) when Shopify doesn't accept it. */
   applyDiscount(code: string): Promise<ShopifyCart>;
   removeDiscount(code: string): Promise<ShopifyCart>;
   setBuyerIdentity(identity: { countryCode?: string; email?: string; phone?: string }, opts?: { create?: boolean }): Promise<ShopifyCart | null>;
@@ -316,7 +332,7 @@ export interface Tether {
   TetherError: typeof TetherError;
   resolveProductKey(el: Element, location?: Location | URL): { key: string | null; fromUrl: boolean; raw: string };
   /** Switch market: prices, currency, cart and every product on the page follow. */
-  setCountry(code: string, opts?: { language?: string; remember?: boolean }): Promise<ShopifyCart | null>;
+  setCountry(code: string, opts?: SetCountryOptions): Promise<ShopifyCart | null>;
   detectMarket(markets?: MarketsConfig): Promise<{ country?: string; language?: string; locale?: string; sources: Record<string, string> }>;
   getLocalization(): Promise<Localization>;
   /** Logs and returns what's wrong on this page (config, token, API version, plans, markup). */
@@ -332,7 +348,14 @@ export declare function mount(root?: ParentNode): number;
 export declare function unmount(): void;
 export declare function getScope(el: Element | null | undefined): ProductScope | null;
 export declare function addGroup(button: Element): Promise<ShopifyCart | null>;
-export declare function setCountry(code: string, opts?: { language?: string; remember?: boolean }): Promise<ShopifyCart | null>;
+export interface SetCountryOptions {
+  /** Shopify language (translations); null clears it. Default: the markets.locales entry for that country, else unchanged. */
+  language?: string | null;
+  /** Money format, e.g. 'de-DE'. Default: the markets.locales entry for that country, else unchanged. */
+  locale?: string;
+  remember?: boolean;
+}
+export declare function setCountry(code: string, opts?: SetCountryOptions): Promise<ShopifyCart | null>;
 export declare const api: Tether;
 declare const tether: Tether;
 export default tether;

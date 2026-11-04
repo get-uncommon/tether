@@ -36,6 +36,9 @@ export const DEFAULTS = {
 
   // Subscriptions
   defaultPurchase: 'one-time', // 'one-time' | 'subscription'
+  variantUrl: false, // true: ?variant= follows the visitor's choice on the main product (shareable links)
+  maxAge: 60, // seconds a Shopify answer may be cached (0 = Shopify's own caching, can be hours)
+  lowStock: 5, // tether-show="low-stock" at this many or fewer (needs inventory access)
 
   // Mounting
   autoMount: true,            // mount document on DOMContentLoaded

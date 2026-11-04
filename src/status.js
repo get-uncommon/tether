@@ -11,8 +11,8 @@ import { attr, sel, get, scoped, show } from './dom.js';
  *   "url:path"            the last segment of the page path (/shop/coffee-box -> coffee-box)
  * Returns { key, fromUrl, raw }. key is null when the URL has no value.
  */
-export function resolveProductKey(el, location = window.location) {
-  const raw = (get(el, 'product') || '').trim();
+export function resolveProductKey(el, location = window.location, name = 'product') {
+  const raw = (get(el, name) || '').trim();
   if (!raw.toLowerCase().startsWith('url:')) return { key: raw || null, fromUrl: false, raw };
   const what = raw.slice(4).trim();
   let key = null;

@@ -95,7 +95,10 @@ async function flush() {
         if (gen === generation) { primeProduct(p); freshAt.set(p.handle, Date.now()); freshAt.set(p.id, Date.now()); }
         r.resolve(p);
       } else {
-        if (gen === generation) productCache.delete(k); // don't cache misses: a fix in Shopify works on next load
+        // A miss is remembered for a few seconds (one page load asking twice makes one request),
+        // not longer: a product published in Shopify shows up on the next visit.
+        const miss = productCache.get(k);
+        if (gen === generation) setTimeout(() => { if (productCache.get(k) === miss) productCache.delete(k); }, 10000);
         r.reject(new TetherError(`Product not found: ${k}`, { code: 'NOT_FOUND' }));
       }
     }));

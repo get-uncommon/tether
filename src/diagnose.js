@@ -63,7 +63,7 @@ export function checkMarkup(root = document) {
   });
 
   const known = new Set([
-    'in-stock', 'out-of-stock', 'backorder', 'low-stock', 'on-sale', 'not-on-sale', 'has-variants', 'single-variant',
+    'in-stock', 'out-of-stock', 'backorder', 'low-stock', 'plenty-in-stock', 'on-sale', 'not-on-sale', 'has-variants', 'single-variant',
     'subscription-available', 'subscription-unavailable', 'subscription-only', 'one-time-available',
     'subscription-selected', 'one-time-selected', 'has-savings', 'loading', 'ready', 'error', 'not-found',
     'cart-empty', 'cart-filled', 'cart-has-subscription', 'cart-no-subscription', 'cart-has-discount', 'cart-error', 'cart-warning',
@@ -107,7 +107,8 @@ export async function diagnose({ root = document, silent = false, version, now =
       autoMount: cfg.autoMount, observe: cfg.observe, onError: typeof cfg.onError === 'function',
     },
     apiVersion: apiVersionStatus(cfg.apiVersion, now),
-    market: cfg.markets?.detect ? detectMarket(cfg.markets) : null,
+    // The market in use (a visitor's choice included), plus what detection would pick.
+    market: { country: cfg.country || null, language: cfg.language || null, locale: cfg.locale || null, detected: cfg.markets?.detect ? detectMarket(cfg.markets) : null },
     reachable: false,
     shop: null,
     latencyMs: null,
@@ -141,6 +142,14 @@ export async function diagnose({ root = document, silent = false, version, now =
           const plans = allPlans(p);
           report.products.push({ key: keys[i], handle: p.handle, title: p.title, plans: plans.length, requiresSellingPlan: p.requiresSellingPlan });
           plans.forEach((pl) => report.sellingPlans.push({ product: p.handle, group: pl.group?.name, plan: pl.name, id: pl.id }));
+          // Options a visitor can't choose on this page (they get the first available variant's value).
+          qsa(root, sel('product')).filter((el) => resolveProductKey(el).key === keys[i] && el.querySelector(sel('add-to-cart'))).forEach((el) => {
+            const shown = new Set(qsa(el, `${sel('option-list')},select${sel('option')}`).map((x) => get(x, 'option-list') || get(x, 'option')));
+            if (!shown.size && qsa(el, `select${sel('variant-select')}`).length) return;
+            (p.options || []).filter((o) => o.optionValues.length > 1 && !shown.has(o.name)).forEach((o) => {
+              report.problems.push({ level: 'warn', message: `Product "${p.handle}": option "${o.name}" (${o.optionValues.length} values) has no tether-option-list, so visitors can't choose it.` });
+            });
+          });
         } else {
           report.products.push({ key: keys[i], error: r.reason?.message });
           report.problems.push({ level: 'error', message: `Product "${keys[i]}": ${r.reason?.message}. Is it published to the Headless channel?` });
