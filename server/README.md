@@ -61,7 +61,7 @@ Your copy updates itself, like a jsDelivr version. The `TETHER_VERSION` file in 
 | `0.6` | only 0.6.x fixes |
 | `0.6.0` | pinned: never changes |
 
-It checks every day, and only updates when the new version's tests pass. To update right away: your copy on GitHub → **Actions** → **Update Tether**
+It checks every Monday (want daily? change the `cron` line in your copy's `.github/workflows/update-tether.yml` to `'23 5 * * *'`), and only updates when the new version's tests pass. To update right away: your copy on GitHub → **Actions** → **Update Tether**
 → **Run workflow**. It tests the new version, then Cloudflare redeploys. Your settings stay as they are.
 `https://YOUR-WORKER/health` shows the version that's running.
 
