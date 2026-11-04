@@ -74,7 +74,7 @@ async function flush() {
     parts.push(`h${i}: product(handle: $h${i}) { ...TetherProduct }`);
   });
 
-  const query = `query TetherProducts(${defs.join(', ')}) {\n  ${parts.join('\n  ')}\n}\n${productFragment()}`;
+  const query = `query TetherProducts(${defs.join(',')}) { ${parts.join(' ')} } ${productFragment()}`;
   log('fetch products', keys);
 
   const settle = (k, fn) => {

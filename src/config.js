@@ -30,6 +30,7 @@ export const DEFAULTS = {
   storageKey: null,           // defaults to `tether:cart:<domain>`
   cartDrawerOpenClass: 'is-open',
   openCartOnAdd: true,
+  cartFocus: true,            // move focus into the open cart, keep Tab inside it, restore it on close
   checkoutTarget: '_self',    // '_self' or '_blank'
 
   // Subscriptions
@@ -38,6 +39,7 @@ export const DEFAULTS = {
   // Mounting
   autoMount: true,            // mount document on DOMContentLoaded
   observe: false,             // auto-mount nodes added later (CMS load-more, filters)
+  partsUrl: null,             // folder of tether.markets/diagnose(.min).js for the <script> build (default: next to it)
 
   // Formatting
   formatMoney: null,          // (money, locale) => string

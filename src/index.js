@@ -9,37 +9,22 @@
  */
 import { cfg, configure, isConfigured, log, warn, reportError } from './config.js';
 import { gql, TetherError, withContext } from './client.js';
-import { Cart } from './cart.js';
-import { ProductScope, scopes } from './product.js';
+import { Cart, focusables } from './cart.js';
+import { scopes } from './product.js';
 import { ListScope, listSelector } from './collection.js';
 import {
   getProduct, getProducts, getRecommendations, clearProductCache, primeProduct, normalizeProductKey,
 } from './loader.js';
 import * as plans from './selling-plans.js';
-import { resolveProductKey, setScopeStatus, isNotFound } from './status.js';
-import { diagnose } from './diagnose.js';
-import { detectMarket, rememberMarket, getLocalization, clearLocalization, toCountry, toLanguage } from './markets.js';
+import { resolveProductKey } from './status.js';
 import { attr, sel, get, qsa, emit, formatMoney, busy, parseJSONAttr, toAttributes } from './dom.js';
+import { loadPart, coreModules } from './lazy.js';
+import { mountedLists, liveLists, pruneLive, within, mountProduct, retryFailed } from './mounting.js';
 
 export const VERSION = '0.3.6';
 
-const mountedProducts = new WeakSet();
-const mountedLists = new WeakSet();
-// Live roots, for re-rendering after a country switch (pruned when disconnected).
-const liveProducts = new Set();
-const liveLists = new Set();
-const requestToken = new WeakMap(); // product root -> latest request, so a slow old response can't win
-
-function pruneLive() {
-  liveProducts.forEach((el) => { if (!el.isConnected) liveProducts.delete(el); });
-  liveLists.forEach((l) => { if (!l.root.isConnected) liveLists.delete(l); });
-}
 let initPromise = null;
 let observer = null;
-
-function within(root, selector) {
-  return [...(root.matches?.(selector) ? [root] : []), ...qsa(root, selector)];
-}
 
 /** Mount every product scope and product list inside `root`. Safe to call repeatedly. */
 export function mount(root = document) {
@@ -59,7 +44,10 @@ export function mount(root = document) {
 
   within(root, sel('product')).forEach((el) => { if (mountProduct(el)) count++; });
 
-  renderCountrySelects(root);
+  // The country select lives in the optional markets part: load it only when the page uses it.
+  if (within(root, `${sel('country-select')},${sel('country-bind')}`).length) {
+    loadPart('markets').then((m) => m.renderCountrySelects(root)).catch((err) => reportError(err, 'markets'));
+  }
 
   qsa(root, sel('account-link')).forEach((a) => {
     a.setAttribute('href', `https://${cfg.domain}/account`);
@@ -70,131 +58,9 @@ export function mount(root = document) {
   return count;
 }
 
-/** Mounts one product root. Returns true when a product request was started. */
-function mountProduct(el) {
-  if (mountedProducts.has(el)) return false;
-  const { key, fromUrl, raw } = resolveProductKey(el);
-  if (!key) {
-    if (fromUrl) {
-      // Dynamic product page opened without ?handle= (or an empty path).
-      mountedProducts.add(el);
-      setScopeStatus(el, 'not-found');
-      emit('product-not-found', { key: null, source: raw }, el);
-    } else if (!el.closest(listSelector())) {
-      // List cards get their handle when the list renders.
-      warn(`[${attr('product')}] without a value. Bind it to the Shopify handle field, or use "url:handle".`, el);
-    }
-    return false;
-  }
-  mountedProducts.add(el);
-  liveProducts.add(el);
-  const token = {};
-  requestToken.set(el, token);
-  const current = () => requestToken.get(el) === token;
-  // A rendered scope keeps showing its content while it refreshes (e.g. country switch).
-  if (!scopes.get(el)) setScopeStatus(el, 'loading');
-  else el.setAttribute(attr('state'), 'updating');
-  getProduct(key)
-    .then((p) => {
-      if (!current()) return;
-      const existing = scopes.get(el);
-      if (existing) existing.update(p);
-      // eslint-disable-next-line no-new
-      else new ProductScope(el, p);
-      applyPageTitle(el, p);
-    })
-    .catch((err) => {
-      if (!current()) return;
-      const notFound = isNotFound(err);
-      setScopeStatus(el, notFound ? 'not-found' : 'error', err);
-      if (notFound) {
-        emit('product-not-found', { key, source: raw }, el);
-        // A typo in a URL isn't worth an alert; a CMS item pointing at a deleted product is.
-        if (fromUrl) log(`product not found: ${key}`); else reportError(err, `product ${key}`);
-      } else {
-        reportError(err, `product ${key}`);
-        emit('error', { error: err, context: 'product', key }, el);
-      }
-    });
-  return true;
-}
-
 // ---------------------------------------------------------------------------
 // Markets: country select + switching
 // ---------------------------------------------------------------------------
-
-/**
- * select[tether-country-select]: countries the store sells to (Shopify Markets).
- * tether-country-label="{name} ({currency})" sets the option text ({name}, {code}, {currency}, {symbol}).
- * tether-country-bind="name|code|currency|symbol" shows the current country anywhere.
- */
-function renderCountrySelects(root = document) {
-  const selects = within(root, `select${sel('country-select')}`);
-  const binds = within(root, sel('country-bind'));
-  if (!selects.length && !binds.length) return Promise.resolve();
-  return getLocalization().then((loc) => {
-    const current = (cfg.country || loc.country?.isoCode || '').toUpperCase();
-    const countries = [...(loc.availableCountries || [])].sort((a, b) => a.name.localeCompare(b.name, cfg.locale || undefined));
-    const info = countries.find((c) => c.isoCode === current) || loc.country;
-    const fill = (tpl, c) => tpl.replace(/\{name\}/g, c.name).replace(/\{code\}/g, c.isoCode)
-      .replace(/\{currency\}/g, c.currency?.isoCode || '').replace(/\{symbol\}/g, c.currency?.symbol || '');
-    selects.forEach((s) => {
-      const tpl = s.getAttribute(attr('country-label')) || '{name} ({currency})';
-      s.innerHTML = '';
-      countries.forEach((c) => s.appendChild(new Option(fill(tpl, c), c.isoCode)));
-      s.value = current;
-      if (s.value !== current) s.selectedIndex = -1; // a country the store doesn't sell to
-      s.disabled = countries.length < 2 && !s.hasAttribute(attr('always-enabled'));
-    });
-    binds.forEach((el) => {
-      const k = get(el, 'country-bind') || 'name';
-      const v = { name: info?.name, code: info?.isoCode, currency: info?.currency?.isoCode, symbol: info?.currency?.symbol }[k];
-      el.textContent = v || '';
-    });
-  }).catch((err) => reportError(err, 'country select'));
-}
-
-/**
- * Switches the market: prices, currency and translations follow (@inContext), the cart's
- * buyerIdentity.countryCode is updated, and every product and list on the page re-renders.
- *   Tether.setCountry('DE')            Tether.setCountry('BE', { language: 'FR' })
- */
-export async function setCountry(code, { language, remember = true } = {}) {
-  const country = toCountry(code);
-  if (!country) throw new TetherError(`Not a country code: ${code}`, { code: 'INVALID_COUNTRY' });
-  const lang = language === undefined ? cfg.language : toLanguage(language);
-  const changed = country !== String(cfg.country || '').toUpperCase() || lang !== cfg.language;
-  cfg.country = country;
-  cfg.language = lang || undefined;
-  if (remember) rememberMarket({ country, language: lang });
-  if (!changed) { renderCountrySelects(); return Cart.state; }
-
-  clearProductCache();
-  const jobs = [];
-  if (language !== undefined) clearLocalization(); // country names follow the language
-  // Only an existing cart moves; switching country never creates one.
-  if (Cart.id()) jobs.push(Cart.setBuyerIdentity({ countryCode: country }, { create: false }).catch((err) => reportError(err, 'cart country')));
-
-  pruneLive();
-  liveLists.forEach((list) => jobs.push(list.load()));
-  liveProducts.forEach((el) => {
-    if (el.closest(listSelector())) return; // re-rendered by its list
-    mountedProducts.delete(el);
-    mountProduct(el);
-  });
-
-  renderCountrySelects();
-  emit('country-changed', { country, language: cfg.language });
-  await Promise.all(jobs);
-  return Cart.state;
-}
-
-/** tether-page-title="{title} | My shop" on a product root sets document.title (dynamic product pages). */
-function applyPageTitle(el, p) {
-  const tpl = get(el, 'page-title');
-  if (!tpl || typeof document === 'undefined') return;
-  document.title = tpl.replace(/\{title\}/g, p.title).replace(/\{vendor\}/g, p.vendor || '').replace(/\{type\}/g, p.productType || '');
-}
 
 /** Call before a page transition removes `root` (closes the drawer etc.). */
 export function unmount() {
@@ -285,7 +151,27 @@ function bindControls() {
     });
   });
 
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && Cart.isOpen()) Cart.close(); });
+  // Back online after a failed load: try the failed products and lists again.
+  window.addEventListener('online', () => {
+    retryFailed();
+    liveLists.forEach((l) => { if (l.root.getAttribute(attr('state')) === 'error') l.load(); });
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (!Cart.isOpen()) return;
+    if (e.key === 'Escape') { Cart.close(); return; }
+    if (e.key !== 'Tab' || cfg.cartFocus === false) return;
+    // Keep Tab inside the open cart.
+    const d = Cart.drawers().find((x) => x.classList.contains(cfg.cartDrawerOpenClass));
+    const f = d ? focusables(d) : [];
+    if (!f.length) return;
+    const first = f[0];
+    const last = f[f.length - 1];
+    if (!d.contains(document.activeElement) || (e.shiftKey && document.activeElement === first) || (!e.shiftKey && document.activeElement === last)) {
+      e.preventDefault();
+      (e.shiftKey ? last : first).focus();
+    }
+  });
 }
 
 function dataKeySel() { return `[data-${cfg.prefix}-key]`; }
@@ -333,17 +219,10 @@ export function init(overrides = {}) {
     return initPromise;
   }
 
-  // Detected market (saved choice, server hint, Webflow locale) wins over the static config.
-  const market = detectMarket(cfg.markets);
-  if (market.country) cfg.country = market.country;
-  if (market.language) cfg.language = market.language;
-  if (market.locale && !overrides.locale && !window.TETHER_CONFIG?.locale) cfg.locale = market.locale;
-  if (market.sources && Object.keys(market.sources).length) log('market', market);
-
   bindControls();
   if (cfg.observe) startObserver();
 
-  initPromise = Cart.init().then(async (cart) => {
+  initPromise = applyMarket(overrides).then(() => Cart.init()).then(async (cart) => {
     // A saved cart from another market: move it to this one, so prices match the page.
     const want = cfg.country ? String(cfg.country).toUpperCase() : null;
     if (cart && want && cart.buyerIdentity?.countryCode && cart.buyerIdentity.countryCode !== want) {
@@ -353,6 +232,33 @@ export function init(overrides = {}) {
     return api;
   });
   return initPromise;
+}
+
+/**
+ * Detected market (saved choice, server hint, Webflow locale) wins over the static config.
+ * Without markets.detect only the visitor's saved choice applies, read here without loading
+ * the markets part.
+ */
+async function applyMarket(overrides) {
+  const m = cfg.markets || {};
+  if (m.detect === false) return;
+  let market = null;
+  if (m.detect) {
+    try { market = (await loadPart('markets')).detectMarket(m); } catch (err) { reportError(err, 'markets'); return; }
+  } else if (m.remember !== false) {
+    try { market = JSON.parse(localStorage.getItem(`${cfg.prefix}:market:${cfg.domain}`) || 'null'); } catch { /* none */ }
+    if (market && !/^[A-Z]{2}$/.test(market.country || '')) market = null;
+  }
+  if (!market) return;
+  if (market.country) cfg.country = market.country;
+  if (market.language) cfg.language = market.language;
+  if (market.locale && !overrides.locale && !window.TETHER_CONFIG?.locale) cfg.locale = market.locale;
+  log('market', market);
+}
+
+/** Tether.setCountry('DE'): loads the markets part on first use. */
+export function setCountry(code, opts) {
+  return loadPart('markets').then((m) => m.setCountry(code, opts));
 }
 
 function startObserver() {
@@ -390,9 +296,11 @@ export const api = {
   TetherError,
   resolveProductKey,
   setCountry,
-  detectMarket: (markets) => detectMarket(markets || cfg.markets),
-  getLocalization,
-  diagnose: (opts) => diagnose({ ...opts, version: VERSION }),
+  detectMarket: (markets) => loadPart('markets').then((m) => m.detectMarket(markets || cfg.markets)),
+  getLocalization: () => loadPart('markets').then((m) => m.getLocalization()),
+  diagnose: (opts) => loadPart('diagnose').then((m) => m.diagnose({ ...opts, version: VERSION })),
+  __core: coreModules,
+  __parts: {},
   on(name, fn) {
     const h = (e) => fn(e.detail, e);
     document.addEventListener(`${cfg.prefix}:${name}`, h);

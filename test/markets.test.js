@@ -90,8 +90,8 @@ const env = ({ path = '/', lang = null, meta = null, cookie = '', saved = null, 
 };
 const locales = { de: { country: 'DE', language: 'DE' }, 'fr-be': { country: 'BE', language: 'FR', locale: 'fr-BE' } };
 
-test('detect: Webflow locale subdirectory through the locales map', () => {
-  const m = Tether.detectMarket();
+test('detect: Webflow locale subdirectory through the locales map', async () => {
+  const m = await Tether.detectMarket(); // async: the markets part loads on first use
   assert.equal(m.country, 'DE'); // from the page this file runs on (/de/...)
   const r = (o, mk = { detect: true, locales }) => detectOnly(mk, env(o));
   assert.deepEqual(pick(r({ path: '/fr-be/shop' })), { country: 'BE', language: 'FR', locale: 'fr-BE' });
@@ -226,6 +226,7 @@ test('switching country keeps rendered products visible (state "updating", not "
   await tick();
   delays.DE = 60;
   const p = Tether.setCountry('DE', { remember: false });
+  await tick(15); // the markets part loads first
   const root = document.querySelector('[tether-product]');
   assert.equal(root.getAttribute('tether-state'), 'updating');
   assert.notEqual(document.getElementById('ready').style.display, 'none');

@@ -19,7 +19,7 @@ An open-source, free alternative to Smootify and Storesynk (formerly Shopyflow):
 - **Optional CMS sync:** a Webflow CMS item per Shopify product, kept up to date automatically ([one-click deploy](#sync-shopify-products-to-the-webflow-cms-optional)).
 - **Hand-over ready:** loading, error and not-found states, `Tether.diagnose()`, error reporting.
 
-MIT licensed · ~60 KB · no dependencies · [full reference](docs/reference.md) · [comparison](docs/comparison.md) · [changelog](CHANGELOG.md)
+MIT licensed · 16 KB gzipped · no dependencies · TypeScript types · [full reference](docs/reference.md) · [comparison](docs/comparison.md) · [changelog](CHANGELOG.md)
 
 ---
 
@@ -45,11 +45,13 @@ Site settings → Custom code → **Head**:
     productPath: '/product',     // your Webflow product template
   };
 </script>
-<script src="https://cdn.jsdelivr.net/gh/ravi-klaassens/tether@0.3/dist/tether.min.js" defer></script>
+<script src="https://cdn.jsdelivr.net/gh/ravi-klaassens/tether@0.4/dist/tether.min.js" defer></script>
 ```
 
-**Versions:** `@0.3` gets every 0.3.x fix automatically (recommended), `@v0.3.6` pins one release,
-`@latest` always takes the newest.
+**Versions:** `@0.4` gets every 0.4.x fix automatically (recommended), `@v0.4.0` pins one release,
+`@latest` always takes the newest. Hosting the file yourself? Put `tether.markets.min.js` and
+`tether.diagnose.min.js` next to it: those optional parts load only when a page uses markets or
+`Tether.diagnose()`.
 
 ## 3. Add attributes in the Designer
 
@@ -117,9 +119,10 @@ npm run smoke     # live test against Shopify's public demo store
 npm run build
 ```
 
-Bundlers: `npm install @occluze/tether`, then `import Tether from "@occluze/tether"`.
+Bundlers: `npm install @occluze/tether`, then `import Tether from "@occluze/tether"` (TypeScript
+types included; markets and diagnose are split into their own chunks).
 JavaScript API, config, releases and the Shopify API version policy are in the [reference](docs/reference.md).
 
 ## License
 
-MIT © Ravi Klaassens
+MIT © Ravi Klaassens · [occluze.com](https://occluze.com)

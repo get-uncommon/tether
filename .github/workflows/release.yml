@@ -1,0 +1,45 @@
+# Publishes a release when a version tag is pushed (made by `npm run release -- X.Y.Z`):
+# tests, npm publish with provenance (trusted publishing: no token in the repo), GitHub Release.
+name: release
+
+on:
+  push:
+    tags: ['v*.*.*']
+
+permissions:
+  contents: write   # the GitHub Release
+  id-token: write   # npm trusted publishing + provenance
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      - name: npm with trusted publishing
+        run: npm install -g npm@^11.5
+      - run: npm ci
+      - name: Tag matches package.json
+        run: |
+          test "v$(node -p "require('./package.json').version")" = "$GITHUB_REF_NAME" || { echo "::error::tag $GITHUB_REF_NAME doesn't match package.json"; exit 1; }
+      - run: npm test
+      - run: npm run smoke
+      - name: Publish to npm
+        run: npm publish --provenance --access public
+      - name: GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          V="${GITHUB_REF_NAME#v}"
+          awk -v v="$V" '$0 ~ "^## "v"( |$)" {f=1; next} /^## / && f {exit} f' CHANGELOG.md > notes.md
+          {
+            echo; echo '**Use it:**'; echo
+            echo '```html'; echo "<script src=\"https://cdn.jsdelivr.net/gh/${GITHUB_REPOSITORY}@${V%.*}/dist/tether.min.js\" defer></script>"; echo '```'; echo
+            echo '```bash'; echo 'npm install @occluze/tether'; echo '```'
+          } >> notes.md
+          gh release create "$GITHUB_REF_NAME" --title "Tether $V" --notes-file notes.md --latest \
+            dist/tether.min.js dist/tether.markets.min.js dist/tether.diagnose.min.js dist/tether.esm.js

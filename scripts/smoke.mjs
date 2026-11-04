@@ -17,7 +17,8 @@ Object.assign(globalThis, {
   CustomEvent: dom.window.CustomEvent, MutationObserver: dom.window.MutationObserver, Option: dom.window.Option,
 });
 
-const { default: Tether } = await import('../src/index.js');
+// The built ES modules: the same minified GraphQL the browser build sends.
+const { default: Tether } = await import('../dist/esm/index.js');
 
 const domain = process.env.TETHER_DOMAIN || 'hydrogen-preview.myshopify.com';
 const token = process.env.TETHER_TOKEN || '3b580e70970c4528da70c98e097c2fa0'; // public demo token

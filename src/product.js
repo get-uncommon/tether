@@ -269,14 +269,17 @@ export class ProductScope {
     const p = this.product;
 
     this.$(sel('bind')).forEach((el) => {
-      const key = get(el, 'bind');
+      const key = get(el, 'bind') || '';
+      const txt = {
+        title: p.title,
+        'description-text': p.description,
+        vendor: p.vendor,
+        type: p.productType,
+        handle: p.handle,
+      }[key];
+      if (txt !== undefined) return setText(el, txt);
       switch (key) {
-        case 'title': return setText(el, p.title);
         case 'description': el.innerHTML = p.descriptionHtml || ''; return undefined;
-        case 'description-text': return setText(el, p.description);
-        case 'vendor': return setText(el, p.vendor);
-        case 'type': return setText(el, p.productType);
-        case 'handle': return setText(el, p.handle);
         case 'published-at': return setText(el, formatDate(p.publishedAt));
         case 'min-price': return setText(el, formatMoney(p.priceRange.minVariantPrice));
         case 'max-price': return setText(el, formatMoney(p.priceRange.maxVariantPrice));
@@ -297,17 +300,15 @@ export class ProductScope {
         }
         default:
           // image:2 = the second product image (falls back to the featured image)
-          if (key && /^image:\d+$/.test(key)) {
-            const img = p.images.nodes[parseInt(key.slice(6), 10) - 1] || p.featuredImage;
+          if (/^image:\d+$/.test(key)) {
+            const img = p.images.nodes[key.slice(6) - 1] || p.featuredImage;
             return setImage(el, img?.url, img?.altText || p.title);
           }
-          if (key && key.startsWith('metafield:')) {
-            const mf = metafieldValue(p, key.slice('metafield:'.length));
+          if (key.startsWith('metafield:')) {
+            const mf = metafieldValue(p, key.slice(10));
             if (!mf) return setText(el, '');
             if (mf.reference?.image) return setImage(el, mf.reference.image.url, mf.reference.image.altText);
-            if (mf.type === 'rich_text_field' || mf.type === 'multi_line_text_field') {
-              el.textContent = mf.value; el.style.whiteSpace = 'pre-line'; return undefined;
-            }
+            if (/^(rich_text|multi_line_text)_field$/.test(mf.type)) el.style.whiteSpace = 'pre-line';
             return setText(el, mf.value);
           }
           return undefined;
@@ -393,35 +394,35 @@ export class ProductScope {
     const plan = this.plan;
     const total = { amount: (parseFloat(price.amount) * Math.max(1, this.quantity)).toFixed(2), currencyCode: price.currencyCode };
 
+    const fm = formatMoney;
+    const pct = (n) => (n ? `${n}%` : '');
+    // Text binds: name -> value (functions, so only the binds on the page are computed).
+    const text = {
+      price: () => fm(price),
+      'total-price': () => fm(total),
+      'one-time-price': () => fm(oneTimePrice),
+      'subscription-price': () => fm(subPrice),
+      'subscription-savings': () => pct(savings.percentage),
+      'subscription-savings-amount': () => fm(savings.amount),
+      'checkout-charge': () => fm(sub ? planCheckoutCharge(v, this.planId) : price),
+      'plan-name': () => plan?.name,
+      'plan-description': () => plan?.description,
+      'plan-group': () => plan?.group?.name,
+      'compare-at-price': () => (onSale ? fm(compareAt) : ''),
+      'unit-price': () => fm(v.unitPrice),
+      'discount-percentage': () => `${discountPct}%`,
+      'discount-amount': () => (onSale ? fm({ amount: String(parseFloat(compareAt.amount) - parseFloat(price.amount)), currencyCode: price.currencyCode }) : ''),
+      'variant-title': () => v.title,
+      'variant-id': () => v.id,
+      sku: () => v.sku,
+      barcode: () => v.barcode,
+      stock: () => v.quantityAvailable,
+      quantity: () => this.quantity,
+    };
     this.$(sel('bind')).forEach((el) => {
-      switch (get(el, 'bind')) {
-        case 'price': return setText(el, formatMoney(price));
-        case 'total-price': return setText(el, formatMoney(total));
-        case 'one-time-price': return setText(el, formatMoney(oneTimePrice));
-        case 'subscription-price': return setText(el, formatMoney(subPrice));
-        case 'subscription-savings': return setText(el, savings.percentage ? `${savings.percentage}%` : '');
-        case 'subscription-savings-amount': return setText(el, formatMoney(savings.amount));
-        case 'checkout-charge': return setText(el, formatMoney(sub ? planCheckoutCharge(v, this.planId) : price));
-        case 'plan-name': return setText(el, plan?.name || '');
-        case 'plan-description': return setText(el, plan?.description || '');
-        case 'plan-group': return setText(el, plan?.group?.name || '');
-        case 'compare-at-price': return setText(el, onSale ? formatMoney(compareAt) : '');
-        case 'unit-price': return setText(el, formatMoney(v.unitPrice));
-        case 'discount-percentage': return setText(el, `${discountPct}%`);
-        case 'discount-amount':
-          return setText(el, onSale ? formatMoney({
-            amount: String(parseFloat(compareAt.amount) - parseFloat(price.amount)),
-            currencyCode: price.currencyCode,
-          }) : '');
-        case 'variant-title': return setText(el, v.title);
-        case 'variant-id': return setText(el, v.id);
-        case 'sku': return setText(el, v.sku);
-        case 'barcode': return setText(el, v.barcode);
-        case 'stock': return setText(el, v.quantityAvailable ?? '');
-        case 'quantity': return setText(el, this.quantity);
-        case 'variant-image': return setImage(el, v.image?.url || p.featuredImage?.url, v.image?.altText || p.title);
-        default: return undefined;
-      }
+      const k = get(el, 'bind');
+      if (k === 'variant-image') setImage(el, v.image?.url || p.featuredImage?.url, v.image?.altText || p.title);
+      else if (text[k]) setText(el, text[k]());
     });
 
     this.$(sel('option-selected')).forEach((el) => setText(el, this.selected[get(el, 'option-selected')] || ''));
@@ -458,17 +459,16 @@ export class ProductScope {
       qsa(node, sel('plan-bind')).forEach((el) => {
         const adj = planAdjustment(planObj);
         const s = planSavings(v, id);
-        switch (get(el, 'plan-bind')) {
-          case 'name': return setText(el, planObj?.name);
-          case 'description': return setText(el, planObj?.description || '');
-          case 'price': return setText(el, formatMoney(planPrice(v, id)));
-          case 'savings': return setText(el, s.percentage ? `${s.percentage}%` : '');
-          case 'savings-amount': return setText(el, formatMoney(s.amount));
-          case 'adjustment':
-            if (!adj) return setText(el, '');
-            return setText(el, adj.type === 'percentage' ? `${adj.value}%` : formatMoney(adj.value));
-          default: return undefined;
-        }
+        const k = get(el, 'plan-bind');
+        const val = {
+          name: () => planObj?.name,
+          description: () => planObj?.description,
+          price: () => fm(planPrice(v, id)),
+          savings: () => pct(s.percentage),
+          'savings-amount': () => fm(s.amount),
+          adjustment: () => (!adj ? '' : adj.type === 'percentage' ? `${adj.value}%` : fm(adj.value)),
+        }[k];
+        if (val) setText(el, val());
       });
     });
 
@@ -510,6 +510,7 @@ export class ProductScope {
     this.$(sel('add-to-cart')).forEach((btn) => {
       const disabled = !v.availableForSale;
       btn.classList.toggle('is-disabled', disabled);
+      btn.setAttribute('aria-disabled', String(disabled));
       if ('disabled' in btn) btn.disabled = disabled;
       const soldOut = get(btn, 'soldout-text');
       const subText = get(btn, 'subscribe-text');

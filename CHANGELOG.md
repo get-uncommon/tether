@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.4.0 (2026-11-04)
+
+**Smaller:** the script every visitor loads went from 62.9 KB to 49 KB (20.7 → 16.5 KB gzipped).
+- Diagnose and markets are optional parts, loaded on first use (`tether.diagnose.min.js`,
+  `tether.markets.min.js`, next to the main script; split chunks for bundlers). Self-hosting: copy
+  them too, or set `partsUrl`. `Tether.detectMarket()` and `Tether.getLocalization()` now return
+  promises.
+- Built for ES2020 browsers (no helpers for `?.` and `??`), GraphQL minified at build time.
+
+**TypeScript types** for the whole API, config, events and the Barba preset.
+
+**Tested on a real Webflow site** (product pages, subscriptions, cart, Barba transitions), fixing:
+- The cart drawer is now keyboard and screen-reader friendly: dialog semantics, focus moves in and
+  back, Tab stays inside, `aria-expanded` on cart buttons (`cartFocus: false` to turn off).
+- Add-to-cart links (not only buttons) get `aria-disabled` when unavailable.
+- Products and lists that failed on a network error load again when the browser is back online.
+
+**Releases in one step:** `npm run release -- X.Y.Z --push`; a workflow publishes to npm with
+provenance (trusted publishing) and creates the GitHub Release.
+
+The npm package shows the author link (occluze.com).
+
 ## 0.3.6 (2026-11-04)
 
 - Fix: updates of deployed sync copies could be rejected by GitHub, because an Action's token may

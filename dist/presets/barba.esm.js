@@ -19,9 +19,8 @@ function barbaPreset(options = {}) {
   return {
     autoMount: false,
     onLayoutChange() {
-      var _a, _b, _c, _d;
-      (_b = (_a = get(lenis)) == null ? void 0 : _a.resize) == null ? void 0 : _b.call(_a);
-      (_d = (_c = get(scrollTrigger)) == null ? void 0 : _c.refresh) == null ? void 0 : _d.call(_c);
+      get(lenis)?.resize?.();
+      get(scrollTrigger)?.refresh?.();
     },
     onCartOpen(drawers) {
       if (!locked && typeof lockScroll === "function" && drawers[0]) {
@@ -52,7 +51,7 @@ function barbaPreset(options = {}) {
         opacity: 1,
         duration: lineDuration,
         clearProps: "height,paddingTop,paddingBottom,borderBottomWidth,opacity,overflow",
-        onComplete: () => onResize == null ? void 0 : onResize()
+        onComplete: () => onResize?.()
       });
     },
     onLineLeave(node, done) {
@@ -71,7 +70,7 @@ function barbaPreset(options = {}) {
         duration: lineDuration,
         onComplete: () => {
           done();
-          onResize == null ? void 0 : onResize();
+          onResize?.();
         }
       });
     },

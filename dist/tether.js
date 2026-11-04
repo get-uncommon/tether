@@ -6,6 +6,16 @@
   };
 
   // src/config.js
+  var config_exports = {};
+  __export(config_exports, {
+    DEFAULTS: () => DEFAULTS,
+    cfg: () => cfg,
+    configure: () => configure,
+    isConfigured: () => isConfigured,
+    log: () => log,
+    reportError: () => reportError,
+    warn: () => warn
+  });
   var DEFAULTS = {
     // Shopify Storefront API
     domain: "",
@@ -41,6 +51,8 @@
     // defaults to `tether:cart:<domain>`
     cartDrawerOpenClass: "is-open",
     openCartOnAdd: true,
+    cartFocus: true,
+    // move focus into the open cart, keep Tab inside it, restore it on close
     checkoutTarget: "_self",
     // '_self' or '_blank'
     // Subscriptions
@@ -51,6 +63,8 @@
     // mount document on DOMContentLoaded
     observe: false,
     // auto-mount nodes added later (CMS load-more, filters)
+    partsUrl: null,
+    // folder of tether.markets/diagnose(.min).js for the <script> build (default: next to it)
     // Formatting
     formatMoney: null,
     // (money, locale) => string
@@ -98,6 +112,14 @@
   }
 
   // src/client.js
+  var client_exports = {};
+  __export(client_exports, {
+    TetherError: () => TetherError,
+    endpoint: () => endpoint,
+    gql: () => gql,
+    unwrap: () => unwrap,
+    withContext: () => withContext
+  });
   var TetherError = class extends Error {
     constructor(message, { status, errors, userErrors, code } = {}) {
       super(message);
@@ -123,7 +145,6 @@
   }
   var sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   async function gql(query, variables = {}, { context = true } = {}) {
-    var _a;
     if (!cfg.domain || !cfg.token) {
       throw new TetherError("Tether is not configured: domain and token are required", { code: "NOT_CONFIGURED" });
     }
@@ -160,16 +181,13 @@
       } catch {
         throw new TetherError(`Invalid response (${res.status})`, { status: res.status });
       }
-      if ((_a = json.errors) == null ? void 0 : _a.length) {
+      if (json.errors?.length) {
         const inventoryDenied = json.errors.some((e) => /quantityAvailable/.test(e.message || ""));
         if (inventoryDenied && /\bquantityAvailable\b/.test(body)) {
           log("no inventory permission, retrying without quantityAvailable");
           return gql(query.replace(/\bquantityAvailable\b/g, ""), variables, { context });
         }
-        const throttled = json.errors.some((e) => {
-          var _a2;
-          return ((_a2 = e.extensions) == null ? void 0 : _a2.code) === "THROTTLED";
-        });
+        const throttled = json.errors.some((e) => e.extensions?.code === "THROTTLED");
         if (throttled && attempt++ < cfg.retries) {
           await sleep(500 * 2 ** attempt);
           continue;
@@ -192,7 +210,24 @@
     return payload;
   }
 
+  // src/cart.js
+  var cart_exports = {};
+  __export(cart_exports, {
+    Cart: () => Cart,
+    focusables: () => focusables,
+    toLineInput: () => toLineInput
+  });
+
   // src/fragments.js
+  var fragments_exports = {};
+  __export(fragments_exports, {
+    ALLOCATION_FIELDS: () => ALLOCATION_FIELDS,
+    SELLING_PLAN_FIELDS: () => SELLING_PLAN_FIELDS,
+    cartFragment: () => cartFragment,
+    collectionFields: () => collectionFields,
+    metafieldIdentifiers: () => metafieldIdentifiers,
+    productFragment: () => productFragment
+  });
   var MONEY = "amount currencyCode";
   var IMAGE = "url altText width height";
   function metafieldIdentifiers() {
@@ -208,112 +243,15 @@
     const ids = metafieldIdentifiers();
     if (!ids.length) return "";
     const list = ids.map((m) => `{namespace: ${JSON.stringify(m.namespace)}, key: ${JSON.stringify(m.key)}}`).join(", ");
-    return `metafields(identifiers: [${list}]) {
-    namespace key type value
-    reference { ... on MediaImage { image { ${IMAGE} } } }
-  }`;
+    return `metafields(identifiers:[${list}]){namespace key type value reference{... on MediaImage{image{${IMAGE}}}}}`;
   }
-  var SELLING_PLAN_FIELDS = `
-  id name description recurringDeliveries
-  options { name value }
-  priceAdjustments {
-    orderCount
-    adjustmentValue {
-      __typename
-      ... on SellingPlanPercentagePriceAdjustment { adjustmentPercentage }
-      ... on SellingPlanFixedAmountPriceAdjustment { adjustmentAmount { ${MONEY} } }
-      ... on SellingPlanFixedPriceAdjustment { price { ${MONEY} } }
-    }
-  }`;
-  var ALLOCATION_FIELDS = `
-  sellingPlan { id }
-  checkoutChargeAmount { ${MONEY} }
-  remainingBalanceChargeAmount { ${MONEY} }
-  priceAdjustments {
-    price { ${MONEY} }
-    compareAtPrice { ${MONEY} }
-    perDeliveryPrice { ${MONEY} }
-    unitPrice { ${MONEY} }
-  }`;
+  var SELLING_PLAN_FIELDS = ` id name description recurringDeliveries options{name value}priceAdjustments{orderCount adjustmentValue{__typename ... on SellingPlanPercentagePriceAdjustment{adjustmentPercentage}... on SellingPlanFixedAmountPriceAdjustment{adjustmentAmount{${MONEY}}}... on SellingPlanFixedPriceAdjustment{price{${MONEY}}}}}`;
+  var ALLOCATION_FIELDS = ` sellingPlan{id}checkoutChargeAmount{${MONEY}}remainingBalanceChargeAmount{${MONEY}}priceAdjustments{price{${MONEY}}compareAtPrice{${MONEY}}perDeliveryPrice{${MONEY}}unitPrice{${MONEY}}}`;
   function productFragment() {
-    return `
-fragment TetherProduct on Product {
-  id handle title description descriptionHtml productType vendor tags
-  availableForSale publishedAt onlineStoreUrl requiresSellingPlan
-  seo { title description }
-  featuredImage { ${IMAGE} }
-  images(first: ${cfg.imagesFirst}) { nodes { ${IMAGE} } }
-  options { name optionValues { name swatch { color image { previewImage { ${IMAGE} } } } } }
-  priceRange { minVariantPrice { ${MONEY} } maxVariantPrice { ${MONEY} } }
-  compareAtPriceRange { minVariantPrice { ${MONEY} } maxVariantPrice { ${MONEY} } }
-  ${metafieldsField()}
-  sellingPlanGroups(first: ${cfg.sellingPlanGroupsFirst}) {
-    nodes {
-      name appName
-      options { name values }
-      sellingPlans(first: ${cfg.sellingPlansFirst}) { nodes { ${SELLING_PLAN_FIELDS} } }
-    }
-  }
-  variants(first: ${cfg.variantsFirst}) {
-    nodes {
-      id title availableForSale currentlyNotInStock quantityAvailable sku barcode
-      selectedOptions { name value }
-      image { ${IMAGE} }
-      price { ${MONEY} }
-      compareAtPrice { ${MONEY} }
-      unitPrice { ${MONEY} }
-      sellingPlanAllocations(first: ${cfg.sellingPlansFirst}) { nodes { ${ALLOCATION_FIELDS} } }
-    }
-  }
-}`;
+    return ` fragment TetherProduct on Product{id handle title description descriptionHtml productType vendor tags availableForSale publishedAt onlineStoreUrl requiresSellingPlan seo{title description}featuredImage{${IMAGE}}images(first:${cfg.imagesFirst}){nodes{${IMAGE}}}options{name optionValues{name swatch{color image{previewImage{${IMAGE}}}}}}priceRange{minVariantPrice{${MONEY}}maxVariantPrice{${MONEY}}}compareAtPriceRange{minVariantPrice{${MONEY}}maxVariantPrice{${MONEY}}}${metafieldsField()} sellingPlanGroups(first:${cfg.sellingPlanGroupsFirst}){nodes{name appName options{name values}sellingPlans(first:${cfg.sellingPlansFirst}){nodes{${SELLING_PLAN_FIELDS}}}}}variants(first:${cfg.variantsFirst}){nodes{id title availableForSale currentlyNotInStock quantityAvailable sku barcode selectedOptions{name value}image{${IMAGE}}price{${MONEY}}compareAtPrice{${MONEY}}unitPrice{${MONEY}}sellingPlanAllocations(first:${cfg.sellingPlansFirst}){nodes{${ALLOCATION_FIELDS}}}}}}`;
   }
   function cartFragment() {
-    return `
-fragment TetherCart on Cart {
-  id checkoutUrl totalQuantity note createdAt updatedAt
-  attributes { key value }
-  buyerIdentity { countryCode email }
-  discountCodes { code applicable }
-  cost {
-    subtotalAmount { ${MONEY} }
-    totalAmount { ${MONEY} }
-    checkoutChargeAmount { ${MONEY} }
-  }
-  lines(first: 100) {
-    nodes {
-      id quantity
-      attributes { key value }
-      cost {
-        totalAmount { ${MONEY} }
-        subtotalAmount { ${MONEY} }
-        amountPerQuantity { ${MONEY} }
-        compareAtAmountPerQuantity { ${MONEY} }
-      }
-      discountAllocations { discountedAmount { ${MONEY} } }
-      sellingPlanAllocation {
-        sellingPlan { id name description recurringDeliveries options { name value } }
-        checkoutChargeAmount { ${MONEY} }
-        priceAdjustments { price { ${MONEY} } compareAtPrice { ${MONEY} } perDeliveryPrice { ${MONEY} } }
-      }
-      merchandise {
-        ... on ProductVariant {
-          id title sku availableForSale requiresShipping
-          image { ${IMAGE} }
-          price { ${MONEY} }
-          compareAtPrice { ${MONEY} }
-          selectedOptions { name value }
-          product { id title handle vendor featuredImage { ${IMAGE} } }
-        }
-      }
-      ... on ComponentizableCartLine {
-        lineComponents {
-          id quantity
-          merchandise { ... on ProductVariant { id title product { title handle } } }
-        }
-      }
-    }
-  }
-}`;
+    return ` fragment TetherCart on Cart{id checkoutUrl totalQuantity note createdAt updatedAt attributes{key value}buyerIdentity{countryCode email}discountCodes{code applicable}cost{subtotalAmount{${MONEY}}totalAmount{${MONEY}}checkoutChargeAmount{${MONEY}}}lines(first:100){nodes{id quantity attributes{key value}cost{totalAmount{${MONEY}}subtotalAmount{${MONEY}}amountPerQuantity{${MONEY}}compareAtAmountPerQuantity{${MONEY}}}discountAllocations{discountedAmount{${MONEY}}}sellingPlanAllocation{sellingPlan{id name description recurringDeliveries options{name value}}checkoutChargeAmount{${MONEY}}priceAdjustments{price{${MONEY}}compareAtPrice{${MONEY}}perDeliveryPrice{${MONEY}}}}merchandise{... on ProductVariant{id title sku availableForSale requiresShipping image{${IMAGE}}price{${MONEY}}compareAtPrice{${MONEY}}selectedOptions{name value}product{id title handle vendor featuredImage{${IMAGE}}}}}... on ComponentizableCartLine{lineComponents{id quantity merchandise{... on ProductVariant{id title product{title handle}}}}}}}}`;
   }
   function collectionFields() {
     return `
@@ -323,6 +261,15 @@ fragment TetherCart on Cart {
   }
 
   // src/loader.js
+  var loader_exports = {};
+  __export(loader_exports, {
+    clearProductCache: () => clearProductCache,
+    getProduct: () => getProduct,
+    getProducts: () => getProducts,
+    getRecommendations: () => getRecommendations,
+    normalizeProductKey: () => normalizeProductKey,
+    primeProduct: () => primeProduct
+  });
   var productCache = /* @__PURE__ */ new Map();
   var pending = [];
   var resolvers = /* @__PURE__ */ new Map();
@@ -330,7 +277,7 @@ fragment TetherCart on Cart {
   var generation = 0;
   var isGid = (v) => typeof v === "string" && v.startsWith("gid://");
   function normalizeProductKey(raw) {
-    const v = String(raw != null ? raw : "").trim();
+    const v = String(raw ?? "").trim();
     if (!v) return null;
     if (isGid(v)) return v;
     if (/^\d+$/.test(v)) return `gid://shopify/Product/${v}`;
@@ -366,22 +313,19 @@ fragment TetherCart on Cart {
     const ids = keys.filter(isGid);
     const handles = keys.filter((k) => !isGid(k));
     const defs = [];
-    const parts = [];
+    const parts2 = [];
     const vars = {};
     if (ids.length) {
       defs.push("$ids: [ID!]!");
       vars.ids = ids;
-      parts.push("byId: nodes(ids: $ids) { ... on Product { ...TetherProduct } }");
+      parts2.push("byId: nodes(ids: $ids) { ... on Product { ...TetherProduct } }");
     }
     handles.forEach((h, i) => {
       defs.push(`$h${i}: String!`);
       vars[`h${i}`] = h;
-      parts.push(`h${i}: product(handle: $h${i}) { ...TetherProduct }`);
+      parts2.push(`h${i}: product(handle: $h${i}) { ...TetherProduct }`);
     });
-    const query = `query TetherProducts(${defs.join(", ")}) {
-  ${parts.join("\n  ")}
-}
-${productFragment()}`;
+    const query = `query TetherProducts(${defs.join(",")}){${parts2.join(" ")}}${productFragment()}`;
     log("fetch products", keys);
     const settle = (k, fn) => {
       const r = resolvers.get(k);
@@ -428,16 +372,7 @@ ${productFragment()}`;
   } = {}) {
     const fragment = productFragment();
     if (collection) {
-      const data2 = await gql(`query TetherCollection($handle: String!, $first: Int!, $after: String, $sortKey: ProductCollectionSortKeys, $reverse: Boolean, $filters: [ProductFilter!]) {
-  collection(handle: $handle) {
-    ${collectionFields()}
-    products(first: $first, after: $after, sortKey: $sortKey, reverse: $reverse, filters: $filters) {
-      nodes { ...TetherProduct }
-      pageInfo { hasNextPage endCursor }
-    }
-  }
-}
-${fragment}`, {
+      const data2 = await gql(`query TetherCollection($handle:String!,$first:Int!,$after:String,$sortKey:ProductCollectionSortKeys,$reverse:Boolean,$filters:[ProductFilter!]){collection(handle:$handle){${collectionFields()} products(first:$first,after:$after,sortKey:$sortKey,reverse:$reverse,filters:$filters){nodes{...TetherProduct}pageInfo{hasNextPage endCursor}}}}${fragment}`, {
         handle: collection,
         first,
         after,
@@ -450,21 +385,12 @@ ${fragment}`, {
       products.nodes.forEach(primeProduct);
       return { collection: rest, products: products.nodes, pageInfo: products.pageInfo };
     }
-    const data = await gql(`query TetherSearch($first: Int!, $after: String, $query: String, $sortKey: ProductSortKeys, $reverse: Boolean) {
-  products(first: $first, after: $after, query: $query, sortKey: $sortKey, reverse: $reverse) {
-    nodes { ...TetherProduct }
-    pageInfo { hasNextPage endCursor }
-  }
-}
-${fragment}`, { first, after, query: query || void 0, sortKey: sortKey || void 0, reverse });
+    const data = await gql(`query TetherSearch($first:Int!,$after:String,$query:String,$sortKey:ProductSortKeys,$reverse:Boolean){products(first:$first,after:$after,query:$query,sortKey:$sortKey,reverse:$reverse){nodes{...TetherProduct}pageInfo{hasNextPage endCursor}}}${fragment}`, { first, after, query: query || void 0, sortKey: sortKey || void 0, reverse });
     data.products.nodes.forEach(primeProduct);
     return { collection: null, products: data.products.nodes, pageInfo: data.products.pageInfo };
   }
   async function getRecommendations(productId, intent = "RELATED") {
-    const data = await gql(`query TetherRecs($id: ID!, $intent: ProductRecommendationIntent) {
-  productRecommendations(productId: $id, intent: $intent) { ...TetherProduct }
-}
-${productFragment()}`, { id: productId, intent });
+    const data = await gql(`query TetherRecs($id:ID!,$intent:ProductRecommendationIntent){productRecommendations(productId:$id,intent:$intent){...TetherProduct}}${productFragment()}`, { id: productId, intent });
     const list = data.productRecommendations || [];
     list.forEach(primeProduct);
     return list;
@@ -491,49 +417,38 @@ ${productFragment()}`, { id: productId, intent });
     sellingPlan: (v) => toGid(v, "SellingPlan")
   };
   function toGid(value, type) {
-    const v = String(value != null ? value : "").trim();
+    const v = String(value ?? "").trim();
     if (!v) return null;
     if (v.startsWith("gid://")) return v;
     if (/^\d+$/.test(v)) return `gid://shopify/${type}/${v}`;
     return v;
   }
   function allPlans(product) {
-    var _a;
-    const groups = ((_a = product == null ? void 0 : product.sellingPlanGroups) == null ? void 0 : _a.nodes) || [];
-    return groups.flatMap((g) => {
-      var _a2;
-      return (((_a2 = g.sellingPlans) == null ? void 0 : _a2.nodes) || []).map((p) => ({ ...p, group: g }));
-    });
+    const groups = product?.sellingPlanGroups?.nodes || [];
+    return groups.flatMap((g) => (g.sellingPlans?.nodes || []).map((p) => ({ ...p, group: g })));
   }
   function hasPlans(product) {
     return allPlans(product).length > 0;
   }
   function allocationFor(variant, planId) {
-    var _a;
     if (!variant || !planId) return null;
-    return (((_a = variant.sellingPlanAllocations) == null ? void 0 : _a.nodes) || []).find((a) => {
-      var _a2;
-      return ((_a2 = a.sellingPlan) == null ? void 0 : _a2.id) === planId;
-    }) || null;
+    return (variant.sellingPlanAllocations?.nodes || []).find((a) => a.sellingPlan?.id === planId) || null;
   }
   function plansForVariant(product, variant) {
     return allPlans(product).filter((p) => allocationFor(variant, p.id));
   }
   function planPrice(variant, planId) {
-    var _a;
     const a = allocationFor(variant, planId);
-    const adj = (_a = a == null ? void 0 : a.priceAdjustments) == null ? void 0 : _a[0];
-    return (adj == null ? void 0 : adj.perDeliveryPrice) || (adj == null ? void 0 : adj.price) || (variant == null ? void 0 : variant.price) || null;
+    const adj = a?.priceAdjustments?.[0];
+    return adj?.perDeliveryPrice || adj?.price || variant?.price || null;
   }
   function planCheckoutCharge(variant, planId) {
-    var _a, _b;
     const a = allocationFor(variant, planId);
-    return (a == null ? void 0 : a.checkoutChargeAmount) || ((_b = (_a = a == null ? void 0 : a.priceAdjustments) == null ? void 0 : _a[0]) == null ? void 0 : _b.price) || (variant == null ? void 0 : variant.price) || null;
+    return a?.checkoutChargeAmount || a?.priceAdjustments?.[0]?.price || variant?.price || null;
   }
   function planSavings(variant, planId) {
-    var _a, _b;
-    const base = parseFloat((_a = variant == null ? void 0 : variant.price) == null ? void 0 : _a.amount);
-    const sub = parseFloat((_b = planPrice(variant, planId)) == null ? void 0 : _b.amount);
+    const base = parseFloat(variant?.price?.amount);
+    const sub = parseFloat(planPrice(variant, planId)?.amount);
     if (!Number.isFinite(base) || !Number.isFinite(sub) || base <= 0 || sub >= base) {
       return { amount: null, percentage: 0 };
     }
@@ -543,8 +458,7 @@ ${productFragment()}`, { id: productId, intent });
     };
   }
   function planAdjustment(plan) {
-    var _a, _b;
-    const v = (_b = (_a = plan == null ? void 0 : plan.priceAdjustments) == null ? void 0 : _a[0]) == null ? void 0 : _b.adjustmentValue;
+    const v = plan?.priceAdjustments?.[0]?.adjustmentValue;
     if (!v) return null;
     switch (v.__typename) {
       case "SellingPlanPercentagePriceAdjustment":
@@ -566,6 +480,35 @@ ${productFragment()}`, { id: productId, intent });
   }
 
   // src/dom.js
+  var dom_exports = {};
+  __export(dom_exports, {
+    attr: () => attr,
+    busy: () => busy,
+    cdnUrl: () => cdnUrl,
+    dataKey: () => dataKey,
+    emit: () => emit,
+    formatDate: () => formatDate,
+    formatMoney: () => formatMoney,
+    get: () => get,
+    has: () => has,
+    hasTemplate: () => hasTemplate,
+    notifyLayoutChanged: () => notifyLayoutChanged,
+    parseJSONAttr: () => parseJSONAttr,
+    productUrl: () => productUrl,
+    qsa: () => qsa,
+    readText: () => readText,
+    repeat: () => repeat,
+    repeatKeyed: () => repeatKeyed,
+    scoped: () => scoped,
+    sel: () => sel,
+    setImage: () => setImage,
+    setSelected: () => setSelected,
+    setText: () => setText,
+    setTextTracked: () => setTextTracked,
+    show: () => show,
+    toAttributes: () => toAttributes,
+    watchImages: () => watchImages
+  });
   var attr = (name) => `${cfg.prefix}-${name}`;
   var sel = (name, value) => value === void 0 ? `[${attr(name)}]` : `[${attr(name)}="${value}"]`;
   var get = (el, name) => el.getAttribute(attr(name));
@@ -666,19 +609,17 @@ ${productFragment()}`, { id: productId, intent });
     }
   }
   function setSelected(el, selected) {
-    var _a;
     el.classList.toggle("is-selected", selected);
     el.setAttribute("aria-pressed", selected ? "true" : "false");
     if (el.tagName === "INPUT" && (el.type === "radio" || el.type === "checkbox")) el.checked = selected;
-    const input = (_a = el.querySelector) == null ? void 0 : _a.call(el, 'input[type="radio"],input[type="checkbox"]');
+    const input = el.querySelector?.('input[type="radio"],input[type="checkbox"]');
     if (input) input.checked = selected;
   }
   var templates = /* @__PURE__ */ new WeakMap();
   var hasTemplate = (container) => Boolean(templates.get(container));
   function template(container) {
-    var _a, _b;
     if (!templates.has(container)) {
-      const tpl = (_b = (_a = container.firstElementChild) == null ? void 0 : _a.cloneNode(true)) != null ? _b : null;
+      const tpl = container.firstElementChild?.cloneNode(true) ?? null;
       templates.set(container, tpl);
       container.innerHTML = "";
     }
@@ -760,9 +701,8 @@ ${productFragment()}`, { id: productId, intent });
   function notifyLayoutChanged(reason) {
     clearTimeout(layoutTimer);
     layoutTimer = setTimeout(() => {
-      var _a;
       if (typeof cfg.onLayoutChange === "function") cfg.onLayoutChange(reason);
-      else if ((_a = window.ScrollTrigger) == null ? void 0 : _a.refresh) window.ScrollTrigger.refresh();
+      else if (window.ScrollTrigger?.refresh) window.ScrollTrigger.refresh();
       emit("layout-changed", { reason });
     }, 120);
   }
@@ -795,20 +735,16 @@ ${productFragment()}`, { id: productId, intent });
   }
   function toAttributes(obj) {
     if (!obj) return [];
-    if (Array.isArray(obj)) return obj.map((a) => {
-      var _a;
-      return { key: String(a.key), value: String((_a = a.value) != null ? _a : "") };
-    });
-    return Object.entries(obj).map(([key, value]) => ({ key, value: String(value != null ? value : "") }));
+    if (Array.isArray(obj)) return obj.map((a) => ({ key: String(a.key), value: String(a.value ?? "") }));
+    return Object.entries(obj).map(([key, value]) => ({ key, value: String(value ?? "") }));
   }
 
   // src/cart.js
   function toLineInput(input, quantity = 1, opts = {}) {
-    var _a;
     const src = typeof input === "object" && input !== null ? input : { variantId: input, quantity, ...opts };
     const merchandiseId = GID.variant(src.merchandiseId || src.variantId || src.id);
     if (!merchandiseId) throw new TetherError("add(): variantId is required");
-    const line = { merchandiseId, quantity: Math.max(1, parseInt((_a = src.quantity) != null ? _a : 1, 10) || 1) };
+    const line = { merchandiseId, quantity: Math.max(1, parseInt(src.quantity ?? 1, 10) || 1) };
     const plan = src.sellingPlanId || src.sellingPlan;
     if (plan) line.sellingPlanId = GID.sellingPlan(plan);
     const attrs = toAttributes(src.attributes);
@@ -816,12 +752,21 @@ ${productFragment()}`, { id: productId, intent });
     return line;
   }
   function mutation(name, args, inner) {
-    return `mutation Tether_${name}(${args}) {
-  ${name}(${inner}) { cart { ...TetherCart } userErrors { field message } }
-}
-${cartFragment()}`;
+    return `mutation Tether_${name}(${args}){${name}(${inner}){cart{...TetherCart}userErrors{field message}}}${cartFragment()}`;
   }
-  var isMissingCart = (err) => /does not exist|not found|invalid id/i.test((err == null ? void 0 : err.message) || "");
+  var FOCUSABLE = 'a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
+  var returnFocus = null;
+  var focusables = (d) => qsa(d, FOCUSABLE).filter((el) => el.offsetParent !== null || el === document.activeElement);
+  function ariaState(open) {
+    qsa(document, sel("cart-open")).forEach((b) => b.setAttribute("aria-expanded", String(open)));
+    qsa(document, sel("cart-drawer")).forEach((d) => {
+      if (!d.hasAttribute("role")) d.setAttribute("role", "dialog");
+      if (!d.hasAttribute("aria-label") && !d.hasAttribute("aria-labelledby")) d.setAttribute("aria-label", get(d, "cart-label") || "Cart");
+      d.setAttribute("aria-modal", String(open));
+      if (!d.classList.contains(cfg.cartDrawerOpenClass)) d.setAttribute("aria-hidden", "true");
+    });
+  }
+  var isMissingCart = (err) => /does not exist|not found|invalid id/i.test(err?.message || "");
   var Cart = {
     state: null,
     _chain: Promise.resolve(),
@@ -840,12 +785,10 @@ ${cartFragment()}`;
       }
     },
     get lines() {
-      var _a, _b;
-      return ((_b = (_a = this.state) == null ? void 0 : _a.lines) == null ? void 0 : _b.nodes) || [];
+      return this.state?.lines?.nodes || [];
     },
     get count() {
-      var _a;
-      return ((_a = this.state) == null ? void 0 : _a.totalQuantity) || 0;
+      return this.state?.totalQuantity || 0;
     },
     lastError: null,
     _queue(fn) {
@@ -867,7 +810,7 @@ ${cartFragment()}`;
     },
     _commit(cart, reason) {
       this.state = cart;
-      if (cart == null ? void 0 : cart.id) this._setId(cart.id);
+      if (cart?.id) this._setId(cart.id);
       this.render();
       emit("cart-updated", { cart, reason });
       return cart;
@@ -880,8 +823,7 @@ ${cartFragment()}`;
         return null;
       }
       try {
-        const data = await gql(`query TetherCart($id: ID!) { cart(id: $id) { ...TetherCart } }
-${cartFragment()}`, { id });
+        const data = await gql(`query TetherCart($id:ID!){cart(id:$id){...TetherCart}}${cartFragment()}`, { id });
         if (!data.cart) {
           this._setId(null);
           this.state = null;
@@ -966,14 +908,13 @@ ${cartFragment()}`, { id });
     },
     setNote(note) {
       return this._queue(async () => this._commit(
-        await this._mutate("cartNoteUpdate", "$note: String!", "note: $note", { note: note != null ? note : "" }, { note: note != null ? note : "" }),
+        await this._mutate("cartNoteUpdate", "$note: String!", "note: $note", { note: note ?? "" }, { note: note ?? "" }),
         "note"
       ));
     },
     /** Cart-level attributes, merged with existing ones. Value '' removes a key. */
     setAttributes(obj) {
-      var _a;
-      const merged = new Map((((_a = this.state) == null ? void 0 : _a.attributes) || []).map((a) => [a.key, a.value]));
+      const merged = new Map((this.state?.attributes || []).map((a) => [a.key, a.value]));
       toAttributes(obj).forEach((a) => merged.set(a.key, a.value));
       const attributes = [...merged].filter(([, v]) => v !== "").map(([key, value]) => ({ key, value }));
       return this._queue(async () => this._commit(
@@ -990,13 +931,11 @@ ${cartFragment()}`, { id });
       ));
     },
     applyDiscount(code) {
-      var _a;
-      const current = (((_a = this.state) == null ? void 0 : _a.discountCodes) || []).map((d) => d.code);
+      const current = (this.state?.discountCodes || []).map((d) => d.code);
       return this.setDiscountCodes([.../* @__PURE__ */ new Set([...current, code])]);
     },
     removeDiscount(code) {
-      var _a;
-      return this.setDiscountCodes((((_a = this.state) == null ? void 0 : _a.discountCodes) || []).map((d) => d.code).filter((c) => c !== code));
+      return this.setDiscountCodes((this.state?.discountCodes || []).map((d) => d.code).filter((c) => c !== code));
     },
     /** { countryCode, email, phone } — changes currency/prices for that market. */
     setBuyerIdentity(buyerIdentity, { create = true } = {}) {
@@ -1015,7 +954,6 @@ ${cartFragment()}`, { id });
      * URL once we have it.
      */
     async checkout(target = cfg.checkoutTarget) {
-      var _a;
       const id = this.id();
       if (!id) return null;
       const tab = target === "_blank" ? window.open("", "_blank") : null;
@@ -1027,7 +965,7 @@ ${cartFragment()}`, { id });
       }
       try {
         const data = await gql("query TetherCheckout($id: ID!) { cart(id: $id) { checkoutUrl } }", { id });
-        const url = (_a = data.cart) == null ? void 0 : _a.checkoutUrl;
+        const url = data.cart?.checkoutUrl;
         if (!url) throw new TetherError("No checkoutUrl (cart empty or expired)");
         emit("checkout", { url, cart: this.state });
         if (tab && !tab.closed) tab.location.href = url;
@@ -1053,16 +991,29 @@ ${cartFragment()}`, { id });
         d.classList.add(cfg.cartDrawerOpenClass);
         d.setAttribute("aria-hidden", "false");
       });
+      ariaState(true);
+      if (cfg.cartFocus !== false && ds[0]) {
+        returnFocus = document.activeElement;
+        setTimeout(() => {
+          const target = focusables(ds[0])[0] || ds[0];
+          if (target === ds[0] && !ds[0].hasAttribute("tabindex")) ds[0].tabIndex = -1;
+          target.focus?.({ preventScroll: true });
+        }, 60);
+      }
       if (typeof cfg.onCartOpen === "function") cfg.onCartOpen(ds);
       emit("cart-toggled", { open: true });
     },
     close() {
       if (!this.isOpen()) return;
       const ds = this.drawers();
+      const hadFocus = ds.some((d) => d.contains(document.activeElement));
       ds.forEach((d) => {
         d.classList.remove(cfg.cartDrawerOpenClass);
         d.setAttribute("aria-hidden", "true");
       });
+      ariaState(false);
+      if (hadFocus && returnFocus?.isConnected) returnFocus.focus({ preventScroll: true });
+      returnFocus = null;
       if (typeof cfg.onCartClose === "function") cfg.onCartClose(ds);
       emit("cart-toggled", { open: false });
     },
@@ -1074,10 +1025,8 @@ ${cartFragment()}`, { id });
     render() {
       const cart = this.state;
       const count = cart ? cart.totalQuantity : 0;
-      const money = (k) => {
-        var _a;
-        return cart ? formatMoney((_a = cart.cost) == null ? void 0 : _a[k]) : "";
-      };
+      const money = (k) => cart ? formatMoney(cart.cost?.[k]) : "";
+      ariaState(this.isOpen());
       qsa(document, sel("cart-count")).forEach((el) => setTextTracked(el, count));
       qsa(document, sel("cart-subtotal")).forEach((el) => setTextTracked(el, money("subtotalAmount")));
       qsa(document, sel("cart-total")).forEach((el) => setTextTracked(el, money("totalAmount")));
@@ -1088,7 +1037,7 @@ ${cartFragment()}`, { id });
         "cart-filled": count > 0,
         "cart-has-subscription": hasSub,
         "cart-no-subscription": !hasSub,
-        "cart-has-discount": ((cart == null ? void 0 : cart.discountCodes) || []).some((d) => d.applicable),
+        "cart-has-discount": (cart?.discountCodes || []).some((d) => d.applicable),
         "cart-error": Boolean(this.lastError)
       };
       qsa(document, sel("show")).forEach((el) => {
@@ -1096,10 +1045,10 @@ ${cartFragment()}`, { id });
         if (k in conds && !el.closest(sel("product"))) show(el, conds[k]);
       });
       qsa(document, `textarea${sel("cart-note")},input${sel("cart-note")}`).forEach((el) => {
-        if (document.activeElement !== el) el.value = (cart == null ? void 0 : cart.note) || "";
+        if (document.activeElement !== el) el.value = cart?.note || "";
       });
       qsa(document, sel("cart-discounts")).forEach((container) => {
-        repeat(container, (cart == null ? void 0 : cart.discountCodes) || [], (node, d) => {
+        repeat(container, cart?.discountCodes || [], (node, d) => {
           node.setAttribute(attr("discount-code"), d.code);
           const t = node.querySelector(sel("discount", "code")) || (node.firstElementChild ? null : node);
           if (t) setText(t, d.code);
@@ -1116,60 +1065,54 @@ ${cartFragment()}`, { id });
     }
   };
   function lineValue(line, key) {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _i;
     const m = line.merchandise || {};
-    const plan = (_a = line.sellingPlanAllocation) == null ? void 0 : _a.sellingPlan;
+    const plan = line.sellingPlanAllocation?.sellingPlan;
     switch (key) {
       case "title":
-        return (_b = m.product) == null ? void 0 : _b.title;
+        return m.product?.title;
       case "product-title":
-        return (_c = m.product) == null ? void 0 : _c.title;
+        return m.product?.title;
       case "variant-title":
         return m.title === "Default Title" ? "" : m.title;
       case "options":
         return (m.selectedOptions || []).filter((o) => o.value !== "Default Title").map((o) => `${o.name}: ${o.value}`).join(", ");
       case "vendor":
-        return (_d = m.product) == null ? void 0 : _d.vendor;
+        return m.product?.vendor;
       case "sku":
         return m.sku;
       case "price":
-        return formatMoney(((_e = line.cost) == null ? void 0 : _e.amountPerQuantity) || m.price);
+        return formatMoney(line.cost?.amountPerQuantity || m.price);
       case "compare-at-price":
-        return formatMoney(((_f = line.cost) == null ? void 0 : _f.compareAtAmountPerQuantity) || m.compareAtPrice);
+        return formatMoney(line.cost?.compareAtAmountPerQuantity || m.compareAtPrice);
       case "line-total":
-        return formatMoney((_g = line.cost) == null ? void 0 : _g.totalAmount);
+        return formatMoney(line.cost?.totalAmount);
       case "line-subtotal":
-        return formatMoney((_h = line.cost) == null ? void 0 : _h.subtotalAmount);
+        return formatMoney(line.cost?.subtotalAmount);
       case "quantity":
         return line.quantity;
       case "plan":
-        return (plan == null ? void 0 : plan.name) || "";
+        return plan?.name || "";
       case "plan-description":
-        return (plan == null ? void 0 : plan.description) || "";
+        return plan?.description || "";
       case "components":
-        return (line.lineComponents || []).map((c) => {
-          var _a2, _b2;
-          return `${c.quantity} \xD7 ${((_b2 = (_a2 = c.merchandise) == null ? void 0 : _a2.product) == null ? void 0 : _b2.title) || ""}`;
-        }).join(", ");
+        return (line.lineComponents || []).map((c) => `${c.quantity} \xD7 ${c.merchandise?.product?.title || ""}`).join(", ");
       default:
         if (key.startsWith("attribute:")) {
           const k = key.slice("attribute:".length);
-          return ((_i = (line.attributes || []).find((a) => a.key === k)) == null ? void 0 : _i.value) || "";
+          return (line.attributes || []).find((a) => a.key === k)?.value || "";
         }
         return void 0;
     }
   }
   function renderLine(node, line) {
-    var _a, _b, _c, _d;
     const m = line.merchandise || {};
     const isSub = Boolean(line.sellingPlanAllocation);
     node.setAttribute(attr("line-id"), line.id);
     node.classList.toggle("is-subscription", isSub);
     qsa(node, sel("line")).forEach((el) => {
-      var _a2, _b2, _c2, _d2, _e, _f;
       const key = get(el, "line");
-      if (key === "image") return setImage(el, ((_a2 = m.image) == null ? void 0 : _a2.url) || ((_c2 = (_b2 = m.product) == null ? void 0 : _b2.featuredImage) == null ? void 0 : _c2.url), (_d2 = m.product) == null ? void 0 : _d2.title);
-      if (key === "url") return el.setAttribute("href", productUrl((_e = m.product) == null ? void 0 : _e.handle, (_f = m.product) == null ? void 0 : _f.id));
+      if (key === "image") return setImage(el, m.image?.url || m.product?.featuredImage?.url, m.product?.title);
+      if (key === "url") return el.setAttribute("href", productUrl(m.product?.handle, m.product?.id));
       const v = lineValue(line, key);
       if (v !== void 0) setTextTracked(el, v);
       return void 0;
@@ -1177,7 +1120,7 @@ ${cartFragment()}`, { id });
     const lineConds = {
       subscription: isSub,
       "one-time": !isSub,
-      "on-sale": parseFloat((_b = (_a = line.cost) == null ? void 0 : _a.compareAtAmountPerQuantity) == null ? void 0 : _b.amount) > parseFloat((_d = (_c = line.cost) == null ? void 0 : _c.amountPerQuantity) == null ? void 0 : _d.amount),
+      "on-sale": parseFloat(line.cost?.compareAtAmountPerQuantity?.amount) > parseFloat(line.cost?.amountPerQuantity?.amount),
       "has-components": (line.lineComponents || []).length > 0
     };
     qsa(node, sel("line-show")).forEach((el) => {
@@ -1185,11 +1128,9 @@ ${cartFragment()}`, { id });
       if (k in lineConds) show(el, lineConds[k]);
     });
     qsa(node, `select${sel("line-plan")}`).forEach((select) => {
-      var _a2;
-      const handle = (_a2 = m.product) == null ? void 0 : _a2.handle;
+      const handle = m.product?.handle;
       if (!handle) return;
       getProduct(handle).then((product) => {
-        var _a3, _b2;
         const plans = allPlans(product);
         const allowOneTime = !product.requiresSellingPlan && get(select, "line-plan") !== "subscription-only";
         const want = [
@@ -1207,21 +1148,37 @@ ${cartFragment()}`, { id });
           });
           select.dataset.tetherSig = sig;
         }
-        select.value = ((_b2 = (_a3 = line.sellingPlanAllocation) == null ? void 0 : _a3.sellingPlan) == null ? void 0 : _b2.id) || "";
+        select.value = line.sellingPlanAllocation?.sellingPlan?.id || "";
         show(select, plans.length > 0);
       }).catch((err) => reportError(err, "line plan options"));
     });
   }
 
+  // src/product.js
+  var product_exports = {};
+  __export(product_exports, {
+    ProductScope: () => ProductScope,
+    scopes: () => scopes
+  });
+
   // src/status.js
+  var status_exports = {};
+  __export(status_exports, {
+    STATUS_KEYS: () => STATUS_KEYS,
+    boundary: () => boundary,
+    isNotFound: () => isNotFound,
+    ownedBy: () => ownedBy,
+    resolveProductKey: () => resolveProductKey,
+    setScopeStatus: () => setScopeStatus
+  });
   function resolveProductKey(el, location = window.location) {
     const raw = (get(el, "product") || "").trim();
     if (!raw.toLowerCase().startsWith("url:")) return { key: raw || null, fromUrl: false, raw };
     const what = raw.slice(4).trim();
     let key = null;
     if (what.toLowerCase() === "path") {
-      const parts = location.pathname.split("/").filter(Boolean);
-      key = parts.length ? safeDecode(parts[parts.length - 1]) : null;
+      const parts2 = location.pathname.split("/").filter(Boolean);
+      key = parts2.length ? safeDecode(parts2[parts2.length - 1]) : null;
     } else {
       key = new URLSearchParams(location.search).get(what || "handle");
     }
@@ -1236,16 +1193,13 @@ ${cartFragment()}`, { id });
     }
   }
   var STATUS_KEYS = ["loading", "ready", "error", "not-found"];
-  var isNotFound = (err) => (err == null ? void 0 : err.code) === "NOT_FOUND";
+  var isNotFound = (err) => err?.code === "NOT_FOUND";
   var boundary = () => ["product", "collection", "products", "recommendations"].map((n) => sel(n)).join(",");
-  var ownedBy = (el, root) => {
-    var _a;
-    return el === root || ((_a = el.parentElement) == null ? void 0 : _a.closest(boundary())) === root;
-  };
+  var ownedBy = (el, root) => el === root || el.parentElement?.closest(boundary()) === root;
   function setScopeStatus(root, status, err) {
     const notFound = status === "not-found";
     root.setAttribute(attr("state"), notFound ? "error" : status);
-    if (status === "error" || notFound) root.setAttribute(attr("error"), notFound ? "not-found" : (err == null ? void 0 : err.code) || "error");
+    if (status === "error" || notFound) root.setAttribute(attr("error"), notFound ? "not-found" : err?.code || "error");
     else root.removeAttribute(attr("error"));
     scoped(root, sel("show"), boundary()).forEach((el) => {
       const k = get(el, "show");
@@ -1259,6 +1213,7 @@ ${cartFragment()}`, { id });
     if (status === "error" || notFound) {
       scoped(root, sel("add-to-cart"), boundary()).forEach((btn) => {
         btn.classList.add("is-disabled");
+        btn.setAttribute("aria-disabled", "true");
         if ("disabled" in btn) btn.disabled = true;
       });
     }
@@ -1276,12 +1231,11 @@ ${cartFragment()}`, { id });
   }
   var ProductScope = class {
     constructor(root, product) {
-      var _a;
       this.root = root;
       this.product = product;
       this.selected = {};
       this.variant = null;
-      this.quantity = Math.max(0, parseInt((_a = get(root, "quantity")) != null ? _a : "1", 10) || (has(root, "quantity") ? 0 : 1));
+      this.quantity = Math.max(0, parseInt(get(root, "quantity") ?? "1", 10) || (has(root, "quantity") ? 0 : 1));
       this.plans = allPlans(product);
       this.purchase = "one-time";
       this.planId = null;
@@ -1299,11 +1253,10 @@ ${cartFragment()}`, { id });
     }
     /** New data for the same product (e.g. after a country switch). Keeps the selection. */
     update(product) {
-      var _a, _b;
-      const variantId = (_a = this.variant) == null ? void 0 : _a.id;
+      const variantId = this.variant?.id;
       this.product = product;
       this.plans = allPlans(product);
-      if (this.planId && !this.plans.some((p) => p.id === this.planId)) this.planId = ((_b = this.plans[0]) == null ? void 0 : _b.id) || null;
+      if (this.planId && !this.plans.some((p) => p.id === this.planId)) this.planId = this.plans[0]?.id || null;
       if (!this.plans.length && this.purchase === "subscription") this.purchase = "one-time";
       const v = product.variants.nodes.find((x) => x.id === variantId);
       if (v) {
@@ -1425,8 +1378,7 @@ ${cartFragment()}`, { id });
       this.renderVariant();
     }
     async addToCart() {
-      var _a;
-      if (!((_a = this.variant) == null ? void 0 : _a.availableForSale)) return null;
+      if (!this.variant?.availableForSale) return null;
       const line = this.getLine();
       if (!line || line.quantity < 1) return null;
       const cart = await Cart.add(line);
@@ -1438,7 +1390,7 @@ ${cartFragment()}`, { id });
       const own = (el) => el && el.closest(productSel()) === this.root;
       this.root.addEventListener("click", (e) => {
         const t = e.target;
-        if (!(t == null ? void 0 : t.closest)) return;
+        if (!t?.closest) return;
         const opt = t.closest(sel("option-value"));
         if (own(opt) && opt.closest(sel("option-list"))) {
           e.preventDefault();
@@ -1510,22 +1462,19 @@ ${cartFragment()}`, { id });
     renderProduct() {
       const p = this.product;
       this.$(sel("bind")).forEach((el) => {
-        var _a, _b, _c;
-        const key = get(el, "bind");
+        const key = get(el, "bind") || "";
+        const txt = {
+          title: p.title,
+          "description-text": p.description,
+          vendor: p.vendor,
+          type: p.productType,
+          handle: p.handle
+        }[key];
+        if (txt !== void 0) return setText(el, txt);
         switch (key) {
-          case "title":
-            return setText(el, p.title);
           case "description":
             el.innerHTML = p.descriptionHtml || "";
             return void 0;
-          case "description-text":
-            return setText(el, p.description);
-          case "vendor":
-            return setText(el, p.vendor);
-          case "type":
-            return setText(el, p.productType);
-          case "handle":
-            return setText(el, p.handle);
           case "published-at":
             return setText(el, formatDate(p.publishedAt));
           case "min-price":
@@ -1533,7 +1482,7 @@ ${cartFragment()}`, { id });
           case "max-price":
             return setText(el, formatMoney(p.priceRange.maxVariantPrice));
           case "featured-image":
-            return setImage(el, (_a = p.featuredImage) == null ? void 0 : _a.url, ((_b = p.featuredImage) == null ? void 0 : _b.altText) || p.title);
+            return setImage(el, p.featuredImage?.url, p.featuredImage?.altText || p.title);
           case "url":
           case "link":
             el.setAttribute("href", productUrl(p.handle, p.id));
@@ -1549,19 +1498,15 @@ ${cartFragment()}`, { id });
             return repeat(el, p.tags.filter((t) => !exclude.includes(t)), (node, tag) => setText(node, tag));
           }
           default:
-            if (key && /^image:\d+$/.test(key)) {
-              const img = p.images.nodes[parseInt(key.slice(6), 10) - 1] || p.featuredImage;
-              return setImage(el, img == null ? void 0 : img.url, (img == null ? void 0 : img.altText) || p.title);
+            if (/^image:\d+$/.test(key)) {
+              const img = p.images.nodes[key.slice(6) - 1] || p.featuredImage;
+              return setImage(el, img?.url, img?.altText || p.title);
             }
-            if (key && key.startsWith("metafield:")) {
-              const mf = metafieldValue(p, key.slice("metafield:".length));
+            if (key.startsWith("metafield:")) {
+              const mf = metafieldValue(p, key.slice(10));
               if (!mf) return setText(el, "");
-              if ((_c = mf.reference) == null ? void 0 : _c.image) return setImage(el, mf.reference.image.url, mf.reference.image.altText);
-              if (mf.type === "rich_text_field" || mf.type === "multi_line_text_field") {
-                el.textContent = mf.value;
-                el.style.whiteSpace = "pre-line";
-                return void 0;
-              }
+              if (mf.reference?.image) return setImage(el, mf.reference.image.url, mf.reference.image.altText);
+              if (/^(rich_text|multi_line_text)_field$/.test(mf.type)) el.style.whiteSpace = "pre-line";
               return setText(el, mf.value);
             }
             return void 0;
@@ -1572,14 +1517,13 @@ ${cartFragment()}`, { id });
         const opt = p.options.find((o) => o.name === name);
         if (!opt || opt.optionValues.length <= 1 && has(container, "hide-single")) return show(container, false);
         return repeat(container, opt.optionValues, (node, v) => {
-          var _a, _b, _c;
           node.setAttribute(attr("option-value"), v.name);
           const t = node.querySelector(sel("bind", "option-value"));
           if (t) setText(t, v.name);
           else if (!node.firstElementChild) setText(node, v.name);
           const sw = node.querySelector(sel("bind", "swatch"));
-          if (sw && ((_a = v.swatch) == null ? void 0 : _a.color)) sw.style.backgroundColor = v.swatch.color;
-          if (sw && ((_c = (_b = v.swatch) == null ? void 0 : _b.image) == null ? void 0 : _c.previewImage)) setImage(sw, v.swatch.image.previewImage.url, v.name);
+          if (sw && v.swatch?.color) sw.style.backgroundColor = v.swatch.color;
+          if (sw && v.swatch?.image?.previewImage) setImage(sw, v.swatch.image.previewImage.url, v.name);
         });
       });
       this.$(`select${sel("option")}`).forEach((s) => {
@@ -1611,7 +1555,6 @@ ${cartFragment()}`, { id });
       });
     }
     renderVariant() {
-      var _a, _b, _c;
       const p = this.product;
       let v = this.findVariant();
       if (!v) {
@@ -1633,63 +1576,40 @@ ${cartFragment()}`, { id });
       const oneTimePrice = v.price;
       const subPrice = this.planId ? planPrice(v, this.planId) : null;
       const price = sub ? subPrice : oneTimePrice;
-      const compareAt = sub ? ((_c = (_b = (_a = allocationFor(v, this.planId)) == null ? void 0 : _a.priceAdjustments) == null ? void 0 : _b[0]) == null ? void 0 : _c.compareAtPrice) || v.compareAtPrice : v.compareAtPrice;
+      const compareAt = sub ? allocationFor(v, this.planId)?.priceAdjustments?.[0]?.compareAtPrice || v.compareAtPrice : v.compareAtPrice;
       const onSale = compareAt && parseFloat(compareAt.amount) > parseFloat(price.amount);
       const discountPct = onSale ? Math.round((1 - parseFloat(price.amount) / parseFloat(compareAt.amount)) * 100) : 0;
       const savings = this.planId ? planSavings(v, this.planId) : { amount: null, percentage: 0 };
       const plan = this.plan;
       const total = { amount: (parseFloat(price.amount) * Math.max(1, this.quantity)).toFixed(2), currencyCode: price.currencyCode };
+      const fm = formatMoney;
+      const pct = (n) => n ? `${n}%` : "";
+      const text = {
+        price: () => fm(price),
+        "total-price": () => fm(total),
+        "one-time-price": () => fm(oneTimePrice),
+        "subscription-price": () => fm(subPrice),
+        "subscription-savings": () => pct(savings.percentage),
+        "subscription-savings-amount": () => fm(savings.amount),
+        "checkout-charge": () => fm(sub ? planCheckoutCharge(v, this.planId) : price),
+        "plan-name": () => plan?.name,
+        "plan-description": () => plan?.description,
+        "plan-group": () => plan?.group?.name,
+        "compare-at-price": () => onSale ? fm(compareAt) : "",
+        "unit-price": () => fm(v.unitPrice),
+        "discount-percentage": () => `${discountPct}%`,
+        "discount-amount": () => onSale ? fm({ amount: String(parseFloat(compareAt.amount) - parseFloat(price.amount)), currencyCode: price.currencyCode }) : "",
+        "variant-title": () => v.title,
+        "variant-id": () => v.id,
+        sku: () => v.sku,
+        barcode: () => v.barcode,
+        stock: () => v.quantityAvailable,
+        quantity: () => this.quantity
+      };
       this.$(sel("bind")).forEach((el) => {
-        var _a2, _b2, _c2, _d, _e;
-        switch (get(el, "bind")) {
-          case "price":
-            return setText(el, formatMoney(price));
-          case "total-price":
-            return setText(el, formatMoney(total));
-          case "one-time-price":
-            return setText(el, formatMoney(oneTimePrice));
-          case "subscription-price":
-            return setText(el, formatMoney(subPrice));
-          case "subscription-savings":
-            return setText(el, savings.percentage ? `${savings.percentage}%` : "");
-          case "subscription-savings-amount":
-            return setText(el, formatMoney(savings.amount));
-          case "checkout-charge":
-            return setText(el, formatMoney(sub ? planCheckoutCharge(v, this.planId) : price));
-          case "plan-name":
-            return setText(el, (plan == null ? void 0 : plan.name) || "");
-          case "plan-description":
-            return setText(el, (plan == null ? void 0 : plan.description) || "");
-          case "plan-group":
-            return setText(el, ((_a2 = plan == null ? void 0 : plan.group) == null ? void 0 : _a2.name) || "");
-          case "compare-at-price":
-            return setText(el, onSale ? formatMoney(compareAt) : "");
-          case "unit-price":
-            return setText(el, formatMoney(v.unitPrice));
-          case "discount-percentage":
-            return setText(el, `${discountPct}%`);
-          case "discount-amount":
-            return setText(el, onSale ? formatMoney({
-              amount: String(parseFloat(compareAt.amount) - parseFloat(price.amount)),
-              currencyCode: price.currencyCode
-            }) : "");
-          case "variant-title":
-            return setText(el, v.title);
-          case "variant-id":
-            return setText(el, v.id);
-          case "sku":
-            return setText(el, v.sku);
-          case "barcode":
-            return setText(el, v.barcode);
-          case "stock":
-            return setText(el, (_b2 = v.quantityAvailable) != null ? _b2 : "");
-          case "quantity":
-            return setText(el, this.quantity);
-          case "variant-image":
-            return setImage(el, ((_c2 = v.image) == null ? void 0 : _c2.url) || ((_d = p.featuredImage) == null ? void 0 : _d.url), ((_e = v.image) == null ? void 0 : _e.altText) || p.title);
-          default:
-            return void 0;
-        }
+        const k = get(el, "bind");
+        if (k === "variant-image") setImage(el, v.image?.url || p.featuredImage?.url, v.image?.altText || p.title);
+        else if (text[k]) setText(el, text[k]());
       });
       this.$(sel("option-selected")).forEach((el) => setText(el, this.selected[get(el, "option-selected")] || ""));
       this.$(sel("option-list")).forEach((container) => {
@@ -1727,23 +1647,16 @@ ${cartFragment()}`, { id });
         qsa(node, sel("plan-bind")).forEach((el) => {
           const adj = planAdjustment(planObj);
           const s = planSavings(v, id);
-          switch (get(el, "plan-bind")) {
-            case "name":
-              return setText(el, planObj == null ? void 0 : planObj.name);
-            case "description":
-              return setText(el, (planObj == null ? void 0 : planObj.description) || "");
-            case "price":
-              return setText(el, formatMoney(planPrice(v, id)));
-            case "savings":
-              return setText(el, s.percentage ? `${s.percentage}%` : "");
-            case "savings-amount":
-              return setText(el, formatMoney(s.amount));
-            case "adjustment":
-              if (!adj) return setText(el, "");
-              return setText(el, adj.type === "percentage" ? `${adj.value}%` : formatMoney(adj.value));
-            default:
-              return void 0;
-          }
+          const k = get(el, "plan-bind");
+          const val = {
+            name: () => planObj?.name,
+            description: () => planObj?.description,
+            price: () => fm(planPrice(v, id)),
+            savings: () => pct(s.percentage),
+            "savings-amount": () => fm(s.amount),
+            adjustment: () => !adj ? "" : adj.type === "percentage" ? `${adj.value}%` : fm(adj.value)
+          }[k];
+          if (val) setText(el, val());
         });
       });
       this.$(`select${sel("plan")}`).forEach((s) => {
@@ -1782,16 +1695,17 @@ ${cartFragment()}`, { id });
       this.$(sel("add-to-cart")).forEach((btn) => {
         const disabled = !v.availableForSale;
         btn.classList.toggle("is-disabled", disabled);
+        btn.setAttribute("aria-disabled", String(disabled));
         if ("disabled" in btn) btn.disabled = disabled;
         const soldOut = get(btn, "soldout-text");
         const subText = get(btn, "subscribe-text");
         if (soldOut || subText) {
           const label = btn.querySelector(sel("add-label")) || btn;
           if (label.dataset.tetherLabel === void 0) label.dataset.tetherLabel = label.tagName === "INPUT" ? label.value : label.textContent;
-          let text = label.dataset.tetherLabel;
-          if (sub && subText) text = subText;
-          if (disabled && soldOut) text = soldOut;
-          if (btn.getAttribute("aria-busy") !== "true") setText(label, text);
+          let text2 = label.dataset.tetherLabel;
+          if (sub && subText) text2 = subText;
+          if (disabled && soldOut) text2 = soldOut;
+          if (btn.getAttribute("aria-busy") !== "true") setText(label, text2);
         }
       });
       emit("variant-changed", {
@@ -1805,6 +1719,11 @@ ${cartFragment()}`, { id });
   };
 
   // src/collection.js
+  var collection_exports = {};
+  __export(collection_exports, {
+    ListScope: () => ListScope,
+    listSelector: () => listSelector
+  });
   var listSelector = () => `${sel("collection")},${sel("products")},${sel("recommendations")}`;
   var ListScope = class {
     constructor(root) {
@@ -1814,8 +1733,7 @@ ${cartFragment()}`, { id });
       this.collection = null;
       setScopeStatus(root, "loading");
       root.addEventListener("click", (e) => {
-        var _a, _b;
-        const more = (_b = (_a = e.target).closest) == null ? void 0 : _b.call(_a, sel("load-more"));
+        const more = e.target.closest?.(sel("load-more"));
         if (more && more.closest(listSelector()) === root) {
           e.preventDefault();
           busy(more, () => this.load(true));
@@ -1837,7 +1755,6 @@ ${cartFragment()}`, { id });
       return opts;
     }
     async load(more = false) {
-      var _a;
       const token = this.loadToken = (this.loadToken || 0) + 1;
       const stale = () => token !== this.loadToken;
       try {
@@ -1849,7 +1766,7 @@ ${cartFragment()}`, { id });
           const limit = parseInt(get(this.root, "limit") || "", 10);
           this.products = limit ? recs.slice(0, limit) : recs;
         } else {
-          const res = await getProducts({ ...this.options(), after: more ? (_a = this.pageInfo) == null ? void 0 : _a.endCursor : null });
+          const res = await getProducts({ ...this.options(), after: more ? this.pageInfo?.endCursor : null });
           if (stale()) return;
           this.collection = res.collection;
           this.pageInfo = res.pageInfo;
@@ -1868,15 +1785,14 @@ ${cartFragment()}`, { id });
     render() {
       const c = this.collection;
       this.$(sel("collection-bind")).forEach((el) => {
-        var _a, _b;
         switch (get(el, "collection-bind")) {
           case "title":
-            return setText(el, (c == null ? void 0 : c.title) || "");
+            return setText(el, c?.title || "");
           case "description":
-            el.innerHTML = (c == null ? void 0 : c.descriptionHtml) || "";
+            el.innerHTML = c?.descriptionHtml || "";
             return void 0;
           case "image":
-            return setImage(el, (_a = c == null ? void 0 : c.image) == null ? void 0 : _a.url, ((_b = c == null ? void 0 : c.image) == null ? void 0 : _b.altText) || (c == null ? void 0 : c.title));
+            return setImage(el, c?.image?.url, c?.image?.altText || c?.title);
           case "count":
             return setText(el, this.products.length);
           default:
@@ -1897,330 +1813,24 @@ ${cartFragment()}`, { id });
         if (k === "list-filled") el.style.display = empty ? "none" : "";
       });
       this.$(sel("load-more")).forEach((el) => {
-        var _a;
-        el.style.display = ((_a = this.pageInfo) == null ? void 0 : _a.hasNextPage) ? "" : "none";
+        el.style.display = this.pageInfo?.hasNextPage ? "" : "none";
       });
       notifyLayoutChanged("list");
     }
   };
 
-  // src/api-version.js
-  var parse = (v) => {
-    const m = /^(\d{4})-(01|04|07|10)$/.exec(String(v || ""));
-    return m ? { y: +m[1], m: +m[2] } : null;
-  };
-  var fmt = (y, m) => `${y}-${String(m).padStart(2, "0")}`;
-  function nextApiVersion(v, steps = 1) {
-    const p = parse(v);
-    if (!p) throw new Error(`not a quarterly Shopify API version: ${v}`);
-    const q = p.y * 4 + (p.m - 1) / 3 + steps;
-    return fmt(Math.floor(q / 4), q % 4 * 3 + 1);
-  }
-  function apiVersionStatus(version, now = /* @__PURE__ */ new Date()) {
-    if (version === "unstable") return { version, ok: false, note: '"unstable" changes without notice: pin a dated version such as 2026-07' };
-    const p = parse(version);
-    if (!p) return { version, ok: false, note: "not a quarterly version (YYYY-01, -04, -07 or -10)" };
-    const released = new Date(Date.UTC(p.y, p.m - 1, 1));
-    const supportedUntil = new Date(Date.UTC(p.y + 1, p.m - 1, 1));
-    const monthsLeft = (supportedUntil - now) / (30.44 * 24 * 3600 * 1e3);
-    let note = `supported until about ${supportedUntil.toISOString().slice(0, 7)}`;
-    if (released > now) note = "not released yet (release candidate at best)";
-    else if (monthsLeft <= 0) note = "no longer supported: Shopify falls back to the oldest supported version. Upgrade (see README)";
-    else if (monthsLeft < 3) note = `${note}: plan the upgrade to ${nextApiVersion(version)} or later (see README)`;
-    return { version, ok: released <= now && monthsLeft > 0, monthsLeft: Math.round(monthsLeft), next: nextApiVersion(version), note };
-  }
-
-  // src/markets.js
-  var COUNTRY = /^[A-Z]{2}$/;
-  var REGIONAL_LANGUAGES = /* @__PURE__ */ new Set(["PT_BR", "PT_PT", "ZH_CN", "ZH_TW"]);
-  var storageKey = () => `${cfg.prefix}:market:${cfg.domain}`;
-  var defaultEnv = () => ({
-    document: typeof document !== "undefined" ? document : null,
-    location: typeof window !== "undefined" ? window.location : null,
-    storage: (() => {
-      try {
-        return window.localStorage;
-      } catch {
-        return null;
-      }
-    })(),
-    global: typeof window !== "undefined" ? window : {}
+  // src/mounting.js
+  var mounting_exports = {};
+  __export(mounting_exports, {
+    liveLists: () => liveLists,
+    liveProducts: () => liveProducts,
+    mountProduct: () => mountProduct,
+    mountedLists: () => mountedLists,
+    mountedProducts: () => mountedProducts,
+    pruneLive: () => pruneLive,
+    retryFailed: () => retryFailed,
+    within: () => within
   });
-  function toCountry(v) {
-    const c = String(v || "").trim().toUpperCase();
-    return COUNTRY.test(c) && c !== "XX" && c !== "T1" ? c : null;
-  }
-  function toLanguage(v) {
-    const raw = String(v || "").trim().replace("-", "_").toUpperCase();
-    if (!raw) return null;
-    if (REGIONAL_LANGUAGES.has(raw)) return raw;
-    const primary = raw.split("_")[0];
-    return /^[A-Z]{2,3}$/.test(primary) ? primary : null;
-  }
-  function readCookie(doc, name) {
-    if (!doc || !name) return null;
-    const hit = String(doc.cookie || "").split(";").map((c) => c.trim()).find((c) => c.startsWith(`${name}=`));
-    return hit ? decodeURIComponent(hit.slice(name.length + 1)) : null;
-  }
-  var lookup = (locales, key) => {
-    if (!locales || !key) return null;
-    const k = String(key).toLowerCase();
-    const found = Object.keys(locales).find((x) => x.toLowerCase() === k);
-    return found ? locales[found] : null;
-  };
-  var readers = {
-    saved(m, env) {
-      if (m.remember === false || !env.storage) return null;
-      try {
-        return JSON.parse(env.storage.getItem(storageKey()) || "null");
-      } catch {
-        return null;
-      }
-    },
-    server(m, env) {
-      const meta = (name) => {
-        var _a, _b, _c;
-        return (_c = (_b = (_a = env.document) == null ? void 0 : _a.querySelector) == null ? void 0 : _b.call(_a, `meta[name="${name}"]`)) == null ? void 0 : _c.getAttribute("content");
-      };
-      const country = env.global.TETHER_COUNTRY || meta("tether-country") || readCookie(env.document, m.cookie || "tether_country");
-      const language = env.global.TETHER_LANGUAGE || meta("tether-language");
-      return { country, language };
-    },
-    webflow(m, env) {
-      var _a, _b, _c;
-      const segment = (((_a = env.location) == null ? void 0 : _a.pathname) || "/").split("/").filter(Boolean)[0];
-      const fromPath = lookup(m.locales, segment);
-      if (fromPath) return fromPath;
-      const lang = (_c = (_b = env.document) == null ? void 0 : _b.documentElement) == null ? void 0 : _c.getAttribute("lang");
-      if (!lang) return null;
-      const mapped = lookup(m.locales, lang) || lookup(m.locales, lang.split("-")[0]);
-      if (mapped) return { locale: lang, ...mapped };
-      if (m.locales && m.strict) return null;
-      const region = lang.split("-")[1];
-      return { language: lang, country: region && region.length === 2 ? region : null, locale: lang };
-    }
-  };
-  function detectMarket(markets = cfg.markets, env = defaultEnv()) {
-    const m = markets || {};
-    if (m.detect === false) return {};
-    const list = !m.detect ? ["saved"] : m.detect === true ? ["saved", "server", "webflow"] : [].concat(m.detect);
-    markets = m;
-    const out = { sources: {} };
-    list.forEach((name) => {
-      var _a;
-      const r = (_a = readers[name]) == null ? void 0 : _a.call(readers, markets, env);
-      if (!r) return;
-      const vals = { country: toCountry(r.country), language: toLanguage(r.language), locale: r.locale || null };
-      Object.entries(vals).forEach(([k, v]) => {
-        if (v && !out[k]) {
-          out[k] = v;
-          out.sources[k] = name;
-        }
-      });
-    });
-    return out;
-  }
-  function rememberMarket(market) {
-    var _a;
-    if (((_a = cfg.markets) == null ? void 0 : _a.remember) === false) return;
-    try {
-      localStorage.setItem(storageKey(), JSON.stringify({ country: market.country, language: market.language || void 0 }));
-    } catch {
-    }
-  }
-  var localizationPromise = null;
-  function clearLocalization() {
-    localizationPromise = null;
-  }
-  function getLocalization() {
-    if (!localizationPromise) {
-      localizationPromise = gql(`query TetherLocalization {
-  localization {
-    country { isoCode name currency { isoCode symbol } }
-    language { isoCode name }
-    availableCountries { isoCode name currency { isoCode symbol } availableLanguages { isoCode name } }
-  }
-}`).then((d) => d.localization).catch((err) => {
-        localizationPromise = null;
-        throw err;
-      });
-    }
-    return localizationPromise;
-  }
-
-  // src/diagnose.js
-  var mask = (t) => t ? `${String(t).slice(0, 4)}\u2026${String(t).slice(-4)} (${String(t).length} chars)` : "(missing)";
-  function describe(el) {
-    const id = el.id ? `#${el.id}` : "";
-    const cls = el.className && typeof el.className === "string" ? `.${el.className.trim().split(/\s+/).slice(0, 2).join(".")}` : "";
-    return `<${el.tagName.toLowerCase()}${id}${cls}>`;
-  }
-  function checkMarkup(root = document) {
-    const problems = [];
-    const add = (level, message, el) => problems.push({ level, message, element: el ? describe(el) : void 0, el });
-    const inProduct = (el) => Boolean(el.closest(sel("product")));
-    const listSel = `${sel("collection")},${sel("products")},${sel("recommendations")}`;
-    qsa(root, sel("product")).forEach((el) => {
-      if (el.closest(listSel) && el.closest(sel("list"))) return;
-      const { key, fromUrl, raw } = resolveProductKey(el);
-      if (!raw) add("error", `${attr("product")} has no value. Bind it to the Shopify handle (CMS field), or use "url:handle".`, el);
-      else if (fromUrl && !key) add("warn", `${attr("product")}="${raw}" but this URL has no value for it (e.g. ?handle=my-product).`, el);
-    });
-    const productOnly = ["bind", "option-list", "option", "variant-select", "add-to-cart", "purchase", "plan-list", "plan", "qty", "line-attribute"];
-    productOnly.forEach((name) => {
-      qsa(root, sel(name)).forEach((el) => {
-        if (inProduct(el)) return;
-        if (name === "line-attribute" && el.closest(sel("group"))) return;
-        add("warn", `${attr(name)} outside any ${attr("product")}: it does nothing here.`, el);
-      });
-    });
-    qsa(root, sel("group-add")).forEach((el) => {
-      if (!el.closest(sel("group"))) add("warn", `${attr("group-add")} outside a ${attr("group")}.`, el);
-    });
-    [...qsa(root, sel("option-list")), ...qsa(root, sel("plan-list")), ...qsa(root, sel("cart-lines")), ...qsa(root, sel("list"))].forEach((el) => {
-      if (!el.firstElementChild && !hasTemplate(el)) {
-        add("warn", "Repeater without a template child: put one example element inside it.", el);
-      }
-    });
-    qsa(root, listSel).forEach((el) => {
-      if (!qsa(el, sel("list")).length) add("error", `List without a ${attr("list")} child: products have nowhere to render.`, el);
-    });
-    const known = /* @__PURE__ */ new Set([
-      "in-stock",
-      "out-of-stock",
-      "backorder",
-      "low-stock",
-      "on-sale",
-      "not-on-sale",
-      "has-variants",
-      "single-variant",
-      "subscription-available",
-      "subscription-unavailable",
-      "subscription-only",
-      "one-time-available",
-      "subscription-selected",
-      "one-time-selected",
-      "has-savings",
-      "loading",
-      "ready",
-      "error",
-      "not-found",
-      "cart-empty",
-      "cart-filled",
-      "cart-has-subscription",
-      "cart-no-subscription",
-      "cart-has-discount",
-      "cart-error",
-      "list-empty",
-      "list-filled"
-    ]);
-    qsa(root, sel("show")).forEach((el) => {
-      const k = get(el, "show");
-      if (!known.has(k)) add("warn", `Unknown ${attr("show")}="${k}".`, el);
-    });
-    qsa(root, sel("bind")).forEach((el) => {
-      const k = get(el, "bind") || "";
-      if (!k.startsWith("metafield:")) return;
-      const ref = k.slice(10);
-      const listed = (cfg.metafields || []).some((m) => (typeof m === "string" ? m : `${m.namespace}.${m.key}`) === ref);
-      if (!listed) add("error", `${attr("bind")}="${k}" but "${ref}" is not in config.metafields, so it stays empty.`, el);
-    });
-    if (qsa(root, sel("cart-open")).length && !qsa(root, sel("cart-drawer")).length) {
-      add("warn", `${attr("cart-open")} exists but there is no ${attr("cart-drawer")} on this page.`);
-    }
-    if (qsa(root, sel("cart-drawer")).length > 1) add("warn", `More than one ${attr("cart-drawer")}.`);
-    qsa(root, `[${attr("state")}="error"]`).forEach((el) => {
-      if (el.matches(boundary())) add("error", `Scope failed to load (${get(el, "error") || "error"}).`, el);
-    });
-    return problems;
-  }
-  async function diagnose({ root = document, silent = false, version, now = /* @__PURE__ */ new Date() } = {}) {
-    var _a, _b, _c, _d, _e, _f, _g;
-    const report = {
-      version,
-      config: {
-        domain: cfg.domain || "(missing)",
-        token: mask(cfg.token),
-        apiVersion: cfg.apiVersion,
-        endpoint: cfg.domain ? endpoint() : null,
-        country: cfg.country,
-        language: cfg.language,
-        locale: cfg.locale,
-        markets: cfg.markets || null,
-        prefix: cfg.prefix,
-        productPath: cfg.productPath,
-        metafields: cfg.metafields,
-        autoMount: cfg.autoMount,
-        observe: cfg.observe,
-        onError: typeof cfg.onError === "function"
-      },
-      apiVersion: apiVersionStatus(cfg.apiVersion, now),
-      market: ((_a = cfg.markets) == null ? void 0 : _a.detect) ? detectMarket(cfg.markets) : null,
-      reachable: false,
-      shop: null,
-      latencyMs: null,
-      products: [],
-      sellingPlans: [],
-      problems: []
-    };
-    if (!isConfigured()) {
-      report.problems.push({ level: "error", message: "TETHER_CONFIG needs domain and token." });
-    } else {
-      const t0 = Date.now();
-      try {
-        const data = await gql("query TetherDiagnose { shop { name primaryDomain { url } paymentSettings { currencyCode } } }", {}, { context: false });
-        report.reachable = true;
-        report.shop = { name: (_b = data.shop) == null ? void 0 : _b.name, url: (_d = (_c = data.shop) == null ? void 0 : _c.primaryDomain) == null ? void 0 : _d.url, currency: (_f = (_e = data.shop) == null ? void 0 : _e.paymentSettings) == null ? void 0 : _f.currencyCode };
-      } catch (err) {
-        const hint = err.status === 401 || err.status === 403 ? "Token rejected: use the public Storefront token from the Headless channel, not an Admin token." : err.status === 404 ? "Store or API version not found: check domain (x.myshopify.com) and apiVersion." : "";
-        report.problems.push({ level: "error", message: `Storefront API not reachable: ${err.message}${hint ? `. ${hint}` : ""}` });
-      }
-      report.latencyMs = Date.now() - t0;
-      if (report.reachable) {
-        const keys = [...new Set(qsa(root, sel("product")).map((el) => resolveProductKey(el).key).filter(Boolean))].slice(0, 20);
-        const results = await Promise.allSettled(keys.map((k) => getProduct(k)));
-        results.forEach((r, i) => {
-          var _a2, _b2;
-          if (r.status === "fulfilled") {
-            const p = r.value;
-            const plans = allPlans(p);
-            report.products.push({ key: keys[i], handle: p.handle, title: p.title, plans: plans.length, requiresSellingPlan: p.requiresSellingPlan });
-            plans.forEach((pl) => {
-              var _a3;
-              return report.sellingPlans.push({ product: p.handle, group: (_a3 = pl.group) == null ? void 0 : _a3.name, plan: pl.name, id: pl.id });
-            });
-          } else {
-            report.products.push({ key: keys[i], error: (_a2 = r.reason) == null ? void 0 : _a2.message });
-            report.problems.push({ level: "error", message: `Product "${keys[i]}": ${(_b2 = r.reason) == null ? void 0 : _b2.message}. Is it published to the Headless channel?` });
-          }
-        });
-      }
-    }
-    if (!report.apiVersion.ok || ((_g = report.apiVersion.monthsLeft) != null ? _g : 99) < 3) {
-      report.problems.push({ level: report.apiVersion.ok ? "warn" : "error", message: `apiVersion ${cfg.apiVersion}: ${report.apiVersion.note}` });
-    }
-    if (typeof document !== "undefined") report.problems.push(...checkMarkup(root));
-    if (!silent) print(report);
-    return report;
-  }
-  function print(r) {
-    var _a, _b, _c;
-    const c = console;
-    const errors = r.problems.filter((p) => p.level === "error").length;
-    (_a = c.group) == null ? void 0 : _a.call(c, `[${cfg.prefix}] diagnose: ${errors ? `${errors} error(s)` : "no errors"}, ${r.problems.length - errors} warning(s)`);
-    c.log("version", r.version, "| API", r.apiVersion.version, `(${r.apiVersion.note})`);
-    c.log("config", r.config);
-    if (r.market) c.log("market detected", r.market, "(in use:", r.config.country, r.config.language, ")");
-    c.log(r.reachable ? `Storefront API reachable: ${(_b = r.shop) == null ? void 0 : _b.name} (${r.latencyMs} ms)` : "Storefront API NOT reachable");
-    if (r.products.length) (c.table || c.log)(r.products);
-    if (r.sellingPlans.length) (c.table || c.log)(r.sellingPlans);
-    else if (r.reachable) c.log("No selling plans on the products of this page.");
-    r.problems.forEach((p) => (p.level === "error" ? c.error : c.warn)(p.message, p.el || ""));
-    (_c = c.groupEnd) == null ? void 0 : _c.call(c);
-  }
-
-  // src/index.js
-  var VERSION = "0.3.6";
   var mountedProducts = /* @__PURE__ */ new WeakSet();
   var mountedLists = /* @__PURE__ */ new WeakSet();
   var liveProducts = /* @__PURE__ */ new Set();
@@ -2234,35 +1844,8 @@ ${cartFragment()}`, { id });
       if (!l.root.isConnected) liveLists.delete(l);
     });
   }
-  var initPromise = null;
-  var observer = null;
   function within(root, selector) {
-    var _a;
-    return [...((_a = root.matches) == null ? void 0 : _a.call(root, selector)) ? [root] : [], ...qsa(root, selector)];
-  }
-  function mount(root = document) {
-    if (!isConfigured()) return 0;
-    let count = 0;
-    pruneLive();
-    within(root, listSelector()).forEach((el) => {
-      if (mountedLists.has(el)) return;
-      mountedLists.add(el);
-      count++;
-      const list = new ListScope(el);
-      liveLists.add(list);
-      el.addEventListener(`${cfg.prefix}:list-rendered`, (e) => mount(e.detail.container));
-      list.load();
-    });
-    within(root, sel("product")).forEach((el) => {
-      if (mountProduct(el)) count++;
-    });
-    renderCountrySelects(root);
-    qsa(root, sel("account-link")).forEach((a) => {
-      a.setAttribute("href", `https://${cfg.domain}/account`);
-    });
-    Cart.render();
-    log(`mounted ${count} scope(s)`, root);
-    return count;
+    return [...root.matches?.(selector) ? [root] : [], ...qsa(root, selector)];
   }
   function mountProduct(el) {
     if (mountedProducts.has(el)) return false;
@@ -2305,74 +1888,91 @@ ${cartFragment()}`, { id });
     });
     return true;
   }
-  function renderCountrySelects(root = document) {
-    const selects = within(root, `select${sel("country-select")}`);
-    const binds = within(root, sel("country-bind"));
-    if (!selects.length && !binds.length) return Promise.resolve();
-    return getLocalization().then((loc) => {
-      var _a;
-      const current = (cfg.country || ((_a = loc.country) == null ? void 0 : _a.isoCode) || "").toUpperCase();
-      const countries = [...loc.availableCountries || []].sort((a, b) => a.name.localeCompare(b.name, cfg.locale || void 0));
-      const info = countries.find((c) => c.isoCode === current) || loc.country;
-      const fill = (tpl, c) => {
-        var _a2, _b;
-        return tpl.replace(/\{name\}/g, c.name).replace(/\{code\}/g, c.isoCode).replace(/\{currency\}/g, ((_a2 = c.currency) == null ? void 0 : _a2.isoCode) || "").replace(/\{symbol\}/g, ((_b = c.currency) == null ? void 0 : _b.symbol) || "");
-      };
-      selects.forEach((s) => {
-        const tpl = s.getAttribute(attr("country-label")) || "{name} ({currency})";
-        s.innerHTML = "";
-        countries.forEach((c) => s.appendChild(new Option(fill(tpl, c), c.isoCode)));
-        s.value = current;
-        if (s.value !== current) s.selectedIndex = -1;
-        s.disabled = countries.length < 2 && !s.hasAttribute(attr("always-enabled"));
-      });
-      binds.forEach((el) => {
-        var _a2, _b;
-        const k = get(el, "country-bind") || "name";
-        const v = { name: info == null ? void 0 : info.name, code: info == null ? void 0 : info.isoCode, currency: (_a2 = info == null ? void 0 : info.currency) == null ? void 0 : _a2.isoCode, symbol: (_b = info == null ? void 0 : info.currency) == null ? void 0 : _b.symbol }[k];
-        el.textContent = v || "";
-      });
-    }).catch((err) => reportError(err, "country select"));
-  }
-  async function setCountry(code, { language, remember = true } = {}) {
-    const country = toCountry(code);
-    if (!country) throw new TetherError(`Not a country code: ${code}`, { code: "INVALID_COUNTRY" });
-    const lang = language === void 0 ? cfg.language : toLanguage(language);
-    const changed = country !== String(cfg.country || "").toUpperCase() || lang !== cfg.language;
-    cfg.country = country;
-    cfg.language = lang || void 0;
-    if (remember) rememberMarket({ country, language: lang });
-    if (!changed) {
-      renderCountrySelects();
-      return Cart.state;
-    }
-    clearProductCache();
-    const jobs = [];
-    if (language !== void 0) clearLocalization();
-    if (Cart.id()) jobs.push(Cart.setBuyerIdentity({ countryCode: country }, { create: false }).catch((err) => reportError(err, "cart country")));
-    pruneLive();
-    liveLists.forEach((list) => jobs.push(list.load()));
-    liveProducts.forEach((el) => {
-      if (el.closest(listSelector())) return;
-      mountedProducts.delete(el);
-      mountProduct(el);
-    });
-    renderCountrySelects();
-    emit("country-changed", { country, language: cfg.language });
-    await Promise.all(jobs);
-    return Cart.state;
-  }
   function applyPageTitle(el, p) {
     const tpl = get(el, "page-title");
     if (!tpl || typeof document === "undefined") return;
     document.title = tpl.replace(/\{title\}/g, p.title).replace(/\{vendor\}/g, p.vendor || "").replace(/\{type\}/g, p.productType || "");
   }
+  function retryFailed() {
+    pruneLive();
+    liveProducts.forEach((el) => {
+      if (el.getAttribute(attr("state")) !== "error" || el.getAttribute(attr("error")) === "not-found") return;
+      mountedProducts.delete(el);
+      mountProduct(el);
+    });
+  }
+
+  // src/lazy-iife.js
+  var { cfg: cfg2 } = config_exports;
+  var coreModules = {
+    "config.js": config_exports,
+    "client.js": client_exports,
+    "dom.js": dom_exports,
+    "fragments.js": fragments_exports,
+    "loader.js": loader_exports,
+    "selling-plans.js": selling_plans_exports,
+    "status.js": status_exports,
+    "cart.js": cart_exports,
+    "product.js": product_exports,
+    "collection.js": collection_exports,
+    "mounting.js": mounting_exports
+  };
+  var self = typeof document !== "undefined" ? document.currentScript?.src || "" : "";
+  var parts = {};
+  function loadPart(name) {
+    if (parts[name]) return parts[name];
+    const base = cfg2.partsUrl || self.replace(/[^/]*$/, "");
+    const min = /\.min\.js(\?|$)/.test(self) || !self ? ".min" : "";
+    const url = `${base.replace(/\/?$/, "/")}tether.${name}${min}.js`;
+    parts[name] = new Promise((resolve, reject) => {
+      const s = document.createElement("script");
+      s.src = url;
+      s.async = true;
+      s.onload = () => window.Tether?.__parts?.[name] ? resolve(window.Tether.__parts[name]) : reject(new Error(`${url} did not register`));
+      s.onerror = () => {
+        delete parts[name];
+        reject(new Error(`Could not load ${url}. Host it next to the Tether script, or set partsUrl.`));
+      };
+      document.head.appendChild(s);
+    });
+    return parts[name];
+  }
+
+  // src/index.js
+  var VERSION = "0.3.6";
+  var initPromise = null;
+  var observer = null;
+  function mount(root = document) {
+    if (!isConfigured()) return 0;
+    let count = 0;
+    pruneLive();
+    within(root, listSelector()).forEach((el) => {
+      if (mountedLists.has(el)) return;
+      mountedLists.add(el);
+      count++;
+      const list = new ListScope(el);
+      liveLists.add(list);
+      el.addEventListener(`${cfg.prefix}:list-rendered`, (e) => mount(e.detail.container));
+      list.load();
+    });
+    within(root, sel("product")).forEach((el) => {
+      if (mountProduct(el)) count++;
+    });
+    if (within(root, `${sel("country-select")},${sel("country-bind")}`).length) {
+      loadPart("markets").then((m) => m.renderCountrySelects(root)).catch((err) => reportError(err, "markets"));
+    }
+    qsa(root, sel("account-link")).forEach((a) => {
+      a.setAttribute("href", `https://${cfg.domain}/account`);
+    });
+    Cart.render();
+    log(`mounted ${count} scope(s)`, root);
+    return count;
+  }
   function unmount() {
     Cart.close();
   }
   function getScope(el) {
-    var _a;
-    const root = (_a = el == null ? void 0 : el.closest) == null ? void 0 : _a.call(el, sel("product"));
+    const root = el?.closest?.(sel("product"));
     return root ? scopes.get(root) || null : null;
   }
   var controlsBound = false;
@@ -2380,9 +1980,8 @@ ${cartFragment()}`, { id });
     if (controlsBound) return;
     controlsBound = true;
     document.addEventListener("click", (e) => {
-      var _a;
       const t = e.target;
-      if (!(t == null ? void 0 : t.closest)) return;
+      if (!t?.closest) return;
       if (t.closest(sel("cart-open"))) {
         e.preventDefault();
         Cart.toggle();
@@ -2420,7 +2019,7 @@ ${cartFragment()}`, { id });
       const removeCode = t.closest(sel("discount-remove"));
       if (removeCode) {
         e.preventDefault();
-        const code = (_a = removeCode.closest(sel("discount-code"))) == null ? void 0 : _a.getAttribute(attr("discount-code"));
+        const code = removeCode.closest(sel("discount-code"))?.getAttribute(attr("discount-code"));
         if (code) Cart.removeDiscount(code).catch((err) => reportError(err, "discount"));
         return;
       }
@@ -2432,9 +2031,9 @@ ${cartFragment()}`, { id });
     });
     document.addEventListener("change", (e) => {
       const t = e.target;
-      if (!(t == null ? void 0 : t.closest)) return;
+      if (!t?.closest) return;
       const lineEl = t.closest(dataKeySel());
-      const id = lineEl == null ? void 0 : lineEl.getAttribute(`data-${cfg.prefix}-key`);
+      const id = lineEl?.getAttribute(`data-${cfg.prefix}-key`);
       if (id && t.matches(`input${sel("line", "quantity")}`)) {
         Cart.updateLine(id, parseInt(t.value, 10) || 0).catch((err) => reportError(err, "cart line"));
       } else if (id && t.matches(`select${sel("line-plan")}`)) {
@@ -2446,18 +2045,16 @@ ${cartFragment()}`, { id });
       }
     });
     document.addEventListener("submit", (e) => {
-      var _a, _b;
-      const form = (_b = (_a = e.target).closest) == null ? void 0 : _b.call(_a, sel("discount-form"));
+      const form = e.target.closest?.(sel("discount-form"));
       if (!form) return;
       e.preventDefault();
       const input = form.querySelector(sel("discount-input")) || form.querySelector("input");
-      const code = input == null ? void 0 : input.value.trim();
+      const code = input?.value.trim();
       if (!code) return;
       busy(form, async () => {
-        var _a2;
         try {
           const cart = await Cart.applyDiscount(code);
-          const ok = (_a2 = ((cart == null ? void 0 : cart.discountCodes) || []).find((d) => d.code.toLowerCase() === code.toLowerCase())) == null ? void 0 : _a2.applicable;
+          const ok = (cart?.discountCodes || []).find((d) => d.code.toLowerCase() === code.toLowerCase())?.applicable;
           form.classList.toggle("is-invalid", !ok);
           emit(ok ? "discount-applied" : "discount-invalid", { code }, form);
           if (ok && input) input.value = "";
@@ -2467,8 +2064,28 @@ ${cartFragment()}`, { id });
         }
       });
     });
+    window.addEventListener("online", () => {
+      retryFailed();
+      liveLists.forEach((l) => {
+        if (l.root.getAttribute(attr("state")) === "error") l.load();
+      });
+    });
     document.addEventListener("keydown", (e) => {
-      if (e.key === "Escape" && Cart.isOpen()) Cart.close();
+      if (!Cart.isOpen()) return;
+      if (e.key === "Escape") {
+        Cart.close();
+        return;
+      }
+      if (e.key !== "Tab" || cfg.cartFocus === false) return;
+      const d = Cart.drawers().find((x) => x.classList.contains(cfg.cartDrawerOpenClass));
+      const f = d ? focusables(d) : [];
+      if (!f.length) return;
+      const first = f[0];
+      const last = f[f.length - 1];
+      if (!d.contains(document.activeElement) || e.shiftKey && document.activeElement === first || !e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        (e.shiftKey ? last : first).focus();
+      }
     });
   }
   function dataKeySel() {
@@ -2480,10 +2097,7 @@ ${cartFragment()}`, { id });
     const name = get(group, "group");
     const extra = toAttributes(parseJSONAttr(group, "line-attributes"));
     const groupAttrs = name ? [{ key: "_group", value: name }, ...extra] : extra;
-    const lines = qsa(group, sel("product")).map((el) => scopes.get(el)).filter((s) => {
-      var _a;
-      return s && ((_a = s.variant) == null ? void 0 : _a.availableForSale) && s.quantity > 0;
-    }).map((s) => {
+    const lines = qsa(group, sel("product")).map((el) => scopes.get(el)).filter((s) => s && s.variant?.availableForSale && s.quantity > 0).map((s) => {
       const l = s.getLine();
       l.attributes = [...l.attributes || [], ...groupAttrs];
       return l;
@@ -2502,7 +2116,6 @@ ${cartFragment()}`, { id });
     }
   }
   function init(overrides = {}) {
-    var _a;
     if (initPromise && !Object.keys(overrides).length) return initPromise;
     configure({ ...window.TETHER_CONFIG || {}, ...overrides });
     if (!isConfigured()) {
@@ -2510,17 +2123,11 @@ ${cartFragment()}`, { id });
       initPromise = Promise.resolve(null);
       return initPromise;
     }
-    const market = detectMarket(cfg.markets);
-    if (market.country) cfg.country = market.country;
-    if (market.language) cfg.language = market.language;
-    if (market.locale && !overrides.locale && !((_a = window.TETHER_CONFIG) == null ? void 0 : _a.locale)) cfg.locale = market.locale;
-    if (market.sources && Object.keys(market.sources).length) log("market", market);
     bindControls();
     if (cfg.observe) startObserver();
-    initPromise = Cart.init().then(async (cart) => {
-      var _a2;
+    initPromise = applyMarket(overrides).then(() => Cart.init()).then(async (cart) => {
       const want = cfg.country ? String(cfg.country).toUpperCase() : null;
-      if (cart && want && ((_a2 = cart.buyerIdentity) == null ? void 0 : _a2.countryCode) && cart.buyerIdentity.countryCode !== want) {
+      if (cart && want && cart.buyerIdentity?.countryCode && cart.buyerIdentity.countryCode !== want) {
         try {
           cart = await Cart.setBuyerIdentity({ countryCode: want }, { create: false });
         } catch (err) {
@@ -2531,6 +2138,33 @@ ${cartFragment()}`, { id });
       return api;
     });
     return initPromise;
+  }
+  async function applyMarket(overrides) {
+    const m = cfg.markets || {};
+    if (m.detect === false) return;
+    let market = null;
+    if (m.detect) {
+      try {
+        market = (await loadPart("markets")).detectMarket(m);
+      } catch (err) {
+        reportError(err, "markets");
+        return;
+      }
+    } else if (m.remember !== false) {
+      try {
+        market = JSON.parse(localStorage.getItem(`${cfg.prefix}:market:${cfg.domain}`) || "null");
+      } catch {
+      }
+      if (market && !/^[A-Z]{2}$/.test(market.country || "")) market = null;
+    }
+    if (!market) return;
+    if (market.country) cfg.country = market.country;
+    if (market.language) cfg.language = market.language;
+    if (market.locale && !overrides.locale && !window.TETHER_CONFIG?.locale) cfg.locale = market.locale;
+    log("market", market);
+  }
+  function setCountry(code, opts) {
+    return loadPart("markets").then((m) => m.setCountry(code, opts));
   }
   function startObserver() {
     if (observer || typeof MutationObserver === "undefined") return;
@@ -2577,9 +2211,11 @@ ${cartFragment()}`, { id });
     TetherError,
     resolveProductKey,
     setCountry,
-    detectMarket: (markets) => detectMarket(markets || cfg.markets),
-    getLocalization,
-    diagnose: (opts) => diagnose({ ...opts, version: VERSION }),
+    detectMarket: (markets) => loadPart("markets").then((m) => m.detectMarket(markets || cfg.markets)),
+    getLocalization: () => loadPart("markets").then((m) => m.getLocalization()),
+    diagnose: (opts) => loadPart("diagnose").then((m) => m.diagnose({ ...opts, version: VERSION })),
+    __core: coreModules,
+    __parts: {},
     on(name, fn) {
       const h = (e) => fn(e.detail, e);
       document.addEventListener(`${cfg.prefix}:${name}`, h);

@@ -335,7 +335,19 @@ See [`src/config.js`](../src/config.js) for every option with comments. The ones
 `domain`, `token`, `country`, `language`, `locale`, `markets`, `productPath` (supports `{handle}`),
 `metafields`, `defaultPurchase`, `checkoutTarget`, `autoMount`, `observe` (auto-mount nodes added
 later, e.g. Finsweet load-more), `prefix`, and the hooks `onLayoutChange`, `onCartOpen`,
-`onCartClose`, `onLineEnter`, `onLineLeave`, `onValueChange`, `onError`.
+`onCartClose`, `onLineEnter`, `onLineLeave`, `onValueChange`, `onError`, `cartFocus` (keyboard focus
+in the cart drawer, on by default) and `partsUrl` (folder of the optional parts when self-hosting).
+
+**Optional parts.** `Tether.diagnose()` and markets (`markets.detect`, `tether-country-select`,
+`Tether.setCountry()`) live in separate files that load on first use: `tether.diagnose.min.js` and
+`tether.markets.min.js` next to the main script (jsDelivr serves them from the same folder), or split
+chunks in a bundler. `Tether.detectMarket()` and `Tether.getLocalization()` return promises.
+
+**Accessibility.** The cart drawer gets `role="dialog"`, `aria-modal` and a label (`tether-cart-label`
+to change it); opening moves focus into it, Tab stays inside, Escape closes it and returns focus.
+Cart buttons get `aria-expanded`, unavailable add-to-cart buttons `aria-disabled`.
+
+**Connection loss.** Products and lists that failed to load try again when the browser is back online.
 
 ## Troubleshooting and handover
 
@@ -407,10 +419,17 @@ TETHER_API_VERSION=2026-10 npm run smoke                        # try a newer Sh
 node scripts/api-version.mjs --next                             # the next quarterly version
 ```
 
-Releases: bump `package.json`, `server/package.json` and `server/src/version.js`, update `CHANGELOG.md`, `npm run build`,
-commit `dist/`, tag `vX.Y.Z`. jsDelivr serves the tag immediately, and deployed sync Workers pick it
-up through their Update Tether action (within their `TETHER_VERSION` range). For a new minor
-version, also set `server/TETHER_VERSION` to it, so new deploys follow that line.
+**Releases:** write the `## X.Y.Z` section in `CHANGELOG.md`, then
+
+```bash
+npm run release -- 0.4.1 --push
+```
+
+It bumps the version everywhere (packages, `VERSION`, the sync, README pins, `server/TETHER_VERSION`
+for a new minor), builds, runs the tests and the live smoke test, commits, tags and pushes. The
+`release` workflow then publishes to npm with provenance (npm trusted publishing, no token in the
+repo) and creates the GitHub Release with the files. jsDelivr serves the tag immediately, and
+deployed sync Workers pick it up through their Update Tether action within their range.
 
 ## Subscriptions: what Shopify handles, not Tether
 

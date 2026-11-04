@@ -57,8 +57,8 @@ Your copy updates itself, like a jsDelivr version. The `TETHER_VERSION` file in 
 
 | `TETHER_VERSION` | Gets |
 |---|---|
-| `0.3` (default) | every 0.3.x fix, automatically |
-| `0.3.3` | pinned: never changes |
+| `0.4` (default) | every 0.4.x fix, automatically |
+| `0.4.0` | pinned: never changes |
 | `latest` | every release, also new minor versions |
 
 It checks every Monday. To update right away: your copy on GitHub → **Actions** → **Update Tether**

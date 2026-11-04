@@ -170,7 +170,7 @@ test('diagnose reports config, reachability, plans and markup problems', async (
     <span tether-show="in-stok"></span>
     <div tether-product="coffee-box"><span tether-bind="metafield:custom.nope"></span></div>`;
   const r = await Tether.diagnose({ silent: true, now: new Date('2026-11-04') });
-  assert.equal(r.version, '0.3.6');
+  assert.equal(r.version, JSON.parse((await import('node:fs')).readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version);
   assert.equal(r.reachable, true);
   assert.equal(r.shop.name, 'Test shop');
   assert.match(r.config.token, /^publ…-123/);
@@ -206,4 +206,20 @@ test('API versions: next quarterly version, support window, unstable refused', a
   assert.equal(close.ok, true);
   assert.match(close.note, /plan the upgrade to 2026-04/);
   assert.equal(apiVersionStatus('2026-07', new Date('2026-11-04')).next, '2026-10');
+});
+
+test('back online: failed products load again by themselves', async () => {
+  mode = 'down';
+  document.body.innerHTML = page('coffee-box');
+  Tether.mount(document);
+  await tick();
+  const root = document.querySelector('[tether-product]');
+  assert.equal(root.getAttribute('tether-state'), 'error');
+  assert.equal(document.getElementById('add').getAttribute('aria-disabled'), 'true');
+  mode = 'ok';
+  window.dispatchEvent(new window.Event('online'));
+  await tick();
+  assert.equal(root.getAttribute('tether-state'), 'ready');
+  assert.equal(document.querySelector('h1').textContent, 'Coffee Box');
+  assert.equal(document.getElementById('add').getAttribute('aria-disabled'), 'false');
 });

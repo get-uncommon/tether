@@ -34,6 +34,23 @@ function mutation(name, args, inner) {
 ${cartFragment()}`;
 }
 
+const FOCUSABLE = 'a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
+let returnFocus = null;
+
+/** Focusable elements inside an open drawer, in order (visible ones only). */
+export const focusables = (d) => qsa(d, FOCUSABLE).filter((el) => el.offsetParent !== null || el === document.activeElement);
+
+/** aria-expanded on the open buttons; dialog semantics on drawers (unless the markup has its own). */
+function ariaState(open) {
+  qsa(document, sel('cart-open')).forEach((b) => b.setAttribute('aria-expanded', String(open)));
+  qsa(document, sel('cart-drawer')).forEach((d) => {
+    if (!d.hasAttribute('role')) d.setAttribute('role', 'dialog');
+    if (!d.hasAttribute('aria-label') && !d.hasAttribute('aria-labelledby')) d.setAttribute('aria-label', get(d, 'cart-label') || 'Cart');
+    d.setAttribute('aria-modal', String(open));
+    if (!d.classList.contains(cfg.cartDrawerOpenClass)) d.setAttribute('aria-hidden', 'true');
+  });
+}
+
 const isMissingCart = (err) => /does not exist|not found|invalid id/i.test(err?.message || '');
 
 export const Cart = {
@@ -255,6 +272,16 @@ export const Cart = {
     if (this.isOpen()) return;
     const ds = this.drawers().filter((d) => get(d, 'cart-drawer') !== 'manual');
     ds.forEach((d) => { d.classList.add(cfg.cartDrawerOpenClass); d.setAttribute('aria-hidden', 'false'); });
+    ariaState(true);
+    if (cfg.cartFocus !== false && ds[0]) {
+      // Move focus into the cart (after the open transition has made it visible).
+      returnFocus = document.activeElement;
+      setTimeout(() => {
+        const target = focusables(ds[0])[0] || ds[0];
+        if (target === ds[0] && !ds[0].hasAttribute('tabindex')) ds[0].tabIndex = -1;
+        target.focus?.({ preventScroll: true });
+      }, 60);
+    }
     if (typeof cfg.onCartOpen === 'function') cfg.onCartOpen(ds);
     emit('cart-toggled', { open: true });
   },
@@ -262,7 +289,11 @@ export const Cart = {
   close() {
     if (!this.isOpen()) return;
     const ds = this.drawers();
+    const hadFocus = ds.some((d) => d.contains(document.activeElement));
     ds.forEach((d) => { d.classList.remove(cfg.cartDrawerOpenClass); d.setAttribute('aria-hidden', 'true'); });
+    ariaState(false);
+    if (hadFocus && returnFocus?.isConnected) returnFocus.focus({ preventScroll: true });
+    returnFocus = null;
     if (typeof cfg.onCartClose === 'function') cfg.onCartClose(ds);
     emit('cart-toggled', { open: false });
   },
@@ -276,6 +307,7 @@ export const Cart = {
     const count = cart ? cart.totalQuantity : 0;
     const money = (k) => (cart ? formatMoney(cart.cost?.[k]) : '');
 
+    ariaState(this.isOpen());
     qsa(document, sel('cart-count')).forEach((el) => setTextTracked(el, count));
     qsa(document, sel('cart-subtotal')).forEach((el) => setTextTracked(el, money('subtotalAmount')));
     qsa(document, sel('cart-total')).forEach((el) => setTextTracked(el, money('totalAmount')));

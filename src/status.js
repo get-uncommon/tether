@@ -64,6 +64,7 @@ export function setScopeStatus(root, status, err) {
   if (status === 'error' || notFound) {
     scoped(root, sel('add-to-cart'), boundary()).forEach((btn) => {
       btn.classList.add('is-disabled');
+      btn.setAttribute('aria-disabled', 'true');
       if ('disabled' in btn) btn.disabled = true;
     });
   }
