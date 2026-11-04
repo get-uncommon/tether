@@ -5,14 +5,19 @@
  *   const report = await runCheck(config, env, { deep: true });
  *   report.ok, report.steps -> [{ level: 'ok' | 'warn' | 'error', title, message, fix }]
  */
-import { normalizeConfig, cleanEnv, applyEnv, checkMapping, mapProduct } from './mapping.js';
+import { normalizeConfig, cleanEnv, applyEnv, checkMapping, mapProduct, envProblems, MIN_SYNC_SECRET } from './mapping.js';
 import { createShopify } from './shopify.js';
 import { createWebflow } from './webflow.js';
 
-export async function runCheck(rawConfig, rawEnv, { deep = true, fetch, sleep } = {}) {
+export async function runCheck(rawConfig, rawEnv, { deep = true, fetch, sleep, worker = false } = {}) {
   const steps = [];
   const step = (level, title, message, fix) => { steps.push({ level, title, message, ...(fix ? { fix } : {}) }); return level !== 'error'; };
   const env = cleanEnv(rawEnv);
+  // Filled in, but ignored: say so, or "missing" below would be confusing.
+  envProblems(rawEnv).forEach(({ key, reason }) => {
+    if (reason === 'placeholder') step('error', key, 'still has an example value, so it counts as not set.', `Replace it with the real value (or leave it empty if you don't use it).`);
+    else if (reason === 'too-short') step('error', key, `is shorter than ${MIN_SYNC_SECRET} characters, so it counts as not set.`, `Use a random string of at least ${MIN_SYNC_SECRET} characters, e.g. from a password manager.`);
+  });
   const done = (extra = {}) => ({ ok: !steps.some((s) => s.level === 'error'), steps, ...extra });
 
   let config;
@@ -51,6 +56,10 @@ export async function runCheck(rawConfig, rawEnv, { deep = true, fetch, sleep } 
   const webhookSecret = env.SHOPIFY_WEBHOOK_SECRET || env.SHOPIFY_CLIENT_SECRET;
   if (!webhookSecret) step('warn', 'Webhooks', 'No webhook secret: webhooks will be rejected, only the cron reconcile syncs.', 'Set SHOPIFY_WEBHOOK_SECRET (Settings → Notifications → Webhooks shows it), or use a Dev Dashboard app (its client secret is used).');
   else step('ok', 'Webhooks', env.SHOPIFY_WEBHOOK_SECRET ? 'SHOPIFY_WEBHOOK_SECRET set' : 'verified with the app client secret');
+
+  if (worker && !env.SYNC_SECRET && !envProblems(rawEnv).some((p) => p.key === 'SYNC_SECRET')) {
+    step('warn', 'SYNC_SECRET', 'not set: /check can only show what is configured, and POST /reconcile is off.', `Set a random string of at least ${MIN_SYNC_SECRET} characters to test the APIs from /check.`);
+  }
 
   if (!deep || !domainOk || !auth || !env.WEBFLOW_TOKEN || !collectionId) {
     if (deep) step('error', 'Connections', 'Not tested: fix the items above first.');

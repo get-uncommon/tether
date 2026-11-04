@@ -1,9 +1,17 @@
-SHOPIFY_DOMAIN=your-store.myshopify.com
-WEBFLOW_COLLECTION_ID=your-collection-id
-WEBFLOW_TOKEN=your-webflow-site-token
-SHOPIFY_CLIENT_ID=your-app-client-id
-SHOPIFY_CLIENT_SECRET=your-app-client-secret
-SHOPIFY_ADMIN_TOKEN=none
-SHOPIFY_WEBHOOK_SECRET=none
-SYNC_SECRET=choose-a-long-random-string
-FIELD_MAP=none
+# Values for the Deploy to Cloudflare button (and `npx wrangler dev`: copy to .dev.vars).
+# Leave a value empty when you don't use it. Descriptions: package.json -> cloudflare.bindings.
+
+# Required
+SHOPIFY_DOMAIN=
+WEBFLOW_COLLECTION_ID=
+WEBFLOW_TOKEN=
+
+# Shopify access: a Dev Dashboard app (client id + secret), or SHOPIFY_ADMIN_TOKEN for an existing custom app
+SHOPIFY_CLIENT_ID=
+SHOPIFY_CLIENT_SECRET=
+SHOPIFY_ADMIN_TOKEN=
+
+# Optional
+SHOPIFY_WEBHOOK_SECRET=
+SYNC_SECRET=
+FIELD_MAP=

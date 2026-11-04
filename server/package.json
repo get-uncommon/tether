@@ -1,6 +1,6 @@
 {
   "name": "@occluze/tether-sync",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "private": true,
   "description": "Shopify -> Webflow CMS sync for Tether: webhooks, reconcile cron and initial import. Runs as a Cloudflare Worker or a Node CLI.",
   "type": "module",
@@ -27,31 +27,31 @@
   "cloudflare": {
     "bindings": {
       "SHOPIFY_DOMAIN": {
-        "description": "Your store's `.myshopify.com` domain, e.g. `your-store.myshopify.com`."
+        "description": "**Required.** Your store's `.myshopify.com` domain, e.g. `your-store.myshopify.com` (not your custom domain)."
       },
       "WEBFLOW_COLLECTION_ID": {
-        "description": "Id of the Webflow Products collection (collection settings in the Webflow CMS)."
+        "description": "**Required.** Id of the Webflow Products collection (24 characters; Webflow CMS \u2192 collection settings)."
       },
       "WEBFLOW_TOKEN": {
-        "description": "Webflow site API token with **CMS read and write** (Site settings \u2192 Apps & integrations \u2192 API access)."
+        "description": "**Required.** Webflow site API token with **CMS read and write** (Site settings \u2192 Apps & integrations \u2192 API access)."
       },
       "SHOPIFY_CLIENT_ID": {
-        "description": "Client id of a Shopify [Dev Dashboard](https://shopify.dev/docs/apps/build/dev-dashboard) app installed on your store, with `read_products`. Enter `none` if you use SHOPIFY_ADMIN_TOKEN."
+        "description": "Client id of a Shopify [Dev Dashboard](https://shopify.dev/docs/apps/build/dev-dashboard) app installed on your store, with `read_products`. Fill this and the secret, **or** SHOPIFY_ADMIN_TOKEN."
       },
       "SHOPIFY_CLIENT_SECRET": {
-        "description": "Client secret of that app. Also used to verify webhooks. Enter `none` if you use SHOPIFY_ADMIN_TOKEN."
+        "description": "Client secret of that app. Also verifies the webhooks."
       },
       "SHOPIFY_ADMIN_TOKEN": {
-        "description": "Only for an existing admin-created custom app: its `shpat_\u2026` token. Otherwise `none`."
+        "description": "Only for an existing admin-created custom app: its `shpat_\u2026` token. Leave empty when you use a Dev Dashboard app."
       },
       "SHOPIFY_WEBHOOK_SECRET": {
-        "description": "Only for webhooks created under Settings \u2192 Notifications: the signing key shown there. Otherwise `none` (the client secret is used)."
+        "description": "Optional. Only for webhooks created under Shopify Settings \u2192 Notifications: the signing key shown there. Leave empty to use the client secret."
       },
       "SYNC_SECRET": {
-        "description": "A long random string. Protects `/check` details and `POST /reconcile`."
+        "description": "Optional. A random string of **at least 24 characters** (e.g. from a password manager). Unlocks the API tests on `/check` and `POST /reconcile`. Empty: both stay off."
       },
       "FIELD_MAP": {
-        "description": "Optional JSON to change the field mapping, e.g. `{\"material\":\"metafield:custom.material\"}`. Otherwise `none`."
+        "description": "Optional. JSON to change the field mapping, e.g. `{\"material\":\"metafield:custom.material\"}`. Leave empty for the default mapping."
       }
     }
   }

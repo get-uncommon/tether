@@ -41,7 +41,7 @@ export function createWorker(config, { fetch, sleep } = {}) {
     return createApp(config, env, { store, fetch: counted.fetch, budget: counted.budget, sleep, log: consoleLog, mode });
   };
   const secretOk = (request, env) => {
-    const secret = cleanEnv(env).SYNC_SECRET; // 'none' counts as unset
+    const secret = cleanEnv(env).SYNC_SECRET; // empty, 'none', an example value or < 24 chars: unset
     return Boolean(secret) && safeEqual(request.headers.get('authorization') || '', `Bearer ${secret}`);
   };
 
@@ -53,7 +53,7 @@ export function createWorker(config, { fetch, sleep } = {}) {
 
         if (url.pathname === '/check' || url.pathname === '/') {
           const deep = secretOk(request, env);
-          const report = await runCheck(config, env, { deep, fetch, sleep });
+          const report = await runCheck(config, env, { deep, fetch, sleep, worker: true });
           if (!deep) {
             // Anyone can open this URL: say what's set, never the values (store, collection id).
             report.steps = report.steps.map((s) => (s.level === 'ok' ? { ...s, message: 'set' } : s));

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.1 (2026-11-04)
+
+- Deploy to Cloudflare: the form starts empty (no example values), with clearer descriptions
+  of what's required.
+- Example values (`your-…`, `choose-…`, `…`) and a `SYNC_SECRET` shorter than 24 characters
+  count as not set, so a left-over example can never unlock `/reconcile` or the API tests on
+  `/check`. `check` names each such value.
+- CI: actions/checkout and actions/setup-node v5 (Node 24).
+
 ## 0.3.0 (2026-11-04)
 
 **Markets and localization**

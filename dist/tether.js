@@ -2220,7 +2220,7 @@ ${cartFragment()}`, { id });
   }
 
   // src/index.js
-  var VERSION = "0.3.0";
+  var VERSION = "0.3.1";
   var mountedProducts = /* @__PURE__ */ new WeakSet();
   var mountedLists = /* @__PURE__ */ new WeakSet();
   var liveProducts = /* @__PURE__ */ new Set();

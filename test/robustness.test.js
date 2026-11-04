@@ -170,7 +170,7 @@ test('diagnose reports config, reachability, plans and markup problems', async (
     <span tether-show="in-stok"></span>
     <div tether-product="coffee-box"><span tether-bind="metafield:custom.nope"></span></div>`;
   const r = await Tether.diagnose({ silent: true, now: new Date('2026-11-04') });
-  assert.equal(r.version, '0.3.0');
+  assert.equal(r.version, '0.3.1');
   assert.equal(r.reachable, true);
   assert.equal(r.shop.name, 'Test shop');
   assert.match(r.config.token, /^publ…-123/);

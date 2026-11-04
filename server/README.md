@@ -26,7 +26,10 @@ The button forks this repo into your GitHub account, creates the Worker, its KV 
 1. Create the Webflow collection with the [standard fields](#1-webflow-collection) (at least Name,
    Slug and **Shopify ID**; every other standard field is optional).
 2. Create the Shopify app and the Webflow token ([Tokens](#2-tokens)).
-3. Click **Deploy to Cloudflare** (above) and fill in the prompts. Enter `none` for the ones you don't use.
+3. Click **Deploy to Cloudflare** (above) and fill in the form: the three required values, and
+   either `SHOPIFY_CLIENT_ID` + `SHOPIFY_CLIENT_SECRET` or `SHOPIFY_ADMIN_TOKEN`. Leave the rest
+   empty if you don't use them. Example values (`your-…`, `choose-…`) count as not set, and
+   `SYNC_SECRET` needs at least 24 characters.
 4. Open `https://<worker>/check`: it lists what's configured. With
    `curl -H "Authorization: Bearer $SYNC_SECRET" https://<worker>/check` it also tests both
    APIs and the field mapping, and shows how a sample product would be written.

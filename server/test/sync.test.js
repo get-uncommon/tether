@@ -311,7 +311,7 @@ test('worker: webhook route with waitUntil, cron reconcile writes KV only on cha
   const apis = createMockApis({ products: [shopifyProduct(1)] });
   const worker = createWorker(baseConfig, { fetch: apis.fetch, sleep: instantSleep });
   const TETHER_SYNC = kv();
-  const wenv = { ...env, TETHER_SYNC, SYNC_SECRET: 's3cret' };
+  const wenv = { ...env, TETHER_SYNC, SYNC_SECRET: 's3cret-s3cret-s3cret-s3cret' };
   const pending = [];
   const ctx = { waitUntil: (p) => pending.push(p) };
 
@@ -333,6 +333,6 @@ test('worker: webhook route with waitUntil, cron reconcile writes KV only on cha
 
   const denied = await worker.fetch(new Request('https://sync.test/reconcile', { method: 'POST' }), wenv, ctx);
   assert.equal(denied.status, 401);
-  const ok = await worker.fetch(new Request('https://sync.test/reconcile', { method: 'POST', headers: { authorization: 'Bearer s3cret' } }), wenv, ctx);
+  const ok = await worker.fetch(new Request('https://sync.test/reconcile', { method: 'POST', headers: { authorization: 'Bearer s3cret-s3cret-s3cret-s3cret' } }), wenv, ctx);
   assert.equal(ok.status, 200);
 });

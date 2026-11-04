@@ -11,7 +11,7 @@ const COL = '0123456789abcdef01234567';
 const deployEnv = {
   SHOPIFY_DOMAIN: 'shop.myshopify.com', WEBFLOW_COLLECTION_ID: COL, WEBFLOW_TOKEN: 'wf',
   SHOPIFY_CLIENT_ID: 'cid', SHOPIFY_CLIENT_SECRET: 'csecret',
-  SHOPIFY_ADMIN_TOKEN: 'none', SHOPIFY_WEBHOOK_SECRET: 'none', SYNC_SECRET: 'long-secret', FIELD_MAP: 'none',
+  SHOPIFY_ADMIN_TOKEN: 'none', SHOPIFY_WEBHOOK_SECRET: 'none', SYNC_SECRET: 'a-long-random-sync-secret-123', FIELD_MAP: 'none',
 };
 
 test('cleanEnv treats none/-/empty as unset; applyEnv merges FIELD_MAP and WEBFLOW_OWNED', () => {
@@ -91,11 +91,49 @@ test('worker GET /check: config presence for anyone, API tests only with SYNC_SE
   assert.ok(!body.steps.some((s) => s.title === 'Shopify API'));
   assert.equal(apis.calls.length, 0);
 
-  res = await worker.fetch(new Request('https://sync.test/check', { headers: { authorization: 'Bearer long-secret' } }), deployEnv, ctx);
+  res = await worker.fetch(new Request('https://sync.test/check', { headers: { authorization: 'Bearer a-long-random-sync-secret-123' } }), deployEnv, ctx);
   body = await res.json();
   assert.ok(body.steps.some((s) => s.title === 'Shopify API' && s.level === 'ok'));
   assert.ok(body.config.fields.name);
 
   res = await worker.fetch(new Request('https://sync.test/check'), {}, ctx);
   assert.equal(res.status, 503);
+});
+
+test('example values and a short SYNC_SECRET count as not set, and check names them', async () => {
+  const { cleanEnv: clean } = await import('../src/mapping.js');
+  const filled = {
+    SHOPIFY_DOMAIN: 'your-store.myshopify.com', WEBFLOW_TOKEN: 'your-webflow-site-token',
+    WEBFLOW_COLLECTION_ID: '0123456789abcdef01234567', SHOPIFY_ADMIN_TOKEN: 'shpat_…', SYNC_SECRET: 'short',
+    SHOPIFY_CLIENT_SECRET: 'choose-a-long-random-string',
+  };
+  assert.deepEqual(Object.keys(clean(filled)), ['WEBFLOW_COLLECTION_ID']);
+  const r = await runCheck(defaultConfig, filled, { deep: false, worker: true });
+  const msg = (k) => r.steps.find((s) => s.title === k)?.message || '';
+  assert.match(msg('SHOPIFY_DOMAIN'), /example value/);
+  assert.match(msg('WEBFLOW_TOKEN'), /example value/);
+  assert.match(msg('SHOPIFY_ADMIN_TOKEN'), /example value/);
+  assert.match(msg('SYNC_SECRET'), /shorter than 24/);
+  assert.equal(r.ok, false);
+});
+
+test('worker: placeholder SYNC_SECRET never unlocks /reconcile or the deep check', async () => {
+  const apis = createMockApis();
+  const worker = createWorker(defaultConfig, { fetch: apis.fetch, sleep: instantSleep });
+  const wenv = { ...deployEnv, SYNC_SECRET: 'choose-a-long-random-string' };
+  const r = await worker.fetch(new Request('https://w.test/reconcile', { method: 'POST', headers: { authorization: 'Bearer choose-a-long-random-string' } }), wenv, {});
+  assert.equal(r.status, 401);
+  const c = await (await worker.fetch(new Request('https://w.test/check', { headers: { authorization: 'Bearer choose-a-long-random-string' } }), wenv, {})).json();
+  assert.ok(!c.steps.some((s) => s.title === 'Shopify API'));
+  assert.equal(apis.calls.length, 0);
+});
+
+test('.dev.vars.example has no values, so the deploy form starts empty', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const text = await readFile(new URL('../.dev.vars.example', import.meta.url), 'utf8');
+  const lines = text.split('\n').filter((l) => l.trim() && !l.trim().startsWith('#'));
+  assert.ok(lines.length >= 9);
+  lines.forEach((l) => assert.match(l, /^[A-Z_]+=$/, l));
+  const pkg = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
+  lines.forEach((l) => assert.ok(pkg.cloudflare.bindings[l.slice(0, -1)]?.description, `description for ${l}`));
 });
