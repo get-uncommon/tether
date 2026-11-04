@@ -1217,8 +1217,10 @@ ${cartFragment()}`, { id });
       notifyLayoutChanged("product");
       emit("product-ready", { product, scope: this }, root);
     }
+    /** Matching elements in this scope, including the root itself (e.g. a card link with tether-bind="link"). */
     $(s) {
-      return scoped(this.root, s, productSel());
+      const inner = scoped(this.root, s, productSel());
+      return this.root.matches(s) ? [this.root, ...inner] : inner;
     }
     // ------------------------------------------------------------ state
     initSelection() {
@@ -1783,7 +1785,7 @@ ${cartFragment()}`, { id });
   };
 
   // src/index.js
-  var VERSION = "0.1.0";
+  var VERSION = "0.1.1";
   var mountedProducts = /* @__PURE__ */ new WeakSet();
   var mountedLists = /* @__PURE__ */ new WeakSet();
   var initPromise = null;

@@ -49,7 +49,11 @@ export class ProductScope {
     emit('product-ready', { product, scope: this }, root);
   }
 
-  $(s) { return scoped(this.root, s, productSel()); }
+  /** Matching elements in this scope, including the root itself (e.g. a card link with tether-bind="link"). */
+  $(s) {
+    const inner = scoped(this.root, s, productSel());
+    return this.root.matches(s) ? [this.root, ...inner] : inner;
+  }
 
   // ------------------------------------------------------------ state
 

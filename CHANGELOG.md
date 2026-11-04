@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.1 (2026-11-04)
+
+- Fix: attributes on the product root element itself (e.g. a card link with `tether-bind="link"`) were ignored.
+
 ## 0.1.0 (2026-11-04)
 
 First release.

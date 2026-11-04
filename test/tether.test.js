@@ -189,6 +189,13 @@ test('group add sends all scopes in one request with _group attribute', async ()
   assert.deepEqual(create.variables.input.lines[0].attributes, [{ key: '_group', value: 'Starter set' }]);
 });
 
+test('binds on the product root itself (card link)', async () => {
+  document.body.innerHTML = '<a href="#" tether-product="coffee-box" tether-bind="link"><span tether-bind="title"></span></a>';
+  Tether.mount(document);
+  await tick();
+  assert.equal(document.querySelector('a').getAttribute('href'), '/product/coffee-box');
+});
+
 test('custom prefix keeps old wfs- markup working', async () => {
   await Tether.init({ domain: 'shop.test', token: 't', autoMount: false, prefix: 'wfs' });
   document.body.innerHTML = '<div wfs-product="coffee-box"><h2 wfs-bind="title"></h2></div>';

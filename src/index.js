@@ -18,7 +18,7 @@ import {
 import * as plans from './selling-plans.js';
 import { attr, sel, get, qsa, emit, formatMoney, busy, parseJSONAttr, toAttributes } from './dom.js';
 
-export const VERSION = '0.1.0';
+export const VERSION = '0.1.1';
 
 const mountedProducts = new WeakSet();
 const mountedLists = new WeakSet();
