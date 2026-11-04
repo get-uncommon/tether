@@ -319,7 +319,10 @@ export class ProductScope {
 
     // Subscriptions
     this.$(sel('plan-list')).forEach((container) => {
-      const group = get(container, 'plan-list');
+      // Value = selling plan group name. Empty, "true", "all" or "*" = every plan
+      // (Webflow's Designer doesn't always allow empty attribute values).
+      const raw = (get(container, 'plan-list') || '').trim();
+      const group = ['', 'true', 'all', '*'].includes(raw.toLowerCase()) ? null : raw;
       const plans = this.plans.filter((pl) => !group || pl.group.name === group);
       repeat(container, plans, (node, plan) => {
         node.setAttribute(attr('plan-value'), plan.id);

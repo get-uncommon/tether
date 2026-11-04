@@ -1488,7 +1488,8 @@ ${cartFragment()}`, { id });
         p.variants.nodes.forEach((v) => s.appendChild(new Option(v.title, v.id)));
       });
       this.$(sel("plan-list")).forEach((container) => {
-        const group = get(container, "plan-list");
+        const raw = (get(container, "plan-list") || "").trim();
+        const group = ["", "true", "all", "*"].includes(raw.toLowerCase()) ? null : raw;
         const plans = this.plans.filter((pl) => !group || pl.group.name === group);
         repeat(container, plans, (node, plan) => {
           node.setAttribute(attr("plan-value"), plan.id);
@@ -1785,7 +1786,7 @@ ${cartFragment()}`, { id });
   };
 
   // src/index.js
-  var VERSION = "0.1.1";
+  var VERSION = "0.1.2";
   var mountedProducts = /* @__PURE__ */ new WeakSet();
   var mountedLists = /* @__PURE__ */ new WeakSet();
   var initPromise = null;

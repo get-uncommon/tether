@@ -90,7 +90,7 @@ function mountProduct(extra = '') {
     <div tether-option-list="Size"><button>v</button></div>
     <button id="one" tether-purchase="one-time">Once</button>
     <button id="sub" tether-purchase="subscription">Subscribe</button>
-    <div tether-plan-list><button><span tether-plan-bind="name"></span> <span tether-plan-bind="price"></span></button></div>
+    <div tether-plan-list="true"><button><span tether-plan-bind="name"></span> <span tether-plan-bind="price"></span></button></div>
     <div id="sub-only" tether-show="subscription-selected">sub</div>
     <input tether-line-attribute="Gift message" value="Hi!">
     <button id="add" tether-add-to-cart subscribe-text="x"><span tether-add-label>Add</span></button>

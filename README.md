@@ -28,13 +28,13 @@ Prices, stock and variants always come live from Shopify. Webflow only holds con
 **Script tag (Webflow, any HTML):** pin a version from jsDelivr:
 
 ```html
-<script src="https://cdn.jsdelivr.net/gh/ravi-klaassens/tether@v0.1.1/dist/tether.min.js" defer></script>
+<script src="https://cdn.jsdelivr.net/gh/ravi-klaassens/tether@v0.1.2/dist/tether.min.js" defer></script>
 ```
 
 **Bundled (Vite, esbuild, Webpack, …):** copy `dist/tether.esm.js` into your project, or install from GitHub:
 
 ```bash
-npm install github:ravi-klaassens/tether#v0.1.1
+npm install github:ravi-klaassens/tether#v0.1.2
 ```
 
 ```js
@@ -71,7 +71,7 @@ and payments need a test payment provider or Shopify Payments in test mode.
     productPath: '/product',      // your Webflow product template path
   };
 </script>
-<script src="https://cdn.jsdelivr.net/gh/ravi-klaassens/tether@v0.1.1/dist/tether.min.js" defer></script>
+<script src="https://cdn.jsdelivr.net/gh/ravi-klaassens/tether@v0.1.2/dist/tether.min.js" defer></script>
 ```
 
 **Try it locally:** `npm install && npm run build`, then serve the folder and open
@@ -153,7 +153,7 @@ product to it. Tether reads the plans via the Storefront API.
 | Attribute | |
 |---|---|
 | `tether-purchase="one-time"` / `"subscription"` | Toggle buttons (or radios). `select[tether-purchase]` also works |
-| `tether-plan-list` (optional value: group name) | Repeater of plans. Inside: `tether-plan-bind="name \| description \| price \| savings \| savings-amount \| adjustment"` |
+| `tether-plan-list` (value: group name, or empty / `all` for every plan) | Repeater of plans. Inside: `tether-plan-bind="name \| description \| price \| savings \| savings-amount \| adjustment"` |
 | `select[tether-plan]` | Select with "One-time purchase" + plans. `tether-one-time-label` sets the label |
 | `tether-default-purchase="subscription"` | On the product root. Global: `defaultPurchase` |
 | `tether-default-plan="Every month"` | Plan id, name or option value. `?selling_plan=` in the URL also works |

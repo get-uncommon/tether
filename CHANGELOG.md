@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.2 (2026-11-04)
+
+- `tether-plan-list="true"` / `"all"` / `"*"` now list every plan, like an empty value (Webflow often can't save empty attribute values).
+
 ## 0.1.1 (2026-11-04)
 
 - Fix: attributes on the product root element itself (e.g. a card link with `tether-bind="link"`) were ignored.
