@@ -90,7 +90,11 @@ async function flush() {
     handles.forEach((h, i) => { if (data[`h${i}`]) got.set(h, data[`h${i}`]); });
 
     keys.forEach((k) => settle(k, (r) => {
-      if (got.has(k)) { if (gen === generation) primeProduct(got.get(k)); r.resolve(got.get(k)); } else {
+      if (got.has(k)) {
+        const p = got.get(k);
+        if (gen === generation) { primeProduct(p); freshAt.set(p.handle, Date.now()); freshAt.set(p.id, Date.now()); }
+        r.resolve(p);
+      } else {
         if (gen === generation) productCache.delete(k); // don't cache misses: a fix in Shopify works on next load
         r.reject(new TetherError(`Product not found: ${k}`, { code: 'NOT_FOUND' }));
       }
@@ -100,7 +104,44 @@ async function flush() {
   }
 }
 
-export function clearProductCache() { productCache.clear(); generation++; }
+export function clearProductCache() { productCache.clear(); generation++; stale.clear(); freshAt.clear(); }
+
+// ---------------------------------------------------------------------------
+// Hydration: products rendered on the server (tether/server hydrate()) are used at once and
+// refreshed once in the background, so prices and stock are live without a loading state.
+// ---------------------------------------------------------------------------
+
+const stale = new Set(); // keys of products that came from the server and weren't refreshed yet
+const freshAt = new Map(); // key -> when it was last loaded live (this page session)
+const FRESH_MS = 60000;
+
+export function hydrateProducts(products) {
+  (products || []).forEach((p) => {
+    if (!p?.id || !p.handle) return;
+    // Loaded live in the last minute (an earlier page of a View Transition visit): that copy is newer.
+    if (Date.now() - (freshAt.get(p.handle) || 0) < FRESH_MS && productCache.has(p.handle)) return;
+    primeProduct(p);
+    stale.add(p.handle);
+    stale.add(p.id);
+  });
+}
+
+/** True once per server-provided product: the caller refreshes it. */
+export function takeStale(key) {
+  const k = normalizeProductKey(key);
+  if (!stale.has(k)) return false;
+  const p = productCache.get(k);
+  stale.delete(k);
+  // Both keys point to the same product: refresh it once.
+  p?.then?.((x) => { stale.delete(x.handle); stale.delete(x.id); });
+  return true;
+}
+
+/** Fetch these products again (bypassing the cache). */
+export function refreshProducts(keys) {
+  keys.forEach((k) => productCache.delete(normalizeProductKey(k)));
+  return keys.map((k) => getProduct(k));
+}
 
 /**
  * A page of products from a collection (by handle) or from a search query.
@@ -141,11 +182,13 @@ ${fragment}`, { first, after, query: query || undefined, sortKey: sortKey || und
   return { collection: null, products: data.products.nodes, pageInfo: data.products.pageInfo };
 }
 
-export async function getRecommendations(productId, intent = 'RELATED') {
-  const data = await gql(`query TetherRecs($id: ID!, $intent: ProductRecommendationIntent) {
-  productRecommendations(productId: $id, intent: $intent) { ...TetherProduct }
+export async function getRecommendations(product, intent = 'RELATED') {
+  const key = normalizeProductKey(typeof product === 'object' ? product?.id : product);
+  const byId = key?.startsWith('gid://');
+  const data = await gql(`query TetherRecs(${byId ? '$id: ID!' : '$handle: String!'}, $intent: ProductRecommendationIntent) {
+  productRecommendations(${byId ? 'productId: $id' : 'productHandle: $handle'}, intent: $intent) { ...TetherProduct }
 }
-${productFragment()}`, { id: productId, intent });
+${productFragment()}`, byId ? { id: key, intent } : { handle: key, intent });
   const list = data.productRecommendations || [];
   list.forEach(primeProduct);
   return list;

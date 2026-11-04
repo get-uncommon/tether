@@ -1,8 +1,8 @@
 /** Product scopes and lists that are mounted, shared by index.js and the optional markets part. */
 import { cfg, log, warn, reportError } from './config.js';
-import { ProductScope, scopes } from './product.js';
+import { ProductScope, scopes, rememberOptionNames } from './product.js';
 import { listSelector } from './collection.js';
-import { getProduct } from './loader.js';
+import { getProduct, takeStale, refreshProducts, hydrateProducts } from './loader.js';
 import { resolveProductKey, setScopeStatus, isNotFound } from './status.js';
 import { attr, get, qsa, emit } from './dom.js';
 
@@ -53,6 +53,7 @@ function mountProduct(el) {
       // eslint-disable-next-line no-new
       else new ProductScope(el, p);
       applyPageTitle(el, p);
+      if (cfg.revalidate !== false && takeStale(key)) queueRefresh(key);
     })
     .catch((err) => {
       if (!current()) return;
@@ -85,5 +86,44 @@ export function retryFailed() {
     if (el.getAttribute(attr('state')) !== 'error' || el.getAttribute(attr('error')) === 'not-found') return;
     mountedProducts.delete(el);
     mountProduct(el);
+  });
+}
+
+// Server-rendered products: one batched background request refreshes them all.
+let refreshQueue = new Set();
+function queueRefresh(key) {
+  if (!refreshQueue.size) setTimeout(flushRefresh, 0);
+  refreshQueue.add(key);
+}
+function flushRefresh() {
+  const keys = [...refreshQueue];
+  refreshQueue = new Set();
+  refreshProducts(keys).forEach((promise, i) => promise.then((fresh) => {
+    liveProducts.forEach((el) => {
+      const scope = scopes.get(el);
+      if (!scope || !el.isConnected) return;
+      const k = resolveProductKey(el).key;
+      if (k !== keys[i] && k !== fresh.handle && k !== fresh.id) return;
+      if (JSON.stringify(scope.product) !== JSON.stringify(fresh)) scope.update(fresh);
+    });
+  }).catch((err) => reportError(err, `refresh ${keys[i]}`)));
+}
+
+/**
+ * <script type="application/json" data-tether-hydrate> tags written by tether/server's hydrate():
+ * their products are used without a request. Ignored when they were made for another market.
+ */
+const readScripts = new WeakSet();
+export function hydrateFromPage(root = document) {
+  qsa(root.ownerDocument || root, 'script[type="application/json"][data-tether-hydrate]').forEach((s) => {
+    if (readScripts.has(s)) return;
+    readScripts.add(s);
+    try {
+      const data = JSON.parse(s.textContent);
+      rememberOptionNames(data.products); // the build's option names, also for other languages
+      const same = (a, b) => String(a || '').toUpperCase() === String(b || '').toUpperCase();
+      if (same(data.country, cfg.country) && same(data.language, cfg.language)) hydrateProducts(data.products);
+      else log('hydration skipped: other market');
+    } catch (err) { warn('bad data-tether-hydrate', err); }
   });
 }

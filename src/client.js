@@ -15,8 +15,8 @@ export class TetherError extends Error {
   }
 }
 
-export function endpoint() {
-  return `https://${cfg.domain}/api/${cfg.apiVersion}/graphql.json`;
+export function endpoint(conf = cfg) {
+  return `https://${conf.domain}/api/${conf.apiVersion}/graphql.json`;
 }
 
 /**
@@ -31,42 +31,46 @@ export function withContext(query, ctx = cfg) {
   if (ctx.language) args.push(`language: ${String(ctx.language).toUpperCase().replace('-', '_')}`);
   if (!args.length || /@inContext/.test(query)) return query;
 
-  return query.replace(
-    /^(\s*(?:query|mutation)\s+\w+\s*(?:\([^)]*\))?)/,
-    `$1 @inContext(${args.join(', ')})`,
-  );
+  const tag = `@inContext(${args.join(', ')})`;
+  // Named (query Name($x: T)), anonymous (query { … }) and shorthand ({ … }) queries.
+  if (/^\s*\{/.test(query)) return `query ${tag} ${query.trimStart()}`;
+  return query.replace(/^(\s*(?:query|mutation)(?:\s+\w+)?\s*(?:\([^)]*\))?)/, `$1 ${tag}`);
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-export async function gql(query, variables = {}, { context = true } = {}) {
-  if (!cfg.domain || !cfg.token) {
+/**
+ * One Storefront API request with retries, for any config object (the browser's shared config,
+ * or the server module's own). gql() below is the browser version.
+ */
+export async function request(conf, query, variables = {}, { context = true } = {}) {
+  if (!conf.domain || !conf.token) {
     throw new TetherError('Tether is not configured: domain and token are required', { code: 'NOT_CONFIGURED' });
   }
 
-  const body = JSON.stringify({ query: context ? withContext(query) : query, variables });
+  const body = JSON.stringify({ query: context ? withContext(query, conf) : query, variables });
   let attempt = 0;
 
   for (;;) {
     let res;
     try {
-      res = await fetch(endpoint(), {
+      res = await (conf.fetch || fetch)(endpoint(conf), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-Shopify-Storefront-Access-Token': cfg.token,
+          'X-Shopify-Storefront-Access-Token': conf.token,
         },
         body,
       });
     } catch (err) {
-      if (attempt++ < cfg.retries) { await sleep(300 * 2 ** attempt); continue; }
+      if (attempt++ < conf.retries) { await sleep(300 * 2 ** attempt); continue; }
       throw new TetherError(`Network error: ${err.message}`, { code: 'NETWORK' });
     }
 
     if (res.status === 430) throw new TetherError('Shopify security rejection (430)', { status: 430 });
 
     const retryable = res.status === 429 || res.status >= 500;
-    if (retryable && attempt++ < cfg.retries) {
+    if (retryable && attempt++ < conf.retries) {
       log('retry', res.status, attempt);
       await sleep(300 * 2 ** attempt);
       continue;
@@ -82,10 +86,14 @@ export async function gql(query, variables = {}, { context = true } = {}) {
       const inventoryDenied = json.errors.some((e) => /quantityAvailable/.test(e.message || ''));
       if (inventoryDenied && /\bquantityAvailable\b/.test(body)) {
         log('no inventory permission, retrying without quantityAvailable');
-        return gql(query.replace(/\bquantityAvailable\b/g, ''), variables, { context });
+        return request(conf, query.replace(/\bquantityAvailable\b/g, ''), variables, { context });
+      }
+      // An older apiVersion without cart warnings (before 2024-07): retry without them.
+      if (json.errors.some((e) => /'warnings'/.test(e.message || '')) && /warnings \{ code message \}/.test(query)) {
+        return request(conf, query.replace(/ warnings \{ code message \}/g, ''), variables, { context });
       }
       const throttled = json.errors.some((e) => e.extensions?.code === 'THROTTLED');
-      if (throttled && attempt++ < cfg.retries) { await sleep(500 * 2 ** attempt); continue; }
+      if (throttled && attempt++ < conf.retries) { await sleep(500 * 2 ** attempt); continue; }
       throw new TetherError(json.errors.map((e) => e.message).join(' | '), {
         status: res.status, errors: json.errors,
       });
@@ -95,6 +103,8 @@ export async function gql(query, variables = {}, { context = true } = {}) {
     return json.data;
   }
 }
+
+export const gql = (query, variables, opts) => request(cfg, query, variables, opts);
 
 /** Throws on mutation userErrors, returns the payload otherwise. */
 export function unwrap(payload, name) {

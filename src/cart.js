@@ -29,7 +29,7 @@ export function toLineInput(input, quantity = 1, opts = {}) {
 
 function mutation(name, args, inner) {
   return `mutation Tether_${name}(${args}) {
-  ${name}(${inner}) { cart { ...TetherCart } userErrors { field message } }
+  ${name}(${inner}) { cart { ...TetherCart } userErrors { field message } warnings { code message } }
 }
 ${cartFragment()}`;
 }
@@ -69,6 +69,17 @@ export const Cart = {
   get count() { return this.state?.totalQuantity || 0; },
 
   lastError: null,
+  /** Shopify's notes on the last change, e.g. less stock than asked: [{ code, message }]. */
+  warnings: [],
+  /** true once the saved cart (or the absence of one) is known. */
+  loaded: false,
+
+  _take(payload, name) {
+    const p = unwrap(payload, name);
+    this.warnings = p.warnings || [];
+    if (this.warnings.length) emit('cart-warning', { warnings: this.warnings });
+    return p.cart;
+  },
 
   _queue(fn) {
     const run = this._chain.then(fn, fn).then((value) => {
@@ -95,7 +106,7 @@ export const Cart = {
 
   async init() {
     const id = this.id();
-    if (!id) { this.state = null; this.render(); return null; }
+    if (!id) { this.state = null; this.loaded = true; this.render(); emit('cart-updated', { cart: null, reason: 'load' }); return null; }
     try {
       const data = await gql(`query TetherCart($id: ID!) { cart(id: $id) { ...TetherCart } }\n${cartFragment()}`, { id });
       if (!data.cart) { this._setId(null); this.state = null; } else this.state = data.cart;
@@ -106,7 +117,9 @@ export const Cart = {
       if (isMissingCart(err)) this._setId(null);
       this.state = null;
     }
+    this.loaded = true;
     this.render();
+    emit('cart-updated', { cart: this.state, reason: 'load' }); // islands (cart.subscribe) hear the loaded cart
     return this.state;
   },
 
@@ -116,7 +129,7 @@ export const Cart = {
       mutation('cartCreate', '$input: CartInput!', 'input: $input'),
       { input: { buyerIdentity, ...input } },
     );
-    return unwrap(data.cartCreate, 'cartCreate').cart;
+    return this._take(data.cartCreate, 'cartCreate');
   },
 
   /** Runs a cart mutation; creates a fresh cart if ours expired. */
@@ -125,7 +138,7 @@ export const Cart = {
     if (!cartId) return createInput ? this._create(createInput) : null;
     try {
       const data = await gql(mutation(name, `$cartId: ID!, ${args}`, `cartId: $cartId, ${inner}`), { ...variables, cartId });
-      return unwrap(data[name], name).cart;
+      return this._take(data[name], name);
     } catch (err) {
       if (createInput && isMissingCart(err)) {
         log('cart expired, creating a new one');
@@ -220,7 +233,8 @@ export const Cart = {
   },
 
   removeDiscount(code) {
-    return this.setDiscountCodes((this.state?.discountCodes || []).map((d) => d.code).filter((c) => c !== code));
+    const k = String(code).toLowerCase();
+    return this.setDiscountCodes((this.state?.discountCodes || []).map((d) => d.code).filter((c) => c.toLowerCase() !== k));
   },
 
   /** { countryCode, email, phone } — changes currency/prices for that market. */
@@ -243,7 +257,7 @@ export const Cart = {
    */
   async checkout(target = cfg.checkoutTarget) {
     const id = this.id();
-    if (!id) return null;
+    if (!id || (this.state && !this.count)) return null; // nothing to check out
     const tab = target === '_blank' ? window.open('', '_blank') : null;
     if (tab) { try { tab.opener = null; } catch { /* ignore */ } }
 
@@ -300,6 +314,18 @@ export const Cart = {
 
   toggle() { if (this.isOpen()) this.close(); else this.open(); },
 
+  /**
+   * For framework islands (React, Svelte, Vue): fn(cart, { open }) now and on every change.
+   * Returns a function that stops listening.
+   */
+  subscribe(fn) {
+    const call = () => fn(this.state, { open: this.isOpen(), count: this.count, loaded: this.loaded, warnings: this.warnings });
+    const h = () => call();
+    ['cart-updated', 'cart-toggled'].forEach((e) => document.addEventListener(`${cfg.prefix}:${e}`, h));
+    call();
+    return () => ['cart-updated', 'cart-toggled'].forEach((e) => document.removeEventListener(`${cfg.prefix}:${e}`, h));
+  },
+
   // -------------------------------------------------------------- render
 
   render() {
@@ -321,10 +347,16 @@ export const Cart = {
       'cart-no-subscription': !hasSub,
       'cart-has-discount': (cart?.discountCodes || []).some((d) => d.applicable),
       'cart-error': Boolean(this.lastError),
+      'cart-warning': this.warnings.length > 0,
     };
+    qsa(document, sel('cart-warning')).forEach((el) => setTextTracked(el, [...new Set(this.warnings.map((w) => w.message))].join(' ')));
     qsa(document, sel('show')).forEach((el) => {
       const k = get(el, 'show');
       if (k in conds && !el.closest(sel('product'))) show(el, conds[k]);
+    });
+    qsa(document, sel('checkout')).forEach((el) => {
+      el.classList.toggle('is-disabled', !count);
+      el.setAttribute('aria-disabled', String(!count));
     });
 
     qsa(document, `textarea${sel('cart-note')},input${sel('cart-note')}`).forEach((el) => {
@@ -388,7 +420,15 @@ function renderLine(node, line) {
   qsa(node, sel('line')).forEach((el) => {
     const key = get(el, 'line');
     if (key === 'image') return setImage(el, m.image?.url || m.product?.featuredImage?.url, m.product?.title);
-    if (key === 'url') return el.setAttribute('href', productUrl(m.product?.handle, m.product?.id));
+    if (key === 'url') {
+      const u = productUrl(m.product?.handle, m.product?.id);
+      const q = new URLSearchParams();
+      if (m.id) q.set('variant', String(m.id).split('/').pop());
+      const plan = line.sellingPlanAllocation?.sellingPlan?.id;
+      if (plan) q.set('selling_plan', plan.split('/').pop());
+      const qs = q.toString();
+      return el.setAttribute('href', qs ? `${u}${u.includes('?') ? '&' : '?'}${qs}` : u);
+    }
     const v = lineValue(line, key);
     if (v !== undefined) setTextTracked(el, v);
     return undefined;

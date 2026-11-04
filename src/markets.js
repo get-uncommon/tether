@@ -112,7 +112,7 @@ export function detectMarket(markets = cfg.markets, env = defaultEnv()) {
 
 export function rememberMarket(market) {
   if (cfg.markets?.remember === false) return;
-  try { localStorage.setItem(storageKey(), JSON.stringify({ country: market.country, language: market.language || undefined })); } catch { /* private mode */ }
+  try { localStorage.setItem(storageKey(), JSON.stringify({ country: market.country, language: market.language || undefined, locale: market.locale || undefined })); } catch { /* private mode */ }
 }
 
 let localizationPromise = null;

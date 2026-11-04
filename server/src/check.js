@@ -46,11 +46,18 @@ export async function runCheck(rawConfig, rawEnv, { deep = true, fetch, sleep, w
       'Create an app in the Shopify Dev Dashboard with the read_products scope, install it on the store, and set SHOPIFY_CLIENT_ID + SHOPIFY_CLIENT_SECRET (or SHOPIFY_ADMIN_TOKEN for an existing custom app).');
   } else step('ok', 'Shopify access', `using ${auth}`);
 
-  if (!env.WEBFLOW_TOKEN) step('error', 'Webflow token', 'WEBFLOW_TOKEN is missing.', 'Webflow → Site settings → Apps & integrations → API access → generate a token with CMS read and write.');
+  // Static sites: a deploy hook instead of (or next to) Webflow.
+  const deployOnly = Boolean(env.DEPLOY_HOOK_URL) && !env.WEBFLOW_TOKEN;
+  if (env.DEPLOY_HOOK_URL) {
+    if (!/^https:\/\//.test(env.DEPLOY_HOOK_URL)) step('error', 'Deploy hook', 'DEPLOY_HOOK_URL must be an https URL.', 'Copy the deploy hook URL from Cloudflare Pages (Settings → Builds → Deploy hooks), Netlify (Build hooks) or Vercel (Deploy Hooks).');
+    else step('ok', 'Deploy hook', `set: a product change starts a build (at most every ${env.DEPLOY_HOOK_MIN_SECONDS !== undefined && !Number.isNaN(Number(env.DEPLOY_HOOK_MIN_SECONDS)) ? Number(env.DEPLOY_HOOK_MIN_SECONDS) : 60}s)${deployOnly ? ', no Webflow' : ', next to Webflow'}`);
+  }
+
+  if (deployOnly) { /* no Webflow needed */ } else if (!env.WEBFLOW_TOKEN) step('error', 'Webflow token', 'WEBFLOW_TOKEN is missing.', 'Webflow → Site settings → Apps & integrations → API access → generate a token with CMS read and write. (Static site instead? Set DEPLOY_HOOK_URL.)');
   else step('ok', 'Webflow token', 'set');
 
-  const collectionId = config.webflow.collectionId;
-  if (!collectionId) step('error', 'Webflow collection', 'No collection id.', 'Set WEBFLOW_COLLECTION_ID (Webflow CMS → collection settings, or GET /v2/sites/{site_id}/collections).');
+  const collectionId = deployOnly ? 'deploy-hook' : config.webflow.collectionId;
+  if (deployOnly) { /* nothing */ } else if (!collectionId) step('error', 'Webflow collection', 'No collection id.', 'Set WEBFLOW_COLLECTION_ID (Webflow CMS → collection settings, or GET /v2/sites/{site_id}/collections).');
   else if (!/^[a-f0-9]{24}$/i.test(collectionId)) step('warn', 'Webflow collection', `"${collectionId}" doesn't look like a Webflow id (24 hex characters).`, 'Copy the collection id, not its name or slug.');
   else step('ok', 'Webflow collection', collectionId);
 
@@ -62,7 +69,7 @@ export async function runCheck(rawConfig, rawEnv, { deep = true, fetch, sleep, w
     step('warn', 'SYNC_SECRET', 'not set: /check can only show what is configured, and POST /reconcile is off.', `Set a random string of at least ${MIN_SYNC_SECRET} characters to test the APIs from /check.`);
   }
 
-  if (!deep || !domainOk || !auth || !env.WEBFLOW_TOKEN || !collectionId) {
+  if (!deep || !domainOk || !auth || (!deployOnly && (!env.WEBFLOW_TOKEN || !collectionId))) {
     if (deep) step('error', 'Connections', 'Not tested: fix the items above first.');
     return done({ config: summary(config) });
   }
@@ -105,6 +112,8 @@ export async function runCheck(rawConfig, rawEnv, { deep = true, fetch, sleep, w
       step('warn', 'Shopify webhooks', `couldn't list them: ${err.message}`);
     }
   }
+
+  if (deployOnly) return done({ config: summary(config) });
 
   const webflow = createWebflow({ token: env.WEBFLOW_TOKEN, collectionId, perMinute: 0, retries: 0, ...opts });
   try {

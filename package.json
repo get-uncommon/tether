@@ -10,6 +10,14 @@
       "types": "./types/index.d.ts",
       "default": "./dist/esm/index.js"
     },
+    "./server": {
+      "types": "./types/server.d.ts",
+      "default": "./dist/esm/server.js"
+    },
+    "./astro": {
+      "types": "./types/astro.d.ts",
+      "default": "./dist/esm/astro.js"
+    },
     "./presets/barba": {
       "types": "./types/barba.d.ts",
       "default": "./dist/presets/barba.esm.js"
@@ -22,7 +30,9 @@
     "LICENSE",
     "README.md",
     "types/index.d.ts",
-    "types/barba.d.ts"
+    "types/barba.d.ts",
+    "types/server.d.ts",
+    "types/astro.d.ts"
   ],
   "scripts": {
     "build": "node scripts/build.mjs",
@@ -53,25 +63,38 @@
     "url": "https://github.com/ravi-klaassens/tether/issues"
   },
   "keywords": [
+    "astro",
+    "astro-integration",
     "cart",
     "ecommerce",
     "headless",
+    "headless-commerce",
     "headless-shopify",
     "selling-plans",
     "shopify",
     "shopify-subscriptions",
     "shopyflow-alternative",
     "smootify-alternative",
+    "ssr",
     "storefront-api",
     "storesynk-alternative",
     "subscriptions",
     "webflow",
     "webflow-cms",
     "webflow-ecommerce",
-    "webflow-shopify"
+    "webflow-shopify",
+    "withastro"
   ],
   "publishConfig": {
     "access": "public"
   },
-  "types": "types/index.d.ts"
+  "types": "types/index.d.ts",
+  "peerDependencies": {
+    "astro": ">=4"
+  },
+  "peerDependenciesMeta": {
+    "astro": {
+      "optional": true
+    }
+  }
 }

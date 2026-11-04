@@ -1,0 +1,33 @@
+---
+import { ClientRouter } from 'astro:transitions';
+import CartDrawer from '../components/CartDrawer.astro';
+const { title = 'Tether + Astro' } = Astro.props;
+---
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+    <ClientRouter />
+    <style is:global>
+      :root { font-family: system-ui, sans-serif; color: #111; }
+      body { margin: 0; }
+      header { display: flex; justify-content: space-between; padding: 1rem 2rem; border-bottom: 1px solid #eee; }
+      main { padding: 2rem; max-width: 1100px; margin: 0 auto; }
+      a { color: inherit; }
+      button { font: inherit; cursor: pointer; }
+      [tether-state="loading"] { opacity: .5; }
+      .is-selected { background: #111; color: #fff; }
+      .is-unavailable { opacity: .4; }
+      .is-disabled { opacity: .4; pointer-events: none; }
+    </style>
+  </head>
+  <body>
+    <header transition:persist>
+      <a href="/">Shop</a>
+      <button tether-cart-open>Cart (<span tether-cart-count>0</span>)</button>
+    </header>
+    <main><slot /></main>
+    <CartDrawer />
+  </body>
+</html>

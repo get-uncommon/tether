@@ -5,7 +5,7 @@
 import { cfg, reportError } from './config.js';
 import {
   attr, sel, get, has, qsa, scoped, emit, formatMoney, formatDate, setText, setImage, show,
-  setSelected, repeat, productUrl, notifyLayoutChanged, watchImages, busy, parseJSONAttr, toAttributes,
+  setSelected, repeat, productUrl, notifyLayoutChanged, watchImages, busy, parseJSONAttr, toAttributes, sameImage, hasTemplate,
 } from './dom.js';
 import { Cart } from './cart.js';
 import { STATUS_KEYS, ownedBy } from './status.js';
@@ -23,6 +23,13 @@ function metafieldValue(product, ref) {
   const key = ref.slice(i + 1);
   const mf = (product.metafields || []).find((m) => m && m.namespace === ns && m.key === key);
   return mf || null;
+}
+
+// Option names as written in the markup (the build's language), by product handle. With another
+// language Shopify translates them (Size -> Größe), so attributes are matched by position instead.
+const knownOptionNames = new Map();
+export function rememberOptionNames(products) {
+  (products || []).forEach((p) => { if (p?.handle && !knownOptionNames.has(p.handle)) knownOptionNames.set(p.handle, (p.options || []).map((o) => o.name)); });
 }
 
 export class ProductScope {
@@ -75,6 +82,14 @@ export class ProductScope {
   }
 
   // ------------------------------------------------------------ state
+
+  /** The product's option name for a name used in the markup (same name, or same position). */
+  optName(authored) {
+    const opts = this.product?.options || [];
+    if (!authored || opts.some((o) => o.name === authored)) return authored;
+    const i = (knownOptionNames.get(this.product.handle) || []).indexOf(authored);
+    return i >= 0 && opts[i] ? opts[i].name : authored;
+  }
 
   initSelection() {
     const vs = this.product.variants.nodes;
@@ -208,7 +223,7 @@ export class ProductScope {
       const opt = t.closest(sel('option-value'));
       if (own(opt) && opt.closest(sel('option-list'))) {
         e.preventDefault();
-        this.select(get(opt.closest(sel('option-list')), 'option-list'), get(opt, 'option-value'));
+        this.select(this.optName(get(opt.closest(sel('option-list')), 'option-list')), get(opt, 'option-value'));
         return;
       }
 
@@ -234,7 +249,7 @@ export class ProductScope {
     this.root.addEventListener('change', (e) => {
       const t = e.target;
       if (!own(t)) return;
-      if (t.matches(`select${sel('option')}`)) this.select(get(t, 'option'), t.value);
+      if (t.matches(`select${sel('option')}`)) this.select(this.optName(get(t, 'option')), t.value);
       else if (t.matches(`select${sel('variant-select')}`)) this.selectVariant(t.value);
       else if (t.matches(`select${sel('plan')}`)) {
         if (t.value) this.selectPlan(t.value); else this.setPurchase('one-time');
@@ -266,6 +281,11 @@ export class ProductScope {
   // ------------------------------------------------------------ render
 
   renderProduct() {
+    const p0 = this.product;
+    if (!knownOptionNames.has(p0.handle)) {
+      const authored = this.$(`${sel('option-list')},select${sel('option')}`).map((e) => get(e, 'option-list') || get(e, 'option'));
+      if (authored.some((n) => p0.options.some((o) => o.name === n))) rememberOptionNames([p0]);
+    }
     const p = this.product;
 
     this.$(sel('bind')).forEach((el) => {
@@ -289,7 +309,11 @@ export class ProductScope {
           el.setAttribute('href', productUrl(p.handle, p.id));
           if (key === 'url' && !el.firstElementChild && !el.textContent.trim()) setText(el, p.title);
           return undefined;
-        case 'images':
+        case 'images': {
+          // Server-rendered gallery with the same images: keep it as it is.
+          const imgs = [...el.children].map((n) => (n.tagName === 'IMG' ? n : n.querySelector('img')));
+          if (!hasTemplate(el) && imgs.length === p.images.nodes.length && imgs.every((im, i) => sameImage(im?.getAttribute('src'), p.images.nodes[i].url))) return undefined;
+        }
           return repeat(el, p.images.nodes, (node, img) => {
             const target = node.matches(`img,${sel('bind', 'image')}`) ? node : node.querySelector('img') || node;
             setImage(target, img.url, img.altText || p.title);
@@ -316,7 +340,7 @@ export class ProductScope {
     });
 
     this.$(sel('option-list')).forEach((container) => {
-      const name = get(container, 'option-list');
+      const name = this.optName(get(container, 'option-list'));
       const opt = p.options.find((o) => o.name === name);
       if (!opt || (opt.optionValues.length <= 1 && has(container, 'hide-single'))) return show(container, false);
       return repeat(container, opt.optionValues, (node, v) => {
@@ -330,7 +354,7 @@ export class ProductScope {
     });
 
     this.$(`select${sel('option')}`).forEach((s) => {
-      const opt = p.options.find((o) => o.name === get(s, 'option'));
+      const opt = p.options.find((o) => o.name === this.optName(get(s, 'option')));
       if (!opt) return show(s, false);
       s.innerHTML = '';
       opt.optionValues.forEach((v) => s.appendChild(new Option(v.name, v.name)));
@@ -425,10 +449,10 @@ export class ProductScope {
       else if (text[k]) setText(el, text[k]());
     });
 
-    this.$(sel('option-selected')).forEach((el) => setText(el, this.selected[get(el, 'option-selected')] || ''));
+    this.$(sel('option-selected')).forEach((el) => setText(el, this.selected[this.optName(get(el, 'option-selected'))] || ''));
 
     this.$(sel('option-list')).forEach((container) => {
-      const name = get(container, 'option-list');
+      const name = this.optName(get(container, 'option-list'));
       qsa(container, sel('option-value')).forEach((node) => {
         const value = get(node, 'option-value');
         setSelected(node, this.selected[name] === value);
@@ -438,7 +462,7 @@ export class ProductScope {
       });
     });
 
-    this.$(`select${sel('option')}`).forEach((s) => { s.value = this.selected[get(s, 'option')] || ''; });
+    this.$(`select${sel('option')}`).forEach((s) => { s.value = this.selected[this.optName(get(s, 'option'))] || ''; });
     this.$(`select${sel('variant-select')}`).forEach((s) => { s.value = v.id; });
 
     // Subscription UI

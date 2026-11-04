@@ -53,24 +53,37 @@ export function formatDate(iso) {
 }
 
 /** Shopify CDN resize via max-width / max-height / crop attributes on the element. */
-export function cdnUrl(url, el) {
-  if (!url || !el) return url;
-  const w = el.getAttribute('max-width');
-  const h = el.getAttribute('max-height');
-  const crop = el.getAttribute('crop');
-  if (!w && !h) return url;
+/**
+ * Shopify CDN image at a size: imageUrl(url, { width: 800 }). Use the same width as the element's
+ * max-width attribute, so the browser script keeps the image instead of loading it again.
+ */
+export function imageUrl(url, { width, height, crop } = {}) {
+  if (!url) return url;
   try {
     const u = new URL(url);
-    if (w) u.searchParams.set('width', w);
-    if (h) u.searchParams.set('height', h);
+    if (width) u.searchParams.set('width', String(width));
+    if (height) u.searchParams.set('height', String(height));
     if (crop) u.searchParams.set('crop', crop);
     return u.toString();
   } catch { return url; }
 }
 
+export function cdnUrl(url, el) {
+  if (!url || !el) return url;
+  const g = (k) => el.getAttribute(k);
+  return imageUrl(url, { width: g('max-width'), height: g('max-height'), crop: g('max-width') || g('max-height') ? g('crop') : null });
+}
+
+/** Same image, whatever size parameters: the server-rendered one is kept (no second download). */
+export const sameImage = (a, b) => Boolean(a && b) && a.split('?')[0] === b.split('?')[0];
+
 export function setImage(el, url, alt) {
   if (!url) return;
   const src = cdnUrl(url, el);
+  if (el.tagName === 'IMG' && sameImage(el.getAttribute('src'), src)) {
+    if (alt != null && !el.getAttribute('alt')) el.setAttribute('alt', alt);
+    return;
+  }
   if (el.tagName === 'IMG') {
     el.removeAttribute('srcset');
     el.removeAttribute('sizes');
@@ -104,14 +117,24 @@ export function setTextTracked(el, v) {
 export function show(el, visible) {
   const k = 'tetherPrevDisplay';
   if (visible) {
+    if (el.dataset.tetherShown !== undefined) return; // already visible, nothing to check
+    el.dataset.tetherShown = '';
+    el.removeAttribute('hidden');
     if (el.dataset[k] !== undefined) {
       el.style.display = el.dataset[k];
       delete el.dataset[k];
     } else if (el.style.display === 'none') {
       el.style.display = '';
     }
+    // Hidden before the script ran (a class, an inline display:none, a hidden attribute): show it
+    // as block or the value of tether-display.
+    if (typeof getComputedStyle === 'function' && getComputedStyle(el).display === 'none') {
+      el.style.display = el.getAttribute(`${cfg.prefix}-display`) || 'block';
+    }
   } else {
-    if (el.dataset[k] === undefined) el.dataset[k] = el.style.display || '';
+    delete el.dataset.tetherShown;
+    // Remember a real display value to restore, never 'none'.
+    if (el.dataset[k] === undefined && el.style.display !== 'none') el.dataset[k] = el.style.display || '';
     el.style.display = 'none';
   }
 }

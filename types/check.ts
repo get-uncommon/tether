@@ -1,6 +1,25 @@
 // Compile-only check of the public types (npm run test:types). Not shipped.
 import Tether, { init, type TetherConfig, type ShopifyCart, TetherError } from '@occluze/tether';
 import { barbaPreset } from '@occluze/tether/presets/barba';
+import { createStorefront } from '@occluze/tether/server';
+import tetherAstro from '@occluze/tether/astro';
+
+const shop = createStorefront({ PUBLIC_SHOPIFY_DOMAIN: 'x.myshopify.com', PUBLIC_SHOPIFY_STOREFRONT_TOKEN: 't', country: 'NL' });
+async function server() {
+  const all = await shop.allProducts({ collection: 'coffee' });
+  const one = await shop.getProduct(all[0].handle);
+  const html: string = shop.hydrate(one ? [one] : []);
+  const price: string = shop.formatMoney(all[0].priceRange.minVariantPrice);
+  const img: string = shop.imageUrl(all[0].featuredImage?.url, { width: 800 });
+  void img;
+  return [html, price, shop.productUrl(all[0].handle)];
+}
+void server;
+tetherAstro({ country: 'NL', inject: true });
+// @ts-expect-error: functions can't go through the integration
+tetherAstro({ onError: () => {} });
+const unsub: () => void = Tether.cart.subscribe((cart, { count }) => console.log(cart?.id, count));
+unsub();
 
 const config: TetherConfig = { domain: 'x.myshopify.com', token: 't', country: 'NL', markets: { detect: true, locales: { de: { country: 'DE' } } }, onError: (e, ctx) => console.log((e as TetherError).code, ctx) };
 init({ ...config, ...barbaPreset({ lenis: () => null }) });
@@ -21,3 +40,8 @@ async function demo() {
   scope?.setPurchase('weekly');
 }
 void demo;
+
+import type { ShopifyProduct as SP } from '@occluze/tether/server';
+const sp: SP | null = null; void sp;
+Tether.cart.subscribe((c, { loaded, warnings }) => { if (loaded && warnings.length) console.log(warnings[0].code, c?.lines.nodes[0]?.cost.totalAmount); });
+const im: string = Tether.imageUrl('https://cdn.shopify.com/a.jpg', { width: 160 }); void im;

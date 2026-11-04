@@ -1,6 +1,6 @@
 # Tether
 
-**Shopify products, cart and subscriptions in Webflow, with HTML attributes.**
+**Shopify products, cart and subscriptions in Webflow or Astro, with HTML attributes.**
 An open-source, free alternative to Smootify and Storesynk (formerly Shopyflow): one script tag, no monthly fee.
 [How it compares →](docs/comparison.md)
 
@@ -17,9 +17,10 @@ An open-source, free alternative to Smootify and Storesynk (formerly Shopyflow):
 - **With or without the CMS:** bind products to CMS items, or let one page show any product from the URL.
 - **Markets:** local prices and currency, a country selector, Webflow Localization.
 - **Optional CMS sync:** a Webflow CMS item per Shopify product, kept up to date automatically ([one-click deploy](#sync-shopify-products-to-the-webflow-cms-optional)).
+- **Astro too:** build-time product pages with live prices and cart, View Transitions included ([Astro guide](docs/astro.md)).
 - **Hand-over ready:** loading, error and not-found states, `Tether.diagnose()`, error reporting.
 
-MIT licensed · 17 KB gzipped · no dependencies · TypeScript types · [full reference](docs/reference.md) · [comparison](docs/comparison.md) · [changelog](CHANGELOG.md)
+MIT licensed · 18 KB gzipped · no dependencies · TypeScript types · [full reference](docs/reference.md) · [comparison](docs/comparison.md) · [changelog](CHANGELOG.md)
 
 ---
 
@@ -120,7 +121,8 @@ npm run build
 ```
 
 Bundlers: `npm install @occluze/tether`, then `import Tether from "@occluze/tether"` (TypeScript
-types included; markets and diagnose are split into their own chunks).
+types included; markets and diagnose are split into their own chunks). Server-side data:
+`@occluze/tether/server`. Astro: `@occluze/tether/astro` ([guide](docs/astro.md), [starter](examples/astro)).
 JavaScript API, config, releases and the Shopify API version policy are in the [reference](docs/reference.md).
 
 ## License

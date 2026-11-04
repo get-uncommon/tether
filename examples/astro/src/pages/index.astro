@@ -1,0 +1,18 @@
+---
+import Layout from '../layouts/Layout.astro';
+import ProductCard from '../components/ProductCard.astro';
+import { shop } from '../lib/shop.js';
+
+// Built once at build time: real HTML for search engines. Tether makes prices and stock live.
+const products = (await shop.getProducts({ first: 12, sortKey: 'BEST_SELLING' })).products;
+---
+<Layout title="Shop">
+  <h1>Shop</h1>
+  <div class="grid">
+    {products.map((product) => <ProductCard product={product} />)}
+  </div>
+  <Fragment set:html={shop.hydrate(products)} />
+</Layout>
+<style>
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 1.5rem; }
+</style>

@@ -53,12 +53,7 @@ export function setScopeStatus(root, status, err) {
   scoped(root, sel('show'), boundary()).forEach((el) => {
     const k = get(el, 'show');
     if (!STATUS_KEYS.includes(k)) return;
-    const visible = k === status;
-    show(el, visible);
-    // Blocks hidden by a Webflow class (display: none) still need to appear.
-    if (visible && typeof getComputedStyle === 'function' && getComputedStyle(el).display === 'none') {
-      el.style.display = el.getAttribute(attr('display')) || 'block';
-    }
+    show(el, k === status);
   });
 
   if (status === 'error' || notFound) {

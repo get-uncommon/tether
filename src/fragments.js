@@ -7,8 +7,8 @@ import { cfg } from './config.js';
 const MONEY = 'amount currencyCode';
 const IMAGE = 'url altText width height';
 
-export function metafieldIdentifiers() {
-  return (cfg.metafields || []).map((m) => {
+export function metafieldIdentifiers(o = cfg) {
+  return (o.metafields || []).map((m) => {
     if (typeof m === 'string') {
       const i = m.indexOf('.');
       return { namespace: m.slice(0, i), key: m.slice(i + 1) };
@@ -17,8 +17,8 @@ export function metafieldIdentifiers() {
   }).filter((m) => m.namespace && m.key);
 }
 
-function metafieldsField() {
-  const ids = metafieldIdentifiers();
+function metafieldsField(o = cfg) {
+  const ids = metafieldIdentifiers(o);
   if (!ids.length) return '';
   const list = ids
     .map((m) => `{namespace: ${JSON.stringify(m.namespace)}, key: ${JSON.stringify(m.key)}}`)
@@ -53,26 +53,27 @@ export const ALLOCATION_FIELDS = `
     unitPrice { ${MONEY} }
   }`;
 
-export function productFragment() {
+/** The product fields Tether renders. `o` = config (counts, metafields); the server module passes its own. */
+export function productFragment(o = cfg) {
   return `
 fragment TetherProduct on Product {
   id handle title description descriptionHtml productType vendor tags
   availableForSale publishedAt onlineStoreUrl requiresSellingPlan
   seo { title description }
   featuredImage { ${IMAGE} }
-  images(first: ${cfg.imagesFirst}) { nodes { ${IMAGE} } }
+  images(first: ${o.imagesFirst}) { nodes { ${IMAGE} } }
   options { name optionValues { name swatch { color image { previewImage { ${IMAGE} } } } } }
   priceRange { minVariantPrice { ${MONEY} } maxVariantPrice { ${MONEY} } }
   compareAtPriceRange { minVariantPrice { ${MONEY} } maxVariantPrice { ${MONEY} } }
-  ${metafieldsField()}
-  sellingPlanGroups(first: ${cfg.sellingPlanGroupsFirst}) {
+  ${metafieldsField(o)}
+  sellingPlanGroups(first: ${o.sellingPlanGroupsFirst}) {
     nodes {
       name appName
       options { name values }
-      sellingPlans(first: ${cfg.sellingPlansFirst}) { nodes { ${SELLING_PLAN_FIELDS} } }
+      sellingPlans(first: ${o.sellingPlansFirst}) { nodes { ${SELLING_PLAN_FIELDS} } }
     }
   }
-  variants(first: ${cfg.variantsFirst}) {
+  variants(first: ${o.variantsFirst}) {
     nodes {
       id title availableForSale currentlyNotInStock quantityAvailable sku barcode
       selectedOptions { name value }
@@ -80,7 +81,7 @@ fragment TetherProduct on Product {
       price { ${MONEY} }
       compareAtPrice { ${MONEY} }
       unitPrice { ${MONEY} }
-      sellingPlanAllocations(first: ${cfg.sellingPlansFirst}) { nodes { ${ALLOCATION_FIELDS} } }
+      sellingPlanAllocations(first: ${o.sellingPlansFirst}) { nodes { ${ALLOCATION_FIELDS} } }
     }
   }
 }`;

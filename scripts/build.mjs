@@ -124,7 +124,8 @@ async function builds() {
     { ...iife, outfile: join(ROOT, 'dist/tether.min.js'), minify: true, sourcemap: true },
     part('diagnose', false), part('diagnose', true), part('markets', false), part('markets', true),
     {
-      ...common, entryPoints: [join(SRC, 'index.js')], format: 'esm', splitting: true, minify: true,
+      ...common, entryPoints: [join(SRC, 'index.js'), join(SRC, 'server.js'), join(SRC, 'astro.js')], format: 'esm', splitting: true, minify: true,
+      external: ['@occluze/tether', 'node:*'],
       outdir: join(ROOT, 'dist/esm'), chunkNames: 'chunks/[name]-[hash]', entryNames: '[name]',
     },
     { ...common, entryPoints: [join(SRC, 'presets/barba.js')], format: 'esm', outfile: join(ROOT, 'dist/presets/barba.esm.js') },

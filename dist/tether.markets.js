@@ -20,7 +20,7 @@
 
   // tether-core:client.js
   var m2 = window.Tether.__core["client.js"];
-  var { TetherError, endpoint, gql, unwrap, withContext } = m2;
+  var { TetherError, endpoint, gql, request, unwrap, withContext } = m2;
 
   // tether-core:cart.js
   var m3 = window.Tether.__core["cart.js"];
@@ -32,15 +32,15 @@
 
   // tether-core:loader.js
   var m5 = window.Tether.__core["loader.js"];
-  var { clearProductCache, getProduct, getProducts, getRecommendations, normalizeProductKey, primeProduct } = m5;
+  var { clearProductCache, getProduct, getProducts, getRecommendations, hydrateProducts, normalizeProductKey, primeProduct, refreshProducts, takeStale } = m5;
 
   // tether-core:dom.js
   var m6 = window.Tether.__core["dom.js"];
-  var { attr, busy, cdnUrl, dataKey, emit, formatDate, formatMoney, get, has, hasTemplate, notifyLayoutChanged, parseJSONAttr, productUrl, qsa, readText, repeat, repeatKeyed, scoped, sel, setImage, setSelected, setText, setTextTracked, show, toAttributes, watchImages } = m6;
+  var { attr, busy, cdnUrl, dataKey, emit, formatDate, formatMoney, get, has, hasTemplate, imageUrl, notifyLayoutChanged, parseJSONAttr, productUrl, qsa, readText, repeat, repeatKeyed, sameImage, scoped, sel, setImage, setSelected, setText, setTextTracked, show, toAttributes, watchImages } = m6;
 
   // tether-core:mounting.js
   var m7 = window.Tether.__core["mounting.js"];
-  var { liveLists, liveProducts, mountProduct, mountedLists, mountedProducts, pruneLive, retryFailed, within } = m7;
+  var { hydrateFromPage, liveLists, liveProducts, mountProduct, mountedLists, mountedProducts, pruneLive, retryFailed, within } = m7;
 
   // src/markets.js
   var COUNTRY = /^[A-Z]{2}$/;
@@ -130,7 +130,7 @@
   function rememberMarket(market) {
     if (cfg.markets?.remember === false) return;
     try {
-      localStorage.setItem(storageKey(), JSON.stringify({ country: market.country, language: market.language || void 0 }));
+      localStorage.setItem(storageKey(), JSON.stringify({ country: market.country, language: market.language || void 0, locale: market.locale || void 0 }));
     } catch {
     }
   }
@@ -160,11 +160,13 @@
       const fill = (tpl, c) => tpl.replace(/\{name\}/g, c.name).replace(/\{code\}/g, c.isoCode).replace(/\{currency\}/g, c.currency?.isoCode || "").replace(/\{symbol\}/g, c.currency?.symbol || "");
       selects.forEach((s) => {
         const tpl = s.getAttribute(attr("country-label")) || "{name} ({currency})";
+        const only = (s.getAttribute(attr("countries")) || "").toUpperCase().split(/[\s,]+/).filter(Boolean);
+        const list = only.length ? only.map((c) => countries.find((x) => x.isoCode === c)).filter(Boolean) : countries;
         s.innerHTML = "";
-        countries.forEach((c) => s.appendChild(new Option(fill(tpl, c), c.isoCode)));
+        list.forEach((c) => s.appendChild(new Option(fill(tpl, c), c.isoCode)));
         s.value = current;
         if (s.value !== current) s.selectedIndex = -1;
-        s.disabled = countries.length < 2 && !s.hasAttribute(attr("always-enabled"));
+        s.disabled = list.length < 2 && !s.hasAttribute(attr("always-enabled"));
       });
       binds.forEach((el) => {
         const k = get(el, "country-bind") || "name";
@@ -173,14 +175,18 @@
       });
     }).catch((err) => reportError(err, "country select"));
   }
-  async function setCountry(code, { language, remember = true } = {}) {
+  async function setCountry(code, { language, locale, remember = true } = {}) {
     const country = toCountry(code);
     if (!country) throw new TetherError(`Not a country code: ${code}`, { code: "INVALID_COUNTRY" });
+    const entry = Object.values(cfg.markets?.locales || {}).find((m8) => toCountry(m8?.country) === country);
+    const own = locale || entry?.locale;
+    const loc = own || cfg.locale;
     const lang = language === void 0 ? cfg.language : toLanguage(language);
-    const changed = country !== String(cfg.country || "").toUpperCase() || lang !== cfg.language;
+    const changed = country !== String(cfg.country || "").toUpperCase() || lang !== cfg.language || loc !== cfg.locale;
     cfg.country = country;
     cfg.language = lang || void 0;
-    if (remember) rememberMarket({ country, language: lang });
+    cfg.locale = loc;
+    if (remember) rememberMarket({ country, language: lang, locale: own });
     if (!changed) {
       renderCountrySelects();
       return Cart.state;

@@ -60,7 +60,8 @@ Inside a scope, `tether-show` follows the state:
 
 Give the `error` / `not-found` blocks a class with `display: none` in Webflow, so they stay hidden
 if JavaScript doesn't run at all. Tether shows them when needed (as `block`, or the value of
-`tether-display`, e.g. `tether-display="flex"`). Add-to-cart buttons in a failed scope are
+`tether-display`, e.g. `tether-display="flex"`). This works for every `tether-show` condition:
+an element hidden with a class, `style="display:none"` or `hidden` is shown when it applies. Add-to-cart buttons in a failed scope are
 disabled. Events: `tether:product-not-found`, `tether:error`, `tether:cart-error`.
 
 CSS works too: `[tether-state="loading"] .price { opacity: .3 }`.
@@ -120,16 +121,20 @@ export default {
 **Country selector:**
 
 ```html
-<select tether-country-select tether-country-label="{name} ({currency})"></select>
+<select tether-country-select tether-country-label="{name} ({currency})" tether-countries="NL,DE,BE"></select>
 <span tether-country-bind="currency"></span>   <!-- name | code | currency | symbol -->
 ```
 
-It lists the countries from your Shopify Markets (`localization.availableCountries`). Choosing one
+It lists the countries from your Shopify Markets (`localization.availableCountries`), or only
+the ones in `tether-countries`, in that order. Choosing one
 calls `Tether.setCountry(code)`, which updates `@inContext`, moves the cart to that market
 (`buyerIdentity.countryCode`, so cart prices and checkout currency follow), re-renders every product
 and list on the page (selections are kept) and remembers the choice. A saved cart from another
 market is moved automatically on the next page load; switching never creates a cart. Responses
 that were still on their way from the old market are ignored. Event: `tether:country-changed`.
+The money format follows a `markets.locales` entry for that country (`locale`), or
+`Tether.setCountry('DE', { locale: 'de-DE' })`; it's remembered with the country. With a
+`language`, Shopify translates option names; `tether-option-list="Size"` keeps working (matched by position).
 
 ```js
 await Tether.setCountry('BE', { language: 'FR' });
@@ -236,7 +241,8 @@ Product: `in-stock`, `out-of-stock`, `backorder`, `low-stock`, `on-sale`, `not-o
 `has-savings`.
 
 Cart (outside product scopes): `cart-empty`, `cart-filled`, `cart-has-subscription`,
-`cart-no-subscription`, `cart-has-discount`, `cart-error`.
+`cart-no-subscription`, `cart-has-discount`, `cart-error`, `cart-warning` (Shopify changed the
+last request, e.g. less stock than asked; the message goes in `[tether-cart-warning]`).
 
 State (products and lists): `loading`, `ready`, `error`, `not-found` (see above).
 
@@ -327,7 +333,7 @@ await Tether.setCountry('DE');                    // switch market (see Markets)
 Events (on `document`, prefixed `tether:`): `ready`, `product-ready`, `variant-changed`,
 `product-added`, `added`, `group-added`, `cart-updated`, `cart-toggled`, `checkout`,
 `list-ready`, `discount-applied`, `discount-invalid`, `layout-changed`, `product-not-found`,
-`product-updated`, `country-changed`, `cart-error`, `error`.
+`product-updated`, `country-changed`, `cart-error`, `cart-warning`, `error`.
 
 ## Config
 
@@ -435,5 +441,5 @@ deployed sync Workers pick it up through their Update Tether action within their
 
 Tether gets the subscription into the cart with the right plan. After that it's all Shopify:
 checkout, the recurring charge, the contract, and the customer portal (skip, pause, swap,
-cancel) in the subscription app / Shopify customer accounts. Test those flows in a dev store
-with payments in test mode.
+cancel) in the subscription app / Shopify customer accounts. Test those flows in a Shopify dev
+store with payments in test mode.

@@ -1,5 +1,54 @@
 # Changelog
 
+## 0.5.0 (2026-11-04)
+
+**Astro** ([guide](docs/astro.md), [starter](examples/astro)): Shopify product pages built at build
+time (or per request with SSR), with live prices, stock, variants, subscriptions and the cart.
+- `@occluze/tether/astro`: an integration that adds Tether to every page, configured from `.env`
+  (`PUBLIC_SHOPIFY_DOMAIN`, `PUBLIC_SHOPIFY_STOREFRONT_TOKEN`).
+- `@occluze/tether/server`: `createStorefront()` for build-time and server data: `getProduct`,
+  `getProducts`, `allProducts`, `getCollection`, `allCollections`, `getRecommendations`,
+  `formatMoney`, `productUrl`, `imageUrl`, `query`. Same product shape as the browser.
+- Hydration: `shop.hydrate(products)` puts the data in the page; the browser renders it without a
+  request and refreshes prices and stock once in the background, batched for the whole page
+  (`revalidate: false` to skip). Server-rendered images and products loaded earlier in the visit are kept.
+- View Transitions (`<ClientRouter />`) work by themselves: each page is mounted, the cart closes
+  on navigation (`astro: false` to turn off).
+- `shop.initialState(product)`: what Tether shows first (variant, price, purchase mode, every
+  `tether-show` condition, unavailable options), so server-rendered pages don't change when the
+  script takes over. Same rules as the browser, covered by a test that compares the two.
+- `Tether.cart.subscribe(fn)` for React, Svelte and Vue islands, with `loaded` (saved cart known)
+  and `warnings`. `Tether.cart.loaded`, `Tether.imageUrl()`.
+- `getRecommendations()` also takes a handle (server and browser), so it runs next to `getProduct()`.
+
+**Sync: rebuild on change.** `DEPLOY_HOOK_URL` starts a build of a statically built site
+(Cloudflare Pages, Netlify, Vercel) when product content changes; stock changes don't. At most one
+build per `DEPLOY_HOOK_MIN_SECONDS` (60). Works with or without Webflow.
+
+**Fixes** (found by first-time users building with the docs only):
+- `tether-show` elements hidden before the script ran (a class, `style="display:none"`, `hidden`)
+  are now shown when their condition applies, for every condition, not only error/not-found.
+- Cart line links (`tether-line="url"`) open the variant that's in the cart.
+- `tether-checkout` gets `is-disabled` / `aria-disabled` while the cart is empty.
+- Cart warnings: asking for more than is in stock used to change the quantity silently. Shopify's
+  message now shows in `tether-show="cart-warning"` / `[tether-cart-warning]`, with a
+  `tether:cart-warning` event (API 2024-07 and later; older versions just skip it).
+- Cart line links also keep the subscription plan (`selling_plan=`).
+- `cart.subscribe` and `tether:cart-updated` now also fire when the saved cart has loaded.
+- Discount codes: the form no longer becomes a page navigation with Astro's router; an invalid
+  code gets `is-invalid` and is removed from the cart (it used to stay and repeat its warning).
+- Another language: when Shopify translates option names (Size → Größe), `tether-option-list`,
+  `tether-option` and `tether-option-selected` keep matching (by position).
+- `Tether.query()` / `shop.query()` add the market to anonymous and shorthand queries too.
+- `diagnose()` knows `tether-show="cart-warning"`.
+
+**Markets:**
+- `setCountry('DE', { locale: 'de-DE' })`, or a `locale` in a `markets.locales` entry for that
+  country: the money format follows the country, and is remembered with it.
+- `tether-countries="NL,DE"` limits a country select to your markets, in your order.
+- With the Astro integration, `window.TETHER_CONFIG` in the layout no longer starts a second,
+  unconfigured Tether.
+
 ## 0.4.0 (2026-11-04)
 
 **Smaller:** the script every visitor loads went from 62.9 KB to 50.8 KB (20.7 → 17.1 KB gzipped, 15.4 KB brotli), while gaining the fixes below.

@@ -60,7 +60,7 @@ export interface ShopifyCartLine {
   merchandise: ShopifyVariant & { product: Pick<ShopifyProduct, 'id' | 'handle' | 'title'> & Record<string, unknown> };
   sellingPlanAllocation?: { sellingPlan: { id: string; name: string } } | null;
   attributes?: { key: string; value: string }[];
-  cost: Record<string, Money | null | undefined>;
+  cost: { totalAmount: Money; subtotalAmount: Money; amountPerQuantity: Money; compareAtAmountPerQuantity?: Money | null };
   [k: string]: unknown;
 }
 
@@ -117,6 +117,10 @@ export interface TetherConfig {
   sellingPlansFirst?: number;
   collectionFirst?: number;
   retries?: number;
+  /** Products handed over by the server (tether/server hydrate()): refresh once in the background (default true). */
+  revalidate?: boolean;
+  /** Mount on Astro View Transitions (astro:page-load) and close the cart on navigation (default true). */
+  astro?: boolean;
   storageKey?: string | null;
   cartDrawerOpenClass?: string;
   openCartOnAdd?: boolean;
@@ -163,11 +167,17 @@ export interface LineInput {
   attributes?: Attributes;
 }
 
+export interface CartWarning { code: string; message: string }
+
 export interface Cart {
   readonly state: ShopifyCart | null;
   readonly lines: ShopifyCartLine[];
   readonly count: number;
   lastError: Error | null;
+  /** Shopify's notes on the last change, e.g. less stock than asked (code MERCHANDISE_NOT_ENOUGH_STOCK). */
+  readonly warnings: CartWarning[];
+  /** true once the saved cart (or the absence of one) is known. */
+  readonly loaded: boolean;
   id(): string | null;
   init(): Promise<ShopifyCart | null>;
   /** add(variantId, qty) · add({ variantId, quantity, sellingPlanId, attributes }) · add([line, line]) */
@@ -189,6 +199,8 @@ export interface Cart {
   isOpen(): boolean;
   drawers(): HTMLElement[];
   render(): void;
+  /** For framework islands: fn(cart, meta) now, when the saved cart has loaded and after every change. Returns unsubscribe. */
+  subscribe(fn: (cart: ShopifyCart | null, meta: { open: boolean; count: number; loaded: boolean; warnings: CartWarning[] }) => void): () => void;
 }
 
 export interface ProductScope {
@@ -262,6 +274,7 @@ export interface TetherEvents {
   'product-added': { product: ShopifyProduct; variant: ShopifyVariant; line: LineInput };
   added: { cart: ShopifyCart; lines: LineInput[] };
   'group-added': { group: string | null; lines: LineInput[] };
+  'cart-warning': { warnings: CartWarning[] };
   'cart-updated': { cart: ShopifyCart | null; reason: string };
   'cart-toggled': { open: boolean };
   'cart-error': { error: Error };
@@ -290,13 +303,15 @@ export interface Tether {
   cart: Cart;
   getProduct(handleOrId: string): Promise<ShopifyProduct>;
   getProducts(opts?: { collection?: string; query?: string; first?: number; after?: string | null; sortKey?: string; reverse?: boolean; filters?: unknown[] }): Promise<ProductPage>;
-  getRecommendations(productId: string, intent?: 'RELATED' | 'COMPLEMENTARY'): Promise<ShopifyProduct[]>;
+  getRecommendations(product: string | Pick<ShopifyProduct, 'id'>, intent?: 'RELATED' | 'COMPLEMENTARY'): Promise<ShopifyProduct[]>;
   getScope(el: Element | null | undefined): ProductScope | null;
   addGroup(button: Element): Promise<ShopifyCart | null>;
   primeProduct(product: ShopifyProduct): void;
   normalizeProductKey(raw: string | number): string | null;
   clearProductCache(): void;
   formatMoney(money: Money | null | undefined): string;
+  /** Shopify CDN image at a size: imageUrl(line.merchandise.image?.url, { width: 160 }). */
+  imageUrl(url: string | null | undefined, size?: { width?: number; height?: number; crop?: string }): string;
   plans: SellingPlanHelpers;
   TetherError: typeof TetherError;
   resolveProductKey(el: Element, location?: Location | URL): { key: string | null; fromUrl: boolean; raw: string };

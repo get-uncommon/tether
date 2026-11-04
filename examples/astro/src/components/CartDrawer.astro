@@ -1,0 +1,46 @@
+---
+// Lives outside the page content and survives View Transitions (transition:persist).
+---
+<aside tether-cart-drawer class="drawer" transition:persist>
+  <div class="head"><strong>Cart</strong><button tether-cart-close>Close</button></div>
+  <p tether-show="cart-empty">Your cart is empty.</p>
+  <div tether-cart-lines>
+    <div class="line">
+      <img tether-line="image" max-width="120" alt="" />
+      <div>
+        <div tether-line="title"></div>
+        <small tether-line="variant-title"></small>
+        <small tether-line="plan"></small>
+        <div>
+          <button tether-line-minus aria-label="One less">−</button>
+          <span tether-line="quantity"></span>
+          <button tether-line-plus aria-label="One more">+</button>
+          <button tether-line-remove>Remove</button>
+        </div>
+      </div>
+      <span tether-line="line-total"></span>
+    </div>
+  </div>
+  <p tether-show="cart-warning" hidden class="warning" tether-cart-warning></p>
+  <form tether-discount-form tether-show="cart-filled" hidden class="discount">
+    <input tether-discount-input placeholder="Discount code" aria-label="Discount code" />
+    <button>Apply</button>
+  </form>
+  <div tether-show="cart-filled" hidden class="foot">
+    <div>Subtotal <span tether-cart-subtotal></span></div>
+    <button tether-checkout>Checkout</button>
+  </div>
+  <p tether-show="cart-error">The cart couldn't be updated. Please try again.</p>
+</aside>
+<style>
+  .drawer { position: fixed; inset: 0 0 0 auto; width: min(420px, 100%); background: #fff; box-shadow: -2px 0 20px #0002;
+    padding: 1rem; transform: translateX(100%); transition: transform .25s; overflow: auto; z-index: 10; }
+  .drawer:global(.is-open) { transform: none; }
+  .head, .foot { display: flex; justify-content: space-between; align-items: center; gap: 1rem; }
+  .line { display: grid; grid-template-columns: 60px 1fr auto; gap: .75rem; padding: .75rem 0; border-bottom: 1px solid #eee; }
+  .line img { width: 60px; height: 60px; object-fit: cover; }
+  small { display: block; color: #666; }
+  .discount { display: flex; gap: .5rem; margin: 1rem 0; }
+  .discount:global(.is-invalid) input { outline: 2px solid #c00; }
+  .warning { color: #a50; }
+</style>

@@ -66,7 +66,7 @@ export function checkMarkup(root = document) {
     'in-stock', 'out-of-stock', 'backorder', 'low-stock', 'on-sale', 'not-on-sale', 'has-variants', 'single-variant',
     'subscription-available', 'subscription-unavailable', 'subscription-only', 'one-time-available',
     'subscription-selected', 'one-time-selected', 'has-savings', 'loading', 'ready', 'error', 'not-found',
-    'cart-empty', 'cart-filled', 'cart-has-subscription', 'cart-no-subscription', 'cart-has-discount', 'cart-error',
+    'cart-empty', 'cart-filled', 'cart-has-subscription', 'cart-no-subscription', 'cart-has-discount', 'cart-error', 'cart-warning',
     'list-empty', 'list-filled',
   ]);
   qsa(root, sel('show')).forEach((el) => {

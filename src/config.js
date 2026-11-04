@@ -25,6 +25,7 @@ export const DEFAULTS = {
   sellingPlansFirst: 25,
   collectionFirst: 24,
   retries: 2,
+  revalidate: true,           // products from the server (tether/server hydrate()): refresh once in the background
 
   // Cart
   storageKey: null,           // defaults to `tether:cart:<domain>`
@@ -39,6 +40,7 @@ export const DEFAULTS = {
   // Mounting
   autoMount: true,            // mount document on DOMContentLoaded
   observe: false,             // auto-mount nodes added later (CMS load-more, filters)
+  astro: true,                // mount on Astro View Transitions (astro:page-load); false if you do it yourself
   partsUrl: null,             // folder of tether.markets/diagnose(.min).js for the <script> build (default: next to it)
 
   // Formatting

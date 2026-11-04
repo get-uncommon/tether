@@ -17,9 +17,9 @@ import {
 } from './loader.js';
 import * as plans from './selling-plans.js';
 import { resolveProductKey } from './status.js';
-import { attr, sel, get, qsa, emit, formatMoney, busy, parseJSONAttr, toAttributes } from './dom.js';
+import { attr, sel, get, qsa, emit, formatMoney, busy, parseJSONAttr, toAttributes, imageUrl } from './dom.js';
 import { loadPart, coreModules } from './lazy.js';
-import { mountedLists, liveLists, pruneLive, within, mountProduct, retryFailed } from './mounting.js';
+import { mountedLists, liveLists, pruneLive, within, mountProduct, retryFailed, hydrateFromPage } from './mounting.js';
 
 export const VERSION = '0.4.0';
 
@@ -31,6 +31,7 @@ export function mount(root = document) {
   if (!isConfigured()) return 0;
   let count = 0;
   pruneLive(); // page transitions detach old roots: don't keep them alive
+  hydrateFromPage(root); // products the server already rendered: no request needed
 
   within(root, listSelector()).forEach((el) => {
     if (mountedLists.has(el)) return;
@@ -144,12 +145,21 @@ function bindControls() {
       try {
         const cart = await Cart.applyDiscount(code);
         const ok = (cart?.discountCodes || []).find((d) => d.code.toLowerCase() === code.toLowerCase())?.applicable;
+        // An invalid code doesn't stay in the cart (Shopify would warn about it on every change).
+        if (!ok) await Cart.removeDiscount(code).catch(() => {});
         form.classList.toggle('is-invalid', !ok);
         emit(ok ? 'discount-applied' : 'discount-invalid', { code }, form);
         if (ok && input) input.value = '';
       } catch (err) { form.classList.add('is-invalid'); reportError(err, 'discount'); }
     });
-  });
+  }, true); // capture: before a router (Astro's ClientRouter) turns the submit into a navigation
+  document.addEventListener('input', (e) => { e.target.closest?.(sel('discount-form'))?.classList.remove('is-invalid'); });
+
+  // Astro View Transitions (<ClientRouter />): mount every new page, close the cart while leaving.
+  if (cfg.astro !== false) {
+    document.addEventListener('astro:page-load', () => mount(document));
+    document.addEventListener('astro:before-swap', () => unmount());
+  }
 
   // Back online after a failed load: try the failed products and lists again.
   window.addEventListener('online', () => {
@@ -252,7 +262,7 @@ async function applyMarket(overrides) {
   if (!market) return;
   if (market.country) cfg.country = market.country;
   if (market.language) cfg.language = market.language;
-  if (market.locale && !overrides.locale && !window.TETHER_CONFIG?.locale) cfg.locale = market.locale;
+  if (market.locale && !overrides.locale) cfg.locale = market.locale; // the visitor's market wins over the default
   log('market', market);
 }
 
@@ -292,6 +302,7 @@ export const api = {
   normalizeProductKey,
   clearProductCache,
   formatMoney,
+  imageUrl,
   plans,
   TetherError,
   resolveProductKey,
@@ -313,7 +324,8 @@ export default api;
 // Auto-start for the plain <script> setup.
 if (typeof window !== 'undefined' && typeof document !== 'undefined') {
   window.Tether = api;
-  const auto = window.TETHER_CONFIG && window.TETHER_CONFIG.autoMount !== false;
+  // Not with a framework integration (Astro), which starts Tether itself.
+  const auto = window.TETHER_CONFIG && window.TETHER_CONFIG.autoMount !== false && !window.TETHER_INTEGRATION;
   if (auto) {
     const start = () => init().then(() => mount(document));
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start, { once: true });

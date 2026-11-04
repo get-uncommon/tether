@@ -1,0 +1,14 @@
+{
+  "name": "tether-astro-starter",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview"
+  },
+  "dependencies": {
+    "@occluze/tether": "^0.5.0",
+    "astro": "^7.4.5"
+  }
+}

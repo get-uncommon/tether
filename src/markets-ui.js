@@ -30,11 +30,14 @@ function renderCountrySelects(root = document) {
       .replace(/\{currency\}/g, c.currency?.isoCode || '').replace(/\{symbol\}/g, c.currency?.symbol || '');
     selects.forEach((s) => {
       const tpl = s.getAttribute(attr('country-label')) || '{name} ({currency})';
+      // tether-countries="NL,DE,BE": only these (in your order); otherwise every country of the store.
+      const only = (s.getAttribute(attr('countries')) || '').toUpperCase().split(/[\s,]+/).filter(Boolean);
+      const list = only.length ? only.map((c) => countries.find((x) => x.isoCode === c)).filter(Boolean) : countries;
       s.innerHTML = '';
-      countries.forEach((c) => s.appendChild(new Option(fill(tpl, c), c.isoCode)));
+      list.forEach((c) => s.appendChild(new Option(fill(tpl, c), c.isoCode)));
       s.value = current;
       if (s.value !== current) s.selectedIndex = -1; // a country the store doesn't sell to
-      s.disabled = countries.length < 2 && !s.hasAttribute(attr('always-enabled'));
+      s.disabled = list.length < 2 && !s.hasAttribute(attr('always-enabled'));
     });
     binds.forEach((el) => {
       const k = get(el, 'country-bind') || 'name';
@@ -49,14 +52,19 @@ function renderCountrySelects(root = document) {
  * buyerIdentity.countryCode is updated, and every product and list on the page re-renders.
  *   Tether.setCountry('DE')            Tether.setCountry('BE', { language: 'FR' })
  */
-export async function setCountry(code, { language, remember = true } = {}) {
+export async function setCountry(code, { language, locale, remember = true } = {}) {
   const country = toCountry(code);
   if (!country) throw new TetherError(`Not a country code: ${code}`, { code: 'INVALID_COUNTRY' });
+  // Money format: the option, else a markets.locales entry for this country, else unchanged.
+  const entry = Object.values(cfg.markets?.locales || {}).find((m) => toCountry(m?.country) === country);
+  const own = locale || entry?.locale;
+  const loc = own || cfg.locale;
   const lang = language === undefined ? cfg.language : toLanguage(language);
-  const changed = country !== String(cfg.country || '').toUpperCase() || lang !== cfg.language;
+  const changed = country !== String(cfg.country || '').toUpperCase() || lang !== cfg.language || loc !== cfg.locale;
   cfg.country = country;
   cfg.language = lang || undefined;
-  if (remember) rememberMarket({ country, language: lang });
+  cfg.locale = loc;
+  if (remember) rememberMarket({ country, language: lang, locale: own });
   if (!changed) { renderCountrySelects(); return Cart.state; }
 
   clearProductCache();

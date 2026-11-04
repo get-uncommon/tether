@@ -248,3 +248,19 @@ test('an expired saved cart is dropped on a country switch, not replaced by a ne
 test('no request ever leaves for anything but the Storefront API (no IP lookups)', () => {
   assert.deepEqual([...hosts], ['shop.test']);
 });
+
+test('setCountry: the money format follows the country (option or markets.locales), and is remembered', async () => {
+  Tether.config.markets.locales = { de: { country: 'DE', language: 'DE', locale: 'de-DE' } };
+  await Tether.setCountry('DE', { language: null });
+  assert.equal(Tether.config.locale, 'de-DE');
+  assert.equal(JSON.parse(localStorage.getItem('tether:market:shop.test')).locale, 'de-DE');
+  await Tether.setCountry('NL', { locale: 'nl-NL', language: null });
+  assert.equal(Tether.config.locale, 'nl-NL');
+});
+
+test('tether-countries limits a country select to your list, in your order', async () => {
+  document.body.innerHTML = '<select id="cs2" tether-country-select tether-countries="NL, DE"></select>';
+  Tether.mount(document);
+  await tick(80);
+  assert.deepEqual([...document.getElementById('cs2').options].map((o) => o.value), ['NL', 'DE']);
+});

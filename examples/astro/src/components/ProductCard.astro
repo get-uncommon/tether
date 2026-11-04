@@ -1,0 +1,16 @@
+---
+import { shop } from '../lib/shop.js';
+const { product } = Astro.props;
+const state = shop.initialState(product); // the price Tether shows (variant, or plan price for subscription-only products)
+---
+<a class:list={["card", { "is-subscription": state.plan }]} tether-product={product.handle} tether-bind="link" href={shop.productUrl(product.handle)}>
+  <img tether-bind="featured-image" src={shop.imageUrl(product.featuredImage?.url, { width: 500 })} alt={product.featuredImage?.altText || product.title} max-width="500" loading="lazy" />
+  <h3 tether-bind="title">{product.title}</h3>
+  <span tether-bind="price">{shop.formatMoney(state.price)}</span>
+  <span tether-show="out-of-stock" hidden={!state.show["out-of-stock"]}>Sold out</span>
+</a>
+<style>
+  .card { display: block; text-decoration: none; }
+  .card img { width: 100%; aspect-ratio: 1; object-fit: cover; background: #f4f4f4; }
+  h3 { margin: .5rem 0 .25rem; font-size: 1rem; }
+</style>

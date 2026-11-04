@@ -83,6 +83,8 @@ Add these later as secrets, only if you need them: Cloudflare → your Worker �
 | `WEBFLOW_OWNED` | Fields Shopify fills in once, then editors own: `description,intro` |
 | `SHOPIFY_ADMIN_TOKEN` | Stores with an old admin-created custom app (`shpat_…`) instead of a Dev Dashboard app |
 | `SHOPIFY_WEBHOOK_SECRET` | Webhooks you created yourself under Shopify → Settings → Notifications |
+| `DEPLOY_HOOK_URL` | A statically built site (Astro, …): start a build when product content changes ([how](../docs/astro.md#7-rebuild-when-products-change)). Without Webflow, set the Webflow fields to `none` |
+| `DEPLOY_HOOK_MIN_SECONDS` | At most one build per this many seconds (default 60) |
 | `MAX_SUBREQUESTS` | A paid Workers plan, to let each run do more (default 45) |
 
 ## Costs
