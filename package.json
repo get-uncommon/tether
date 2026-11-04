@@ -1,6 +1,6 @@
 {
   "name": "@occluze/tether",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Open-source alternative to Smootify/Shopiflow: Shopify Storefront API for Webflow and any HTML (products, cart, subscriptions). Use via jsDelivr or self-host.",
   "type": "module",
   "main": "dist/tether.esm.js",

@@ -170,7 +170,7 @@ test('diagnose reports config, reachability, plans and markup problems', async (
     <span tether-show="in-stok"></span>
     <div tether-product="coffee-box"><span tether-bind="metafield:custom.nope"></span></div>`;
   const r = await Tether.diagnose({ silent: true, now: new Date('2026-11-04') });
-  assert.equal(r.version, '0.2.0');
+  assert.equal(r.version, '0.3.0');
   assert.equal(r.reachable, true);
   assert.equal(r.shop.name, 'Test shop');
   assert.match(r.config.token, /^publ…-123/);
@@ -192,4 +192,18 @@ test('diagnose explains a rejected token and an expired API version', async () =
   const msgs = r.problems.map((p) => p.message).join('\n');
   assert.match(msgs, /Token rejected/);
   assert.match(msgs, /no longer supported/);
+});
+
+test('API versions: next quarterly version, support window, unstable refused', async () => {
+  const { nextApiVersion, apiVersionStatus } = await import('../src/api-version.js');
+  assert.equal(nextApiVersion('2026-07'), '2026-10');
+  assert.equal(nextApiVersion('2026-10'), '2027-01');
+  assert.equal(nextApiVersion('2026-10', 2), '2027-04');
+  assert.throws(() => nextApiVersion('unstable'));
+  assert.equal(apiVersionStatus('unstable').ok, false);
+  assert.match(apiVersionStatus('unstable').note, /pin a dated version/);
+  const close = apiVersionStatus('2026-01', new Date('2026-11-15'));
+  assert.equal(close.ok, true);
+  assert.match(close.note, /plan the upgrade to 2026-04/);
+  assert.equal(apiVersionStatus('2026-07', new Date('2026-11-04')).next, '2026-10');
 });

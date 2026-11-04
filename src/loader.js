@@ -10,6 +10,9 @@ const productCache = new Map(); // key -> Promise<product>
 let pending = [];
 const resolvers = new Map();
 let scheduled = false;
+// Bumped by clearProductCache(): responses to requests sent before that (e.g. in the old
+// market after a country switch) still reach their callers but never refill the cache.
+let generation = 0;
 
 const isGid = (v) => typeof v === 'string' && v.startsWith('gid://');
 
@@ -50,6 +53,7 @@ export function getProduct(rawKey) {
 
 async function flush() {
   scheduled = false;
+  const gen = generation;
   const keys = pending.splice(0);
   if (!keys.length) return;
 
@@ -86,17 +90,17 @@ async function flush() {
     handles.forEach((h, i) => { if (data[`h${i}`]) got.set(h, data[`h${i}`]); });
 
     keys.forEach((k) => settle(k, (r) => {
-      if (got.has(k)) { primeProduct(got.get(k)); r.resolve(got.get(k)); } else {
-        productCache.delete(k); // don't cache misses: a fix in Shopify works on next load
+      if (got.has(k)) { if (gen === generation) primeProduct(got.get(k)); r.resolve(got.get(k)); } else {
+        if (gen === generation) productCache.delete(k); // don't cache misses: a fix in Shopify works on next load
         r.reject(new TetherError(`Product not found: ${k}`, { code: 'NOT_FOUND' }));
       }
     }));
   } catch (err) {
-    keys.forEach((k) => settle(k, (r) => { productCache.delete(k); r.reject(err); }));
+    keys.forEach((k) => settle(k, (r) => { if (gen === generation) productCache.delete(k); r.reject(err); }));
   }
 }
 
-export function clearProductCache() { productCache.clear(); }
+export function clearProductCache() { productCache.clear(); generation++; }
 
 /**
  * A page of products from a collection (by handle) or from a search query.

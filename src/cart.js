@@ -207,11 +207,16 @@ export const Cart = {
   },
 
   /** { countryCode, email, phone } — changes currency/prices for that market. */
-  setBuyerIdentity(buyerIdentity) {
-    return this._queue(async () => this._commit(
-      await this._mutate('cartBuyerIdentityUpdate', '$buyerIdentity: CartBuyerIdentityInput!', 'buyerIdentity: $buyerIdentity', { buyerIdentity }, { buyerIdentity }),
-      'buyer-identity',
-    ));
+  setBuyerIdentity(buyerIdentity, { create = true } = {}) {
+    return this._queue(async () => {
+      const cart = await this._mutate('cartBuyerIdentityUpdate', '$buyerIdentity: CartBuyerIdentityInput!', 'buyerIdentity: $buyerIdentity', { buyerIdentity }, create ? { buyerIdentity } : null)
+        .catch((err) => {
+          if (create || !isMissingCart(err)) throw err;
+          this._setId(null); // expired cart: forget it instead of creating an empty one
+          return null;
+        });
+      return this._commit(cart, 'buyer-identity');
+    });
   },
 
   /**

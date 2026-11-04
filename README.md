@@ -8,14 +8,16 @@ with no Shopify theme involved.
 No subscription, no per-site fee: use it straight from jsDelivr, or host the single file
 yourself (Cloudflare, Webflow assets, your own bundle).
 
-MIT licensed. Status: 0.2, tested against a Shopify dev store with Shopify Subscriptions
+MIT licensed. Status: 0.3, tested against a Shopify dev store with Shopify Subscriptions
 (product page, plans, cart, subscription checkout) and with Barba page transitions.
 
-- One script tag, no dependencies, ~55 KB minified
+- One script tag, no dependencies, ~60 KB minified
 - Works with Webflow CMS (bind `tether-product` to the handle field) **or without**: one static
   page can render any product from the URL (`tether-product="url:handle"`)
 - Optional server-side sync ([`server/`](server/README.md)): Shopify webhooks + cron keep a Webflow
-  CMS collection in step with your products (Cloudflare Worker or Node)
+  CMS collection in step with your products (Cloudflare Worker with a Deploy button, or Node)
+- Markets: country/language from Webflow Localization or your server, a country selector,
+  live currency switching
 - Loading, error and not-found states, `Tether.diagnose()` and an `onError` hook for handover
 - Subscriptions via Shopify selling plans (Shopify Subscriptions, Recharge, Skio, Loop, Appstle, …)
 - Bundles / build-a-box: add multiple products in one request
@@ -24,7 +26,9 @@ MIT licensed. Status: 0.2, tested against a Shopify dev store with Shopify Subsc
 
 Prices, stock and variants always come live from Shopify. Webflow only holds content and layout.
 To also have a Webflow CMS item per product (SEO, CMS lists, editor content), see the
-[Shopify → Webflow CMS sync](server/README.md).
+[Shopify → Webflow CMS sync](server/README.md):
+
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/ravi-klaassens/tether/tree/main/server)
 
 ---
 
@@ -33,13 +37,13 @@ To also have a Webflow CMS item per product (SEO, CMS lists, editor content), se
 **Script tag (Webflow, any HTML):** pin a version from jsDelivr:
 
 ```html
-<script src="https://cdn.jsdelivr.net/gh/ravi-klaassens/tether@v0.2.0/dist/tether.min.js" defer></script>
+<script src="https://cdn.jsdelivr.net/gh/ravi-klaassens/tether@v0.3.0/dist/tether.min.js" defer></script>
 ```
 
 **Bundled (Vite, esbuild, Webpack, …):** copy `dist/tether.esm.js` into your project, or install from GitHub:
 
 ```bash
-npm install github:ravi-klaassens/tether#v0.2.0
+npm install github:ravi-klaassens/tether#v0.3.0
 ```
 
 ```js
@@ -76,7 +80,7 @@ and payments need a test payment provider or Shopify Payments in test mode.
     productPath: '/product',      // your Webflow product template path
   };
 </script>
-<script src="https://cdn.jsdelivr.net/gh/ravi-klaassens/tether@v0.2.0/dist/tether.min.js" defer></script>
+<script src="https://cdn.jsdelivr.net/gh/ravi-klaassens/tether@v0.3.0/dist/tether.min.js" defer></script>
 ```
 
 **Try it locally:** `npm install && npm run build`, then serve the folder and open
@@ -119,7 +123,8 @@ use CMS items, filled by the [sync](server/README.md).
 
 ## Loading, error and not-found states
 
-Every product scope and product list gets `tether-state="loading | ready | error"`. On failure
+Every product scope and product list gets `tether-state="loading | ready | error"` (and
+`updating` while a rendered product refreshes after a country switch; its content stays visible). On failure
 it also gets `tether-error="not-found"` or an error code (`NETWORK`, `HTTP_401`, …).
 Inside a scope, `tether-show` follows the state:
 
@@ -137,6 +142,80 @@ if JavaScript doesn't run at all. Tether shows them when needed (as `block`, or 
 disabled. Events: `tether:product-not-found`, `tether:error`, `tether:cart-error`.
 
 CSS works too: `[tether-state="loading"] .price { opacity: .3 }`.
+
+## Markets and localization
+
+Prices, currency and product translations follow `country` and `language` (Shopify Markets,
+via `@inContext`). Set them statically, or let Tether detect them:
+
+```js
+window.TETHER_CONFIG = {
+  …,
+  country: 'NL', language: 'NL',              // fallback
+  markets: {
+    detect: true,
+    locales: {                                // Webflow Localization: subdirectory or <html lang>
+      de: { country: 'DE', language: 'DE', locale: 'de-DE' },
+      'fr-be': { country: 'BE', language: 'FR' },
+    },
+  },
+};
+```
+
+With `detect: true`, the first match wins for each of country and language:
+
+1. **The visitor's own choice**, saved by `tether-country-select` / `Tether.setCountry()`
+   (`remember: false` turns this off). This one applies even without `detect`, so a country
+   select keeps its choice across pages; `detect: false` turns detection off completely.
+2. **Your server**: `window.TETHER_COUNTRY = 'DE'`, `<meta name="tether-country" content="DE">`,
+   or a cookie (`markets.cookie`, default `tether_country`). `TETHER_LANGUAGE` and
+   `<meta name="tether-language">` work for language.
+3. **Webflow Localization**: the locale subdirectory (`/de/…`) or `<html lang="de-DE">`, looked up in
+   `locales`. An unmapped `lang` still gives the language, and the country only when it has a
+   region (`de-CH` → CH).
+4. The static `country` / `language`.
+
+`detect` also takes a list to limit the sources, e.g. `['server', 'webflow']`.
+
+**Tether never looks up the visitor's IP with a third-party service.** If you want IP-based
+country, let your own edge set it. With Cloudflare in front of the site, a few lines in a Worker
+or a Transform Rule (no extra service, no personal data leaves your stack):
+
+```js
+// Cloudflare Worker in front of Webflow: pass the visitor's country as a cookie
+export default {
+  async fetch(req) {
+    const res = await fetch(req);
+    const country = req.cf?.country;               // same as the cf-ipcountry header
+    if (!country || country === 'XX') return res;
+    const out = new Response(res.body, res);
+    out.headers.append('Set-Cookie', `tether_country=${country}; Path=/; Max-Age=86400; SameSite=Lax; Secure`);
+    return out;
+  },
+};
+```
+
+**Country selector:**
+
+```html
+<select tether-country-select tether-country-label="{name} ({currency})"></select>
+<span tether-country-bind="currency"></span>   <!-- name | code | currency | symbol -->
+```
+
+It lists the countries from your Shopify Markets (`localization.availableCountries`). Choosing one
+calls `Tether.setCountry(code)`, which updates `@inContext`, moves the cart to that market
+(`buyerIdentity.countryCode`, so cart prices and checkout currency follow), re-renders every product
+and list on the page (selections are kept) and remembers the choice. A saved cart from another
+market is moved automatically on the next page load; switching never creates a cart. Responses
+that were still on their way from the old market are ignored. Event: `tether:country-changed`.
+
+```js
+await Tether.setCountry('BE', { language: 'FR' });
+const { availableCountries } = await Tether.getLocalization();
+Tether.detectMarket();                         // what detection found, and where
+```
+
+Markets have to be set up in Shopify (Settings → Markets) for prices and currencies to differ.
 
 ---
 
@@ -293,6 +372,8 @@ Place these anywhere, typically in a drawer outside the Barba container.
 | `tether-checkout` | Goes to Shopify checkout (`checkoutTarget: '_blank'` for a new tab) |
 | `tether-cart-clear` | |
 | `tether-account-link` | Link to Shopify customer accounts (orders + subscription portal) |
+| `select[tether-country-select]` | Country selector (Shopify Markets). `tether-country-label="{name} ({currency})"` |
+| `tether-country-bind` | `name`, `code`, `currency`, `symbol` of the current country |
 
 ---
 
@@ -318,17 +399,18 @@ Tether.plans.planSavings(variant, planId);        // selling plan helpers
 
 Tether.on('cart-updated', ({ cart }) => {});
 await Tether.diagnose();                          // what's wrong on this page (see Troubleshooting)
+await Tether.setCountry('DE');                    // switch market (see Markets)
 ```
 
 Events (on `document`, prefixed `tether:`): `ready`, `product-ready`, `variant-changed`,
 `product-added`, `added`, `group-added`, `cart-updated`, `cart-toggled`, `checkout`,
 `list-ready`, `discount-applied`, `discount-invalid`, `layout-changed`, `product-not-found`,
-`cart-error`, `error`.
+`product-updated`, `country-changed`, `cart-error`, `error`.
 
 ## Config
 
 See [`src/config.js`](src/config.js) for every option with comments. The ones you'll use most:
-`domain`, `token`, `country`, `language`, `locale`, `productPath` (supports `{handle}`),
+`domain`, `token`, `country`, `language`, `locale`, `markets`, `productPath` (supports `{handle}`),
 `metafields`, `defaultPurchase`, `checkoutTarget`, `autoMount`, `observe` (auto-mount nodes added
 later, e.g. Finsweet load-more), `prefix`, and the hooks `onLayoutChange`, `onCartOpen`,
 `onCartClose`, `onLineEnter`, `onLineLeave`, `onValueChange`, `onError`.
@@ -366,15 +448,25 @@ Any other tool works the same (LogRocket, Bugsnag, a `fetch` to your own endpoin
 products on `url:handle` pages are not reported (that's a mistyped URL); a CMS item pointing at a
 deleted Shopify product is.
 
-**Shopify API version.** `apiVersion` is pinned (`2026-07`) on purpose: Shopify changes the
-Storefront API every quarter, and a pinned version keeps working until Shopify retires it,
-12 months after release. `diagnose()` warns 3 months before that. To upgrade:
+**Shopify API version.** `apiVersion` is pinned (`2026-07`) on purpose, and never `unstable`
+(it changes without notice; Tether warns if you set it). Shopify ships a Storefront API version
+every quarter and supports each one for 12 months. `Tether.diagnose()` shows how long your version
+is still supported, and warns from 3 months before retirement with the version to move to.
+`tether-sync check` refuses a non-dated version for the sync. To upgrade:
 
 1. Read the Storefront API release notes for the versions in between (shopify.dev → API versioning).
-2. `TETHER_API_VERSION=2027-01 npm run smoke` (and against your dev store with
-   `TETHER_DOMAIN`/`TETHER_TOKEN`) to check every Tether query against the new version.
-3. Bump `apiVersion` in `src/config.js` (and `DEFAULT_API_VERSION` in `server/src/shopify.js` for the sync), run
-   `npm test`, release. Sites can also set `apiVersion` in `TETHER_CONFIG` themselves.
+2. `TETHER_API_VERSION=$(node scripts/api-version.mjs --next) npm run smoke` (and against your dev
+   store with `TETHER_DOMAIN`/`TETHER_TOKEN`) to check every Tether query against the next version.
+3. Bump `apiVersion` in `src/config.js` (and `DEFAULT_API_VERSION` in `server/src/shopify.js` for the
+   sync), run `npm test`, release. Sites can also set `apiVersion` in `TETHER_CONFIG` themselves.
+
+**Weekly check.** [`.github/workflows/smoke.yml`](.github/workflows/smoke.yml) runs `npm test` and the
+smoke test against the pinned *and* the next quarterly API version, every Monday and on every push
+to `main`. When something fails it opens an issue (label `smoke-failure`), or comments on the open
+one. In a fork, enable Actions on the fork's Actions tab. Optionally add the repository secrets
+`TETHER_DOMAIN` and `TETHER_TOKEN` (a public Storefront token of your test store) to test your own
+store, selling plans included; without them it uses Shopify's public demo store. A run takes
+1–2 minutes, and Actions minutes are free on public repositories.
 
 Run `npm test` and `npm run smoke` before every release; the smoke test needs no setup.
 
@@ -389,7 +481,8 @@ npm run dev       # watch
 npm test          # unit tests: client (jsdom, mocked Storefront API) + server/ sync (mocked APIs)
 npm run smoke     # live test against a real store (default: Shopify's public demo store)
 TETHER_DOMAIN=x.myshopify.com TETHER_TOKEN=... npm run smoke   # your dev store, incl. selling plans
-TETHER_API_VERSION=2027-01 npm run smoke                        # try a newer Shopify API version
+TETHER_API_VERSION=2026-10 npm run smoke                        # try a newer Shopify API version
+node scripts/api-version.mjs --next                             # the next quarterly version
 ```
 
 Releases: bump `package.json`, update `CHANGELOG.md`, `npm run build`, commit `dist/`, tag `vX.Y.Z`.

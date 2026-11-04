@@ -18,6 +18,8 @@ var DEFAULTS = {
   // e.g. 'NL' -> @inContext(language: NL)
   locale: void 0,
   // Intl locale for money/dates, e.g. 'nl-NL'
+  markets: null,
+  // { detect: true, locales: { de: { country: 'DE', language: 'DE' } }, cookie, remember } (markets.js)
   // Markup
   prefix: "tether",
   // attribute prefix: tether-product, tether-bind, ...
@@ -74,6 +76,7 @@ function configure(overrides = {}) {
   Object.assign(cfg, DEFAULTS, overrides);
   if (cfg.domain) cfg.domain = String(cfg.domain).replace(/^https?:\/\//, "").replace(/\/.*$/, "");
   if (!cfg.storageKey) cfg.storageKey = `${cfg.prefix}:cart:${cfg.domain}`;
+  if (cfg.apiVersion === "unstable") warn('apiVersion "unstable" changes without notice. Pin a dated version (e.g. 2026-07).');
   return cfg;
 }
 var isConfigured = () => Boolean(cfg.domain && cfg.token);
@@ -323,6 +326,7 @@ var productCache = /* @__PURE__ */ new Map();
 var pending = [];
 var resolvers = /* @__PURE__ */ new Map();
 var scheduled = false;
+var generation = 0;
 var isGid = (v) => typeof v === "string" && v.startsWith("gid://");
 function normalizeProductKey(raw) {
   const v = String(raw != null ? raw : "").trim();
@@ -355,6 +359,7 @@ function getProduct(rawKey) {
 }
 async function flush() {
   scheduled = false;
+  const gen = generation;
   const keys = pending.splice(0);
   if (!keys.length) return;
   const ids = keys.filter(isGid);
@@ -393,22 +398,23 @@ ${productFragment()}`;
     });
     keys.forEach((k) => settle(k, (r) => {
       if (got.has(k)) {
-        primeProduct(got.get(k));
+        if (gen === generation) primeProduct(got.get(k));
         r.resolve(got.get(k));
       } else {
-        productCache.delete(k);
+        if (gen === generation) productCache.delete(k);
         r.reject(new TetherError(`Product not found: ${k}`, { code: "NOT_FOUND" }));
       }
     }));
   } catch (err) {
     keys.forEach((k) => settle(k, (r) => {
-      productCache.delete(k);
+      if (gen === generation) productCache.delete(k);
       r.reject(err);
     }));
   }
 }
 function clearProductCache() {
   productCache.clear();
+  generation++;
 }
 async function getProducts({
   collection,
@@ -992,11 +998,15 @@ ${cartFragment()}`, { id });
     return this.setDiscountCodes((((_a = this.state) == null ? void 0 : _a.discountCodes) || []).map((d) => d.code).filter((c) => c !== code));
   },
   /** { countryCode, email, phone } — changes currency/prices for that market. */
-  setBuyerIdentity(buyerIdentity) {
-    return this._queue(async () => this._commit(
-      await this._mutate("cartBuyerIdentityUpdate", "$buyerIdentity: CartBuyerIdentityInput!", "buyerIdentity: $buyerIdentity", { buyerIdentity }, { buyerIdentity }),
-      "buyer-identity"
-    ));
+  setBuyerIdentity(buyerIdentity, { create = true } = {}) {
+    return this._queue(async () => {
+      const cart = await this._mutate("cartBuyerIdentityUpdate", "$buyerIdentity: CartBuyerIdentityInput!", "buyerIdentity: $buyerIdentity", { buyerIdentity }, create ? { buyerIdentity } : null).catch((err) => {
+        if (create || !isMissingCart(err)) throw err;
+        this._setId(null);
+        return null;
+      });
+      return this._commit(cart, "buyer-identity");
+    });
   },
   /**
    * Goes to Shopify checkout. With checkoutTarget '_blank' the tab is opened
@@ -1285,6 +1295,28 @@ var ProductScope = class {
     watchImages(root, "product");
     notifyLayoutChanged("product");
     emit("product-ready", { product, scope: this }, root);
+  }
+  /** New data for the same product (e.g. after a country switch). Keeps the selection. */
+  update(product) {
+    var _a, _b;
+    const variantId = (_a = this.variant) == null ? void 0 : _a.id;
+    this.product = product;
+    this.plans = allPlans(product);
+    if (this.planId && !this.plans.some((p) => p.id === this.planId)) this.planId = ((_b = this.plans[0]) == null ? void 0 : _b.id) || null;
+    if (!this.plans.length && this.purchase === "subscription") this.purchase = "one-time";
+    const v = product.variants.nodes.find((x) => x.id === variantId);
+    if (v) {
+      this.selected = {};
+      v.selectedOptions.forEach((o) => {
+        this.selected[o.name] = o.value;
+      });
+    }
+    this.root.setAttribute(attr("state"), "ready");
+    this.root.removeAttribute(attr("error"));
+    this.renderProduct();
+    this.renderVariant();
+    notifyLayoutChanged("product");
+    emit("product-updated", { product, scope: this }, this.root);
   }
   /** Matching elements in this scope, including the root itself (e.g. a card link with tether-bind="link"). */
   $(s) {
@@ -1805,15 +1837,19 @@ var ListScope = class {
   }
   async load(more = false) {
     var _a;
+    const token = this.loadToken = (this.loadToken || 0) + 1;
+    const stale = () => token !== this.loadToken;
     try {
       if (has(this.root, "recommendations")) {
         const key = get(this.root, "recommendations");
         const base = await getProduct(key);
-        this.products = await getRecommendations(base.id, get(this.root, "intent") || "RELATED");
+        const recs = await getRecommendations(base.id, get(this.root, "intent") || "RELATED");
+        if (stale()) return;
         const limit = parseInt(get(this.root, "limit") || "", 10);
-        if (limit) this.products = this.products.slice(0, limit);
+        this.products = limit ? recs.slice(0, limit) : recs;
       } else {
         const res = await getProducts({ ...this.options(), after: more ? (_a = this.pageInfo) == null ? void 0 : _a.endCursor : null });
+        if (stale()) return;
         this.collection = res.collection;
         this.pageInfo = res.pageInfo;
         this.products = more ? [...this.products, ...res.products] : res.products;
@@ -1822,6 +1858,7 @@ var ListScope = class {
       setScopeStatus(this.root, "ready");
       emit("list-ready", { products: this.products, collection: this.collection }, this.root);
     } catch (err) {
+      if (stale()) return;
       if (!more) setScopeStatus(this.root, isNotFound(err) ? "not-found" : "error", err);
       reportError(err, "list load failed");
       emit("error", { error: err, context: "list" }, this.root);
@@ -1866,19 +1903,151 @@ var ListScope = class {
   }
 };
 
-// src/diagnose.js
+// src/api-version.js
+var parse = (v) => {
+  const m = /^(\d{4})-(01|04|07|10)$/.exec(String(v || ""));
+  return m ? { y: +m[1], m: +m[2] } : null;
+};
+var fmt = (y, m) => `${y}-${String(m).padStart(2, "0")}`;
+function nextApiVersion(v, steps = 1) {
+  const p = parse(v);
+  if (!p) throw new Error(`not a quarterly Shopify API version: ${v}`);
+  const q = p.y * 4 + (p.m - 1) / 3 + steps;
+  return fmt(Math.floor(q / 4), q % 4 * 3 + 1);
+}
 function apiVersionStatus(version, now = /* @__PURE__ */ new Date()) {
-  const m = /^(\d{4})-(\d{2})$/.exec(String(version || ""));
-  if (!m) return { version, ok: version === "unstable", note: "not a dated version" };
-  const released = new Date(Date.UTC(+m[1], +m[2] - 1, 1));
-  const supportedUntil = new Date(Date.UTC(+m[1] + 1, +m[2] - 1, 1));
+  if (version === "unstable") return { version, ok: false, note: '"unstable" changes without notice: pin a dated version such as 2026-07' };
+  const p = parse(version);
+  if (!p) return { version, ok: false, note: "not a quarterly version (YYYY-01, -04, -07 or -10)" };
+  const released = new Date(Date.UTC(p.y, p.m - 1, 1));
+  const supportedUntil = new Date(Date.UTC(p.y + 1, p.m - 1, 1));
   const monthsLeft = (supportedUntil - now) / (30.44 * 24 * 3600 * 1e3);
   let note = `supported until about ${supportedUntil.toISOString().slice(0, 7)}`;
-  if (released > now) note = "not released yet";
+  if (released > now) note = "not released yet (release candidate at best)";
   else if (monthsLeft <= 0) note = "no longer supported: Shopify falls back to the oldest supported version. Upgrade (see README)";
-  else if (monthsLeft < 3) note = `${note}: plan the upgrade (see README)`;
-  return { version, ok: released <= now && monthsLeft > 0, monthsLeft: Math.round(monthsLeft), note };
+  else if (monthsLeft < 3) note = `${note}: plan the upgrade to ${nextApiVersion(version)} or later (see README)`;
+  return { version, ok: released <= now && monthsLeft > 0, monthsLeft: Math.round(monthsLeft), next: nextApiVersion(version), note };
 }
+
+// src/markets.js
+var COUNTRY = /^[A-Z]{2}$/;
+var REGIONAL_LANGUAGES = /* @__PURE__ */ new Set(["PT_BR", "PT_PT", "ZH_CN", "ZH_TW"]);
+var storageKey = () => `${cfg.prefix}:market:${cfg.domain}`;
+var defaultEnv = () => ({
+  document: typeof document !== "undefined" ? document : null,
+  location: typeof window !== "undefined" ? window.location : null,
+  storage: (() => {
+    try {
+      return window.localStorage;
+    } catch {
+      return null;
+    }
+  })(),
+  global: typeof window !== "undefined" ? window : {}
+});
+function toCountry(v) {
+  const c = String(v || "").trim().toUpperCase();
+  return COUNTRY.test(c) && c !== "XX" && c !== "T1" ? c : null;
+}
+function toLanguage(v) {
+  const raw = String(v || "").trim().replace("-", "_").toUpperCase();
+  if (!raw) return null;
+  if (REGIONAL_LANGUAGES.has(raw)) return raw;
+  const primary = raw.split("_")[0];
+  return /^[A-Z]{2,3}$/.test(primary) ? primary : null;
+}
+function readCookie(doc, name) {
+  if (!doc || !name) return null;
+  const hit = String(doc.cookie || "").split(";").map((c) => c.trim()).find((c) => c.startsWith(`${name}=`));
+  return hit ? decodeURIComponent(hit.slice(name.length + 1)) : null;
+}
+var lookup = (locales, key) => {
+  if (!locales || !key) return null;
+  const k = String(key).toLowerCase();
+  const found = Object.keys(locales).find((x) => x.toLowerCase() === k);
+  return found ? locales[found] : null;
+};
+var readers = {
+  saved(m, env) {
+    if (m.remember === false || !env.storage) return null;
+    try {
+      return JSON.parse(env.storage.getItem(storageKey()) || "null");
+    } catch {
+      return null;
+    }
+  },
+  server(m, env) {
+    const meta = (name) => {
+      var _a, _b, _c;
+      return (_c = (_b = (_a = env.document) == null ? void 0 : _a.querySelector) == null ? void 0 : _b.call(_a, `meta[name="${name}"]`)) == null ? void 0 : _c.getAttribute("content");
+    };
+    const country = env.global.TETHER_COUNTRY || meta("tether-country") || readCookie(env.document, m.cookie || "tether_country");
+    const language = env.global.TETHER_LANGUAGE || meta("tether-language");
+    return { country, language };
+  },
+  webflow(m, env) {
+    var _a, _b, _c;
+    const segment = (((_a = env.location) == null ? void 0 : _a.pathname) || "/").split("/").filter(Boolean)[0];
+    const fromPath = lookup(m.locales, segment);
+    if (fromPath) return fromPath;
+    const lang = (_c = (_b = env.document) == null ? void 0 : _b.documentElement) == null ? void 0 : _c.getAttribute("lang");
+    if (!lang) return null;
+    const mapped = lookup(m.locales, lang) || lookup(m.locales, lang.split("-")[0]);
+    if (mapped) return { locale: lang, ...mapped };
+    if (m.locales && m.strict) return null;
+    const region = lang.split("-")[1];
+    return { language: lang, country: region && region.length === 2 ? region : null, locale: lang };
+  }
+};
+function detectMarket(markets = cfg.markets, env = defaultEnv()) {
+  const m = markets || {};
+  if (m.detect === false) return {};
+  const list = !m.detect ? ["saved"] : m.detect === true ? ["saved", "server", "webflow"] : [].concat(m.detect);
+  markets = m;
+  const out = { sources: {} };
+  list.forEach((name) => {
+    var _a;
+    const r = (_a = readers[name]) == null ? void 0 : _a.call(readers, markets, env);
+    if (!r) return;
+    const vals = { country: toCountry(r.country), language: toLanguage(r.language), locale: r.locale || null };
+    Object.entries(vals).forEach(([k, v]) => {
+      if (v && !out[k]) {
+        out[k] = v;
+        out.sources[k] = name;
+      }
+    });
+  });
+  return out;
+}
+function rememberMarket(market) {
+  var _a;
+  if (((_a = cfg.markets) == null ? void 0 : _a.remember) === false) return;
+  try {
+    localStorage.setItem(storageKey(), JSON.stringify({ country: market.country, language: market.language || void 0 }));
+  } catch {
+  }
+}
+var localizationPromise = null;
+function clearLocalization() {
+  localizationPromise = null;
+}
+function getLocalization() {
+  if (!localizationPromise) {
+    localizationPromise = gql(`query TetherLocalization {
+  localization {
+    country { isoCode name currency { isoCode symbol } }
+    language { isoCode name }
+    availableCountries { isoCode name currency { isoCode symbol } availableLanguages { isoCode name } }
+  }
+}`).then((d) => d.localization).catch((err) => {
+      localizationPromise = null;
+      throw err;
+    });
+  }
+  return localizationPromise;
+}
+
+// src/diagnose.js
 var mask = (t) => t ? `${String(t).slice(0, 4)}\u2026${String(t).slice(-4)} (${String(t).length} chars)` : "(missing)";
 function describe(el) {
   const id = el.id ? `#${el.id}` : "";
@@ -1965,7 +2134,7 @@ function checkMarkup(root = document) {
   return problems;
 }
 async function diagnose({ root = document, silent = false, version, now = /* @__PURE__ */ new Date() } = {}) {
-  var _a, _b, _c, _d, _e, _f;
+  var _a, _b, _c, _d, _e, _f, _g;
   const report = {
     version,
     config: {
@@ -1976,6 +2145,7 @@ async function diagnose({ root = document, silent = false, version, now = /* @__
       country: cfg.country,
       language: cfg.language,
       locale: cfg.locale,
+      markets: cfg.markets || null,
       prefix: cfg.prefix,
       productPath: cfg.productPath,
       metafields: cfg.metafields,
@@ -1984,6 +2154,7 @@ async function diagnose({ root = document, silent = false, version, now = /* @__
       onError: typeof cfg.onError === "function"
     },
     apiVersion: apiVersionStatus(cfg.apiVersion, now),
+    market: ((_a = cfg.markets) == null ? void 0 : _a.detect) ? detectMarket(cfg.markets) : null,
     reachable: false,
     shop: null,
     latencyMs: null,
@@ -1998,7 +2169,7 @@ async function diagnose({ root = document, silent = false, version, now = /* @__
     try {
       const data = await gql("query TetherDiagnose { shop { name primaryDomain { url } paymentSettings { currencyCode } } }", {}, { context: false });
       report.reachable = true;
-      report.shop = { name: (_a = data.shop) == null ? void 0 : _a.name, url: (_c = (_b = data.shop) == null ? void 0 : _b.primaryDomain) == null ? void 0 : _c.url, currency: (_e = (_d = data.shop) == null ? void 0 : _d.paymentSettings) == null ? void 0 : _e.currencyCode };
+      report.shop = { name: (_b = data.shop) == null ? void 0 : _b.name, url: (_d = (_c = data.shop) == null ? void 0 : _c.primaryDomain) == null ? void 0 : _d.url, currency: (_f = (_e = data.shop) == null ? void 0 : _e.paymentSettings) == null ? void 0 : _f.currencyCode };
     } catch (err) {
       const hint = err.status === 401 || err.status === 403 ? "Token rejected: use the public Storefront token from the Headless channel, not an Admin token." : err.status === 404 ? "Store or API version not found: check domain (x.myshopify.com) and apiVersion." : "";
       report.problems.push({ level: "error", message: `Storefront API not reachable: ${err.message}${hint ? `. ${hint}` : ""}` });
@@ -2024,7 +2195,7 @@ async function diagnose({ root = document, silent = false, version, now = /* @__
       });
     }
   }
-  if (!report.apiVersion.ok || ((_f = report.apiVersion.monthsLeft) != null ? _f : 99) < 3) {
+  if (!report.apiVersion.ok || ((_g = report.apiVersion.monthsLeft) != null ? _g : 99) < 3) {
     report.problems.push({ level: report.apiVersion.ok ? "warn" : "error", message: `apiVersion ${cfg.apiVersion}: ${report.apiVersion.note}` });
   }
   if (typeof document !== "undefined") report.problems.push(...checkMarkup(root));
@@ -2038,6 +2209,7 @@ function print(r) {
   (_a = c.group) == null ? void 0 : _a.call(c, `[${cfg.prefix}] diagnose: ${errors ? `${errors} error(s)` : "no errors"}, ${r.problems.length - errors} warning(s)`);
   c.log("version", r.version, "| API", r.apiVersion.version, `(${r.apiVersion.note})`);
   c.log("config", r.config);
+  if (r.market) c.log("market detected", r.market, "(in use:", r.config.country, r.config.language, ")");
   c.log(r.reachable ? `Storefront API reachable: ${(_b = r.shop) == null ? void 0 : _b.name} (${r.latencyMs} ms)` : "Storefront API NOT reachable");
   if (r.products.length) (c.table || c.log)(r.products);
   if (r.sellingPlans.length) (c.table || c.log)(r.sellingPlans);
@@ -2047,9 +2219,20 @@ function print(r) {
 }
 
 // src/index.js
-var VERSION = "0.2.0";
+var VERSION = "0.3.0";
 var mountedProducts = /* @__PURE__ */ new WeakSet();
 var mountedLists = /* @__PURE__ */ new WeakSet();
+var liveProducts = /* @__PURE__ */ new Set();
+var liveLists = /* @__PURE__ */ new Set();
+var requestToken = /* @__PURE__ */ new WeakMap();
+function pruneLive() {
+  liveProducts.forEach((el) => {
+    if (!el.isConnected) liveProducts.delete(el);
+  });
+  liveLists.forEach((l) => {
+    if (!l.root.isConnected) liveLists.delete(l);
+  });
+}
 var initPromise = null;
 var observer = null;
 function within(root, selector) {
@@ -2059,52 +2242,124 @@ function within(root, selector) {
 function mount(root = document) {
   if (!isConfigured()) return 0;
   let count = 0;
+  pruneLive();
   within(root, listSelector()).forEach((el) => {
     if (mountedLists.has(el)) return;
     mountedLists.add(el);
     count++;
     const list = new ListScope(el);
+    liveLists.add(list);
     el.addEventListener(`${cfg.prefix}:list-rendered`, (e) => mount(e.detail.container));
     list.load();
   });
   within(root, sel("product")).forEach((el) => {
-    if (mountedProducts.has(el)) return;
-    const { key, fromUrl, raw } = resolveProductKey(el);
-    if (!key) {
-      if (fromUrl) {
-        mountedProducts.add(el);
-        setScopeStatus(el, "not-found");
-        emit("product-not-found", { key: null, source: raw }, el);
-      } else if (!el.closest(listSelector())) {
-        warn(`[${attr("product")}] without a value. Bind it to the Shopify handle field, or use "url:handle".`, el);
-      }
-      return;
-    }
-    mountedProducts.add(el);
-    count++;
-    setScopeStatus(el, "loading");
-    getProduct(key).then((p) => {
-      new ProductScope(el, p);
-      applyPageTitle(el, p);
-    }).catch((err) => {
-      const notFound = isNotFound(err);
-      setScopeStatus(el, notFound ? "not-found" : "error", err);
-      if (notFound) {
-        emit("product-not-found", { key, source: raw }, el);
-        if (fromUrl) log(`product not found: ${key}`);
-        else reportError(err, `product ${key}`);
-      } else {
-        reportError(err, `product ${key}`);
-        emit("error", { error: err, context: "product", key }, el);
-      }
-    });
+    if (mountProduct(el)) count++;
   });
+  renderCountrySelects(root);
   qsa(root, sel("account-link")).forEach((a) => {
     a.setAttribute("href", `https://${cfg.domain}/account`);
   });
   Cart.render();
   log(`mounted ${count} scope(s)`, root);
   return count;
+}
+function mountProduct(el) {
+  if (mountedProducts.has(el)) return false;
+  const { key, fromUrl, raw } = resolveProductKey(el);
+  if (!key) {
+    if (fromUrl) {
+      mountedProducts.add(el);
+      setScopeStatus(el, "not-found");
+      emit("product-not-found", { key: null, source: raw }, el);
+    } else if (!el.closest(listSelector())) {
+      warn(`[${attr("product")}] without a value. Bind it to the Shopify handle field, or use "url:handle".`, el);
+    }
+    return false;
+  }
+  mountedProducts.add(el);
+  liveProducts.add(el);
+  const token = {};
+  requestToken.set(el, token);
+  const current = () => requestToken.get(el) === token;
+  if (!scopes.get(el)) setScopeStatus(el, "loading");
+  else el.setAttribute(attr("state"), "updating");
+  getProduct(key).then((p) => {
+    if (!current()) return;
+    const existing = scopes.get(el);
+    if (existing) existing.update(p);
+    else new ProductScope(el, p);
+    applyPageTitle(el, p);
+  }).catch((err) => {
+    if (!current()) return;
+    const notFound = isNotFound(err);
+    setScopeStatus(el, notFound ? "not-found" : "error", err);
+    if (notFound) {
+      emit("product-not-found", { key, source: raw }, el);
+      if (fromUrl) log(`product not found: ${key}`);
+      else reportError(err, `product ${key}`);
+    } else {
+      reportError(err, `product ${key}`);
+      emit("error", { error: err, context: "product", key }, el);
+    }
+  });
+  return true;
+}
+function renderCountrySelects(root = document) {
+  const selects = within(root, `select${sel("country-select")}`);
+  const binds = within(root, sel("country-bind"));
+  if (!selects.length && !binds.length) return Promise.resolve();
+  return getLocalization().then((loc) => {
+    var _a;
+    const current = (cfg.country || ((_a = loc.country) == null ? void 0 : _a.isoCode) || "").toUpperCase();
+    const countries = [...loc.availableCountries || []].sort((a, b) => a.name.localeCompare(b.name, cfg.locale || void 0));
+    const info = countries.find((c) => c.isoCode === current) || loc.country;
+    const fill = (tpl, c) => {
+      var _a2, _b;
+      return tpl.replace(/\{name\}/g, c.name).replace(/\{code\}/g, c.isoCode).replace(/\{currency\}/g, ((_a2 = c.currency) == null ? void 0 : _a2.isoCode) || "").replace(/\{symbol\}/g, ((_b = c.currency) == null ? void 0 : _b.symbol) || "");
+    };
+    selects.forEach((s) => {
+      const tpl = s.getAttribute(attr("country-label")) || "{name} ({currency})";
+      s.innerHTML = "";
+      countries.forEach((c) => s.appendChild(new Option(fill(tpl, c), c.isoCode)));
+      s.value = current;
+      if (s.value !== current) s.selectedIndex = -1;
+      s.disabled = countries.length < 2 && !s.hasAttribute(attr("always-enabled"));
+    });
+    binds.forEach((el) => {
+      var _a2, _b;
+      const k = get(el, "country-bind") || "name";
+      const v = { name: info == null ? void 0 : info.name, code: info == null ? void 0 : info.isoCode, currency: (_a2 = info == null ? void 0 : info.currency) == null ? void 0 : _a2.isoCode, symbol: (_b = info == null ? void 0 : info.currency) == null ? void 0 : _b.symbol }[k];
+      el.textContent = v || "";
+    });
+  }).catch((err) => reportError(err, "country select"));
+}
+async function setCountry(code, { language, remember = true } = {}) {
+  const country = toCountry(code);
+  if (!country) throw new TetherError(`Not a country code: ${code}`, { code: "INVALID_COUNTRY" });
+  const lang = language === void 0 ? cfg.language : toLanguage(language);
+  const changed = country !== String(cfg.country || "").toUpperCase() || lang !== cfg.language;
+  cfg.country = country;
+  cfg.language = lang || void 0;
+  if (remember) rememberMarket({ country, language: lang });
+  if (!changed) {
+    renderCountrySelects();
+    return Cart.state;
+  }
+  clearProductCache();
+  const jobs = [];
+  if (language !== void 0) clearLocalization();
+  if (Cart.id()) jobs.push(Cart.setBuyerIdentity({ countryCode: country }, { create: false }).catch((err) => reportError(err, "cart country")));
+  pruneLive();
+  liveLists.forEach((list) => jobs.push(list.load()));
+  liveProducts.forEach((el) => {
+    if (el.closest(listSelector())) return;
+    mountedProducts.delete(el);
+    mountProduct(el);
+  });
+  renderCountrySelects();
+  emit("country-changed", { country, language: cfg.language });
+  await Promise.all(jobs);
+  return Cart.state;
 }
 function applyPageTitle(el, p) {
   const tpl = get(el, "page-title");
@@ -2183,6 +2438,8 @@ function bindControls() {
       Cart.updateLine(id, parseInt(t.value, 10) || 0).catch((err) => reportError(err, "cart line"));
     } else if (id && t.matches(`select${sel("line-plan")}`)) {
       Cart.updateLine(id, { sellingPlanId: t.value || null }).catch((err) => reportError(err, "cart line plan"));
+    } else if (t.matches(`select${sel("country-select")}`)) {
+      if (t.value) setCountry(t.value).catch((err) => reportError(err, "country"));
     } else if (t.matches(sel("cart-note"))) {
       Cart.setNote(t.value).catch((err) => reportError(err, "cart note"));
     }
@@ -2244,6 +2501,7 @@ async function addGroup(btn) {
   }
 }
 function init(overrides = {}) {
+  var _a;
   if (initPromise && !Object.keys(overrides).length) return initPromise;
   configure({ ...window.TETHER_CONFIG || {}, ...overrides });
   if (!isConfigured()) {
@@ -2251,9 +2509,23 @@ function init(overrides = {}) {
     initPromise = Promise.resolve(null);
     return initPromise;
   }
+  const market = detectMarket(cfg.markets);
+  if (market.country) cfg.country = market.country;
+  if (market.language) cfg.language = market.language;
+  if (market.locale && !overrides.locale && !((_a = window.TETHER_CONFIG) == null ? void 0 : _a.locale)) cfg.locale = market.locale;
+  if (market.sources && Object.keys(market.sources).length) log("market", market);
   bindControls();
   if (cfg.observe) startObserver();
-  initPromise = Cart.init().then((cart) => {
+  initPromise = Cart.init().then(async (cart) => {
+    var _a2;
+    const want = cfg.country ? String(cfg.country).toUpperCase() : null;
+    if (cart && want && ((_a2 = cart.buyerIdentity) == null ? void 0 : _a2.countryCode) && cart.buyerIdentity.countryCode !== want) {
+      try {
+        cart = await Cart.setBuyerIdentity({ countryCode: want }, { create: false });
+      } catch (err) {
+        reportError(err, "cart country");
+      }
+    }
     emit("ready", { cart });
     return api;
   });
@@ -2303,6 +2575,9 @@ var api = {
   plans: selling_plans_exports,
   TetherError,
   resolveProductKey,
+  setCountry,
+  detectMarket: (markets) => detectMarket(markets || cfg.markets),
+  getLocalization,
   diagnose: (opts) => diagnose({ ...opts, version: VERSION }),
   on(name, fn) {
     const h = (e) => fn(e.detail, e);
@@ -2328,5 +2603,6 @@ export {
   getScope,
   init,
   mount,
+  setCountry,
   unmount
 };

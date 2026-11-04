@@ -10,6 +10,7 @@ const BASE = 'https://api.webflow.com/v2';
 export function createWebflow({
   token, collectionId, fetch: fetchImpl = globalThis.fetch, throttle, perMinute = 50,
   sleep = realSleep, retries = 4, log,
+  maxRetryWaitMs = Infinity, // webhook runs: give up instead of waiting out a long Retry-After
 }) {
   if (!token) throw new SyncError('WEBFLOW_TOKEN is required');
   if (!collectionId) throw new SyncError('webflow.collectionId is required');
@@ -31,6 +32,7 @@ export function createWebflow({
       });
       if (res.status === 429 && attempt < retries) {
         const wait = (parseFloat(res.headers.get('retry-after')) || 60) * 1000;
+        if (wait > maxRetryWaitMs) throw new SyncError(`Webflow rate limit: retry after ${wait / 1000}s`, { status: 429 });
         log?.warn?.(`webflow 429, waiting ${wait / 1000}s`);
         gate.pause(wait);
         continue;

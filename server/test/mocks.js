@@ -28,11 +28,12 @@ export function shopifyProduct(n, over = {}) {
   };
 }
 
-export function createMockApis({ products = [], items = [], failCreateFor = null, rateLimitOnce = false } = {}) {
+export function createMockApis({ products = [], items = [], failCreateFor = null, rateLimitOnce = false, maxFirst = Infinity } = {}) {
   const shop = { products: new Map(products.map((p) => [p.id, p])) };
   const wf = { items: new Map(items.map((it) => [it.id, it])), live: new Set(), nextId: 1 };
   const calls = [];
   let limited = !rateLimitOnce;
+  const flags = { failPublish: false };
 
   const json = (status, body, headers = {}) => new Response(body == null ? null : JSON.stringify(body), { status, headers: { 'content-type': 'application/json', ...headers } });
 
@@ -48,6 +49,9 @@ export function createMockApis({ products = [], items = [], failCreateFor = null
       const op = body.query.match(/query\s+(\w+)/)[1];
       if (op === 'TetherSyncGetProduct') return json(200, { data: { product: shop.products.get(body.variables.id) || null } });
       if (op === 'TetherSyncShop') return json(200, { data: { shop: { name: 'Shop', myshopifyDomain: 'shop.myshopify.com' } } });
+      if (op === 'TetherSyncProducts' && body.variables.first > maxFirst) {
+        return json(200, { errors: [{ message: 'Query cost is 1500, which exceeds the single query max cost limit (1000).', extensions: { code: 'MAX_COST_EXCEEDED' } }] });
+      }
       if (op === 'TetherSyncProducts') {
         let list = [...shop.products.values()].sort((a, b) => a.updatedAt.localeCompare(b.updatedAt));
         const q = body.variables.query;
@@ -76,13 +80,18 @@ export function createMockApis({ products = [], items = [], failCreateFor = null
         return json(200, { items: all.slice(offset, offset + limit), pagination: { limit, offset, total: all.length } });
       }
       if (p === '/items' && method === 'POST') {
-        if (failCreateFor && body.fieldData.slug === failCreateFor) return json(400, { message: 'Validation Error', details: [{ param: 'slug' }] });
+        if (failCreateFor && body.fieldData.slug === failCreateFor) return json(400, { message: 'Validation Error', details: [{ param: 'name' }] });
+        // Webflow slugs are unique within a collection.
+        if ([...wf.items.values()].some((it) => it.fieldData.slug === body.fieldData.slug)) {
+          return json(409, { message: 'Conflict', details: [{ param: 'slug', description: 'Unique value is already in database' }] });
+        }
         const id = `item${wf.nextId++}`;
         const item = { id, isArchived: body.isArchived, isDraft: body.isDraft, fieldData: body.fieldData };
         wf.items.set(id, item);
         return json(202, item);
       }
       if (p === '/items/publish' && method === 'POST') {
+        if (flags.failPublish) return json(500, { message: 'publish failed' });
         body.itemIds.forEach((id) => wf.live.add(id));
         return json(202, { publishedItemIds: body.itemIds, errors: [] });
       }
@@ -111,7 +120,7 @@ export function createMockApis({ products = [], items = [], failCreateFor = null
   }
 
   const webflowWrites = () => calls.filter((c) => c.host === 'api.webflow.com' && c.method !== 'GET');
-  return { fetch, shop, wf, calls, webflowWrites };
+  return { fetch, shop, wf, calls, webflowWrites, flags };
 }
 
 export const baseConfig = {

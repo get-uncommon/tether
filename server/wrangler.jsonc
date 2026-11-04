@@ -1,0 +1,19 @@
+// Used as-is by `npx wrangler deploy` and the Deploy to Cloudflare button.
+// Nothing deploys until you run one of those yourself.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "tether-sync",
+  "main": "src/entry.js",
+  "compatibility_date": "2026-10-01",
+  "observability": { "enabled": true },
+
+  // Reconcile every 10 minutes (144 runs/day). Free plan: 5 cron triggers per account.
+  "triggers": { "crons": ["*/10 * * * *"] },
+
+  // Sync state. No id: Wrangler creates the namespace on first deploy.
+  "kv_namespaces": [{ "binding": "TETHER_SYNC" }]
+
+  // Secrets (prompted by the Deploy button, from .dev.vars.example; or `npx wrangler secret put NAME`):
+  // SHOPIFY_DOMAIN, WEBFLOW_COLLECTION_ID, WEBFLOW_TOKEN, SHOPIFY_CLIENT_ID, SHOPIFY_CLIENT_SECRET,
+  // SHOPIFY_ADMIN_TOKEN, SHOPIFY_WEBHOOK_SECRET, SYNC_SECRET, FIELD_MAP
+}

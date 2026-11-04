@@ -1,6 +1,6 @@
 export { createApp } from './app.js';
 export { createSync } from './sync.js';
-export { createShopify, normalizeProduct, productFragment, DEFAULT_API_VERSION } from './shopify.js';
+export { createShopify, normalizeProduct, productFragment, pageSizeFor, DEFAULT_API_VERSION } from './shopify.js';
 export { createWebflow } from './webflow.js';
 export { createThrottle } from './throttle.js';
 export { normalizeConfig, mapProduct, checkMapping, toSlug } from './mapping.js';

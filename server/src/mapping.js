@@ -24,13 +24,21 @@ export function normalizeConfig(raw = {}) {
   const fields = { ...DEFAULT_FIELDS, [idField]: 'legacyId', ...(raw.fields || {}) };
   const cfg = {
     shopify: { apiVersion: DEFAULT_API_VERSION, metafields: [], inventory: false, ...(raw.shopify || {}) },
-    webflow: { perMinute: 50, publish: true, ...(raw.webflow || {}) },
-    match: { idField, bySlug: raw.match?.bySlug !== false },
+    webflow: { perMinute: 50, publish: true, skipMissingFields: false, ...(raw.webflow || {}) },
+    match: { idField, bySlug: raw.match?.bySlug !== false, indexTtlMinutes: raw.match?.indexTtlMinutes ?? 24 * 60 },
     fields,
     webflowOwned: [...new Set(raw.webflowOwned || [])],
     onDelete: raw.onDelete || 'archive',     // 'archive' | 'delete' | 'unpublish'
     inactive: raw.inactive || 'archive',     // DRAFT/ARCHIVED products: 'archive' | 'unpublish' | 'keep'
-    reconcile: { maxChangesPerRun: 20, lookbackMinutes: 60, pageSize: 50, ...(raw.reconcile || {}) },
+    reconcile: {
+      maxChangesPerRun: 20,     // Webflow writes
+      maxProductsPerRun: 200,   // products checked (KV reads)
+      maxPagesPerRun: 10,       // Shopify pages
+      reserveSubrequests: 8,    // stop while this many subrequests are left (Worker budget)
+      overlapMinutes: 5,        // re-read the end of the previous window (Shopify's search index lags)
+      lookbackMinutes: 60,
+      ...(raw.reconcile || {}),
+    },
   };
   // Metafields used in the mapping are fetched automatically.
   Object.values(fields).forEach((src) => {
@@ -45,6 +53,37 @@ export function normalizeConfig(raw = {}) {
     throw new SyncError(`"slug" and "${idField}" can't be Webflow-owned: they are how items are matched`);
   }
   return cfg;
+}
+
+/** Values of '', 'none' or '-' count as unset (the Deploy button asks for every secret). */
+export function cleanEnv(env = {}) {
+  const out = {};
+  Object.entries(env).forEach(([k, v]) => {
+    if (typeof v !== 'string') { out[k] = v; return; }
+    const t = v.trim();
+    if (t && !['none', '-', 'null', 'undefined'].includes(t.toLowerCase())) out[k] = t;
+  });
+  return out;
+}
+
+/**
+ * Environment overrides on top of the config file:
+ *   FIELD_MAP='{"material":"metafield:custom.material","gallery":null}'  (null removes a field)
+ *   WEBFLOW_OWNED='description,intro'
+ */
+export function applyEnv(raw = {}, env = {}) {
+  const out = { ...raw, shopify: { ...(raw.shopify || {}) }, webflow: { ...(raw.webflow || {}) }, fields: { ...(raw.fields || {}) } };
+  if (env.SHOPIFY_DOMAIN) out.shopify.domain = env.SHOPIFY_DOMAIN;
+  if (env.SHOPIFY_API_VERSION) out.shopify.apiVersion = env.SHOPIFY_API_VERSION;
+  if (env.WEBFLOW_COLLECTION_ID) out.webflow.collectionId = env.WEBFLOW_COLLECTION_ID;
+  if (env.FIELD_MAP) {
+    let map;
+    try { map = JSON.parse(env.FIELD_MAP); } catch (err) { throw new SyncError(`FIELD_MAP is not valid JSON: ${err.message}`, { code: 'FIELD_MAP' }); }
+    if (!map || typeof map !== 'object' || Array.isArray(map)) throw new SyncError('FIELD_MAP must be a JSON object like {"webflow-field":"shopifySource"}', { code: 'FIELD_MAP' });
+    Object.entries(map).forEach(([k, v]) => { if (v === null) delete out.fields[k]; else out.fields[k] = v; });
+  }
+  if (env.WEBFLOW_OWNED) out.webflowOwned = env.WEBFLOW_OWNED.split(',').map((x) => x.trim()).filter(Boolean);
+  return out;
 }
 
 export function readSource(product, src) {
@@ -82,25 +121,45 @@ export function withoutOwned(fieldData, cfg) {
   return out;
 }
 
-/** Checks the mapping against the Webflow collection schema. Returns a list of problems. */
+/**
+ * Checks the mapping against the Webflow collection schema.
+ * Returns [{ level: 'error' | 'warn', message, fix }].
+ */
 export function checkMapping(cfg, collection) {
   const problems = [];
+  const add = (level, message, fix) => problems.push({ level, message, fix });
   const fields = new Map((collection?.fields || []).map((f) => [f.slug, f]));
+  const name = collection?.displayName || cfg.webflow.collectionId;
+  const skip = cfg.webflow.skipMissingFields;
   Object.entries(cfg.fields).forEach(([slug, src]) => {
     const f = fields.get(slug);
-    if (!f) { problems.push(`Webflow field "${slug}" doesn't exist in collection "${collection?.displayName || cfg.webflow.collectionId}".`); return; }
+    if (!f) {
+      if (skip) add('warn', `Webflow field "${slug}" doesn't exist in "${name}": it is skipped.`, `Add a field with slug "${slug}" to sync it, or remove it from the mapping.`);
+      else add('error', `Webflow field "${slug}" doesn't exist in "${name}".`, `Add the field, or remove it from the mapping (or set webflow.skipMissingFields).`);
+      return;
+    }
     const type = f.type;
     const s = typeof src === 'string' ? src : '(function)';
-    if (type === 'Image' && !['image', '(function)'].includes(s) && !/^images\.\d+$/.test(s)) problems.push(`"${slug}" is an Image field but maps "${s}" (use "image" or "images.0").`);
-    if (type === 'MultiImage' && !['images', '(function)'].includes(s)) problems.push(`"${slug}" is a Multi-image field but maps "${s}" (use "images").`);
-    if (type === 'Number' && ['tags', 'images', 'image', 'title'].includes(s)) problems.push(`"${slug}" is a Number field but maps "${s}".`);
-    if (['PlainText', 'RichText'].includes(type) && ['tags', 'images', 'image', 'variants', 'options'].includes(s)) problems.push(`"${slug}" is a text field but maps "${s}" (an object/list). Use e.g. "tagsText".`);
-    if (['Option', 'Reference', 'MultiReference'].includes(type) && s !== '(function)') problems.push(`"${slug}" is an ${type} field: map it with a function that returns Webflow ids.`);
+    const bad = (msg, fix) => add('error', msg, fix);
+    if (type === 'Image' && !['image', '(function)'].includes(s) && !/^images\.\d+$/.test(s)) bad(`"${slug}" is an Image field but maps "${s}".`, 'Map it to "image" or "images.0".');
+    if (type === 'MultiImage' && !['images', '(function)'].includes(s)) bad(`"${slug}" is a Multi-image field but maps "${s}".`, 'Map it to "images".');
+    if (type === 'Number' && ['tags', 'tagsText', 'images', 'image', 'title', 'handle', 'vendor'].includes(s)) bad(`"${slug}" is a Number field but maps "${s}".`, 'Map a number such as "price", or change the field type.');
+    if (type === 'Switch' && !['available', '(function)'].includes(s) && !s.startsWith('metafield:')) bad(`"${slug}" is a Switch field but maps "${s}".`, 'Map a true/false source such as "available", or a function.');
+    if (['PlainText', 'RichText'].includes(type) && ['tags', 'images', 'image', 'variants', 'options'].includes(s)) bad(`"${slug}" is a text field but maps "${s}" (an object/list).`, 'Use "tagsText" for tags, or a function that returns text.');
+    if (['Option', 'Reference', 'MultiReference'].includes(type) && s !== '(function)') bad(`"${slug}" is an ${type} field.`, 'Map it with a function that returns Webflow ids.');
   });
   (collection?.fields || []).filter((f) => f.isRequired && !(f.slug in cfg.fields)).forEach((f) => {
-    problems.push(`Required Webflow field "${f.slug}" isn't mapped: creating items will fail.`);
+    add('error', `Required Webflow field "${f.slug}" isn't mapped: creating items will fail.`, `Map "${f.slug}" in the config (or FIELD_MAP), or make it optional in Webflow.`);
   });
-  if (!fields.has(cfg.match.idField)) problems.push(`Add a Plain text field with slug "${cfg.match.idField}" to the collection (it stores the Shopify product id).`);
-  cfg.webflowOwned.forEach((k) => { if (!fields.has(k)) problems.push(`webflowOwned "${k}" isn't a field in the collection.`); });
+  if (!fields.has(cfg.match.idField)) add('error', `The collection has no "${cfg.match.idField}" field.`, `Add a Plain text field named "Shopify ID" (slug "${cfg.match.idField}"): it stores the Shopify product id.`);
+  cfg.webflowOwned.forEach((k) => { if (!fields.has(k)) add('warn', `webflowOwned "${k}" isn't a field in the collection.`, 'Remove it from webflowOwned or add the field.'); });
   return problems;
+}
+
+/** Drops mapped fields the collection doesn't have (webflow.skipMissingFields). */
+export function onlyExisting(fieldData, fieldSlugs) {
+  if (!fieldSlugs) return fieldData;
+  const out = {};
+  Object.entries(fieldData).forEach(([k, v]) => { if (k === 'name' || k === 'slug' || fieldSlugs.has(k)) out[k] = v; });
+  return out;
 }

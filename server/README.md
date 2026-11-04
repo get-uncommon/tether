@@ -13,7 +13,28 @@ in Webflow next to the Shopify data.
 - **Throttled** to Webflow's rate limit, retries 429s with `Retry-After`.
 - Runs as a **Cloudflare Worker** (webhooks + cron) **or** a **Node CLI** (≥ 20). No dependencies.
 
-Nothing here deploys itself. You run `wrangler deploy` (or host the Node server) when you're ready.
+Nothing here deploys itself. You click the button (or run `wrangler deploy`, or host the Node server) when you're ready.
+
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/ravi-klaassens/tether/tree/main/server)
+
+The button forks this repo into your GitHub account, creates the Worker, its KV namespace and the
+10-minute cron on your Cloudflare account, and asks for the values below. Then open
+`https://<your-worker>.workers.dev/check` to see what's still missing (see [Quick start](#quick-start-deploy-button)).
+
+## Quick start (Deploy button)
+
+1. Create the Webflow collection with the [standard fields](#1-webflow-collection) (at least Name,
+   Slug and **Shopify ID**; every other standard field is optional).
+2. Create the Shopify app and the Webflow token ([Tokens](#2-tokens)).
+3. Click **Deploy to Cloudflare** (above) and fill in the prompts. Enter `none` for the ones you don't use.
+4. Open `https://<worker>/check`: it lists what's configured. With
+   `curl -H "Authorization: Bearer $SYNC_SECRET" https://<worker>/check` it also tests both
+   APIs and the field mapping, and shows how a sample product would be written.
+5. Add the [webhooks](#6-shopify-webhooks) in Shopify, then run the first [import](#4-check-and-import-node)
+   from your machine (or let the cron pick up products as they change).
+
+Changing the mapping later: set `FIELD_MAP` (`npx wrangler secret put FIELD_MAP`, or in the
+Cloudflare dashboard) or edit `tether-sync.config.js` in your fork; the fork redeploys on push.
 
 ## How it works
 
@@ -33,23 +54,48 @@ cron ───▶ reconcile (updated_at ≥ cursor)┘                     └�
   from being re-uploaded on every run.
 - Draft/archived products (status ≠ ACTIVE) are archived and unpublished in Webflow
   (`inactive`). Deleted products are archived by default (`onDelete: 'archive' | 'delete' | 'unpublish'`).
-- Reconcile stops after `maxChangesPerRun` Webflow writes and continues from there next run.
-  Products that failed are retried on the next runs (up to 5 times).
+- The hash is stored only once the item is **published**, so a failed publish is retried.
+- Reconcile stops at the first budget it reaches: `maxChangesPerRun` Webflow writes,
+  `maxProductsPerRun` products, `maxPagesPerRun` Shopify pages, or the Worker's subrequest limit.
+  It saves its exact position (page and offset) and continues there next run, so a bulk edit of
+  thousands of products spreads over several runs instead of failing. Each window overlaps the
+  previous one by `overlapMinutes` (Shopify's search index lags a little behind updates).
+- Failed products, including failed webhooks, are retried on the next runs (up to 5 times).
+- Webflow slugs are unique, so two runs creating the same product at once (Shopify sends
+  `products/create` and `products/update` together) can't make a duplicate: the second one gets
+  a conflict, finds the first one's item and updates it.
+- Product pages are sized to stay under Shopify's 1,000-point query cost limit (25 variants and
+  10 images per product by default), and shrink automatically if Shopify still refuses.
+- The client-credentials token (24h) and the Webflow item index (`match.indexTtlMinutes`, a day)
+  are cached in the store, so a run doesn't spend requests on them.
 
 ## Setup
 
 ### 1. Webflow collection
 
-Create (or reuse) a Products collection with at least:
+The default mapping ([`tether-sync.config.js`](tether-sync.config.js)) expects these fields.
+Webflow derives the slug from the field name, so naming a field "Compare at price" gives the slug
+`compare-at-price`. Fields you don't create are skipped (`webflow.skipMissingFields`), so a
+collection with only Name, Slug and Shopify ID works.
 
-| Field | Type | Notes |
-|---|---|---|
-| Name, Slug | built in | slug = Shopify handle, so `productPath: '/product'` in Tether keeps working |
-| `shopify-id` | Plain text | stores the product id; how items are matched |
+| Field name | Slug | Type | From Shopify |
+|---|---|---|---|
+| Name, Slug | `name`, `slug` | built in | title, handle (so `productPath: '/product'` in Tether keeps working) |
+| **Shopify ID** | `shopify-id` | Plain text | product id: **required**, how items are matched |
+| Shopify handle | `shopify-handle` | Plain text | handle (bind `tether-product` to it) |
+| Description | `description` | Rich text | description HTML, **Webflow-owned**: set once, then edited in Webflow |
+| Price | `price` | Number | lowest variant price |
+| Compare at price | `compare-at-price` | Number | only when on sale |
+| Main image | `main-image` | Image | featured image |
+| Gallery | `gallery` | Multi-image | all images |
+| Vendor | `vendor` | Plain text | |
+| Product type | `product-type` | Plain text | |
+| Tags | `tags` | Plain text | comma-separated |
+| SKU | `sku` | Plain text | first variant |
+| Available | `available` | Switch | any variant in stock |
 
-Add whatever else you map: price (Number), main image (Image), gallery (Multi-image),
-description (Rich text), vendor (Plain text), and so on. Bind `tether-product` on the template
-page to the slug (or `shopify-id`) and Tether takes care of variants, prices and the cart.
+Bind `tether-product` on the template page to the slug (or `shopify-handle`) and Tether takes care
+of variants, live prices and the cart.
 
 Find the collection id in the collection settings, or with
 `GET https://api.webflow.com/v2/sites/{site_id}/collections`.
@@ -73,10 +119,16 @@ Tether's public Storefront token.
 
 ### 3. Config
 
+[`tether-sync.config.js`](tether-sync.config.js) is the config: it works as-is with the standard
+collection, taking the store and collection from `SHOPIFY_DOMAIN` and `WEBFLOW_COLLECTION_ID`.
+Edit it (in your fork) for a custom mapping, or override in the environment without touching it:
+
 ```bash
-cd server
-cp tether-sync.config.example.js tether-sync.config.js   # edit domain, collectionId, fields
+FIELD_MAP='{"material":"metafield:custom.material","gallery":null}'   # add/change; null removes
+WEBFLOW_OWNED='description,intro'
 ```
+
+In the file:
 
 ```js
 fields: {
@@ -107,7 +159,7 @@ mapped field in `webflowOwned` when Shopify should only provide the first versio
 
 ```bash
 export WEBFLOW_TOKEN=... SHOPIFY_CLIENT_ID=... SHOPIFY_CLIENT_SECRET=...   # or a .env next to the config
-node bin/tether-sync.js check                 # tokens, collection, mapping vs. field types, sample output
+node bin/tether-sync.js check                 # guided first run (below)
 node bin/tether-sync.js import --dry-run      # what would happen
 node bin/tether-sync.js import                # create/update + publish everything
 node bin/tether-sync.js import --prune        # also archive items whose product is gone
@@ -115,6 +167,26 @@ node bin/tether-sync.js reconcile             # changed since the last run
 node bin/tether-sync.js sync my-handle        # one product
 node bin/tether-sync.js serve --port 8787     # webhook endpoint for a Node host
 ```
+
+`check` goes through everything in order and says exactly what to fix:
+
+```
+✓ Shopify store: your-store.myshopify.com
+✓ Shopify access: using client credentials
+✗ Webflow token: WEBFLOW_TOKEN is missing.
+    fix: Webflow → Site settings → Apps & integrations → API access → generate a token with CMS read and write.
+✓ Webflow collection: 6650c1d2e3f4a5b6c7d8e9f0
+✓ Webhooks: verified with the app client secret
+✗ Connections: Not tested: fix the items above first.
+
+2 thing(s) to fix before syncing.
+```
+
+Once everything is set it tests both APIs (rejected token, missing `read_products`, wrong
+collection id, token for another site), checks every mapped field against the collection
+(missing fields, Image/Number/Switch type mismatches, required fields not mapped, no Shopify ID
+field) and prints how a sample product would be written. `--offline` skips the API calls, `--json`
+prints the report. It never prints secret values.
 
 State (product → item id + hash, and the reconcile cursor) lives in `.tether-sync-state.json`.
 Losing it is harmless: the next run matches items by `shopify-id` again and rewrites each item once.
@@ -124,23 +196,32 @@ Run it from your machine (or any Node host), not from a free Worker (50 subreque
 
 ### 5. Run it continuously
 
-**Cloudflare Worker (webhooks + cron):**
+**Cloudflare Worker (webhooks + cron).** The button above, or by hand:
 
 ```bash
 cd server
-cp worker.example.js worker.js && cp wrangler.example.toml wrangler.toml
-npx wrangler kv namespace create TETHER_SYNC          # put the id in wrangler.toml
-npx wrangler secret put WEBFLOW_TOKEN                 # and the Shopify secrets
-npx wrangler deploy                                   # your call; this repo never deploys
+npm install
+npx wrangler secret put WEBFLOW_TOKEN        # and SHOPIFY_DOMAIN, WEBFLOW_COLLECTION_ID, the Shopify secrets
+npx wrangler deploy                           # your call; this repo never deploys
 ```
 
-Routes: `POST /webhooks/shopify`, `GET /health`, `POST /reconcile` (needs
-`Authorization: Bearer $SYNC_SECRET`). Run the import once from Node first. The Worker keeps its
-own state in KV. Its first reconcile looks back `lookbackMinutes` and finds the imported items by
-`shopify-id`, so nothing is duplicated. The first time the Worker touches an already-imported
-product, it rewrites that item once, because the hash isn't in KV yet.
+[`wrangler.jsonc`](wrangler.jsonc) is ready to use: the KV binding (`TETHER_SYNC`, created on the
+first deploy), the cron (every 10 minutes) and the entry point. The secrets the button prompts for
+are listed in [`.dev.vars.example`](.dev.vars.example); for local `npx wrangler dev`, copy it to
+`.dev.vars`.
+
+Routes: `POST /webhooks/shopify`, `GET /check` (and `/`), `GET /health`, `POST /reconcile` (needs
+`Authorization: Bearer $SYNC_SECRET`). Every run counts its outgoing requests and stops in time:
+`MAX_SUBREQUESTS` (default 45, for the free plan's 50) can be raised on a paid plan. The Worker keeps its own state in KV. Run the first import
+from Node: the Worker's first reconcile looks back `lookbackMinutes` and finds the imported items
+by `shopify-id`, so nothing is duplicated. The first time the Worker touches an already-imported
+product it rewrites that item once, because the hash isn't in KV yet.
 
 **Node:** `tether-sync serve` behind any HTTPS host, plus `tether-sync reconcile` from cron.
+
+**Vercel / Netlify:** not included. Their serverless functions have no built-in key-value store
+(the sync needs one for its cursor and hashes), so it would mean wiring up a third-party database.
+The Node CLI runs on any host with cron.
 
 ### 6. Shopify webhooks
 
@@ -155,22 +236,29 @@ Check current pricing pages before relying on this; these were the published lim
 
 | Service | Free tier | What the sync uses |
 |---|---|---|
-| Cloudflare Workers | 100,000 requests/day, 10 ms CPU per run, 50 subrequests per run, 5 cron triggers per account | 1 request per webhook; a cron every 10 min = 144 runs/day. Waiting on APIs doesn't count as CPU |
-| Cloudflare KV | 100,000 reads/day, 1,000 writes/day | writes only when a product changed (1–2 per change) and when the cursor moves. A quiet store writes ~0 |
-| Shopify Admin API | included in every plan | 1 query per webhook, 1 per 50 products per reconcile |
+| Cloudflare Workers | 100,000 requests/day, 10 ms CPU per run, 50 subrequests per run, 5 cron triggers per account | 1 request per webhook; a cron every 10 min = 144 runs/day. Waiting on APIs doesn't count as CPU. A run stops at 45 subrequests and resumes next time |
+| Cloudflare KV | 100,000 reads/day, 1,000 writes/day | 1 read per product checked; writes only when something changed: 1–2 per changed product, the cursor when it moves, the item index and the Shopify token about once a day. A quiet store writes ~0 |
+| Shopify Admin API | included in every plan | 1 query per webhook, 1 per ~19 products per reconcile |
 | Webflow Data API | included with a site plan; 60 requests/min (Starter/Basic), 120 (CMS/eCommerce/Business) | ~1–2 per changed product, publishes batched per 100 |
 
 The real limit is usually Webflow's **CMS item count** for your site plan, not the API.
-With `maxChangesPerRun: 20`, a reconcile stays well under a free Worker's 50 subrequests.
+On the free plan a run handles roughly 15–20 changed products (each is an update plus its share of
+a publish); a bigger change spreads over the next runs, every 10 minutes. CPU time per run hasn't
+been measured on Cloudflare yet; hashing and mapping a page of products is light, but if you see
+CPU-limit errors, lower `maxProductsPerRun`.
 
 ## Limitations
 
 - One collection, one locale (localized CMS fields aren't written).
+- The Deploy button needs a public GitHub/GitLab repo (it forks this one) and a Cloudflare account.
 - Image fields are sent as `{ url, alt }`; Webflow downloads them. If an image URL in Shopify
   changes, Webflow gets a new asset.
 - Item slugs follow the handle. Changing a handle in Shopify changes the Webflow URL (set up a
   redirect in Webflow).
-- Variants aren't synced as separate items; Tether reads them live on the page.
+- Variants aren't synced as separate items; Tether reads them live on the page. `available` and
+  `sku` look at the first 25 variants.
+- `import` lists products page by page (fine for thousands, from the CLI). It doesn't use
+  Shopify bulk operations yet.
 
 ## Development
 

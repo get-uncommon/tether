@@ -102,6 +102,20 @@ if (planId) {
     if (Tether.cart.lines[0].sellingPlanAllocation) throw new Error('still has a plan');
   });
 }
+let countries = [];
+await step('localization (tether-country-select data)', async () => {
+  const loc = await Tether.getLocalization();
+  countries = loc.availableCountries || [];
+  if (!countries.length) throw new Error('no availableCountries');
+});
+const other = countries.find((c) => c.isoCode !== country)?.isoCode;
+if (other) {
+  await step(`setCountry(${other}) updates the cart market`, async () => {
+    await Tether.setCountry(other, { remember: false });
+    if (Tether.cart.state.buyerIdentity?.countryCode !== other) throw new Error(`cart country ${Tether.cart.state.buyerIdentity?.countryCode}`);
+    await Tether.setCountry(country, { remember: false });
+  });
+}
 await step('add second line (array)', async () => {
   await Tether.cart.add([{ variantId: variant.id, quantity: 1, attributes: { _group: 'smoke' } }]);
 });

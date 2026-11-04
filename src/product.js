@@ -51,6 +51,23 @@ export class ProductScope {
     emit('product-ready', { product, scope: this }, root);
   }
 
+  /** New data for the same product (e.g. after a country switch). Keeps the selection. */
+  update(product) {
+    const variantId = this.variant?.id;
+    this.product = product;
+    this.plans = allPlans(product);
+    if (this.planId && !this.plans.some((p) => p.id === this.planId)) this.planId = this.plans[0]?.id || null;
+    if (!this.plans.length && this.purchase === 'subscription') this.purchase = 'one-time';
+    const v = product.variants.nodes.find((x) => x.id === variantId);
+    if (v) { this.selected = {}; v.selectedOptions.forEach((o) => { this.selected[o.name] = o.value; }); }
+    this.root.setAttribute(attr('state'), 'ready');
+    this.root.removeAttribute(attr('error'));
+    this.renderProduct();
+    this.renderVariant();
+    notifyLayoutChanged('product');
+    emit('product-updated', { product, scope: this }, this.root);
+  }
+
   /** Matching elements in this scope, including the root itself (e.g. a card link with tether-bind="link"). */
   $(s) {
     const inner = scoped(this.root, s, productSel());

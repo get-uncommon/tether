@@ -1,0 +1,76 @@
+# Weekly check that Tether still works against Shopify, on the pinned API version and the next one.
+# Forks: enable Actions on the fork (Actions tab) and it runs there too.
+# Optional repository secrets (Settings -> Secrets and variables -> Actions):
+#   TETHER_DOMAIN, TETHER_TOKEN   a public Storefront token of your test store
+#                                 (without them it runs against Shopify's public demo store)
+# Cost: ~1-2 minutes a run, weekly plus per push to main. Free on public repositories.
+name: smoke
+
+on:
+  schedule:
+    - cron: '17 6 * * 1'   # Mondays 06:17 UTC
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: weekly-smoke
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      TETHER_DOMAIN: ${{ secrets.TETHER_DOMAIN }}
+      TETHER_TOKEN: ${{ secrets.TETHER_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Unit tests
+        run: npm test
+      - name: API versions
+        id: versions
+        run: |
+          echo "pinned=$(node scripts/api-version.mjs)" >> "$GITHUB_OUTPUT"
+          echo "next=$(node scripts/api-version.mjs --next)" >> "$GITHUB_OUTPUT"
+      - name: Smoke (pinned ${{ steps.versions.outputs.pinned }})
+        id: pinned
+        run: npm run smoke
+      - name: Smoke (next ${{ steps.versions.outputs.next }})
+        id: next
+        if: always() && steps.versions.outcome == 'success'
+        run: TETHER_API_VERSION=${{ steps.versions.outputs.next }} npm run smoke
+
+      - name: Open or update an issue
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          PINNED: ${{ steps.versions.outputs.pinned }}
+          NEXT: ${{ steps.versions.outputs.next }}
+          PINNED_OUTCOME: ${{ steps.pinned.outcome }}
+          NEXT_OUTCOME: ${{ steps.next.outcome }}
+        run: |
+          title="Smoke test failing"
+          body="Run: $RUN_URL
+
+          - pinned API $PINNED: $PINNED_OUTCOME
+          - next API $NEXT: $NEXT_OUTCOME
+
+          If only the next version fails, read the Storefront API release notes and fix Tether before bumping apiVersion. If the pinned version fails, the store, token or Shopify changed: run Tether.diagnose() on the site."
+          gh label create smoke-failure --color B60205 --force >/dev/null 2>&1 || true
+          num=$(gh issue list --state open --label smoke-failure --json number --jq '.[0].number')
+          if [ -n "$num" ]; then
+            gh issue comment "$num" --body "$body"
+          else
+            gh issue create --title "$title" --label smoke-failure --body "$body"
+          fi

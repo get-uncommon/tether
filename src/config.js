@@ -10,6 +10,7 @@ export const DEFAULTS = {
   country: undefined,         // ISO code, e.g. 'NL' -> @inContext(country: NL)
   language: undefined,        // e.g. 'NL' -> @inContext(language: NL)
   locale: undefined,          // Intl locale for money/dates, e.g. 'nl-NL'
+  markets: null,              // { detect: true, locales: { de: { country: 'DE', language: 'DE' } }, cookie, remember } (markets.js)
 
   // Markup
   prefix: 'tether',           // attribute prefix: tether-product, tether-bind, ...
@@ -60,6 +61,7 @@ export function configure(overrides = {}) {
   Object.assign(cfg, DEFAULTS, overrides);
   if (cfg.domain) cfg.domain = String(cfg.domain).replace(/^https?:\/\//, '').replace(/\/.*$/, '');
   if (!cfg.storageKey) cfg.storageKey = `${cfg.prefix}:cart:${cfg.domain}`;
+  if (cfg.apiVersion === 'unstable') warn('apiVersion "unstable" changes without notice. Pin a dated version (e.g. 2026-07).');
   return cfg;
 }
 

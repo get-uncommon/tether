@@ -1,8 +1,6 @@
-tether-sync.config.js
-tether-sync.config.mjs
-tether-sync.config.json
-worker.js
-wrangler.toml
 .tether-sync-state.json*
 .env
+.dev.vars
 .wrangler
+node_modules
+dist/

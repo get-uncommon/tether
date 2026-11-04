@@ -47,11 +47,11 @@ test('mapping: sources, metafields, slug, owned fields and config checks', () =>
       { slug: 'main-image', type: 'Image' }, { slug: 'description', type: 'RichText' }, { slug: 'material', type: 'PlainText' },
       { slug: 'required-thing', type: 'PlainText', isRequired: true }],
   });
-  const text = problems.join('\n');
+  const text = problems.map((p) => p.message).join('\n');
   assert.match(text, /"gone" doesn't exist/);
   assert.match(text, /"price" is a Number field but maps "title"/);
   assert.match(text, /Required Webflow field "required-thing"/);
-  assert.match(text, /slug "shopify-id"/);
+  assert.match(text, /no "shopify-id" field/);
 });
 
 test('throttle spaces requests and pauses after a 429', async () => {
@@ -191,7 +191,7 @@ test('dry run writes nothing', async () => {
 
 test('reconcile: only products updated since the cursor, budgeted, resumable, idempotent', async () => {
   const products = [1, 2, 3, 4, 5].map((n) => shopifyProduct(n));
-  const { sync, store, shop, wf } = setup({ products });
+  const { sync, store, shop, wf } = setup({ products }, { ...baseConfig, reconcile: { overlapMinutes: 0 } });
   await store.put('reconcile:since', '2026-11-01T00:00:03Z');
 
   const r1 = await sync.reconcile({ maxChanges: 2 });

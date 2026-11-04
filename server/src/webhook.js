@@ -42,8 +42,9 @@ export async function handleShopifyWebhook(request, {
       log?.info?.(`webhook ${topic} ${id}: ${res.action}`);
       return res;
     } catch (err) {
-      // Shopify won't retry (we already answered 200); reconcile picks it up.
+      // Shopify won't retry (we already answered 200): the next reconcile does.
       log?.error?.(`webhook ${topic} ${id} failed: ${err.message}`);
+      try { await sync.queueRetry?.(id, err); } catch { /* the cursor overlap still catches most */ }
       return { action: 'failed', error: err };
     }
   };

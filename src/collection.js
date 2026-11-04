@@ -42,15 +42,19 @@ export class ListScope {
   }
 
   async load(more = false) {
+    const token = (this.loadToken = (this.loadToken || 0) + 1);
+    const stale = () => token !== this.loadToken;
     try {
       if (has(this.root, 'recommendations')) {
         const key = get(this.root, 'recommendations');
         const base = await getProduct(key);
-        this.products = await getRecommendations(base.id, get(this.root, 'intent') || 'RELATED');
+        const recs = await getRecommendations(base.id, get(this.root, 'intent') || 'RELATED');
+        if (stale()) return;
         const limit = parseInt(get(this.root, 'limit') || '', 10);
-        if (limit) this.products = this.products.slice(0, limit);
+        this.products = limit ? recs.slice(0, limit) : recs;
       } else {
         const res = await getProducts({ ...this.options(), after: more ? this.pageInfo?.endCursor : null });
+        if (stale()) return;
         this.collection = res.collection;
         this.pageInfo = res.pageInfo;
         this.products = more ? [...this.products, ...res.products] : res.products;
@@ -59,6 +63,7 @@ export class ListScope {
       setScopeStatus(this.root, 'ready');
       emit('list-ready', { products: this.products, collection: this.collection }, this.root);
     } catch (err) {
+      if (stale()) return;
       // Keep what's already rendered on a failed "load more"; otherwise show the error state.
       if (!more) setScopeStatus(this.root, isNotFound(err) ? 'not-found' : 'error', err);
       reportError(err, 'list load failed');

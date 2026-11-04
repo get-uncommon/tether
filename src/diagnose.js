@@ -11,20 +11,10 @@ import { attr, sel, get, qsa, hasTemplate } from './dom.js';
 import { getProduct } from './loader.js';
 import { allPlans } from './selling-plans.js';
 import { resolveProductKey, boundary } from './status.js';
+import { apiVersionStatus } from './api-version.js';
+import { detectMarket } from './markets.js';
 
-/** Shopify supports each quarterly API version for 12 months. */
-export function apiVersionStatus(version, now = new Date()) {
-  const m = /^(\d{4})-(\d{2})$/.exec(String(version || ''));
-  if (!m) return { version, ok: version === 'unstable', note: 'not a dated version' };
-  const released = new Date(Date.UTC(+m[1], +m[2] - 1, 1));
-  const supportedUntil = new Date(Date.UTC(+m[1] + 1, +m[2] - 1, 1));
-  const monthsLeft = (supportedUntil - now) / (30.44 * 24 * 3600 * 1000);
-  let note = `supported until about ${supportedUntil.toISOString().slice(0, 7)}`;
-  if (released > now) note = 'not released yet';
-  else if (monthsLeft <= 0) note = 'no longer supported: Shopify falls back to the oldest supported version. Upgrade (see README)';
-  else if (monthsLeft < 3) note = `${note}: plan the upgrade (see README)`;
-  return { version, ok: released <= now && monthsLeft > 0, monthsLeft: Math.round(monthsLeft), note };
-}
+export { apiVersionStatus };
 
 const mask = (t) => (t ? `${String(t).slice(0, 4)}…${String(t).slice(-4)} (${String(t).length} chars)` : '(missing)');
 
@@ -112,11 +102,12 @@ export async function diagnose({ root = document, silent = false, version, now =
       token: mask(cfg.token),
       apiVersion: cfg.apiVersion,
       endpoint: cfg.domain ? endpoint() : null,
-      country: cfg.country, language: cfg.language, locale: cfg.locale,
+      country: cfg.country, language: cfg.language, locale: cfg.locale, markets: cfg.markets || null,
       prefix: cfg.prefix, productPath: cfg.productPath, metafields: cfg.metafields,
       autoMount: cfg.autoMount, observe: cfg.observe, onError: typeof cfg.onError === 'function',
     },
     apiVersion: apiVersionStatus(cfg.apiVersion, now),
+    market: cfg.markets?.detect ? detectMarket(cfg.markets) : null,
     reachable: false,
     shop: null,
     latencyMs: null,
@@ -173,6 +164,7 @@ function print(r) {
   c.group?.(`[${cfg.prefix}] diagnose: ${errors ? `${errors} error(s)` : 'no errors'}, ${r.problems.length - errors} warning(s)`);
   c.log('version', r.version, '| API', r.apiVersion.version, `(${r.apiVersion.note})`);
   c.log('config', r.config);
+  if (r.market) c.log('market detected', r.market, '(in use:', r.config.country, r.config.language, ')');
   c.log(r.reachable ? `Storefront API reachable: ${r.shop?.name} (${r.latencyMs} ms)` : 'Storefront API NOT reachable');
   if (r.products.length) (c.table || c.log)(r.products);
   if (r.sellingPlans.length) (c.table || c.log)(r.sellingPlans);

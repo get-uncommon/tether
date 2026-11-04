@@ -11,7 +11,16 @@ import { SyncError, sleep as realSleep } from './util.js';
 
 export const DEFAULT_API_VERSION = '2026-07';
 
-export function productFragment({ metafields = [], inventory = false, mediaFirst = 20, variantsFirst = 100 } = {}) {
+/**
+ * Shopify rejects a query above 1,000 cost points. A product node costs roughly
+ * 1 + variantsFirst + mediaFirst + its other fields, so a page holds ~800 / that.
+ */
+export function pageSizeFor({ variantsFirst = 25, mediaFirst = 10, metafields = [] } = {}) {
+  const perProduct = 6 + variantsFirst + mediaFirst + metafields.length;
+  return Math.max(1, Math.min(50, Math.floor(800 / perProduct)));
+}
+
+export function productFragment({ metafields = [], inventory = false, mediaFirst = 10, variantsFirst = 25 } = {}) {
   const mf = metafields.map((ref, i) => {
     const [namespace, ...rest] = ref.split('.');
     return `mf${i}: metafield(namespace: ${JSON.stringify(namespace)}, key: ${JSON.stringify(rest.join('.'))}) { value type }`;
@@ -33,7 +42,8 @@ export function productFragment({ metafields = [], inventory = false, mediaFirst
 export function createShopify({
   domain, adminToken, clientId, clientSecret, apiVersion = DEFAULT_API_VERSION,
   metafields = [], inventory = false, fetch: fetchImpl = globalThis.fetch, sleep = realSleep, now = () => Date.now(),
-  retries = 3,
+  retries = 3, variantsFirst = 25, mediaFirst = 10,
+  tokenStore = null, // { get, put }: caches the client-credentials token (one request a day instead of one per run)
 }) {
   if (!domain) throw new SyncError('shopify.domain is required');
   if (!adminToken && !(clientId && clientSecret)) {
@@ -44,6 +54,10 @@ export function createShopify({
 
   async function token() {
     if (cached && cached.expires > now() + 60000) return cached.token;
+    if (!cached && tokenStore) {
+      const saved = await tokenStore.get('shopify:token');
+      if (saved?.token && saved.expires > now() + 60000) { cached = saved; return saved.token; }
+    }
     const res = await fetchImpl(`https://${shop}/admin/oauth/access_token`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -52,6 +66,7 @@ export function createShopify({
     if (!res.ok) throw new SyncError(`Shopify token request failed (${res.status})`, { status: res.status, body: await res.text().catch(() => '') });
     const json = await res.json();
     cached = { token: json.access_token, expires: now() + (json.expires_in || 86399) * 1000 };
+    if (tokenStore) await tokenStore.put('shopify:token', cached);
     return cached.token;
   }
 
@@ -62,19 +77,21 @@ export function createShopify({
         headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': await token() },
         body: JSON.stringify({ query, variables }),
       });
-      if (res.status === 401 && !adminToken && attempt < 1) { cached = null; continue; }
+      if (res.status === 401 && !adminToken && attempt < 1) { cached = null; tokenStore = null; continue; }
       if ((res.status === 429 || res.status >= 500) && attempt < retries) { await sleep(1000 * 2 ** attempt); continue; }
       const json = await res.json().catch(() => null);
       if (!res.ok) throw new SyncError(`Shopify Admin API ${res.status}`, { status: res.status, body: json });
       if (json?.errors?.length) {
         if (json.errors.some((e) => e.extensions?.code === 'THROTTLED') && attempt < retries) { await sleep(1000 * 2 ** attempt); continue; }
-        throw new SyncError(`Shopify Admin API: ${json.errors.map((e) => e.message).join(' | ')}`, { body: json });
+        const code = json.errors.find((e) => e.extensions?.code)?.extensions.code;
+        throw new SyncError(`Shopify Admin API: ${json.errors.map((e) => e.message).join(' | ')}`, { body: json, code });
       }
       return json.data;
     }
   }
 
-  const fragment = productFragment({ metafields, inventory });
+  const fragment = productFragment({ metafields, inventory, variantsFirst, mediaFirst });
+  let pageSize = pageSizeFor({ variantsFirst, mediaFirst, metafields });
 
   return {
     shop,
@@ -86,16 +103,20 @@ export function createShopify({
       return data.product ? normalizeProduct(data.product, metafields) : null;
     },
 
-    /** One page of products, oldest update first. */
-    async listProducts({ first = 50, after = null, query = null } = {}) {
-      const data = await gql(`query TetherSyncProducts($first: Int!, $after: String, $query: String) {
-  products(first: $first, after: $after, query: $query, sortKey: UPDATED_AT) {
-    nodes { ...TetherSyncProduct }
-    pageInfo { hasNextPage endCursor }
-  }
-}
-${fragment}`, { first, after, query });
-      return { products: data.products.nodes.map((p) => normalizeProduct(p, metafields)), pageInfo: data.products.pageInfo };
+    get pageSize() { return pageSize; },
+
+    /** One page of products, oldest update first. Shrinks the page if Shopify says it costs too much. */
+    async listProducts({ first, after = null, query = null } = {}) {
+      let size = first || pageSize;
+      for (;;) {
+        try {
+          return await listPage(size, after, query);
+        } catch (err) {
+          if (err.code !== 'MAX_COST_EXCEEDED' || size <= 1) throw err;
+          size = Math.max(1, Math.floor(size / 2));
+          if (!first) pageSize = size;
+        }
+      }
     },
 
     async shopName() {
@@ -103,6 +124,17 @@ ${fragment}`, { first, after, query });
       return data.shop;
     },
   };
+
+  async function listPage(first, after, query) {
+    const data = await gql(`query TetherSyncProducts($first: Int!, $after: String, $query: String) {
+  products(first: $first, after: $after, query: $query, sortKey: UPDATED_AT) {
+    nodes { ...TetherSyncProduct }
+    pageInfo { hasNextPage endCursor }
+  }
+}
+${fragment}`, { first, after, query });
+    return { products: data.products.nodes.map((p) => normalizeProduct(p, metafields)), pageInfo: data.products.pageInfo };
+  }
 }
 
 const num = (m) => (m && m.amount != null ? Number(m.amount) : null);

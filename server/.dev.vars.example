@@ -1,0 +1,9 @@
+SHOPIFY_DOMAIN=your-store.myshopify.com
+WEBFLOW_COLLECTION_ID=your-collection-id
+WEBFLOW_TOKEN=your-webflow-site-token
+SHOPIFY_CLIENT_ID=your-app-client-id
+SHOPIFY_CLIENT_SECRET=your-app-client-secret
+SHOPIFY_ADMIN_TOKEN=none
+SHOPIFY_WEBHOOK_SECRET=none
+SYNC_SECRET=choose-a-long-random-string
+FIELD_MAP=none
