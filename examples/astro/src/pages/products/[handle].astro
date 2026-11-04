@@ -55,6 +55,7 @@ const show = (k) => !state.show[k];
     </div>
   </article>
   <Fragment set:html={shop.hydrate(product)} />
+  <Fragment set:html={shop.jsonLd(product, { url: new URL(Astro.url.pathname, Astro.site ?? Astro.url).toString() })} />
 </Layout>
 <style>
   .product { display: grid; grid-template-columns: 1.2fr 1fr; gap: 2rem; }

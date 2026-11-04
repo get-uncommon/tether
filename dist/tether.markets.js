@@ -40,7 +40,7 @@
 
   // tether-core:mounting.js
   var m7 = window.Tether.__core["mounting.js"];
-  var { hydrateFromPage, liveLists, liveProducts, mountProduct, mountedLists, mountedProducts, pruneLive, retryFailed, within } = m7;
+  var { hydrateFromPage, liveLists, liveProducts, mountProduct, mountedLists, mountedProducts, pruneLive, retryFailed, settleMarket, trackMarket, within } = m7;
 
   // src/markets.js
   var COUNTRY = /^[A-Z]{2}$/;

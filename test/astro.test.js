@@ -32,6 +32,7 @@ globalThis.fetch = async (url, init) => {
     const page = all.slice(start, start + variables.first);
     return ok({ products: { nodes: page, pageInfo: { hasNextPage: start + page.length < all.length, endCursor: String(start + page.length) } } });
   }
+  if (op === 'TetherPredictive') return ok({ predictiveSearch: { products: variables.q.startsWith('cof') ? [{ id: product.id, handle: product.handle, title: product.title, availableForSale: true, featuredImage: null, priceRange: product.priceRange }] : [], collections: [], queries: variables.q.startsWith('cof') ? [{ text: 'coffee beans' }] : [] } });
   if (op === 'TetherSearch') return ok({ products: { nodes: [], pageInfo: { hasNextPage: false, endCursor: null } } });
   if (op === 'TetherCart') return ok({ cart: null });
   if (op === 'Tether_cartCreate') return ok({ cartCreate: { cart: cartFrom(variables.input.lines), userErrors: [] } });
@@ -425,9 +426,10 @@ test('variantUrl: the choice goes into ?variant= after a change (not on first re
   Tether.clearProductCache(); Tether.primeProduct(product);
   document.body.innerHTML = '<div tether-product="coffee-box"></div>';
   Tether.mount(document);
-  await tick(20);
+  await tick(30);
   assert.equal(window.location.search, '', 'nothing on first render');
   Tether.getScope(document.querySelector('[tether-product]')).select('Size', '1kg');
+  await tick(20); // written by the extras part
   assert.match(window.location.search, /variant=\d+/);
   await Tether.init({ domain: 'shop.test', token: 't', autoMount: false, country: 'NL', locale: 'nl-NL' });
   window.history.replaceState(null, '', '/');
@@ -474,4 +476,58 @@ test('queries carry a maxAge bucket (Shopify caches identical query texts); muta
   assert.doesNotMatch(bodies[1], /#\d+$/);
   await none.query('mutation M { a }').catch(() => {});
   assert.doesNotMatch(bodies[2] || '', /#\d+$/);
+});
+
+test('jsonLd: Product / ProductGroup with offers per variant, safe to put in HTML', () => {
+  const shop = server.createStorefront({ domain: 'shop.test', token: 't', siteUrl: 'https://shop.example', productPath: '/products' });
+  const d = shop.jsonLdData(product);
+  assert.ok(['Product', 'ProductGroup'].includes(d['@type']));
+  const offers = d.offers ? [d.offers] : d.hasVariant.map((v) => v.offers);
+  assert.ok(offers.every((o) => o.price && o.priceCurrency && /schema.org\/(InStock|OutOfStock|BackOrder)/.test(o.availability)));
+  assert.match(d.url, /^https:\/\/shop\.example\/products\/coffee-box$/);
+  const evil = { ...product, title: '</script><script>alert(1)</script>' };
+  assert.ok(!/<\/script><script>/.test(shop.jsonLd(evil).slice(30, -9)), 'escaped');
+});
+
+
+test('search as you type: results while typing, arrow keys, Escape, stale answers ignored', async () => {
+  document.body.innerHTML = `<form tether-search action="/search">
+    <input tether-search-input name="q">
+    <div tether-search-results>
+      <div tether-search-products><a><span tether-search-bind="title"></span> <span tether-search-bind="price"></span></a></div>
+      <div tether-search-queries><a><span tether-search-bind="text"></span></a></div>
+      <p tether-show="search-empty" hidden>Nothing</p>
+    </div></form>`;
+  Tether.mount(document);
+  await tick(30); // the part loads
+  const input = document.querySelector('[tether-search-input]');
+  const type = (v) => { input.value = v; input.dispatchEvent(new window.Event('input', { bubbles: true })); };
+  type('c'); type('co'); type('cof');
+  await tick(250);
+  const root = document.querySelector('[tether-search]');
+  assert.equal(root.getAttribute('tether-search-state'), 'ready');
+  assert.equal(calls.filter((c) => c.op === 'TetherPredictive').length, 1, 'debounced: one request');
+  const link = document.querySelector('[tether-search-products] a');
+  assert.equal(link.querySelector('[tether-search-bind="title"]').textContent, product.title);
+  assert.match(link.getAttribute('href'), /coffee-box/);
+  assert.match(document.querySelector('[tether-search-queries] a').getAttribute('href'), /\/search\?q=coffee%20beans/);
+  assert.equal(input.getAttribute('aria-expanded'), 'true');
+  input.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'ArrowDown' }));
+  assert.equal(input.getAttribute('aria-activedescendant'), link.id);
+  input.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape' }));
+  assert.equal(input.getAttribute('aria-expanded'), 'false');
+  type('zzz');
+  await tick(250);
+  assert.equal(root.getAttribute('tether-search-state'), 'empty');
+  assert.notEqual(window.getComputedStyle(document.querySelector('[tether-show="search-empty"]')).display, 'none');
+});
+
+test('a page built for another market: html.tether-market-pending until the live prices are in', async () => {
+  const de = server.createStorefront({ domain: 'shop.test', token: 't', country: 'DE' });
+  document.documentElement.classList.remove('tether-market-pending');
+  document.body.innerHTML = `${de.hydrate(product)}<div tether-product="coffee-box"><span tether-bind="price">built price</span></div>`;
+  Tether.mount(document);
+  assert.ok(document.documentElement.classList.contains('tether-market-pending'));
+  await tick(80);
+  assert.ok(!document.documentElement.classList.contains('tether-market-pending'));
 });

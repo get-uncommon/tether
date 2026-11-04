@@ -122,7 +122,7 @@ async function builds() {
   return [
     { ...iife, outfile: join(ROOT, 'dist/tether.js') },
     { ...iife, outfile: join(ROOT, 'dist/tether.min.js'), minify: true, sourcemap: true },
-    part('diagnose', false), part('diagnose', true), part('markets', false), part('markets', true),
+    ...['diagnose', 'markets', 'search', 'extras'].flatMap((n) => [part(n, false), part(n, true)]),
     {
       ...common, entryPoints: [join(SRC, 'index.js'), join(SRC, 'server.js'), join(SRC, 'astro.js')], format: 'esm', splitting: true, minify: true,
       external: ['@occluze/tether', 'node:*'],
@@ -134,7 +134,7 @@ async function builds() {
 
 async function report() {
   const rows = [];
-  for (const f of ['tether.min.js', 'tether.diagnose.min.js', 'tether.markets.min.js']) {
+  for (const f of ['tether.min.js', 'tether.diagnose.min.js', 'tether.markets.min.js', 'tether.search.min.js', 'tether.extras.min.js']) {
     const buf = await readFile(join(ROOT, 'dist', f));
     rows.push(`${f.padEnd(24)} ${(buf.length / 1024).toFixed(1).padStart(5)} KB  gzip ${(gzipSync(buf, { level: 9 }).length / 1024).toFixed(1).padStart(4)} KB  brotli ${(brotliCompressSync(buf).length / 1024).toFixed(1).padStart(4)} KB`);
   }

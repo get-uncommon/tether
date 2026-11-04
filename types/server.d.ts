@@ -7,6 +7,8 @@ export interface StorefrontOptions extends Partial<Pick<TetherConfig,
   domain?: string;
   /** Public Storefront API token (or PUBLIC_SHOPIFY_STOREFRONT_TOKEN in import.meta.env). */
   token?: string;
+  /** Your site's address, e.g. https://shop.example: product URLs in jsonLd() without passing url. */
+  siteUrl?: string;
   /** Products per request for allProducts() (default 25). */
   pageSize?: number;
   /** Custom fetch (tests, caching). */
@@ -62,6 +64,9 @@ export interface Storefront {
    * so the server renders the same and nothing flashes. Pass Astro.url.searchParams.get('variant') in SSR.
    */
   initialState(product: ShopifyProduct, opts?: InitialOptions): InitialState | null;
+  /** schema.org Product / ProductGroup data for search engines, as a <script type="application/ld+json"> tag. */
+  jsonLd(product: ShopifyProduct | null, opts?: { url?: string; brand?: string }): string;
+  jsonLdData(product: ShopifyProduct | null, opts?: { url?: string; brand?: string }): Record<string, unknown> | null;
   plans: SellingPlanHelpers;
 }
 

@@ -19,7 +19,7 @@ import * as plans from './selling-plans.js';
 import { resolveProductKey } from './status.js';
 import { attr, sel, get, qsa, emit, formatMoney, busy, parseJSONAttr, toAttributes, imageUrl } from './dom.js';
 import { loadPart, coreModules } from './lazy.js';
-import { mountedLists, liveLists, pruneLive, within, mountProduct, retryFailed, hydrateFromPage } from './mounting.js';
+import { mountedLists, liveLists, pruneLive, within, mountProduct, retryFailed, hydrateFromPage, settleMarket, trackMarket } from './mounting.js';
 
 export const VERSION = '0.5.0';
 
@@ -40,7 +40,7 @@ export function mount(root = document) {
     const list = new ListScope(el);
     liveLists.add(list);
     el.addEventListener(`${cfg.prefix}:list-rendered`, (e) => mount(e.detail.container));
-    list.load();
+    trackMarket(list.load());
   });
 
   within(root, sel('product')).forEach((el) => { if (mountProduct(el)) count++; });
@@ -50,10 +50,16 @@ export function mount(root = document) {
     loadPart('markets').then((m) => m.renderCountrySelects(root)).catch((err) => reportError(err, 'markets'));
   }
 
+  // Search as you type: its own optional part, only for pages that have it.
+  if (within(root, sel('search')).length) {
+    loadPart('search').then((m) => m.mountSearch(root)).catch((err) => reportError(err, 'search'));
+  }
+
   qsa(root, sel('account-link')).forEach((a) => {
     a.setAttribute('href', `https://${cfg.domain}/account`);
   });
 
+  settleMarket();
   Cart.render();
   log(`mounted ${count} scope(s)`, root);
   return count;
@@ -164,16 +170,14 @@ function bindControls() {
     if (f) { f.classList.remove('is-invalid'); e.target.removeAttribute?.('aria-invalid'); }
   });
 
-  // Other tabs: the cart changed there (reload it here), or the visitor picked another market.
+  // Other tabs: the cart or the market changed there (handled by the extras part, loaded then).
   window.addEventListener('storage', (e) => {
-    if (!e.key || !cfg.domain) return;
-    if (e.key === cfg.storageKey || e.key === `${cfg.storageKey}:seen`) Cart.init();
-    else if (e.key === `${cfg.prefix}:market:${cfg.domain}` && e.newValue) {
-      try {
-        const m = JSON.parse(e.newValue);
-        if (m?.country) setCountry(m.country, { language: m.language ?? null, locale: m.locale, remember: false }).catch(() => {});
-      } catch { /* ignore */ }
-    }
+    if (cfg.domain && e.key?.startsWith(`${cfg.prefix}:`)) loadPart('extras').then((m) => m.onStorage(e)).catch(() => {});
+  });
+  // Shareable variant links: only when turned on.
+  document.addEventListener(`${cfg.prefix}:variant-changed`, (e) => {
+    const root = e.target;
+    if (cfg.variantUrl || root.hasAttribute?.(attr('variant-url'))) loadPart('extras').then((m) => m.writeVariantUrl(root, e.detail)).catch(() => {});
   });
 
   // Astro View Transitions (<ClientRouter />): mount every new page, close the cart while leaving.
@@ -225,29 +229,7 @@ function dataKeySel() { return `[data-${cfg.prefix}-key]`; }
  * group in one request. Bundles, build-a-box, "complete the set".
  * Lines get attribute _group (and the group's tether-line-attributes).
  */
-export async function addGroup(btn) {
-  const group = btn.closest(sel('group'));
-  if (!group) return null;
-  const name = get(group, 'group');
-  const extra = toAttributes(parseJSONAttr(group, 'line-attributes'));
-  const groupAttrs = name ? [{ key: '_group', value: name }, ...extra] : extra;
-
-  const lines = qsa(group, sel('product'))
-    .map((el) => scopes.get(el))
-    .filter((s) => s && s.variant?.availableForSale && s.quantity > 0)
-    .map((s) => {
-      const l = s.getLine();
-      l.attributes = [...(l.attributes || []), ...groupAttrs];
-      return l;
-    });
-
-  if (!lines.length) { warn('group-add: nothing selected'); return null; }
-  try {
-    const cart = await Cart.add(lines);
-    emit('group-added', { group: name, lines }, group);
-    return cart;
-  } catch (err) { reportError(err, 'group add'); return null; }
-}
+export const addGroup = (btn) => loadPart('extras').then((m) => m.addGroup(btn));
 
 // ---------------------------------------------------------------------------
 // Init

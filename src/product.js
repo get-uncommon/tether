@@ -566,17 +566,5 @@ export class ProductScope {
       purchase: this.purchase, sellingPlanId: sub ? this.planId : null,
     }, this.root);
 
-    // Shareable links: the visitor's choice in ?variant= (variantUrl: true, for the page's main product,
-    // or tether-variant-url on a scope). Only after a change, never on the first render.
-    const key = `${v.id}|${sub ? this.planId : ''}`;
-    if (this.urlKey && this.urlKey !== key && (has(this.root, 'variant-url') || (cfg.variantUrl && document.querySelector(productSel()) === this.root))) {
-      try {
-        const u = new URL(window.location.href);
-        u.searchParams.set('variant', v.id.split('/').pop());
-        if (sub) u.searchParams.set('selling_plan', this.planId.split('/').pop()); else u.searchParams.delete('selling_plan');
-        window.history.replaceState(window.history.state, '', u);
-      } catch { /* ignore */ }
-    }
-    this.urlKey = key;
   }
 }

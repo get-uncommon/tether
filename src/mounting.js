@@ -45,7 +45,9 @@ function mountProduct(el) {
   // A rendered scope keeps showing its content while it refreshes (e.g. country switch).
   if (!scopes.get(el)) setScopeStatus(el, 'loading');
   else el.setAttribute(attr('state'), 'updating');
-  getProduct(key)
+  const loading = getProduct(key);
+  marketPending?.add(loading);
+  loading
     .then((p) => {
       if (!current()) return;
       const existing = scopes.get(el);
@@ -114,6 +116,24 @@ function flushRefresh() {
  * their products are used without a request. Ignored when they were made for another market.
  */
 const readScripts = new WeakSet();
+let marketPending = null; // product loads to wait for before html.tether-market-pending goes
+
+/** Lists (and anything else that loads prices) wait too. */
+export const trackMarket = (p) => { marketPending?.add(p); return p; };
+
+/** After a mount: drop html.tether-market-pending once this page's products are live. */
+export function settleMarket() {
+  if (!marketPending) return;
+  const waits = [...marketPending];
+  Promise.allSettled(waits).then(() => {
+    if (!marketPending || waits.some((w) => !marketPending.has(w))) return;
+    if (waits.length === marketPending.size) {
+      marketPending = null;
+      document.documentElement.classList.remove(`${cfg.prefix}-market-pending`);
+    } else settleMarket(); // more products came in meanwhile
+  });
+}
+
 export function hydrateFromPage(root = document) {
   qsa(root.ownerDocument || root, 'script[type="application/json"][data-tether-hydrate]').forEach((s) => {
     if (readScripts.has(s)) return;
@@ -123,7 +143,12 @@ export function hydrateFromPage(root = document) {
       rememberOptionNames(data.products); // the build's option names, also for other languages
       const same = (a, b) => String(a || '').toUpperCase() === String(b || '').toUpperCase();
       if (same(data.country, cfg.country) && same(data.language, cfg.language)) hydrateProducts(data.products);
-      else log('hydration skipped: other market');
+      else {
+        // The page was built for another market: its prices aren't this visitor's. Mark the page
+        // (html.tether-market-pending) until the live ones are in, so CSS can hide prices meanwhile.
+        log('hydration skipped: other market');
+        if (!marketPending) { marketPending = new Set(); document.documentElement.classList.add(`${cfg.prefix}-market-pending`); }
+      }
     } catch (err) { warn('bad data-tether-hydrate', err); }
   });
 }

@@ -1941,18 +1941,6 @@
         purchase: this.purchase,
         sellingPlanId: sub ? this.planId : null
       }, this.root);
-      const key = `${v.id}|${sub ? this.planId : ""}`;
-      if (this.urlKey && this.urlKey !== key && (has(this.root, "variant-url") || cfg.variantUrl && document.querySelector(productSel()) === this.root)) {
-        try {
-          const u = new URL(window.location.href);
-          u.searchParams.set("variant", v.id.split("/").pop());
-          if (sub) u.searchParams.set("selling_plan", this.planId.split("/").pop());
-          else u.searchParams.delete("selling_plan");
-          window.history.replaceState(window.history.state, "", u);
-        } catch {
-        }
-      }
-      this.urlKey = key;
     }
   };
 
@@ -2068,6 +2056,8 @@
     mountedProducts: () => mountedProducts,
     pruneLive: () => pruneLive,
     retryFailed: () => retryFailed,
+    settleMarket: () => settleMarket,
+    trackMarket: () => trackMarket,
     within: () => within
   });
   var mountedProducts = /* @__PURE__ */ new WeakSet();
@@ -2106,7 +2096,9 @@
     const current = () => requestToken.get(el) === token;
     if (!scopes.get(el)) setScopeStatus(el, "loading");
     else el.setAttribute(attr("state"), "updating");
-    getProduct(key).then((p) => {
+    const loading = getProduct(key);
+    marketPending?.add(loading);
+    loading.then((p) => {
       if (!current()) return;
       const existing = scopes.get(el);
       if (existing) existing.update(p);
@@ -2160,6 +2152,22 @@
     }).catch((err) => reportError(err, `refresh ${keys[i]}`)));
   }
   var readScripts = /* @__PURE__ */ new WeakSet();
+  var marketPending = null;
+  var trackMarket = (p) => {
+    marketPending?.add(p);
+    return p;
+  };
+  function settleMarket() {
+    if (!marketPending) return;
+    const waits = [...marketPending];
+    Promise.allSettled(waits).then(() => {
+      if (!marketPending || waits.some((w) => !marketPending.has(w))) return;
+      if (waits.length === marketPending.size) {
+        marketPending = null;
+        document.documentElement.classList.remove(`${cfg.prefix}-market-pending`);
+      } else settleMarket();
+    });
+  }
   function hydrateFromPage(root = document) {
     qsa(root.ownerDocument || root, 'script[type="application/json"][data-tether-hydrate]').forEach((s) => {
       if (readScripts.has(s)) return;
@@ -2169,7 +2177,13 @@
         rememberOptionNames(data.products);
         const same = (a, b) => String(a || "").toUpperCase() === String(b || "").toUpperCase();
         if (same(data.country, cfg.country) && same(data.language, cfg.language)) hydrateProducts(data.products);
-        else log("hydration skipped: other market");
+        else {
+          log("hydration skipped: other market");
+          if (!marketPending) {
+            marketPending = /* @__PURE__ */ new Set();
+            document.documentElement.classList.add(`${cfg.prefix}-market-pending`);
+          }
+        }
       } catch (err) {
         warn("bad data-tether-hydrate", err);
       }
@@ -2228,7 +2242,7 @@
       const list = new ListScope(el);
       liveLists.add(list);
       el.addEventListener(`${cfg.prefix}:list-rendered`, (e) => mount(e.detail.container));
-      list.load();
+      trackMarket(list.load());
     });
     within(root, sel("product")).forEach((el) => {
       if (mountProduct(el)) count++;
@@ -2236,9 +2250,13 @@
     if (within(root, `${sel("country-select")},${sel("country-bind")}`).length) {
       loadPart("markets").then((m) => m.renderCountrySelects(root)).catch((err) => reportError(err, "markets"));
     }
+    if (within(root, sel("search")).length) {
+      loadPart("search").then((m) => m.mountSearch(root)).catch((err) => reportError(err, "search"));
+    }
     qsa(root, sel("account-link")).forEach((a) => {
       a.setAttribute("href", `https://${cfg.domain}/account`);
     });
+    settleMarket();
     Cart.render();
     log(`mounted ${count} scope(s)`, root);
     return count;
@@ -2362,16 +2380,13 @@
       }
     });
     window.addEventListener("storage", (e) => {
-      if (!e.key || !cfg.domain) return;
-      if (e.key === cfg.storageKey || e.key === `${cfg.storageKey}:seen`) Cart.init();
-      else if (e.key === `${cfg.prefix}:market:${cfg.domain}` && e.newValue) {
-        try {
-          const m = JSON.parse(e.newValue);
-          if (m?.country) setCountry(m.country, { language: m.language ?? null, locale: m.locale, remember: false }).catch(() => {
-          });
-        } catch {
-        }
-      }
+      if (cfg.domain && e.key?.startsWith(`${cfg.prefix}:`)) loadPart("extras").then((m) => m.onStorage(e)).catch(() => {
+      });
+    });
+    document.addEventListener(`${cfg.prefix}:variant-changed`, (e) => {
+      const root = e.target;
+      if (cfg.variantUrl || root.hasAttribute?.(attr("variant-url"))) loadPart("extras").then((m) => m.writeVariantUrl(root, e.detail)).catch(() => {
+      });
     });
     if (cfg.astro !== false) {
       document.addEventListener("astro:page-load", () => {
@@ -2418,30 +2433,7 @@
   function dataKeySel() {
     return `[data-${cfg.prefix}-key]`;
   }
-  async function addGroup(btn) {
-    const group = btn.closest(sel("group"));
-    if (!group) return null;
-    const name = get(group, "group");
-    const extra = toAttributes(parseJSONAttr(group, "line-attributes"));
-    const groupAttrs = name ? [{ key: "_group", value: name }, ...extra] : extra;
-    const lines = qsa(group, sel("product")).map((el) => scopes.get(el)).filter((s) => s && s.variant?.availableForSale && s.quantity > 0).map((s) => {
-      const l = s.getLine();
-      l.attributes = [...l.attributes || [], ...groupAttrs];
-      return l;
-    });
-    if (!lines.length) {
-      warn("group-add: nothing selected");
-      return null;
-    }
-    try {
-      const cart = await Cart.add(lines);
-      emit("group-added", { group: name, lines }, group);
-      return cart;
-    } catch (err) {
-      reportError(err, "group add");
-      return null;
-    }
-  }
+  var addGroup = (btn) => loadPart("extras").then((m) => m.addGroup(btn));
   function init(overrides = {}) {
     if (initPromise && !Object.keys(overrides).length) return initPromise;
     configure({ ...window.TETHER_CONFIG || {}, ...overrides });

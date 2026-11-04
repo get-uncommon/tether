@@ -59,7 +59,7 @@ const ENV = {
 };
 
 export function createStorefront(options = {}) {
-  const known = Object.fromEntries(Object.entries(options).filter(([k]) => k in DEFAULTS || k === 'fetch' || k === 'pageSize'));
+  const known = Object.fromEntries(Object.entries(options).filter(([k]) => k in DEFAULTS || k === 'fetch' || k === 'pageSize' || k === 'siteUrl'));
   const conf = { ...DEFAULTS, ...known };
   for (const [key, names] of Object.entries(ENV)) if (!conf[key]) conf[key] = names.map((n) => options[n]).find(Boolean) || '';
   conf.domain = String(conf.domain || '').replace(/^https?:\/\//, '').replace(/\/.*$/, '');
@@ -166,6 +166,60 @@ ${fragment()}`, byId ? { id: key, intent } : { handle: key, intent });
     return `<script type="application/json" data-tether-hydrate>${safeJson(payload)}</script>`;
   }
 
+  /**
+   * schema.org data for search engines (Google's product rich results): a Product, or a ProductGroup
+   * with one Product per variant (price, currency, stock, sku, image, link to ?variant=).
+   * jsonLd(product, { url: 'https://shop.example/products/x' }) -> the <script> tag; jsonLdData() -> the object.
+   */
+  function jsonLdData(p, { url, brand } = {}) {
+    if (!p) return null;
+    const pageUrl = url || (conf.siteUrl ? new URL(productUrl(p.handle, { productPath: conf.productPath, id: p.id }), conf.siteUrl).toString() : undefined);
+    const vid = (v) => String(v.id).split('/').pop();
+    const withVariant = (v) => (pageUrl ? `${pageUrl}${pageUrl.includes('?') ? '&' : '?'}variant=${vid(v)}` : undefined);
+    const text = (p.description || '').trim() || undefined;
+    const images = (p.images?.nodes || []).map((i) => i.url).filter(Boolean);
+    const brandName = brand || p.vendor;
+    // Only buyable on a subscription: the plan price is the price (the first plan the variant has).
+    const priceOf = (v) => {
+      if (!p.requiresSellingPlan) return v.price;
+      const plan = plans.allPlans(p).find((pl) => plans.allocationFor(v, pl.id));
+      return plan ? plans.planPrice(v, plan.id) : v.price;
+    };
+    const offer = (v) => ({
+      '@type': 'Offer',
+      price: priceOf(v)?.amount,
+      priceCurrency: priceOf(v)?.currencyCode,
+      availability: `https://schema.org/${v.availableForSale ? (v.currentlyNotInStock ? 'BackOrder' : 'InStock') : 'OutOfStock'}`,
+      url: withVariant(v),
+    });
+    const vs = p.variants?.nodes || [];
+    const clean = (o) => JSON.parse(JSON.stringify(o)); // drops undefined
+    if (vs.length <= 1) {
+      const v = vs[0];
+      return clean({
+        '@context': 'https://schema.org', '@type': 'Product', name: p.title, description: text, url: pageUrl,
+        image: images, sku: v?.sku || undefined, brand: brandName ? { '@type': 'Brand', name: brandName } : undefined,
+        offers: v ? offer(v) : undefined,
+      });
+    }
+    const varies = { size: 'https://schema.org/size', color: 'https://schema.org/color', colour: 'https://schema.org/color', material: 'https://schema.org/material' };
+    return clean({
+      '@context': 'https://schema.org', '@type': 'ProductGroup', name: p.title, description: text, url: pageUrl,
+      productGroupID: String(p.id).split('/').pop(), image: images,
+      brand: brandName ? { '@type': 'Brand', name: brandName } : undefined,
+      variesBy: [...new Set((p.options || []).map((o) => varies[o.name.toLowerCase()]).filter(Boolean))],
+      hasVariant: vs.map((v) => ({
+        '@type': 'Product',
+        name: `${p.title} - ${v.title}`,
+        sku: v.sku || undefined,
+        image: v.image?.url || images[0],
+        ...Object.fromEntries((v.selectedOptions || []).filter((o) => varies[o.name.toLowerCase()]).map((o) => [varies[o.name.toLowerCase()].split('/').pop(), o.value])),
+        offers: offer(v),
+      })),
+    });
+  }
+  const jsonLd = (p, opts) => (p ? `<script type="application/ld+json">${safeJson(jsonLdData(p, opts))}</script>` : '');
+
   function slim(p) {
     return {
       ...p,
@@ -188,6 +242,8 @@ ${fragment()}`, byId ? { id: key, intent } : { handle: key, intent });
     formatMoney: (money, locale = conf.locale) => formatMoney(money, locale),
     formatPercent: (n, locale = conf.locale) => formatPercent(n, locale),
     imageUrl,
+    jsonLd,
+    jsonLdData,
     initialState: (product, opts = {}) => initialState(product, { defaultPurchase: conf.defaultPurchase, lowStock: conf.lowStock, ...opts }),
     productUrl: (handle, opts = {}) => productUrl(handle, { productPath: conf.productPath, ...opts }),
     plans,
