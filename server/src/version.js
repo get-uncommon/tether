@@ -1,2 +1,2 @@
 // Set by each release (a test checks it matches package.json).
-export const VERSION = '0.6.1';
+export const VERSION = '0.6.2';
