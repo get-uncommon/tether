@@ -121,16 +121,45 @@ function kv(env, store) {
 // ---------------------------------------------------------------- Shopify
 
 const discoveryCache = new Map();
+const JSON_HEADERS = { Accept: 'application/json', 'User-Agent': 'tether-sync (Cloudflare Worker)' };
+/** The shop's numeric id, from the Storefront API (gid://shopify/Shop/123 -> 123). */
+async function shopId(s, fetchImpl) {
+  if (!s.storefrontToken) return null;
+  const r = await fetchImpl(`https://${s.shopDomain}/api/${s.apiVersion}/graphql.json`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Shopify-Storefront-Access-Token': s.storefrontToken },
+    body: JSON.stringify({ query: '{ shop { id } }' }),
+  });
+  const id = r.ok ? (await r.json())?.data?.shop?.id : null;
+  return id ? String(id).split('/').pop() : null;
+}
 async function discover(s, fetchImpl) {
   const hit = discoveryCache.get(s.shopDomain);
   if (hit && hit.until > Date.now()) return hit.value;
-  const get = async (p) => {
-    const r = await fetchImpl(`https://${s.shopDomain}/.well-known/${p}`);
-    if (!r.ok) throw new Error(`${p} answered ${r.status}`);
+  const get = async (url) => {
+    const r = await fetchImpl(url, { headers: JSON_HEADERS });
+    if (!r.ok) throw new Error(`${url.replace(/^https:\/\/[^/]+/, '')} answered ${r.status}`);
     return r.json();
   };
-  const [oidc, api] = await Promise.all([get('openid-configuration'), get('customer-account-api')]);
-  const value = { ...oidc, graphql: api.graphql_api };
+  const [oidc, api] = await Promise.allSettled([
+    get(`https://${s.shopDomain}/.well-known/openid-configuration`),
+    get(`https://${s.shopDomain}/.well-known/customer-account-api`),
+  ]);
+  let value;
+  if (oidc.status === 'fulfilled' && api.status === 'fulfilled') {
+    value = { ...oidc.value, graphql: api.value.graphql_api };
+  } else {
+    // The store domain's bot protection can refuse requests from Workers (403). Shopify's
+    // account host and the Storefront API don't: find the shop id and use the same addresses.
+    const id = await shopId(s, fetchImpl).catch(() => null);
+    if (!id) throw (oidc.reason || api.reason);
+    const auth = `https://shopify.com/authentication/${id}`;
+    const conf = oidc.status === 'fulfilled' ? oidc.value : await get(`${auth}/.well-known/openid-configuration`).catch(() => ({
+      issuer: auth, authorization_endpoint: `${auth}/oauth/authorize`, token_endpoint: `${auth}/oauth/token`,
+      end_session_endpoint: `${auth}/logout`, jwks_uri: `${auth}/.well-known/jwks.json`,
+    }));
+    value = { ...conf, graphql: api.status === 'fulfilled' ? api.value.graphql_api : `https://shopify.com/${id}/account/customer/api/${s.apiVersion}/graphql` };
+  }
   discoveryCache.set(s.shopDomain, { value, until: Date.now() + 3600e3 });
   return value;
 }

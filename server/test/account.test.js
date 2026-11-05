@@ -237,3 +237,33 @@ test('a 401 from Shopify (session ended there) ends it here too', async () => {
   assert.equal((await r.json()).loggedIn, false);
   assert.equal(memory.size, 0);
 });
+
+test('the store domain refuses Workers (403 on .well-known): addresses come from the shop id instead', async () => {
+  const sh = shopify();
+  const blocked = { ...env, SHOPIFY_DOMAIN: 'blocked.myshopify.com' };
+  const asked = [];
+  const fetch = async (url, init = {}) => {
+    const u = String(url);
+    asked.push(u);
+    if (u.startsWith('https://blocked.myshopify.com/.well-known/')) return new Response('forbidden', { status: 403 });
+    if (u.startsWith('https://blocked.myshopify.com/api/')) {
+      assert.match(JSON.parse(init.body).query, /shop \{ id \}/);
+      return new Response(JSON.stringify({ data: { shop: { id: 'gid://shopify/Shop/1' } } }), { status: 200 });
+    }
+    return sh.fetch(url, init);
+  };
+  const memory = new Map();
+  const run = (r) => handleAccount(r, blocked, { fetch, memory });
+  const start = await run(req('/login'));
+  assert.equal(start.status, 302);
+  const a = new URL(start.headers.get('location'));
+  assert.equal(a.origin + a.pathname, 'https://shopify.com/authentication/1/oauth/authorize');
+  assert.ok(asked.includes('https://shopify.com/authentication/1/.well-known/openid-configuration'));
+  sh.setNonce(a.searchParams.get('nonce'));
+  const back = await run(req(`/callback?code=c&state=${a.searchParams.get('state')}`, { cookie: pick(start, '__Host-tether-login') }));
+  const cookie = pick(back, '__Host-tether-account');
+  assert.ok(cookie, 'logged in');
+  const me = await run(req('/me', { origin: SITE, cookie }));
+  assert.equal((await me.json()).customer.firstName, 'Ada');
+  assert.ok(asked.some((u) => u.startsWith('https://shopify.com/1/account/customer/api/')), 'the Customer Account API by shop id');
+});

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.3 (2026-11-05)
+
+- Customer accounts, server mode on a deployed Worker: login failed with "account error" because
+  the store domain's bot protection answers 403 to Workers for its `.well-known` files. The Worker
+  now finds the shop id through the Storefront API and uses Shopify's account addresses directly
+  (needs `STOREFRONT_TOKEN`, which server mode already asks for).
+
 ## 0.6.2 (2026-11-05)
 
 From testers building an Astro store from the starter:
