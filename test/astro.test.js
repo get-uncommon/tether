@@ -818,6 +818,10 @@ test('account pages (server mode): order page with returns, subscriptions with a
       <ul tether-addresses><li><span tether-address-bind="formatted"></span><b tether-address-show="default" hidden>Default</b></li></ul>
       <form tether-address-form><input name="address1" value="x"><p tether-form-error></p><button>Save</button></form>
       <form tether-profile-form><input name="firstName"><input name="lastName"></form>`;
+    // A router on document that registered first (Astro's ClientRouter) must see the submit handled.
+    let routerSaw = null;
+    const router = (e) => { routerSaw = e.defaultPrevented; };
+    document.addEventListener('submit', router);
     await acc.mountAccount(document);
     const $ = (q) => document.querySelector(q);
     const visible = (el) => window.getComputedStyle(el).display !== 'none';
@@ -853,6 +857,8 @@ test('account pages (server mode): order page with returns, subscriptions with a
     assert.equal($('[tether-address-bind="formatted"]').textContent, 'Street 1, Utrecht');
     assert.ok(visible($('[tether-address-show="default"]')));
     $('[tether-address-form]').dispatchEvent(new window.Event('submit', { cancelable: true, bubbles: true }));
+    document.removeEventListener('submit', router);
+    assert.equal(routerSaw, true, 'account forms are handled in the capture phase, before a router');
     await tick(40);
     assert.equal($('[tether-address-form]').getAttribute('tether-form-state'), 'error');
     assert.equal($('[tether-address-form] [tether-form-error]').textContent, 'City is required');

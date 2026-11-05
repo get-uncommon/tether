@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Account pages: the profile and address forms are handled before a page router (Astro's
+  ClientRouter) sees the submit, so the router no longer navigates with the form fields in the URL.
+
 ## 0.6.6 (2026-11-05)
 
 - Sync (Node CLI file store): a write from another process in the same coarse timestamp tick

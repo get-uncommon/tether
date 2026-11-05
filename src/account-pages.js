@@ -253,7 +253,7 @@ function bindPages() {
       const isDefault = Boolean(f.elements?.isDefault?.checked);
       act(f, async () => { await saveAddress(fieldsOf(f), { id, isDefault }); f.reset(); delete f.dataset.tetherAddressId; await renderAddresses(document); });
     }
-  });
+  }, true); // capture: before a router (Astro's ClientRouter) turns the submit into a navigation with the fields in the URL
   document.addEventListener('input', (e) => { if (e.target.closest?.(sel('profile-form'))) e.target.dataset.tetherTouched = '1'; });
   document.addEventListener('click', (e) => {
     const t = e.target;
