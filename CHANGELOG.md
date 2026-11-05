@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.4 (2026-11-05)
+
+- Customer accounts, server mode: the Worker asks for Shopify's signing keys with JSON headers
+  (a request from a Worker without them can get a bot-protection page instead of the keys), and
+  says clearly when the keys can't be fetched.
+
 ## 0.6.3 (2026-11-05)
 
 - Customer accounts, server mode on a deployed Worker: login failed with "account error" because

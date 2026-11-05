@@ -174,7 +174,9 @@ async function verifyIdToken(token, d, s, nonce, fetchImpl) {
   if (header.alg !== 'RS256') throw new Error(`id token alg ${header.alg}`);
   let set = jwksCache.get(d.jwks_uri);
   if (!set || !set.keys.some((k) => k.kid === header.kid)) {
-    set = await (await fetchImpl(d.jwks_uri)).json();
+    const r = await fetchImpl(d.jwks_uri, { headers: JSON_HEADERS });
+    set = r.ok ? await r.json().catch(() => null) : null;
+    if (!Array.isArray(set?.keys)) throw new Error(`Shopify's signing keys answered ${r.status} (${r.headers.get('content-type') || 'no type'})`);
     jwksCache.set(d.jwks_uri, set);
   }
   const jwk = set.keys.find((k) => k.kid === header.kid) || (set.keys.length === 1 ? set.keys[0] : null);
