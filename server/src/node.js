@@ -13,7 +13,7 @@ import { handleShopifyWebhook } from './webhook.js';
  */
 export function fileStore(path, { delayMs = 250 } = {}) {
   let data = null;
-  let mtime = 0;
+  let version = ''; // mtime + size + inode: Linux mtimes are coarse, two writes can share one
   const dirty = new Map(); // key -> value, or undefined for a delete
   let timer = null;
   let writing = Promise.resolve();
@@ -21,19 +21,20 @@ export function fileStore(path, { delayMs = 250 } = {}) {
   const readDisk = async () => {
     try {
       const [text, st] = await Promise.all([readFile(path, 'utf8'), stat(path)]);
-      return { json: JSON.parse(text), mtime: st.mtimeMs };
+      return { json: JSON.parse(text), version: stamp(st) };
     } catch (err) {
       if (err.code !== 'ENOENT') throw err;
-      return { json: {}, mtime: 0 };
+      return { json: {}, version: '' };
     }
   };
+  const stamp = (st) => `${st.mtimeMs}:${st.size}:${st.ino}`;
   const load = async () => {
     let changed = !data;
-    if (data) { try { changed = (await stat(path)).mtimeMs !== mtime; } catch { changed = false; } }
+    if (data) { try { changed = stamp(await stat(path)) !== version; } catch { changed = false; } }
     if (changed) {
       const disk = await readDisk();
       data = disk.json;
-      mtime = disk.mtime;
+      version = disk.version;
       dirty.forEach((v, k) => { if (v === undefined) delete data[k]; else data[k] = v; });
     }
     return data;
@@ -51,7 +52,7 @@ export function fileStore(path, { delayMs = 250 } = {}) {
       await writeFile(tmp, JSON.stringify(disk.json));
       await rename(tmp, path);
       data = disk.json;
-      mtime = (await stat(path)).mtimeMs;
+      version = stamp(await stat(path));
     }).catch((err) => {
       batch.forEach((v, k) => { if (!dirty.has(k)) dirty.set(k, v); }); // try again next flush
       throw err;

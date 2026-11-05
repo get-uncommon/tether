@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.6 (2026-11-05)
+
+- Sync (Node CLI file store): a write from another process in the same coarse timestamp tick
+  (common on Linux) is no longer missed; the store compares size and inode as well as mtime. This
+  also made the sync's update check fail on some GitHub runners.
+
 ## 0.6.5 (2026-11-05)
 
 **Customer accounts on your own site:** order pages (lines, totals, addresses, tracking), profile
