@@ -18,6 +18,9 @@ npm run dev
 - `src/pages/products/[handle].astro`: one page per product. `shop.initialState(product)` renders
   what Tether shows first (no flash), `shop.hydrate(product)` saves the browser a request.
 - `src/components/CartDrawer.astro`: the cart, kept across View Transitions.
+- `src/pages/search.astro`: search results on a static site (`tether-products="url:q"`).
+- Set `site` in `astro.config.mjs` (or `SITE_URL`) to your domain: structured data and canonical
+  links use it. Commit `package-lock.json` for reproducible builds.
 
 Guide: [Tether with Astro](https://github.com/ravi-klaassens/tether/blob/main/docs/astro.md),
 including [rebuilding when products change](https://github.com/ravi-klaassens/tether/blob/main/docs/astro.md#7-rebuild-when-products-change).

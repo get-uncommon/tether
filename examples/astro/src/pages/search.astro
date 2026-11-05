@@ -1,0 +1,26 @@
+---
+import Layout from '../layouts/Layout.astro';
+// A static page: Tether reads ?q= in the browser (tether-products="url:q") and lists the results.
+// With SSR you can render them on the server instead: shop.getProducts({ query: Astro.url.searchParams.get('q') }).
+---
+<Layout title="Search">
+  <h1>Search</h1>
+  <div tether-products="url:q" tether-limit="24">
+    <div tether-list class="grid">
+      <a class="card" tether-bind="link">
+        <img tether-bind="featured-image" max-width="500" alt="" loading="lazy" />
+        <h3 tether-bind="title"></h3>
+        <span tether-bind="price"></span>
+      </a>
+    </div>
+    <p tether-show="loading">Searching…</p>
+    <p tether-show="list-empty" hidden>No products found.</p>
+    <button tether-load-more>More results</button>
+  </div>
+</Layout>
+<style>
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 1.5rem; }
+  .card { display: block; text-decoration: none; }
+  .card img { width: 100%; aspect-ratio: 1; object-fit: cover; background: #f4f4f4; }
+  h3 { margin: .5rem 0 .25rem; font-size: 1rem; }
+</style>

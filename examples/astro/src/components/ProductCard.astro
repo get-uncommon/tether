@@ -1,10 +1,11 @@
 ---
 import { shop } from '../lib/shop.js';
-const { product } = Astro.props;
+// eager: the first cards (above the fold) load at once, the rest lazily.
+const { product, eager = false } = Astro.props;
 const state = shop.initialState(product); // the price Tether shows (variant, or plan price for subscription-only products)
 ---
 <a class:list={["card", { "is-subscription": state.plan }]} tether-product={product.handle} tether-bind="link" href={shop.productUrl(product.handle)}>
-  <img tether-bind="featured-image" src={shop.imageUrl(product.featuredImage?.url, { width: 500 })} alt={product.featuredImage?.altText || product.title} max-width="500" loading="lazy" />
+  <img tether-bind="featured-image" src={shop.imageUrl(product.featuredImage?.url, { width: 500 })} alt={product.featuredImage?.altText || product.title} max-width="500" loading={eager ? undefined : 'lazy'} fetchpriority={eager ? 'high' : undefined} />
   <h3 tether-bind="title">{product.title}</h3>
   <span tether-bind="price">{shop.formatMoney(state.price)}</span>
   <span tether-show="out-of-stock" hidden={!state.show["out-of-stock"]}>Sold out</span>

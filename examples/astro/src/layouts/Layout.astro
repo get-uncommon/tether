@@ -2,12 +2,15 @@
 import { ClientRouter } from 'astro:transitions';
 import CartDrawer from '../components/CartDrawer.astro';
 const { title = 'Tether + Astro' } = Astro.props;
+const canonical = new URL(Astro.url.pathname, Astro.site ?? Astro.url);
 ---
 <html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{title}</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="canonical" href={canonical} />
     <ClientRouter />
     <style is:global>
       :root { font-family: system-ui, sans-serif; color: #111; }
@@ -34,7 +37,7 @@ const { title = 'Tether + Astro' } = Astro.props;
   <body>
     <header transition:persist>
       <a href="/">Shop</a>
-      <form tether-search class="search" action="/" role="search">
+      <form tether-search class="search" action="/search" role="search">
         <input tether-search-input name="q" type="search" placeholder="Search products" aria-label="Search products" />
         <div tether-search-results class="results">
           <div tether-search-products><a><img tether-search-bind="image" max-width="80" alt="" /><span tether-search-bind="title"></span><span tether-search-bind="price"></span></a></div>

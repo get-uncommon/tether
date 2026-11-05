@@ -76,7 +76,8 @@ export function imageUrl(url, { width, height, crop } = {}) {
 
 export function cdnUrl(url, el) {
   if (!url || !el) return url;
-  const g = (k) => el.getAttribute(k);
+  // max-width (Webflow's custom attribute), or valid HTML: tether-max-width / data-max-width.
+  const g = (k) => el.getAttribute(k) ?? el.getAttribute(`${cfg.prefix}-${k}`) ?? el.getAttribute(`data-${k}`);
   return imageUrl(url, { width: g('max-width'), height: g('max-height'), crop: g('max-width') || g('max-height') ? g('crop') : null });
 }
 

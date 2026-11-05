@@ -62,7 +62,7 @@
   var session = null;
   var refreshing = null;
   var customerCache = null;
-  var server = () => cfg.account?.server ? String(cfg.account.server).replace(/\/$/, "") : "";
+  var server = () => cfg.account?.server ? new URL(String(cfg.account.server), window.location.href).href.replace(/\/$/, "") : "";
   var HINT = () => `${cfg.prefix}:account-hint:${cfg.domain}`;
   var serverState = null;
   async function serverFetch(path, { method = "GET", body } = {}) {
@@ -318,20 +318,46 @@
     }
     const lists = qsa(root, sel("orders"));
     if (lists.length) {
+      const ordersShow = (loading, empty) => qsa(root, sel("show")).forEach((el) => {
+        const k = get(el, "show");
+        if (k === "orders-loading") show(el, loading);
+        if (k === "orders-empty") show(el, empty);
+      });
+      ordersShow(true, false);
+      let failed = false;
       const list = await orders({ first: parseInt(get(lists[0], "limit") || "10", 10) }).catch((err) => {
         reportError(err, "orders");
+        failed = true;
         return [];
       });
+      ordersShow(false, !failed && list.length === 0);
       lists.forEach((c) => repeat(c, list, (node, o) => {
+        const items = o.lineItems?.nodes || [];
         qsa(node, sel("order-bind")).forEach((el) => {
           const k = get(el, "order-bind");
           if (k === "url") {
             if (https(o.statusPageUrl)) el.setAttribute("href", o.statusPageUrl);
             return;
           }
-          const v = { name: o.name, date: date(o.processedAt), total: formatMoney(o.totalPrice), status: o.financialStatus?.toLowerCase(), fulfillment: o.fulfillmentStatus?.toLowerCase(), items: o.lineItems.nodes.map((l) => `${l.quantity}\xD7 ${l.title}`).join(", ") }[k];
+          if (k === "image") {
+            const im = items.find((l) => l.image)?.image;
+            if (im) setImage(el, im.url, im.altText || items[0]?.title || "");
+            return;
+          }
+          const v = { name: o.name, date: date(o.processedAt), total: formatMoney(o.totalPrice), status: o.financialStatus?.toLowerCase(), fulfillment: o.fulfillmentStatus?.toLowerCase(), items: items.map((l) => `${l.quantity}\xD7 ${l.title}`).join(", ") }[k];
           if (v != null) setText(el, v);
         });
+        qsa(node, sel("order-lines")).forEach((box) => repeat(box, items, (row, l) => {
+          qsa(row, sel("order-line")).concat(row.matches(sel("order-line")) ? [row] : []).forEach((el) => {
+            const k = get(el, "order-line");
+            if (k === "image") {
+              if (l.image) setImage(el, l.image.url, l.image.altText || l.title);
+              return;
+            }
+            const v = { title: l.title, "variant-title": l.variantTitle || "", quantity: String(l.quantity) }[k];
+            if (v != null) setText(el, v);
+          });
+        }));
         if (get(node, "order-bind") === "url" && https(o.statusPageUrl)) node.setAttribute("href", o.statusPageUrl);
       }));
     }

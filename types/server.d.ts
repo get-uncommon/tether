@@ -15,7 +15,8 @@ export interface StorefrontOptions extends Partial<Pick<TetherConfig,
   fetch?: typeof fetch;
   PUBLIC_SHOPIFY_DOMAIN?: string;
   PUBLIC_SHOPIFY_STOREFRONT_TOKEN?: string;
-  [env: string]: unknown;
+  /** Astro's import.meta.env carries these too; ignored. */
+  MODE?: string; BASE_URL?: string; PROD?: boolean; DEV?: boolean; SSR?: boolean; SITE?: string; ASSETS_PREFIX?: string;
 }
 
 export interface ShopifyCollection {
@@ -26,7 +27,8 @@ export interface ShopifyCollection {
 
 export interface ProductQuery {
   collection?: string;
-  query?: string;
+  /** A Shopify search query; null or '' = every product (e.g. searchParams.get('q')). */
+  query?: string | null;
   first?: number;
   after?: string | null;
   sortKey?: string;
@@ -38,7 +40,7 @@ export interface Storefront {
   readonly config: Required<Pick<StorefrontOptions, 'domain' | 'token'>> & StorefrontOptions;
   query<T = any>(query: string, variables?: Record<string, unknown>, opts?: { context?: boolean }): Promise<T>;
   /** By handle, numeric id, gid or product URL. null when it doesn't exist. */
-  getProduct(handleOrId: string | number): Promise<ShopifyProduct | null>;
+  getProduct(handleOrId: string | number | null | undefined): Promise<ShopifyProduct | null>;
   getProducts(opts?: ProductQuery): Promise<{ collection: ShopifyCollection | null; products: ShopifyProduct[]; pageInfo: { hasNextPage: boolean; endCursor: string | null } }>;
   /** Every product (of a collection or a search query), page by page. For getStaticPaths(). */
   allProducts(opts?: Omit<ProductQuery, 'first' | 'after'>): Promise<ShopifyProduct[]>;
@@ -51,8 +53,12 @@ export interface Storefront {
    * products without its own request, then refreshes prices and stock once in the background.
    * Astro: <Fragment set:html={shop.hydrate(product)} />
    */
-  /** { card: true } for lists: much smaller (no descriptions, one image), the rest comes with the refresh. */
-  hydrate(products: ShopifyProduct | ShopifyProduct[], opts?: { card?: boolean }): string;
+  hydrate(products: ShopifyProduct | ShopifyProduct[], opts?: {
+    /** For lists: without descriptions and variant images, about 40% smaller. */
+    card?: boolean;
+    /** Images a card keeps (default 2: the main one and a hover image). */
+    images?: number;
+  }): string;
   formatMoney(money: Money | null | undefined, locale?: string): string;
   /** 30 -> '30%' (nl, en) / '30 %' (de, fr), the way Tether shows savings. '' for 0. */
   formatPercent(n: number, locale?: string): string;
@@ -63,7 +69,8 @@ export interface Storefront {
    * What Tether shows first for this product (variant, price, purchase mode, tether-show conditions),
    * so the server renders the same and nothing flashes. Pass Astro.url.searchParams.get('variant') in SSR.
    */
-  initialState(product: ShopifyProduct, opts?: InitialOptions): InitialState | null;
+  initialState(product: ShopifyProduct, opts?: InitialOptions): InitialState;
+  initialState(product: ShopifyProduct | null | undefined, opts?: InitialOptions): InitialState | null;
   /** schema.org Product / ProductGroup data for search engines, as a <script type="application/ld+json"> tag. */
   jsonLd(product: ShopifyProduct | null, opts?: { url?: string; brand?: string }): string;
   jsonLdData(product: ShopifyProduct | null, opts?: { url?: string; brand?: string }): Record<string, unknown> | null;
@@ -84,12 +91,13 @@ export interface InitialState {
   compareAtPrice: Money | null;
   available: boolean;
   /** tether-show conditions: hidden={!state.show['out-of-stock']}. */
-  show: Record<'in-stock' | 'out-of-stock' | 'backorder' | 'on-sale' | 'not-on-sale' | 'has-variants' | 'single-variant' | 'low-stock' | 'subscription-available' | 'subscription-unavailable' | 'subscription-only' | 'one-time-available' | 'subscription-selected' | 'one-time-selected', boolean>;
+  show: Record<'in-stock' | 'out-of-stock' | 'backorder' | 'on-sale' | 'not-on-sale' | 'has-variants' | 'single-variant' | 'low-stock' | 'subscription-available' | 'subscription-unavailable' | 'subscription-only' | 'one-time-available' | 'subscription-selected' | 'one-time-selected' | 'plenty-in-stock' | 'has-savings', boolean>;
   /** true for option values without an available variant: class is-unavailable. */
   isUnavailable(optionName: string, value: string): boolean;
 }
 export interface InitialOptions { variant?: string | null; sellingPlan?: string | null; defaultPurchase?: 'one-time' | 'subscription' }
-export declare function initialState(product: ShopifyProduct, opts?: InitialOptions): InitialState | null;
+export declare function initialState(product: ShopifyProduct, opts?: InitialOptions): InitialState;
+export declare function initialState(product: ShopifyProduct | null | undefined, opts?: InitialOptions): InitialState | null;
 
 export interface ImageSize { width?: number; height?: number; crop?: 'center' | 'top' | 'bottom' | 'left' | 'right' }
 export declare function imageUrl(url: string | null | undefined, size?: ImageSize): string;

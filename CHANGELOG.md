@@ -2,8 +2,43 @@
 
 ## 0.6.2 (2026-11-05)
 
-- Customer accounts: `account.server` can be a path on your own site (`'/_tether/account'`)
-  instead of a full URL, so the same config works on every domain the site runs on.
+From testers building an Astro store from the starter:
+
+**Fixes**
+- Cart: quick +/− clicks no longer step the count and totals through every reply from Shopify
+  (+ + + − from 1 showed 2, 3, 4, 3). Only the latest quantity is sent; a click that undoes the
+  last one sends nothing.
+- A wrong token (or an Admin token, `shpat_…`) now says so, naming the store: Shopify's 401 has
+  no message, so the error (and `astro build`'s output) was empty.
+- `hydrate(products, { card: true })` keeps two images per product (a hover image,
+  `tether-bind="image:2"`), `images: n` for more. Cards with a second image showed the first one
+  until the background refresh.
+- `diagnose()`: documented values (`tether-show="search-empty"`, `logged-in`, `logged-out`) are no
+  longer called unknown. It now finds typos, with a suggestion: `tether-bind="pric"`, attributes like
+  `tether-bnd` or `tether-add-to-card`, and an option list for an option the product doesn't have.
+  Clearer messages, with no empty or `undefined` parts.
+- Types: `initialState(product)` is non-null for a product (strict `astro check` passes with the
+  docs' examples). `show` has `plenty-in-stock` and `has-savings`. `getProduct()` and
+  `getProducts({ query })` take `null`/`undefined`. A typo in `createStorefront()` options is now
+  a type error.
+- Astro integration: in dev, a change to `src/shop.config.js` restarts the dev server, so the
+  browser gets the new config too (`watch` for other files). `.env` files follow `--mode`, and the
+  store variables are declared through `astro:env`.
+
+**New**
+- `account.server` can be a path on your own site (`'/_tether/account'`).
+- Accounts: `tether-show="orders-loading"` / `"orders-empty"`, `tether-order-bind="image"`, and
+  `tether-order-lines` with `tether-order-line="title|variant-title|quantity|image"`.
+- `tether-products="url:q"`: search results for the page's `?q=` on a static site.
+- `tether-max-width` / `data-max-width` (and `-max-height`, `-crop`): valid HTML for image sizes.
+
+**Starter and docs**
+- The Astro starter has `site`, canonical links, a favicon, a 404 page, a static search page,
+  `tsconfig.json`, and no longer ignores `package-lock.json`. The first cards and the first product
+  image load eagerly (`fetchpriority="high"`), the rest lazily.
+- Astro guide: `astro:assets` `<Image>` makes images download twice with Tether (use `<img>`),
+  fonts with `<ClientRouter />`, search pages need SSR (or `url:q`), a null check for unknown
+  collections, `prerender` with SSR, and `revalidate: false` for SSR pages.
 
 ## 0.6.1 (2026-11-04)
 

@@ -78,5 +78,5 @@ test('parts are small and the core is under budget', async () => {
   assert.ok(await gz('tether.account.min.js') < 4.5 * 1024);
   assert.ok(await gz('tether.extras.min.js') < 1.5 * 1024);
   assert.ok(await gz('tether.markets.min.js') < 3 * 1024);
-  assert.ok(await gz('tether.diagnose.min.js') < 5 * 1024);
+  assert.ok(await gz('tether.diagnose.min.js') < 6 * 1024); // console only, loaded on demand; knows every attribute for did-you-mean
 });

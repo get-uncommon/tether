@@ -112,7 +112,7 @@
     console.warn(`[${cfg.prefix}]`, ...a);
   }
   function reportError(err, context) {
-    warn(context, err && err.message ? err.message : err);
+    warn(context, err && (err.message || err.code) ? err.message || err.code : err);
     if (typeof cfg.onError === "function") {
       try {
         cfg.onError(err, context);
@@ -154,6 +154,12 @@
     return query.replace(/^(\s*(?:query|mutation)(?:\s+\w+)?\s*(?:\([^)]*\))?)/, `$1 ${tag}`);
   }
   var sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  function statusText(status, conf) {
+    if (status === 401 || status === 403) {
+      return `Shopify rejected the Storefront token for ${conf.domain} (${status}): use the public Storefront API token (Headless channel)${/^shpat_/.test(conf.token) ? ", not an Admin API token (shpat_\u2026)" : ""}`;
+    }
+    return status === 404 ? `Store or API version not found (404): check domain ${conf.domain} and apiVersion ${conf.apiVersion}` : `HTTP ${status} from ${conf.domain}`;
+  }
   async function request(conf, query, variables = {}, { context = true } = {}) {
     if (!conf.domain || !conf.token) {
       throw new TetherError("Tether is not configured: domain and token are required", { code: "NOT_CONFIGURED" });
@@ -192,7 +198,7 @@
       try {
         json = await res.json();
       } catch {
-        throw new TetherError(`Invalid response (${res.status})`, { status: res.status });
+        throw new TetherError(res.ok ? `Invalid response (${res.status})` : statusText(res.status, conf), { status: res.status });
       }
       if (json.errors?.length) {
         const inventoryDenied = json.errors.some((e) => /quantityAvailable/.test(e.message || ""));
@@ -208,12 +214,13 @@
           await sleep(500 * 2 ** attempt);
           continue;
         }
-        throw new TetherError(json.errors.map((e) => e.message).join(" | "), {
+        const message = json.errors.map((e) => e.message).filter(Boolean).join(" | ");
+        throw new TetherError(res.ok ? message || "Storefront API error" : res.status === 401 || res.status === 403 || !message ? statusText(res.status, conf) : message, {
           status: res.status,
           errors: json.errors
         });
       }
-      if (!res.ok) throw new TetherError(`HTTP ${res.status}`, { status: res.status });
+      if (!res.ok) throw new TetherError(statusText(res.status, conf), { status: res.status });
       return json.data;
     }
   }
@@ -631,7 +638,7 @@
   }
   function cdnUrl(url, el) {
     if (!url || !el) return url;
-    const g = (k) => el.getAttribute(k);
+    const g = (k) => el.getAttribute(k) ?? el.getAttribute(`${cfg.prefix}-${k}`) ?? el.getAttribute(`data-${k}`);
     return imageUrl(url, { width: g("max-width"), height: g("max-height"), crop: g("max-width") || g("max-height") ? g("crop") : null });
   }
   var sameImage = (a, b) => Boolean(a && b) && a.split("?")[0] === b.split("?")[0];
@@ -1026,8 +1033,20 @@
       this.pendingQty.set(lineId, job);
       this.render();
       emit("cart-updated", { cart: this.state, reason: "pending" });
-      return this.updateLine(lineId, target).finally(() => {
-        if (this.pendingQty.get(lineId) === job) {
+      const latest = () => this.pendingQty.get(lineId) === job;
+      return this._queue(async () => {
+        if (!latest()) return this.state;
+        const now = this.lines.find((l) => l.id === lineId);
+        if (now && now.quantity === target) return this.state;
+        const cart = target > 0 ? await this._mutate("cartLinesUpdate", "$lines: [CartLineUpdateInput!]!", "lines: $lines", { lines: [{ id: lineId, quantity: target }] }) : await this._mutate("cartLinesRemove", "$lineIds: [ID!]!", "lineIds: $lineIds", { lineIds: [lineId] });
+        if (!latest()) {
+          this.state = cart;
+          if (cart?.id) this._setId(cart.id);
+          return cart;
+        }
+        return this._commit(cart, target > 0 ? "update" : "remove");
+      }).finally(() => {
+        if (latest()) {
           this.pendingQty.delete(lineId);
           this.render();
           emit("cart-updated", { cart: this.state, reason: "settled" });
@@ -1983,7 +2002,10 @@
         reverse: get(r, "reverse") === "true"
       };
       if (has(r, "collection")) opts.collection = get(r, "collection");
-      else opts.query = get(r, "products") || "";
+      else {
+        const raw = get(r, "products") || "";
+        opts.query = raw.startsWith("url:") ? new URL(window.location.href).searchParams.get(raw.slice(4)) || "" : raw;
+      }
       return opts;
     }
     async load(more = false) {

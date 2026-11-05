@@ -107,15 +107,23 @@ Shopify only allows `https` addresses, no `localhost`: test on a staging domain 
 
 <div tether-orders tether-limit="10">                      <!-- first child is the template -->
   <a tether-order-bind="url">
+    <img tether-order-bind="image" alt="">
     <span tether-order-bind="name"></span> · <span tether-order-bind="date"></span> ·
     <span tether-order-bind="total"></span> · <span tether-order-bind="status"></span>
+    <div tether-order-lines>                               <!-- each product of the order -->
+      <div><img tether-order-line="image" alt=""> <span tether-order-line="quantity"></span>×
+        <span tether-order-line="title"></span> <span tether-order-line="variant-title"></span></div>
+    </div>
   </a>
 </div>
+<p tether-show="orders-loading">Loading your orders…</p>
+<p tether-show="orders-empty" hidden>No orders yet.</p>
 ```
 
 `tether-account-bind`: `first-name`, `last-name`, `name`, `email`, `address`.
 `tether-order-bind`: `name` (#1001), `date`, `total`, `status` (payment), `fulfillment`, `items`,
-`url` (Shopify's order status page).
+`image` (the first product's image), `url` (Shopify's order status page). `tether-order-line`:
+`title`, `variant-title`, `quantity`, `image`.
 
 While logged in, checkout knows the customer (their details filled in, the order in their account).
 Logging out unlinks the cart. **Subscriptions** (skip, pause, cancel) are managed on Shopify's

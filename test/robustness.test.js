@@ -182,6 +182,29 @@ test('diagnose reports config, reachability, plans and markup problems', async (
   assert.match(msgs, /tether-bind outside any tether-product/);
   assert.match(msgs, /Unknown tether-show="in-stok"/);
   assert.match(msgs, /custom\.nope" is not in config\.metafields/);
+  assert.match(msgs, /in-stok"\. Did you mean "in-stock"/);
+});
+
+test('diagnose: documented values pass, typos get a did-you-mean', async () => {
+  document.body.innerHTML = `
+    <div tether-search><p tether-show="search-empty"></p><p tether-show="search-results"></p><div tether-search-results><a></a></div></div>
+    <p tether-show="logged-in"></p><p tether-show="logged-out"></p>
+    <div tether-product="coffee-box">
+      <span tether-bind="price"></span><img tether-bind="image:2"><span tether-bind="pric"></span>
+      <span tether-bnd="title"></span><button tether-add-to-card>Add</button><button tether-add-to-cart>Add</button>
+      <div tether-option-list="Sise"><button></button></div>
+      <div tether-option-list="Size"><button></button></div>
+      <div tether-plan-list></div>
+    </div>`;
+  const r = await Tether.diagnose({ silent: true, now: new Date('2026-11-04') });
+  const msgs = r.problems.map((p) => p.message).join('\n');
+  assert.doesNotMatch(msgs, /Unknown tether-show|bind="price"|image:2/);
+  assert.match(msgs, /tether-bind="pric".*Did you mean "price"/);
+  assert.match(msgs, /tether-bnd.*Did you mean "tether-bind"/);
+  assert.match(msgs, /tether-add-to-card.*Did you mean "tether-add-to-cart"/);
+  assert.match(msgs, /no option "Sise".*Did you mean "Size"/);
+  assert.match(msgs, /tether-plan-list without a template child/);
+  assert.doesNotMatch(msgs, /: \.|undefined/);
 });
 
 test('diagnose explains a rejected token and an expired API version', async () => {
@@ -190,7 +213,7 @@ test('diagnose explains a rejected token and an expired API version', async () =
   const r = await Tether.diagnose({ silent: true, now: new Date('2028-01-01') });
   assert.equal(r.reachable, false);
   const msgs = r.problems.map((p) => p.message).join('\n');
-  assert.match(msgs, /Token rejected/);
+  assert.match(msgs, /rejected the Storefront token/);
   assert.match(msgs, /no longer supported/);
 });
 

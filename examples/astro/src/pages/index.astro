@@ -9,7 +9,7 @@ const products = (await shop.getProducts({ first: 12, sortKey: 'BEST_SELLING' })
 <Layout title="Shop">
   <h1>Shop</h1>
   <div class="grid">
-    {products.map((product) => <ProductCard product={product} />)}
+    {products.map((product, i) => <ProductCard product={product} eager={i < 4} />)}
   </div>
   <Fragment set:html={shop.hydrate(products, { card: true })} />
 </Layout>

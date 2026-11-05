@@ -78,7 +78,7 @@ export function log(...a) { if (cfg.debug) console.log(`[${cfg.prefix}]`, ...a);
 export function warn(...a) { console.warn(`[${cfg.prefix}]`, ...a); }
 
 export function reportError(err, context) {
-  warn(context, err && err.message ? err.message : err);
+  warn(context, err && (err.message || err.code) ? err.message || err.code : err);
   if (typeof cfg.onError === 'function') {
     try { cfg.onError(err, context); } catch { /* never let a hook break us */ }
   }

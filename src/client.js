@@ -39,6 +39,14 @@ export function withContext(query, ctx = cfg) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+/** What a status means, for errors Shopify sends without a message (401/403 have none). */
+function statusText(status, conf) {
+  if (status === 401 || status === 403) {
+    return `Shopify rejected the Storefront token for ${conf.domain} (${status}): use the public Storefront API token (Headless channel)${/^shpat_/.test(conf.token) ? ', not an Admin API token (shpat_…)' : ''}`;
+  }
+  return status === 404 ? `Store or API version not found (404): check domain ${conf.domain} and apiVersion ${conf.apiVersion}` : `HTTP ${status} from ${conf.domain}`;
+}
+
 /**
  * One Storefront API request with retries, for any config object (the browser's shared config,
  * or the server module's own). gql() below is the browser version.
@@ -83,7 +91,7 @@ export async function request(conf, query, variables = {}, { context = true } = 
 
     let json;
     try { json = await res.json(); } catch {
-      throw new TetherError(`Invalid response (${res.status})`, { status: res.status });
+      throw new TetherError(res.ok ? `Invalid response (${res.status})` : statusText(res.status, conf), { status: res.status });
     }
 
     if (json.errors?.length) {
@@ -99,11 +107,12 @@ export async function request(conf, query, variables = {}, { context = true } = 
       }
       const throttled = json.errors.some((e) => e.extensions?.code === 'THROTTLED');
       if (throttled && attempt++ < conf.retries) { await sleep(500 * 2 ** attempt); continue; }
-      throw new TetherError(json.errors.map((e) => e.message).join(' | '), {
+      const message = json.errors.map((e) => e.message).filter(Boolean).join(' | ');
+      throw new TetherError(res.ok ? message || 'Storefront API error' : (res.status === 401 || res.status === 403 || !message ? statusText(res.status, conf) : message), {
         status: res.status, errors: json.errors,
       });
     }
-    if (!res.ok) throw new TetherError(`HTTP ${res.status}`, { status: res.status });
+    if (!res.ok) throw new TetherError(statusText(res.status, conf), { status: res.status });
 
     return json.data;
   }

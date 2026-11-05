@@ -256,6 +256,29 @@ test('integration: reads .env, .env.local and .env.production like Vite (process
   assert.match(scripts[1], /"token":"quoted-token"/);
 });
 
+test('integration: --mode picks the .env file; shop.config.js changes restart the dev server', async () => {
+  const { default: tether } = await import('../src/astro.js');
+  const { mkdtemp, writeFile, mkdir } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const dir = await mkdtemp(join(tmpdir(), 'astro-mode-'));
+  await writeFile(join(dir, '.env.staging'), 'PUBLIC_SHOPIFY_DOMAIN=staging.myshopify.com\nPUBLIC_SHOPIFY_STOREFRONT_TOKEN=s\n');
+  await mkdir(join(dir, 'src'));
+  await writeFile(join(dir, 'src', 'shop.config.js'), 'export default {};\n');
+  const prev = { ...process.env };
+  const argv = process.argv;
+  delete process.env.PUBLIC_SHOPIFY_DOMAIN;
+  delete process.env.PUBLIC_SHOPIFY_STOREFRONT_TOKEN;
+  process.argv = [...argv, '--mode', 'staging'];
+  const scripts = [];
+  const watched = [];
+  try {
+    await tether().hooks['astro:config:setup']({ injectScript: (s, c) => scripts.push(c), command: 'dev', addWatchFile: (f) => watched.push(String(f)), config: { root: new URL(`file://${dir}/`) }, logger: { warn() {} } });
+  } finally { process.env = prev; process.argv = argv; }
+  assert.match(scripts[1], /"domain":"staging\.myshopify\.com"/);
+  assert.deepEqual(watched, [join(dir, 'src', 'shop.config.js')]);
+});
+
 // ---- reported by first-time users -------------------------------------------
 
 test('tether-show: elements hidden before the script ran (class, inline style, hidden) are shown when true', async () => {
@@ -384,10 +407,42 @@ test('cart: quick +/+ clicks add up (each builds on the last one asked for), the
   assert.ok(line.classList.contains('is-busy'));
   await tick(150);
   const updates = calls.filter((c) => c.op === 'Tether_cartLinesUpdate').map((c) => c.variables.lines[0].quantity);
-  assert.deepEqual(updates, [2, 3]);
+  assert.deepEqual(updates, [3], 'only the latest target is sent');
   assert.equal(Tether.cart.lines[0].quantity, 3);
   assert.ok(!document.querySelector('[tether-cart-lines] > *').classList.contains('is-busy'));
   void lineId;
+});
+
+test('cart: + + + - while Shopify answers slowly: the count never steps past the target', async () => {
+  const realFetch = globalThis.fetch;
+  const sent = [];
+  globalThis.fetch = async (url, init) => {
+    const { query, variables } = JSON.parse(init.body);
+    if (/cartLinesUpdate/.test(query)) {
+      sent.push(variables.lines[0].quantity);
+      await tick(30);
+      const c = cartFrom([{ merchandiseId: product.variants.nodes[0].id, quantity: variables.lines[0].quantity }]);
+      return { ok: true, status: 200, json: async () => ({ data: { cartLinesUpdate: { cart: c, userErrors: [], warnings: [] } } }) };
+    }
+    return realFetch(url, init);
+  };
+  try {
+    Tether.cart._commit(cartFrom([{ merchandiseId: product.variants.nodes[0].id, quantity: 1 }]), 'test');
+    document.body.innerHTML = '<span tether-cart-count></span><div tether-cart-lines><div><span tether-line="quantity"></span><button tether-line-plus>+</button><button tether-line-minus>-</button></div></div>';
+    Tether.cart.render();
+    const counts = [];
+    const off = Tether.cart.subscribe((c) => counts.push(c?.totalQuantity));
+    const plus = document.querySelector('[tether-line-plus]');
+    plus.click();
+    await tick(5); // the first one is on its way
+    plus.click(); plus.click(); document.querySelector('[tether-line-minus]').click();
+    assert.equal(document.querySelector('[tether-line="quantity"]').textContent, '3');
+    await tick(150);
+    off();
+    assert.deepEqual(sent, [2, 3], 'the first, then only the latest');
+    assert.equal(document.querySelector('[tether-cart-count]').textContent, '3');
+    assert.ok(counts.every((n) => n <= 3), `counts seen: ${counts}`);
+  } finally { globalThis.fetch = realFetch; }
 });
 
 test('cart.open() works without a tether-cart-drawer (framework carts), subscribe reports it', async () => {
@@ -464,6 +519,12 @@ test('hydrate({ card: true }) is smaller and still renders a card without a requ
   await Promise.resolve(); await Promise.resolve();
   assert.equal(document.querySelector('[tether-product]').getAttribute('tether-state'), 'ready');
   assert.match(document.getElementById('p').textContent, /30/);
+  // Cards keep a hover image (image:2), more on request.
+  const many = { ...product, images: { nodes: ['a', 'b', 'c', 'd'].map((n) => ({ url: `https://cdn.shopify.com/${n}.jpg`, altText: null, width: 10, height: 10 })) } };
+  const imgs = (tag) => JSON.parse(tag.replace(/^<script[^>]*>|<\/script>$/g, '')).products[0].images.nodes.length;
+  assert.equal(imgs(shop.hydrate(many, { card: true })), 2);
+  assert.equal(imgs(shop.hydrate(many, { card: true, images: 3 })), 3);
+  assert.equal(imgs(shop.hydrate(many)), 4);
 });
 
 test('queries carry a maxAge bucket (Shopify caches identical query texts); mutations and maxAge: 0 do not', async () => {
@@ -623,6 +684,7 @@ test('customer accounts in server mode: no token in the browser, the Worker does
   Tether.config.account = { server: '/_tether/account', navigate: (u) => nav.push(u) }; // a path on this site works too
   const realFetch = globalThis.fetch;
   const asked = [];
+  let noOrders = false;
   globalThis.fetch = async (url, init = {}) => {
     const u = String(url);
     if (u.startsWith('https://astro.test/_tether/account')) {
@@ -630,7 +692,7 @@ test('customer accounts in server mode: no token in the browser, the Worker does
       assert.equal(init.credentials, 'include');
       const json = (d) => ({ ok: true, status: 200, json: async () => d });
       if (u.endsWith('/me')) return json({ loggedIn: true, customer: { firstName: 'Ada', email: 'ada@x.test' } });
-      if (u.includes('/orders')) return json({ orders: [{ id: 'o1', name: '#1001', processedAt: '2026-11-01', statusPageUrl: 'https://x/o1', totalPrice: { amount: '10', currencyCode: 'EUR' }, lineItems: { nodes: [] } }] });
+      if (u.includes('/orders')) return json({ orders: noOrders ? [] : [{ id: 'o1', name: '#1001', processedAt: '2026-11-01', statusPageUrl: 'https://x/o1', totalPrice: { amount: '10', currencyCode: 'EUR' }, lineItems: { nodes: [{ title: 'Tee', variantTitle: 'M', quantity: 2, image: { url: 'https://cdn.shopify.com/tee.jpg', altText: null } }] } }] });
       if (u.endsWith('/cart')) { assert.equal(init.headers['X-Tether-Account'], '1'); return json({ linked: true, checkoutUrl: 'https://shop.test/checkouts/c/1' }); }
       if (u.endsWith('/logout')) return json({ logoutUrl: 'https://shopify.com/logout?x' });
     }
@@ -643,11 +705,22 @@ test('customer accounts in server mode: no token in the browser, the Worker does
     assert.equal(to.pathname, '/_tether/account/login');
     assert.equal(to.searchParams.get('cart'), null, 'no cart on the login link (linked through POST /cart)');
     window.history.replaceState(null, '', '/account?account=in');
-    document.body.innerHTML = '<span id="n" tether-account-bind="first-name"></span><ul tether-orders><li><span tether-order-bind="name"></span></li></ul>';
+    document.body.innerHTML = `<span id="n" tether-account-bind="first-name"></span>
+      <ul tether-orders><li><span tether-order-bind="name"></span><img id="oi" tether-order-bind="image">
+        <div tether-order-lines><p><span tether-order-line="quantity"></span>x <span tether-order-line="title"></span> <span tether-order-line="variant-title"></span></p></div></li></ul>
+      <p id="ol" tether-show="orders-loading"></p><p id="oe" tether-show="orders-empty"></p>`;
     await acc.mountAccount(document);
+    const visible = (id) => window.getComputedStyle(document.getElementById(id)).display !== 'none';
+    assert.match(document.getElementById('oi').getAttribute('src'), /tee\.jpg/);
+    assert.equal(document.querySelector('[tether-order-lines] p').textContent.replace(/\s+/g, ' ').trim(), '2x Tee M');
+    assert.ok(!visible('ol') && !visible('oe'));
+    assert.equal(document.querySelector('[tether-order-bind="name"]').textContent, '#1001');
+    noOrders = true;
+    await acc.render(document);
+    assert.ok(visible('oe'), 'no orders yet');
+    noOrders = false;
     assert.equal(window.location.search, '', '?account=in removed');
     assert.equal(document.getElementById('n').textContent, 'Ada');
-    assert.equal(document.querySelector('[tether-order-bind="name"]').textContent, '#1001');
     assert.equal(await acc.getToken(), null, 'never a token');
     await assert.rejects(acc.query('{ customer { id } }'), /server mode/);
     const url = await Tether.cart.beforeCheckout();
@@ -662,4 +735,36 @@ test('customer accounts in server mode: no token in the browser, the Worker does
     Tether.cart.beforeCheckout = undefined;
     window.history.replaceState(null, '', '/');
   }
+});
+
+test('a rejected token says why: Shopify sends 401 with an empty message', async () => {
+  const fetch = async () => ({ ok: false, status: 401, json: async () => ({ errors: [{ message: '', extensions: { code: 'UNAUTHORIZED' } }] }) });
+  const shop = server.createStorefront({ domain: 'wrong.myshopify.com', token: 'shpat_abc', fetch });
+  await assert.rejects(shop.getProduct('x'), (err) => {
+    assert.match(err.message, /rejected the Storefront token for wrong\.myshopify\.com \(401\)/);
+    assert.match(err.message, /not an Admin API token/);
+    return true;
+  });
+  const empty = server.createStorefront({ domain: 'wrong.myshopify.com', token: 't', fetch: async () => ({ ok: false, status: 403, json: async () => { throw new Error('no json'); } }) });
+  await assert.rejects(empty.getProduct('x'), /rejected the Storefront token .*\(403\)/);
+});
+
+test('image size attributes: max-width, or valid HTML tether-max-width / data-max-width', async () => {
+  const { cdnUrl } = await import('../src/dom.js');
+  const img = (a) => { const el = document.createElement('img'); Object.entries(a).forEach(([k, v]) => el.setAttribute(k, v)); return el; };
+  const u = 'https://cdn.shopify.com/a.jpg';
+  assert.match(cdnUrl(u, img({ 'max-width': '400' })), /width=400/);
+  assert.match(cdnUrl(u, img({ 'tether-max-width': '500' })), /width=500/);
+  assert.match(cdnUrl(u, img({ 'data-max-width': '600', 'data-crop': 'center', 'data-max-height': '600' })), /width=600/);
+});
+
+test('tether-products="url:q": a search results page on a static site', async () => {
+  window.history.replaceState(null, '', '/search?q=tee%20shirt');
+  calls.length = 0;
+  document.body.innerHTML = '<div tether-products="url:q"><div tether-list><div></div></div></div>';
+  Tether.mount(document);
+  await tick(60);
+  const search = calls.find((c) => c.op === 'TetherSearch');
+  assert.equal(search?.variables.query, 'tee shirt');
+  window.history.replaceState(null, '', '/');
 });

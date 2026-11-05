@@ -21,7 +21,7 @@
  */
 import { cfg, log, reportError } from './config.js';
 import { TetherError } from './client.js';
-import { sel, get, qsa, setText, repeat, show, formatMoney, emit } from './dom.js';
+import { sel, get, qsa, setText, setImage, repeat, show, formatMoney, emit } from './dom.js';
 import { Cart } from './cart.js';
 
 const KEY = () => `${cfg.prefix}:account:${cfg.domain}`;
@@ -272,14 +272,34 @@ export async function render(root = document) {
   }
   const lists = qsa(root, sel('orders'));
   if (lists.length) {
-    const list = await orders({ first: parseInt(get(lists[0], 'limit') || '10', 10) }).catch((err) => { reportError(err, 'orders'); return []; });
+    // tether-show="orders-loading" / "orders-empty" (no orders yet).
+    const ordersShow = (loading, empty) => qsa(root, sel('show')).forEach((el) => {
+      const k = get(el, 'show');
+      if (k === 'orders-loading') show(el, loading);
+      if (k === 'orders-empty') show(el, empty);
+    });
+    ordersShow(true, false);
+    let failed = false;
+    const list = await orders({ first: parseInt(get(lists[0], 'limit') || '10', 10) }).catch((err) => { reportError(err, 'orders'); failed = true; return []; });
+    ordersShow(false, !failed && list.length === 0);
     lists.forEach((c) => repeat(c, list, (node, o) => {
+      const items = o.lineItems?.nodes || [];
       qsa(node, sel('order-bind')).forEach((el) => {
         const k = get(el, 'order-bind');
         if (k === 'url') { if (https(o.statusPageUrl)) el.setAttribute('href', o.statusPageUrl); return; }
-        const v = { name: o.name, date: date(o.processedAt), total: formatMoney(o.totalPrice), status: o.financialStatus?.toLowerCase(), fulfillment: o.fulfillmentStatus?.toLowerCase(), items: o.lineItems.nodes.map((l) => `${l.quantity}× ${l.title}`).join(', ') }[k];
+        if (k === 'image') { const im = items.find((l) => l.image)?.image; if (im) setImage(el, im.url, im.altText || items[0]?.title || ''); return; }
+        const v = { name: o.name, date: date(o.processedAt), total: formatMoney(o.totalPrice), status: o.financialStatus?.toLowerCase(), fulfillment: o.fulfillmentStatus?.toLowerCase(), items: items.map((l) => `${l.quantity}× ${l.title}`).join(', ') }[k];
         if (v != null) setText(el, v);
       });
+      // Per product of the order: <div tether-order-lines><div><img tether-order-line="image"> <span tether-order-line="title"></span></div></div>
+      qsa(node, sel('order-lines')).forEach((box) => repeat(box, items, (row, l) => {
+        qsa(row, sel('order-line')).concat(row.matches(sel('order-line')) ? [row] : []).forEach((el) => {
+          const k = get(el, 'order-line');
+          if (k === 'image') { if (l.image) setImage(el, l.image.url, l.image.altText || l.title); return; }
+          const v = { title: l.title, 'variant-title': l.variantTitle || '', quantity: String(l.quantity) }[k];
+          if (v != null) setText(el, v);
+        });
+      }));
       if (get(node, 'order-bind') === 'url' && https(o.statusPageUrl)) node.setAttribute('href', o.statusPageUrl);
     }));
   }

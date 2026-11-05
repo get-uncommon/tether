@@ -12,7 +12,8 @@
  *
  * Options are Tether's config (domain and token override .env). Functions (onError, formatMoney,
  * hooks) can't be passed here: set them in window.TETHER_CONFIG in your layout, it is merged in.
- * View Transitions (<ClientRouter />) work without extra code.
+ * View Transitions (<ClientRouter />) work without extra code. In dev, changes to
+ * src/shop.config.js restart the dev server (other files: tether({ ..., watch: ['my/config.js'] })).
  */
 
 const ENV_KEYS = {
@@ -20,9 +21,16 @@ const ENV_KEYS = {
   token: ['PUBLIC_SHOPIFY_STOREFRONT_TOKEN', 'PUBLIC_SHOPIFY_STOREFRONT_ACCESS_TOKEN', 'SHOPIFY_STOREFRONT_TOKEN'],
 };
 
+/** The mode Astro runs in: --mode, else development for dev and production for build. */
+function modeOf(command, argv = process.argv) {
+  const i = argv.findIndex((a) => a === '--mode' || a.startsWith('--mode='));
+  if (i >= 0) return argv[i].includes('=') ? argv[i].split('=')[1] : argv[i + 1];
+  return command === 'dev' ? 'development' : 'production';
+}
+
 /** .env files the way Vite reads them (later files win), plus process.env on top. */
 async function readEnv(command, root) {
-  const mode = command === 'dev' ? 'development' : 'production';
+  const mode = modeOf(command);
   const out = {};
   try {
     const { readFile } = await import('node:fs/promises');
@@ -44,12 +52,29 @@ async function readEnv(command, root) {
 }
 
 export default function tether(options = {}) {
-  const { inject = true, ...config } = options;
+  const { inject = true, watch = ['src/shop.config.js', 'src/shop.config.mjs', 'src/shop.config.ts'], ...config } = options;
   return {
     name: '@occluze/tether',
     hooks: {
-      'astro:config:setup': async ({ injectScript, command, config: astroConfig, logger }) => {
+      'astro:config:setup': async ({ injectScript, command, config: astroConfig, logger, addWatchFile, updateConfig }) => {
         const root = astroConfig?.root ? decodeURIComponent(new URL(astroConfig.root).pathname) : process.cwd();
+        // The options usually come from a file the Astro config imports (src/shop.config.js):
+        // the dev server restarts when it changes, so the browser gets the new config too.
+        if (command === 'dev' && addWatchFile) {
+          const { existsSync } = await import('node:fs');
+          const { resolve } = await import('node:path');
+          [].concat(watch || []).map((f) => resolve(root, f)).filter((f) => existsSync(f)).forEach((f) => addWatchFile(f));
+        }
+        // Astro 5+: declare the store variables, so Astro checks them (astro:env).
+        if (updateConfig) {
+          try {
+            const { envField } = await import('astro/config');
+            if (envField) {
+              const field = () => envField.string({ context: 'client', access: 'public', optional: true });
+              updateConfig({ env: { schema: { PUBLIC_SHOPIFY_DOMAIN: field(), PUBLIC_SHOPIFY_STOREFRONT_TOKEN: field() } } });
+            }
+          } catch { /* Astro 4: no astro:env */ }
+        }
         const env = await readEnv(command, root);
         for (const [key, names] of Object.entries(ENV_KEYS)) {
           if (!config[key]) config[key] = names.map((n) => env[n]).find(Boolean);

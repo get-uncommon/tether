@@ -10,12 +10,13 @@ export async function getStaticPaths() {
 const { product } = Astro.props;
 // What Tether shows first: render the same, so nothing changes when the script takes over.
 const state = shop.initialState(product);
-const show = (k) => !state.show[k];
+// hidden={hide('low-stock')}: hidden when Tether would hide it.
+const hide = (k) => !state.show[k];
 ---
 <Layout title={product.seo?.title || product.title}>
   <article tether-product={product.handle} class:list={["product", { "is-subscription": state.plan }]}>
     <div tether-bind="images" class="images">
-      {product.images.nodes.map((img) => <img src={shop.imageUrl(img.url, { width: 800 })} alt={img.altText || product.title} max-width="800" />)}
+      {product.images.nodes.map((img, i) => <img src={shop.imageUrl(img.url, { width: 800 })} alt={img.altText || product.title} max-width="800" fetchpriority={i === 0 ? 'high' : undefined} loading={i === 0 ? undefined : 'lazy'} />)}
     </div>
     <div>
       <h1 tether-bind="title">{product.title}</h1>
@@ -35,12 +36,12 @@ const show = (k) => !state.show[k];
         </fieldset>
       ))}
 
-      <div tether-show="subscription-available" hidden={show('subscription-available')}>
-        <button tether-purchase="one-time" hidden={show('one-time-available')} class:list={{ 'is-selected': !state.plan }}>One-time</button>
+      <div tether-show="subscription-available" hidden={hide('subscription-available')}>
+        <button tether-purchase="one-time" hidden={hide('one-time-available')} class:list={{ 'is-selected': !state.plan }}>One-time</button>
         <button tether-purchase="subscription" class:list={{ 'is-selected': state.plan }}>
           Subscribe <span tether-bind="subscription-savings">{shop.formatPercent(state.savings)}</span>
         </button>
-        <div tether-show="subscription-selected" hidden={show('subscription-selected')} tether-plan-list="all" class="options">
+        <div tether-show="subscription-selected" hidden={hide('subscription-selected')} tether-plan-list="all" class="options">
           {state.plans.map((p) => (
             <button class:list={{ 'is-selected': p.selected, 'is-unavailable': !p.available }}><span tether-plan-bind="name">{p.name}</span></button>
           ))}
@@ -50,7 +51,7 @@ const show = (k) => !state.show[k];
       <button tether-add-to-cart tether-soldout-text="Sold out" tether-adding-text="Adding…" disabled={!state.available} class:list={{ 'is-disabled': !state.available }}>
         {state.available ? 'Add to cart' : 'Sold out'}
       </button>
-      <p tether-show="low-stock" hidden={show('low-stock')}>Only a few left</p>
+      <p tether-show="low-stock" hidden={hide('low-stock')}>Only a few left</p>
       <div tether-bind="description" set:html={product.descriptionHtml} />
     </div>
   </article>

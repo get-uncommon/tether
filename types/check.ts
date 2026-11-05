@@ -15,6 +15,21 @@ async function server() {
   return [html, price, shop.productUrl(all[0].handle)];
 }
 void server;
+// The docs' patterns compile under strict: non-null state for a product, null-tolerant lookups.
+async function docsPatterns(params: URLSearchParams, handle: string | undefined) {
+  const p = await shop.getProduct(handle);
+  if (!p) return;
+  const state = shop.initialState(p, { variant: params.get('variant') });
+  const hide: boolean = !state.show['plenty-in-stock'] || !state.show['has-savings'];
+  const found = await shop.getProducts({ query: params.get('q') });
+  const maybe = shop.initialState(null);
+  void hide; void found; void maybe;
+}
+void docsPatterns;
+// @ts-expect-error: a typo in the options is caught
+createStorefront({ domian: 'x.myshopify.com' });
+const env: Record<string, string> = {};
+createStorefront({ ...env, country: 'NL' }); // import.meta.env-style spreads still work
 tetherAstro({ country: 'NL', inject: true });
 // @ts-expect-error: functions can't go through the integration
 tetherAstro({ onError: () => {} });

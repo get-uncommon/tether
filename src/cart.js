@@ -217,8 +217,21 @@ export const Cart = {
     this.pendingQty.set(lineId, job);
     this.render();
     emit('cart-updated', { cart: this.state, reason: 'pending' });
-    return this.updateLine(lineId, target).finally(() => {
-      if (this.pendingQty.get(lineId) === job) { this.pendingQty.delete(lineId); this.render(); emit('cart-updated', { cart: this.state, reason: 'settled' }); }
+    const latest = () => this.pendingQty.get(lineId) === job;
+    return this._queue(async () => {
+      // Quick clicks: only the latest target goes to Shopify; the ones it replaced are skipped.
+      if (!latest()) return this.state;
+      const now = this.lines.find((l) => l.id === lineId);
+      if (now && now.quantity === target) return this.state; // e.g. + then -: nothing to change
+      const cart = target > 0
+        ? await this._mutate('cartLinesUpdate', '$lines: [CartLineUpdateInput!]!', 'lines: $lines', { lines: [{ id: lineId, quantity: target }] })
+        : await this._mutate('cartLinesRemove', '$lineIds: [ID!]!', 'lineIds: $lineIds', { lineIds: [lineId] });
+      // A newer click is on its way: keep this answer, but show totals and count only once that
+      // one is in (no stepping through every reply).
+      if (!latest()) { this.state = cart; if (cart?.id) this._setId(cart.id); return cart; }
+      return this._commit(cart, target > 0 ? 'update' : 'remove');
+    }).finally(() => {
+      if (latest()) { this.pendingQty.delete(lineId); this.render(); emit('cart-updated', { cart: this.state, reason: 'settled' }); }
     });
   },
 

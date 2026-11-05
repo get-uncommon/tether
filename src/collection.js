@@ -38,7 +38,11 @@ export class ListScope {
       reverse: get(r, 'reverse') === 'true',
     };
     if (has(r, 'collection')) opts.collection = get(r, 'collection');
-    else opts.query = get(r, 'products') || '';
+    else {
+      // url:q = the search in the page's ?q= (a results page on a static site).
+      const raw = get(r, 'products') || '';
+      opts.query = raw.startsWith('url:') ? new URL(window.location.href).searchParams.get(raw.slice(4)) || '' : raw;
+    }
     return opts;
   }
 

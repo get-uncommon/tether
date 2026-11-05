@@ -156,12 +156,13 @@ ${fragment()}`, byId ? { id: key, intent } : { handle: key, intent });
    */
   /**
    * { card: true } for lists (home, collections, recommendations): about 40% smaller, without
-   * descriptions, extra images and variant images (cards show the main image). Price, stock and
-   * plans per variant stay. The full product comes with the background refresh.
+   * descriptions, variant images and images after the first two (a hover image, tether-bind="image:2";
+   * more with { card: true, images: 3 }). Price, stock and plans per variant stay. The full
+   * product comes with the background refresh.
    */
-  function hydrate(products, { card = false } = {}) {
+  function hydrate(products, { card = false, images = 2 } = {}) {
     let list = (Array.isArray(products) ? products : [products]).filter(Boolean);
-    if (card) list = list.map(slim);
+    if (card) list = list.map((p) => slim(p, images));
     const payload = { v: 1, at: new Date().toISOString(), country: conf.country || null, language: conf.language || null, products: list };
     return `<script type="application/json" data-tether-hydrate>${safeJson(payload)}</script>`;
   }
@@ -220,11 +221,11 @@ ${fragment()}`, byId ? { id: key, intent } : { handle: key, intent });
   }
   const jsonLd = (p, opts) => (p ? `<script type="application/ld+json">${safeJson(jsonLdData(p, opts))}</script>` : '');
 
-  function slim(p) {
+  function slim(p, keep = 2) {
     return {
       ...p,
       description: '', descriptionHtml: '',
-      images: { nodes: (p.images?.nodes || []).slice(0, 1) },
+      images: { nodes: (p.images?.nodes || []).slice(0, Math.max(1, keep)) },
       variants: { nodes: (p.variants?.nodes || []).map((v) => ({ ...v, image: null })) },
     };
   }

@@ -5,6 +5,8 @@ type Serializable<T> = { [K in keyof T as T[K] extends ((...args: any[]) => any)
 export interface TetherAstroOptions extends Partial<Serializable<TetherConfig>> {
   /** Add the Tether script to every page (default true). False: import and init it yourself. */
   inject?: boolean;
+  /** Files that restart the dev server when they change (default: src/shop.config.js/.mjs/.ts). */
+  watch?: string[];
 }
 
 /**

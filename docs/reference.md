@@ -211,7 +211,8 @@ Markup written for an older `wfs-*` prefix keeps working with `prefix: 'wfs'`.
 (repeater, `exclude="a,b"`), `link`/`url` (href to `productPath`), `metafield:namespace.key`
 (add the metafield to `config.metafields`), plus the subscription binds below.
 
-Images accept `max-width`, `max-height`, `crop` for Shopify CDN resizing.
+Images accept `max-width`, `max-height`, `crop` for Shopify CDN resizing (or, as valid HTML,
+`tether-max-width` / `data-max-width`, and the same for the others).
 
 Classes Tether sets: option buttons get `is-selected` (+ `aria-pressed`) and `is-unavailable` when no
 available variant has that value with the other choices. Clicking an unavailable value picks the
@@ -281,6 +282,7 @@ loses to it.
 ```
 
 `tether-products="tag:coffee"` uses Shopify search syntax instead of a collection.
+`tether-products="url:q"` searches for the page's `?q=`: a search results page on a static site.
 `tether-recommendations="<handle>"` lists related products (`url:handle` on a dynamic product page;
 empty inside a `tether-product`: that product). `tether-products=""` lists all products. Search
 syntax caveat: Shopify matches words loosely, so `handle:a OR handle:b` can return other products, and

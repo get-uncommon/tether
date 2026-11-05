@@ -46,7 +46,10 @@ import { defineConfig } from 'astro/config';
 import tether from '@occluze/tether/astro';
 import shopConfig from './src/shop.config.js';
 
-export default defineConfig({ integrations: [tether(shopConfig)] });
+export default defineConfig({
+  site: 'https://your-shop.com', // absolute URLs for jsonLd() and canonical links (else localhost)
+  integrations: [tether(shopConfig)],
+});
 ```
 
 ```js
@@ -66,6 +69,10 @@ takes the keys it knows from `import.meta.env`, so spreading it is safe.
 
 Every [config option](reference.md#config) works in `shop.config.js`, except functions
 (`onError`, `formatMoney`, hooks): set those in `window.TETHER_CONFIG` in your layout, they are merged in.
+In dev, a change to `src/shop.config.js` restarts the dev server, so the browser and the server
+render agree (another file: `tether({ ...shopConfig, watch: ['config/shop.js'] })`). `.env` follows
+Astro's `--mode` (`.env.staging` with `astro build --mode staging`), and the two store variables
+are declared through `astro:env`, so Astro checks them.
 
 ## 3. Product pages
 
@@ -131,8 +138,11 @@ const state = shop.initialState(product); // what Tether will show first
   price as the compare-at price.
 - `shop.jsonLd(product, { url })` adds the product for search engines (Google's product results:
   price, stock and currency per variant); set `siteUrl` in `shop.config.js` to leave out `url`.
-- Images: give `shop.imageUrl()` the same width as the `max-width` attribute, and Tether keeps the
-  server-rendered image instead of loading it again.
+- Images: give `shop.imageUrl()` the same width as the `max-width` attribute (valid HTML:
+  `data-max-width`), and Tether keeps the server-rendered image instead of loading it again. Use a
+  plain `<img>`: `astro:assets`' `<Image>` rewrites the URL, so Tether can't tell it's the same image
+  and replaces it (the image downloads twice). Give the first product image
+  `fetchpriority="high"` and no `loading="lazy"`; lazy-load cards below the fold only.
 - The attributes are the same as in Webflow: see the [attribute reference](reference.md#attribute-reference)
   (variants, subscriptions, bundles, lists, metafields, recommendations…).
 
@@ -147,7 +157,8 @@ true, as its normal display, or `block` / the value of `tether-display` when a c
 
 **Lists:** `const { products } = await shop.getProducts({ first: 12, sortKey: 'BEST_SELLING' })`,
 then one `tether-product={p.handle}` card each, and `shop.hydrate(products, { card: true })` once
-(about 40% smaller: no descriptions or extra images, which a card doesn't need). Sort keys differ per
+(about 40% smaller: no descriptions or variant images, and two images per product, for
+`tether-bind="image:2"` hover images; `{ card: true, images: 3 }` keeps more). Sort keys differ per
 query: `getProducts` takes Shopify's product sort keys (`CREATED_AT`), `getCollection` the
 collection ones (`CREATED`).
 
@@ -161,11 +172,15 @@ export async function getStaticPaths() {
   return collections.map((c) => ({ params: { handle: c.handle } }));
 }
 const collection = await shop.getCollection(Astro.params.handle, { first: 48 });
+if (!collection) return Astro.rewrite('/404'); // SSR: an unknown handle
 ---
 <h1>{collection.title}</h1>
 {collection.products.map((p) => <ProductCard product={p} />)}
-<Fragment set:html={shop.hydrate(collection.products)} />
+<Fragment set:html={shop.hydrate(collection.products, { card: true })} />
 ```
+
+With `output: 'server'`, `getStaticPaths` only runs for pages marked `export const prerender = true`;
+leave both out to render every collection per request.
 
 **SSR** (`output: 'server'`): the same calls work per request. A missing product is `null`:
 
@@ -177,11 +192,17 @@ if (!product) return Astro.rewrite('/404'); // your 404 page, with status 404
 ---
 ```
 
+An SSR page has just fetched fresh data, so the browser's one background refresh isn't needed:
+`revalidate: false` in `shop.config.js` (or in `window.TETHER_CONFIG` on those pages) skips it.
+
 `shop.config.ts` works the same as `.js`.
 
-**Search:** `shop.getProducts({ query: Astro.url.searchParams.get('q'), first: 24 })` (Shopify's
+**Search page:** `shop.getProducts({ query: Astro.url.searchParams.get('q'), first: 24 })` (Shopify's
 [search syntax](https://shopify.dev/docs/api/usage/search-syntax): `tag:summer`, `vendor:Acme`, …).
-Shopify searches the store's default language only.
+Shopify searches the store's default language only. This needs SSR (`output: 'server'`, or
+`export const prerender = false` on that page with an adapter): a static build has no `?q=` and
+lists every product. On a static site use [search as you type](reference.md#search-as-you-type)
+instead, and point the search form's `action` at a page that reads `q`.
 
 **Prices are live:** a page built yesterday can show yesterday's price until the background refresh
 (one request) replaces it; the cart and checkout always use Shopify's current price. Stores that
@@ -240,6 +261,10 @@ When the visitor asks for more than is in stock, Shopify adds what it can and Te
 
 Put `transition:persist` on the header or on an island, not on both (an island inside a persisted
 header is kept with it; Astro can't move a persisted element inside another one).
+
+**Fonts:** load them with a `<link rel="stylesheet">` in the layout's `<head>` or Astro's Fonts API.
+Font loaders that inject their styles with a script (Adobe Fonts' JavaScript kit, for example) lose
+them on a `<ClientRouter />` navigation, because Astro replaces the `<head>`: use their CSS link instead.
 
 ## 5. React, Svelte, Vue islands
 
@@ -359,7 +384,7 @@ and the markup, and tells you what to fix.
 | `allCollections()` | every collection (`handle`, `title`, `description`, `image`, `seo`) |
 | `getRecommendations(handleOrId)` | related products |
 | `initialState(product, { variant })` | what Tether shows first: `variant`, `selected`, `price`, `compareAtPrice`, `available`, `purchase`, `plan`, `plans`, `savings`, `show`, `isUnavailable()` |
-| `hydrate(products, { card })` | the `<script>` tag for the browser (see above) |
+| `hydrate(products, { card, images })` | the `<script>` tag for the browser (see above); cards keep 2 images by default |
 | `jsonLd(product, { url })`, `jsonLdData(product)` | schema.org Product / ProductGroup for search engines |
 | `formatMoney(money)`, `formatPercent(n)`, `productUrl(handle)`, `imageUrl(url, { width })` | strings, same rules as the browser |
 | `query(graphql, variables)` | any Storefront API query, in the configured market |

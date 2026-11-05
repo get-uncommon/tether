@@ -61,7 +61,8 @@ export const shop = createStorefront({ domain, token, country: 'NL', locale: 'nl
   `isUnavailable()` is a function.
 - React: `<div hidden dangerouslySetInnerHTML={{ __html: shop.hydrate(product) }} />`.
   Svelte: `{@html shop.hydrate(product)}`. Nunjucks/Liquid: `{{ hydrate | safe }}`.
-- Lists: `shop.hydrate(products, { card: true })` is about 40% smaller.
+- Lists: `shop.hydrate(products, { card: true })` is about 40% smaller. Cards keep the first two
+  images (`tether-bind="image:2"` for a hover image); `{ card: true, images: 3 }` keeps more.
 
 ## Your own cart UI
 
