@@ -261,22 +261,30 @@ export const Cart = {
 
   /** Cart-level attributes, merged with existing ones. Value '' removes a key. */
   setAttributes(obj) {
-    const merged = new Map((this.state?.attributes || []).map((a) => [a.key, a.value]));
-    toAttributes(obj).forEach((a) => merged.set(a.key, a.value));
-    const attributes = [...merged].filter(([, v]) => v !== '').map(([key, value]) => ({ key, value }));
-    return this._queue(async () => this._commit(
-      await this._mutate('cartAttributesUpdate', '$attributes: [AttributeInput!]!', 'attributes: $attributes', { attributes }, { attributes }),
-      'attributes',
-    ));
+    const add = toAttributes(obj);
+    // Merged in the queue, with the cart as it is by then: quick calls in a row don't drop each other.
+    return this._queue(async () => {
+      const merged = new Map((this.state?.attributes || []).map((a) => [a.key, a.value]));
+      add.forEach((a) => merged.set(a.key, a.value));
+      const attributes = [...merged].filter(([, v]) => v !== '').map(([key, value]) => ({ key, value }));
+      return this._commit(
+        await this._mutate('cartAttributesUpdate', '$attributes: [AttributeInput!]!', 'attributes: $attributes', { attributes }, { attributes }),
+        'attributes',
+      );
+    });
   },
 
   /** Replaces the discount codes. Pass [] to remove all. */
   setDiscountCodes(codes) {
-    const discountCodes = (Array.isArray(codes) ? codes : [codes]).map((c) => String(c).trim()).filter(Boolean);
-    return this._queue(async () => this._commit(
-      await this._mutate('cartDiscountCodesUpdate', '$discountCodes: [String!]!', 'discountCodes: $discountCodes', { discountCodes }, { discountCodes }),
-      'discount',
-    ));
+    return this._queue(async () => {
+      // A function gets the codes as they are by then (applyDiscount/removeDiscount in quick succession).
+      const list = typeof codes === 'function' ? codes((this.state?.discountCodes || []).map((d) => d.code)) : codes;
+      const discountCodes = (Array.isArray(list) ? list : [list]).map((c) => String(c).trim()).filter(Boolean);
+      return this._commit(
+        await this._mutate('cartDiscountCodesUpdate', '$discountCodes: [String!]!', 'discountCodes: $discountCodes', { discountCodes }, { discountCodes }),
+        'discount',
+      );
+    });
   },
 
   /**
@@ -284,8 +292,7 @@ export const Cart = {
    * it's removed again and the promise rejects with code INVALID_DISCOUNT.
    */
   async applyDiscount(code) {
-    const current = (this.state?.discountCodes || []).map((d) => d.code);
-    const cart = await this.setDiscountCodes([...new Set([...current, code])]);
+    const cart = await this.setDiscountCodes((current) => [...new Set([...current, code])]);
     const hit = (cart?.discountCodes || []).find((d) => d.code.toLowerCase() === String(code).toLowerCase());
     if (hit?.applicable) return cart;
     await this.removeDiscount(code).catch(() => {});
@@ -294,7 +301,7 @@ export const Cart = {
 
   removeDiscount(code) {
     const k = String(code).toLowerCase();
-    return this.setDiscountCodes((this.state?.discountCodes || []).map((d) => d.code).filter((c) => c.toLowerCase() !== k));
+    return this.setDiscountCodes((current) => current.filter((c) => c.toLowerCase() !== k));
   },
 
   /** { countryCode, email, phone } — changes currency/prices for that market. */
@@ -322,8 +329,10 @@ export const Cart = {
     if (tab) { try { tab.opener = null; } catch { /* ignore */ } }
 
     try {
-      const data = await gql('query TetherCheckout($id: ID!) { cart(id: $id) { checkoutUrl } }', { id });
-      let url = (this.beforeCheckout && await this.beforeCheckout().catch(() => null)) || data.cart?.checkoutUrl;
+      // Side by side: the cart's current checkout URL, and the account's own (beforeCheckout) if any.
+      const fresh = gql('query TetherCheckout($id: ID!) { cart(id: $id) { checkoutUrl } }', { id }).then((d) => d.cart?.checkoutUrl);
+      fresh.catch(() => {}); // not needed when beforeCheckout answers
+      let url = (this.beforeCheckout && await this.beforeCheckout().catch(() => null)) || await fresh;
       if (url && this.customerAccessToken) url += `${url.includes('?') ? '&' : '?'}logged_in=true`;
       if (!url) throw new TetherError('No checkoutUrl (cart empty or expired)');
       emit('checkout', { url, cart: this.state });

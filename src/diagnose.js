@@ -23,7 +23,7 @@ const SHOW = new Set([
   'subscription-selected', 'one-time-selected', 'has-savings', 'loading', 'ready', 'error', 'not-found',
   'cart-empty', 'cart-filled', 'cart-has-subscription', 'cart-no-subscription', 'cart-has-discount', 'cart-error', 'cart-warning',
   'list-empty', 'list-filled', 'search-empty', 'search-results', 'logged-in', 'logged-out', 'orders-empty', 'orders-loading',
-  'addresses-loading', 'addresses-empty', 'subscriptions-loading', 'subscriptions-empty',
+  'addresses-loading', 'addresses-empty', 'addresses-error', 'subscriptions-loading', 'subscriptions-empty', 'subscriptions-error',
 ]);
 const BIND = new Set([
   'title', 'description', 'description-text', 'vendor', 'type', 'handle', 'published-at', 'price', 'total-price',

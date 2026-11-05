@@ -124,14 +124,14 @@ async function renderOrder(el) {
     const t = f.trackingInformation?.[0] || {};
     qsa(row, sel('fulfillment-bind')).concat(row.matches(sel('fulfillment-bind')) ? [row] : []).forEach((b) => {
       const k = get(b, 'fulfillment-bind');
-      if (k === 'url') { if (https(t.url)) b.setAttribute('href', t.url); return; }
+      if (k === 'url') { const ok = https(t.url); if (ok) b.setAttribute('href', t.url); show(b, ok); return; } // no tracking link: hidden
       const v = { status: lower(f.latestShipmentStatus || f.status), date: date(f.createdAt), eta: f.estimatedDeliveryAt ? date(f.estimatedDeliveryAt) : '', company: t.company || '', number: t.number || '' }[k];
       if (v != null) setText(b, v);
     });
   }));
   showIn(el, 'order-show', {
     loading: false, ready: true, error: false, 'not-found': false, cancelled: Boolean(o.cancelledAt), shipped: ships.length > 0,
-    returnable: [...returnable.values()].some((q) => q > 0), 'has-returns': (o.returns?.nodes || []).length > 0, 'return-requested': el.dataset.tetherReturned === '1',
+    returnable: [...returnable.values()].some((q) => q > 0), 'has-returns': el.dataset.tetherReturned !== '1' && (o.returns?.nodes || []).length > 0, 'return-requested': el.dataset.tetherReturned === '1',
   });
   state('ready');
 }
@@ -147,9 +147,13 @@ async function renderAddresses(root) {
   const boxes = qsa(root, sel('addresses'));
   if (!boxes.length) return;
   showGlobal(root, { 'addresses-loading': true, 'addresses-empty': false });
-  let list = [];
-  try { list = addressCache = await addresses(); } catch (err) { reportError(err, 'addresses'); }
-  showGlobal(root, { 'addresses-loading': false, 'addresses-empty': list.length === 0 });
+  let list;
+  try { list = addressCache = await addresses(); } catch (err) {
+    reportError(err, 'addresses'); // not "no addresses yet": keep what's shown
+    showGlobal(root, { 'addresses-loading': false, 'addresses-error': true });
+    return;
+  }
+  showGlobal(root, { 'addresses-loading': false, 'addresses-empty': list.length === 0, 'addresses-error': false });
   boxes.forEach((box) => repeat(box, list, (row, a) => {
     row.dataset.tetherAddress = a.id;
     qsa(row, sel('address-bind')).concat(row.matches(sel('address-bind')) ? [row] : []).forEach((b) => {
@@ -174,9 +178,13 @@ async function renderSubscriptions(root) {
   const boxes = qsa(root, sel('subscriptions'));
   if (!boxes.length) return;
   showGlobal(root, { 'subscriptions-loading': true, 'subscriptions-empty': false });
-  let list = [];
-  try { list = await subscriptions(); } catch (err) { reportError(err, 'subscriptions'); }
-  showGlobal(root, { 'subscriptions-loading': false, 'subscriptions-empty': list.length === 0 });
+  let list;
+  try { list = await subscriptions(); } catch (err) {
+    reportError(err, 'subscriptions');
+    showGlobal(root, { 'subscriptions-loading': false, 'subscriptions-error': true });
+    return;
+  }
+  showGlobal(root, { 'subscriptions-loading': false, 'subscriptions-empty': list.length === 0, 'subscriptions-error': false });
   boxes.forEach((box) => repeat(box, list, (row, c) => {
     row.dataset.tetherSubscription = c.id;
     row.setAttribute(attr('subscription-status'), lower(c.status));
@@ -225,6 +233,7 @@ export async function renderPages(root = document) {
 
 const fieldsOf = (form) => Object.fromEntries([...form.elements].filter((i) => i.name && i.type !== 'submit' && i.type !== 'button' && i.type !== 'checkbox').map((i) => [i.name, i.value]));
 async function act(el, fn, { error } = {}) {
+  if (el.getAttribute('aria-busy') === 'true') return undefined; // already sending: no second request (Enter, double click)
   el.classList.add('is-busy'); el.setAttribute('aria-busy', 'true');
   el.setAttribute(attr('form-state'), 'pending');
   qsa(el, sel('form-error')).forEach((e) => setText(e, ''));
@@ -246,7 +255,7 @@ function bindPages() {
     const f = e.target;
     if (f.matches?.(sel('profile-form'))) {
       e.preventDefault();
-      act(f, () => updateProfile(fieldsOf(f)));
+      act(f, async () => { await updateProfile(fieldsOf(f)); await ctx.bindCustomer?.(document); });
     } else if (f.matches?.(sel('address-form'))) {
       e.preventDefault();
       const id = f.dataset.tetherAddressId || undefined;
@@ -283,9 +292,13 @@ function bindPages() {
       const sub = btn.closest('[data-tether-subscription]');
       const a = get(btn, 'subscription-action');
       if (!sub || !SUB_ACTIONS.includes(a) || btn.disabled || !confirmOk(btn)) return;
+      const id = sub.dataset.tetherSubscription;
       sub.setAttribute(attr('subscription-state'), 'pending');
-      act(sub, async () => { await subscriptionAction(sub.dataset.tetherSubscription, a); await renderSubscriptions(document); }).then(() => {
-        sub.setAttribute(attr('subscription-state'), sub.getAttribute(attr('form-state')) === 'error' ? 'error' : 'done');
+      act(sub, async () => { await subscriptionAction(id, a); await renderSubscriptions(document); }).then(() => {
+        const state = sub.getAttribute(attr('form-state')) === 'error' ? 'error' : 'done';
+        // The re-render may have replaced the row: mark the one that shows this subscription now.
+        qsa(document, '[data-tether-subscription]').filter((r) => r === sub || r.dataset.tetherSubscription === id)
+          .forEach((r) => r.setAttribute(attr('subscription-state'), state));
       });
     } else if ((btn = t.closest?.(sel('order-return')))) {
       e.preventDefault();

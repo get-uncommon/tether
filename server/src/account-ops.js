@@ -66,11 +66,19 @@ const text = (v, max = 255) => {
   return s;
 };
 const ADDRESS_FIELDS = ['firstName', 'lastName', 'company', 'address1', 'address2', 'city', 'zip', 'zoneCode', 'phoneNumber'];
-/** Only the CustomerAddressInput fields, as bounded strings; countryCode two letters. */
-export function addressInput(a = {}) {
+/**
+ * Only the CustomerAddressInput fields, as bounded strings; countryCode two letters. On an update
+ * (clear: true) a field sent empty is cleared ('') instead of left out, so an emptied apartment
+ * line or phone number really goes away.
+ */
+export function addressInput(a = {}, { clear = false } = {}) {
   if (!a || typeof a !== 'object' || Array.isArray(a)) throw new InputError('address');
   const out = {};
-  ADDRESS_FIELDS.forEach((k) => { const v = text(a[k]); if (v !== undefined) out[k] = v; });
+  ADDRESS_FIELDS.forEach((k) => {
+    const v = text(a[k]);
+    if (v !== undefined) out[k] = v;
+    else if (clear && k in a && (a[k] === '' || a[k] === null)) out[k] = '';
+  });
   if (a.countryCode != null && a.countryCode !== '') {
     const c = String(a.countryCode).toUpperCase();
     if (!/^[A-Z]{2}$/.test(c)) throw new InputError('countryCode');
@@ -109,7 +117,7 @@ export const ops = {
     return { addresses: (c?.addresses?.nodes || []).map((a) => ({ ...a, isDefault: a.id === def })) };
   },
   async saveAddress(ask, { id, address, isDefault }) {
-    const a = addressInput(address || {});
+    const a = addressInput(address || {}, { clear: Boolean(id) });
     const def = isDefault === true ? true : undefined;
     const p = id // an update without fields only sets the default
       ? userErrors((await ask(M.addressUpdate, { id: idOf('CustomerAddress', id), address: Object.keys(a).length ? a : null, default: def ?? null }))?.customerAddressUpdate)

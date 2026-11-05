@@ -25,10 +25,12 @@ export const VERSION = '0.6.6';
 
 let initPromise = null;
 let observer = null;
+let mountedBody = null; // the page body mount(document) last ran on (Astro's first page-load repeats it)
 
 /** Mount every product scope and product list inside `root`. Safe to call repeatedly. */
 export function mount(root = document) {
   if (!isConfigured()) return 0;
+  if (root === document) mountedBody = document.body;
   let count = 0;
   pruneLive(); // page transitions detach old roots: don't keep them alive
   hydrateFromPage(root); // products the server already rendered: no request needed
@@ -198,9 +200,9 @@ function bindControls() {
       const differs = target?.country && (String(target.country).toUpperCase() !== String(cfg.country || '').toUpperCase()
         || String(target.language || '').toUpperCase() !== String(cfg.language || '').toUpperCase());
       if (differs) setCountry(target.country, { language: target.language ?? null, locale: target.locale, remember: false }).then(() => mount(document), () => mount(document));
-      else mount(document);
+      else if (mountedBody !== document.body) mount(document); // the first load is already mounted: no second round of requests
     }));
-    document.addEventListener('astro:before-swap', () => unmount());
+    document.addEventListener('astro:before-swap', () => { mountedBody = null; unmount(); });
   }
 
   // Back online after a failed load: try the failed products and lists again.

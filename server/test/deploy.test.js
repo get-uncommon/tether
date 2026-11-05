@@ -110,3 +110,15 @@ test('check in deploy-only mode: no Webflow errors, the hook is validated', asyn
   const bad = await runCheck(defaultConfig, { ...shopEnv, DEPLOY_HOOK_URL: 'http://insecure.test' }, { deep: false });
   assert.match(bad.steps.find((s) => s.title === 'Deploy hook').message, /must be an https URL/);
 });
+
+test('deploy hook: a network error keeps the build pending for the next run', async () => {
+  const { createDeployHook } = await import('../src/deploy.js');
+  const store = memoryStore();
+  let calls = 0;
+  const fetch = async () => { calls++; if (calls === 1) throw new Error('offline'); return new Response('{}', { status: 200 }); };
+  const hook = createDeployHook({ url: HOOK, store, fetch, now: () => 1e12 });
+  hook.markDirty();
+  await assert.rejects(hook.maybeTrigger(), /offline/);
+  assert.deepEqual(await hook.maybeTrigger(), { triggered: true }, 'no new change needed: the failed build is retried');
+  assert.equal(calls, 2);
+});

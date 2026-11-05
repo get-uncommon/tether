@@ -177,9 +177,11 @@ account: {
 - `tether-order-bind`: `name`, `date`, `total`, `subtotal`, `shipping`, `tax`, `status`, `fulfillment`,
   `shipping-address`, `billing-address`, `items`, `cancelled`, `url` (Shopify's status page).
 - `tether-order-line`: `title`, `variant-title`, `quantity`, `price`, `total`, `sku`, `image`, `returnable`.
-- `tether-fulfillment-bind`: `status`, `date`, `eta`, `company`, `number`, `url` (tracking link).
+- `tether-fulfillment-bind`: `status`, `date`, `eta`, `company`, `number`, `url` (tracking link; hidden
+  when the shipment has none).
 - `tether-order-show`: `loading`, `ready`, `not-found`, `error`, `shipped`, `cancelled`, `returnable`,
-  `has-returns`, `return-requested`. The order root gets `tether-order-state`.
+  `has-returns` (an earlier return), `return-requested` (just sent here; `has-returns` then stays
+  hidden). The order root gets `tether-order-state`.
 - **Returns:** the quantities typed in `tether-return-quantity` (at most what Shopify says is
   returnable), with the reason from `tether-return-reason` (Shopify's suggested reasons), go to
   Shopify as a return request. You approve it in the Shopify admin, as usual.
@@ -201,6 +203,7 @@ account: {
   </li>
 </ul>
 <p tether-show="addresses-empty" hidden>No addresses yet.</p>
+<p tether-show="addresses-error" hidden>Your addresses couldn't be loaded.</p>
 
 <form tether-address-form>                            <!-- new, or the one you clicked Edit on -->
   <input name="firstName"> <input name="lastName"> <input name="address1"> <input name="address2">
@@ -220,6 +223,7 @@ message (e.g. "Zip is invalid") goes in `tether-form-error`.
 ```html
 <p tether-show="subscriptions-loading">Loading…</p>
 <p tether-show="subscriptions-empty" hidden>No subscriptions.</p>
+<p tether-show="subscriptions-error" hidden>Your subscriptions couldn't be loaded.</p>
 <div tether-subscriptions>
   <article>
     <div tether-subscription-lines><p><span tether-subscription-line="quantity"></span>×

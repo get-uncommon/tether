@@ -857,11 +857,13 @@ test('account pages (server mode): order page with returns, subscriptions with a
     assert.equal($('[tether-address-bind="formatted"]').textContent, 'Street 1, Utrecht');
     assert.ok(visible($('[tether-address-show="default"]')));
     $('[tether-address-form]').dispatchEvent(new window.Event('submit', { cancelable: true, bubbles: true }));
+    $('[tether-address-form]').dispatchEvent(new window.Event('submit', { cancelable: true, bubbles: true })); // Enter twice
     document.removeEventListener('submit', router);
     assert.equal(routerSaw, true, 'account forms are handled in the capture phase, before a router');
     await tick(40);
     assert.equal($('[tether-address-form]').getAttribute('tether-form-state'), 'error');
     assert.equal($('[tether-address-form] [tether-form-error]').textContent, 'City is required');
+    assert.equal(posts.filter((p) => p.path === '/address').length, 1, 'a second submit while sending sends nothing');
     // Profile form prefilled.
     assert.equal($('[tether-profile-form] [name="firstName"]').value, 'Ada');
   } finally {

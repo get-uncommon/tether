@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- Astro: the first page load no longer mounts twice (the injected script and ClientRouter's first
+  `astro:page-load`), so account pages send each request once instead of twice.
+- Account pages: a second submit or click while a request is still running does nothing (no
+  duplicate address, return or subscription change from a double click or Enter).
+- Addresses: on an edit, a field cleared in the form (apartment, phone) is cleared in Shopify too.
+- Addresses and subscriptions: a failed load keeps what's shown and sets `addresses-error` /
+  `subscriptions-error` (new `tether-show` values) instead of showing "none yet".
+- Profile: after saving, `tether-account-bind` shows the new name.
+- Subscriptions: `tether-subscription-state="done"` lands on the row as shown after the update.
+- Orders: a tracking link without a URL is hidden; after a return request only `return-requested`
+  shows, not `has-returns` as well.
+- Cart: `setAttributes`, `applyDiscount` and `removeDiscount` called quickly in a row no longer
+  undo each other (each reads the cart in its turn).
+- Checkout asks Shopify for the checkout URL and the account's own URL side by side.
+- Account: the order list and the account pages load side by side.
+- Sync: a deploy hook that can't be reached keeps the rebuild pending for the next run.
 - Account pages: the profile and address forms are handled before a page router (Astro's
   ClientRouter) sees the submit, so the router no longer navigates with the form fields in the URL.
 

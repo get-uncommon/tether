@@ -50,7 +50,11 @@ export function createDeployHook({ url, minIntervalSeconds = 60, store, fetch: f
       log?.info?.(`deploy hook: change noted, next build in ${Math.ceil(wait / 1000)}s or later`);
       return { triggered: false, pending: true, waitMs: wait };
     }
-    const res = await fetchImpl(url, { method: 'POST' });
+    let res;
+    try { res = await fetchImpl(url, { method: 'POST' }); } catch (err) {
+      await store.put(KEY, { ...state, dirty: true }); // network error: keep the build pending for the next run
+      throw err;
+    }
     if (!res.ok) {
       await store.put(KEY, { ...state, dirty: true });
       throw new Error(`deploy hook answered ${res.status}`);

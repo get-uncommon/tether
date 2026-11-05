@@ -271,14 +271,12 @@ export async function render(root = document) {
     a.setAttribute('href', u || `https://${cfg.domain}/account`);
   });
   if (!logged) return;
-  const binds = qsa(root, sel('account-bind'));
-  if (binds.length) {
-    const c = await customer().catch((err) => { reportError(err, 'account'); return null; });
-    binds.forEach((el) => {
-      const v = { 'first-name': c?.firstName, 'last-name': c?.lastName, name: c?.displayName, email: c?.emailAddress?.emailAddress, address: c?.defaultAddress?.formatted?.join(', ') }[get(el, 'account-bind')];
-      if (v != null) setText(el, v);
-    });
-  }
+  await bindCustomer(root);
+  // The order list and the account pages (order, addresses, subscriptions) load side by side.
+  await Promise.all([renderOrderList(root), PAGE_ATTRS.some((n) => qsa(root, sel(n)).length) ? pages().then((m) => m.renderPages(root)) : null]);
+}
+
+async function renderOrderList(root) {
   const lists = qsa(root, sel('orders'));
   if (lists.length) {
     // tether-show="orders-loading" / "orders-empty" (no orders yet).
@@ -305,7 +303,6 @@ export async function render(root = document) {
       if (get(node, 'order-bind') === 'url' && orderUrl(o)) node.setAttribute('href', orderUrl(o));
     }));
   }
-  if (PAGE_ATTRS.some((n) => qsa(root, sel(n)).length)) await (await pages()).renderPages(root);
 }
 
 
@@ -331,8 +328,18 @@ function fillLines(box, items) {
 // only on pages that use them. It gets this module's login state, so both share one session.
 const PAGE_ATTRS = ['order', 'addresses', 'subscriptions', 'profile-form', 'address-form'];
 let pagesPart = null;
+/** tether-account-bind: the customer's name, email, default address (again after a profile change). */
+async function bindCustomer(root) {
+  const binds = qsa(root, sel('account-bind'));
+  if (!binds.length) return;
+  const c = await customer().catch((err) => { reportError(err, 'account'); return null; });
+  binds.forEach((el) => {
+    const v = { 'first-name': c?.firstName, 'last-name': c?.lastName, name: c?.displayName, email: c?.emailAddress?.emailAddress, address: c?.defaultAddress?.formatted?.join(', ') }[get(el, 'account-bind')];
+    if (v != null) setText(el, v);
+  });
+}
 function pages() {
-  pagesPart ||= loadPart('account-pages').then((m) => { m.setup({ server, serverFetch, query, customer, reset: () => { customerCache = null; serverState = null; } }); return m; });
+  pagesPart ||= loadPart('account-pages').then((m) => { m.setup({ server, serverFetch, query, customer, bindCustomer, reset: () => { customerCache = null; serverState = null; } }); return m; });
   return pagesPart;
 }
 const viaPages = (name) => (...a) => pages().then((m) => m[name](...a));
