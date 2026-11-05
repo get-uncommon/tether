@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.6.7 (2026-11-05)
 
 - Astro: the first page load no longer mounts twice (the injected script and ClientRouter's first
   `astro:page-load`), so account pages send each request once instead of twice.
