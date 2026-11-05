@@ -2256,7 +2256,7 @@
   coreModules["lazy.js"] = { loadPart, coreModules };
 
   // src/index.js
-  var VERSION = "0.6.4";
+  var VERSION = "0.6.5";
   var initPromise = null;
   var observer = null;
   function mount(root = document) {
