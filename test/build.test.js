@@ -80,3 +80,24 @@ test('parts are small and the core is under budget', async () => {
   assert.ok(await gz('tether.markets.min.js') < 3 * 1024);
   assert.ok(await gz('tether.diagnose.min.js') < 6 * 1024); // console only, loaded on demand; knows every attribute for did-you-mean
 });
+
+test('e2e static server: stays inside its folders and listens on loopback only', async () => {
+  const { spawn } = await import('node:child_process');
+  const { connect } = await import('node:net');
+  const port = 40000 + Math.floor(Math.random() * 20000);
+  const child = spawn(process.execPath, ['e2e/serve.mjs'], { env: { ...process.env, PORT: String(port) }, stdio: 'ignore' });
+  const get = (path) => new Promise((resolve) => {
+    const s = connect(port, '127.0.0.1', () => s.write(`GET ${path} HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n`));
+    let out = ''; s.on('data', (d) => { out += d; }); s.on('end', () => resolve(out)); s.on('error', () => resolve('ERR'));
+  });
+  try {
+    let first = 'ERR';
+    for (let i = 0; i < 40 && first === 'ERR'; i++) { await new Promise((r) => setTimeout(r, 50)); first = await get('/plain/'); }
+    for (const p of ['/plain/..%2F..%2Fpackage.json', '/..%2F..%2F..%2Fpackage.json', '/plain/dist/..%2F..%2Fpackage.json']) {
+      const res = await get(p);
+      assert.doesNotMatch(res, /@occluze\/tether/, `${p} must not leave the served folder`);
+      assert.match(res, /^HTTP\/1\.1 (403|404)/);
+    }
+    assert.match(await get('/%E0%A4%A'), /^HTTP\/1\.1 400/, 'a malformed path is answered, not a crash');
+  } finally { child.kill(); }
+});

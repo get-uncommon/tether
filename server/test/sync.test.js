@@ -285,6 +285,19 @@ test('webhook: verifies HMAC and shop, syncs update, archives on delete', async 
   assert.equal((await r.task).action, 'archived');
 });
 
+test('webhook: an unsigned topic header cannot delete a live product (Shopify is asked)', async () => {
+  const { app, wf } = setup({ products: [shopifyProduct(1)] });
+  const opts = { sync: app.sync, secret: app.webhookSecret, shopDomain: 'shop.myshopify.com', sleep: instantSleep };
+  let r = await handleShopifyWebhook(await webhook('products/update', { id: 1, admin_graphql_api_id: 'gid://shopify/Product/1' }), opts);
+  assert.equal((await r.task).action, 'created');
+  // The same signed body, replayed with the topic header changed to products/delete.
+  r = await handleShopifyWebhook(await webhook('products/delete', { id: 1, admin_graphql_api_id: 'gid://shopify/Product/1' }), opts);
+  assert.equal(r.response.status, 200);
+  assert.notEqual((await r.task).action, 'archived');
+  const [item] = [...wf.items.values()];
+  assert.ok(item && !item.isArchived, 'the live item stays');
+});
+
 test('concurrent create + update webhooks for a new product make one item', async () => {
   const { app, wf } = setup({ products: [shopifyProduct(9)] });
   const opts = { sync: app.sync, secret: app.webhookSecret, sleep: instantSleep, createDelayMs: 0 };

@@ -132,7 +132,7 @@ node bin/tether-sync.js import                # create/update + publish everythi
 node bin/tether-sync.js import --prune        # also archive items whose product is gone
 node bin/tether-sync.js reconcile             # changed since the last run
 node bin/tether-sync.js sync my-handle        # one product
-node bin/tether-sync.js serve --port 8787     # webhook endpoint for a Node host
+node bin/tether-sync.js serve --port 8787     # webhook endpoint for a Node host (--host 127.0.0.1 behind a proxy)
 ```
 
 `check` goes through everything in order and says exactly what to fix:

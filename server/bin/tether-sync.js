@@ -5,7 +5,7 @@
  *   tether-sync check                      guided first run: what's missing and how to fix it
  *   tether-sync import [--prune] [--force] every product (first run)
  *   tether-sync reconcile [--since ISO]    products changed since the last run (cron)
- *   tether-sync serve [--port 8787]        webhook endpoint
+ *   tether-sync serve [--port 8787] [--host 127.0.0.1]   webhook endpoint
  *   tether-sync sync <handle|id>           one product
  *   tether-sync webhooks <public-url>      register the product webhooks (Node hosts)
  *
@@ -39,6 +39,7 @@ const HELP = `tether-sync <check|import|reconcile|serve|sync|webhooks> [options]
   --max <n>         (reconcile) max Webflow writes this run (default from config)
   --since <iso>     (reconcile) start from this time instead of the stored cursor
   --port <n>        (serve) default 8787
+  --host <addr>     (serve) interface to listen on (default: all; 127.0.0.1 behind a proxy)
 Env: WEBFLOW_TOKEN, SHOPIFY_ADMIN_TOKEN or SHOPIFY_CLIENT_ID + SHOPIFY_CLIENT_SECRET, SHOPIFY_WEBHOOK_SECRET`;
 
 async function main() {
@@ -106,7 +107,7 @@ async function main() {
       return 0;
     }
     case 'serve':
-      await serve(app, { port: parseInt(opt('port', process.env.PORT || '8787'), 10), log });
+      await serve(app, { port: parseInt(opt('port', process.env.PORT || '8787'), 10), host: opt('host', process.env.HOST) || undefined, log });
       return null;
     default:
       console.log(HELP);

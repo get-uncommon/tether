@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.6.5 (2026-11-05)
+
+Fixes from a full security audit (Cloudflare's security-audit method; details in the release notes):
+
+- **Sync webhooks:** the `X-Shopify-Topic` header isn't covered by Shopify's signature, so it no
+  longer decides on its own: every webhook asks Shopify for the product, and an item is only
+  removed when Shopify no longer has the product. Before, a replayed signed webhook with the
+  topic changed to `products/delete` could take a live product off the site.
+- **`tether-sync serve` (Node):** routes before reading the body, accepts bodies up to 1 MB
+  (413 above), and an aborted upload no longer stops the process. New `--host` option
+  (e.g. `127.0.0.1` behind a proxy).
+- **Test server (`e2e/serve.mjs`, development only):** serves only files inside its folders and
+  listens on 127.0.0.1.
+
 ## 0.6.4 (2026-11-05)
 
 - Customer accounts, server mode: the Worker asks for Shopify's signing keys with JSON headers

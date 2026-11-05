@@ -41,7 +41,9 @@ export async function handleShopifyWebhook(request, {
       // products/create and products/update arrive together for new products; the
       // update runs first, the delayed create then finds the item and does nothing.
       if (topic === 'products/create' && createDelayMs) await sleep(createDelayMs);
-      const res = topic === 'products/delete' ? await sync.removeProduct(id) : await sync.syncById(id);
+      // The topic header isn't covered by the HMAC, so it never decides on its own: every topic
+      // asks Shopify for the product, and only a product Shopify no longer has is removed.
+      const res = await sync.syncById(id);
       log?.info?.(`webhook ${topic} ${id}: ${res.action}`);
       return res;
     } catch (err) {

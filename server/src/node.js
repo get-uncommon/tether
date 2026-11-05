@@ -91,15 +91,25 @@ function toRequest(req, body) {
   return new Request(`http://localhost${req.url}`, { method: req.method, headers, body: ['GET', 'HEAD'].includes(req.method) ? undefined : body });
 }
 
-export function serve(app, { port = 8787, log = console } = {}) {
+/** Largest webhook body accepted (Shopify product webhooks are a few KB). */
+export const MAX_BODY = 1024 * 1024;
+
+export function serve(app, { port = 8787, host, log = console, maxBody = MAX_BODY } = {}) {
   const server = createServer(async (req, res) => {
-    const chunks = [];
-    for await (const ch of req) chunks.push(ch);
-    const body = Buffer.concat(chunks);
     try {
-      if (req.url === '/health') { res.writeHead(200, { 'content-type': 'application/json' }); res.end('{"ok":true}'); return; }
-      if (req.url !== '/webhooks/shopify') { res.writeHead(404); res.end('not found'); return; }
-      const { response, task } = await handleShopifyWebhook(toRequest(req, body), {
+      if (req.url === '/health') { res.writeHead(200, { 'content-type': 'application/json' }); res.end('{"ok":true}'); req.resume(); return; }
+      // Route before reading: other paths never get their body read.
+      if (req.url !== '/webhooks/shopify') { res.writeHead(404); res.end('not found'); req.resume(); return; }
+      if (req.method !== 'POST') { res.writeHead(405); res.end('POST only'); req.resume(); return; }
+      if (Number(req.headers['content-length'] || 0) > maxBody) { res.writeHead(413); res.end('too large'); req.destroy(); return; }
+      const chunks = [];
+      let size = 0;
+      for await (const ch of req) {
+        size += ch.length;
+        if (size > maxBody) { res.writeHead(413); res.end('too large'); req.destroy(); return; }
+        chunks.push(ch);
+      }
+      const { response, task } = await handleShopifyWebhook(toRequest(req, Buffer.concat(chunks)), {
         sync: app.sync, secret: app.webhookSecret, secrets: app.webhookSecrets, shopDomain: app.config.shopify.domain, log,
       });
       res.writeHead(response.status, Object.fromEntries(response.headers));
@@ -107,9 +117,10 @@ export function serve(app, { port = 8787, log = console } = {}) {
       if (task) await task;
       await app.store?.flush?.();
     } catch (err) {
-      log.error(err);
-      if (!res.headersSent) { res.writeHead(500); res.end('error'); }
+      // A client that aborts mid-body ends up here: it ends this request, never the process.
+      if (err?.code !== 'ECONNRESET' && err?.message !== 'aborted') log.error(err);
+      if (!res.headersSent && !res.destroyed) { res.writeHead(500); res.end('error'); }
     }
   });
-  return new Promise((r) => server.listen(port, () => { log.info(`tether-sync listening on http://localhost:${port}/webhooks/shopify`); r(server); }));
+  return new Promise((r) => server.listen(port, host, () => { log.info(`tether-sync listening on http://${host || 'localhost'}:${server.address().port}/webhooks/shopify`); r(server); }));
 }
