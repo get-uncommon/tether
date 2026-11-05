@@ -1,0 +1,42 @@
+# UNCOMMON only: keeps this fork (get-uncommon/tether) up to date with ravi-klaassens/tether.
+# Runs every Monday, or now: Actions -> Sync from upstream -> Run workflow.
+# Doesn't exist upstream; it lives only in this fork.
+#
+# If a run fails because upstream changed a workflow file (GITHUB_TOKEN may not write workflows),
+# sync by hand: `gh repo sync get-uncommon/tether`, or Sync fork on GitHub.
+name: Sync from upstream
+
+on:
+  schedule:
+    - cron: '7 5 * * 1'   # Mondays 05:07 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write   # to keep this schedule alive (below)
+
+concurrency:
+  group: sync-upstream
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      # GitHub switches off scheduled workflows in public repos after 60 days without activity.
+      # Re-enabling it through the API resets that, so syncing never silently stops.
+      - name: Keep the weekly schedule alive
+        run: gh api -X PUT "repos/$GITHUB_REPOSITORY/actions/workflows/sync-upstream.yml/enable" || true
+      - name: Merge upstream main
+        run: |
+          if out=$(gh api -X POST "repos/$GITHUB_REPOSITORY/merge-upstream" -f branch=main --jq '.message' 2>&1); then
+            echo "$out"
+            echo "### $out" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "$out"
+            printf '### Sync failed\n\n%s\n\nSync by hand: `gh repo sync get-uncommon/tether`, or Sync fork on GitHub.\n' "$out" >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
