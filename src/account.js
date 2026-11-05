@@ -41,7 +41,8 @@ let customerCache = null;
 
 // Server mode (account.server): the Worker holds the tokens, this browser only a session cookie it
 // can't read. Recommended for live sites.
-const server = () => (cfg.account?.server ? String(cfg.account.server).replace(/\/$/, '') : '');
+// A full URL or a path on this site ('/_tether/account').
+const server = () => (cfg.account?.server ? new URL(String(cfg.account.server), window.location.href).href.replace(/\/$/, '') : '');
 const HINT = () => `${cfg.prefix}:account-hint:${cfg.domain}`; // "may be logged in": loads this part, no secret
 let serverState = null; // { loggedIn, customer }
 async function serverFetch(path, { method = 'GET', body } = {}) {

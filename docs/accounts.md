@@ -74,7 +74,7 @@ in Shopify.
 ```js
 window.TETHER_CONFIG = {
   …,
-  account: { server: 'https://your-shop.com/_tether/account' },
+  account: { server: '/_tether/account' },   // or the full URL: 'https://your-shop.com/_tether/account'
 };
 ```
 

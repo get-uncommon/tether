@@ -620,7 +620,7 @@ test('customer accounts: PKCE login URL, callback checks state/nonce, cart linke
 test('customer accounts in server mode: no token in the browser, the Worker does the work', async () => {
   const acc = await import('../src/account.js');
   const nav = [];
-  Tether.config.account = { server: 'https://astro.test/_tether/account', navigate: (u) => nav.push(u) };
+  Tether.config.account = { server: '/_tether/account', navigate: (u) => nav.push(u) }; // a path on this site works too
   const realFetch = globalThis.fetch;
   const asked = [];
   globalThis.fetch = async (url, init = {}) => {

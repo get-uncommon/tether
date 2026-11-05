@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.2 (2026-11-05)
+
+- Customer accounts: `account.server` can be a path on your own site (`'/_tether/account'`)
+  instead of a full URL, so the same config works on every domain the site runs on.
+
 ## 0.6.1 (2026-11-04)
 
 **Customer accounts, server mode: fixes from an independent security review** (nothing critical
