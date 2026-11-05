@@ -322,17 +322,10 @@
       a.setAttribute("href", u || `https://${cfg.domain}/account`);
     });
     if (!logged) return;
-    const binds = qsa(root, sel("account-bind"));
-    if (binds.length) {
-      const c = await customer().catch((err) => {
-        reportError(err, "account");
-        return null;
-      });
-      binds.forEach((el) => {
-        const v = { "first-name": c?.firstName, "last-name": c?.lastName, name: c?.displayName, email: c?.emailAddress?.emailAddress, address: c?.defaultAddress?.formatted?.join(", ") }[get(el, "account-bind")];
-        if (v != null) setText(el, v);
-      });
-    }
+    await bindCustomer(root);
+    await Promise.all([renderOrderList(root), PAGE_ATTRS.some((n) => qsa(root, sel(n)).length) ? pages().then((m6) => m6.renderPages(root)) : null]);
+  }
+  async function renderOrderList(root) {
     const lists = qsa(root, sel("orders"));
     if (lists.length) {
       const ordersShow = (loading, empty) => qsa(root, sel("show")).forEach((el) => {
@@ -369,7 +362,6 @@
         if (get(node, "order-bind") === "url" && orderUrl(o)) node.setAttribute("href", orderUrl(o));
       }));
     }
-    if (PAGE_ATTRS.some((n) => qsa(root, sel(n)).length)) await (await pages()).renderPages(root);
   }
   var nid = (g) => String(g || "").split("/").pop().split("?")[0];
   function orderUrl(o) {
@@ -392,9 +384,21 @@
   }
   var PAGE_ATTRS = ["order", "addresses", "subscriptions", "profile-form", "address-form"];
   var pagesPart = null;
+  async function bindCustomer(root) {
+    const binds = qsa(root, sel("account-bind"));
+    if (!binds.length) return;
+    const c = await customer().catch((err) => {
+      reportError(err, "account");
+      return null;
+    });
+    binds.forEach((el) => {
+      const v = { "first-name": c?.firstName, "last-name": c?.lastName, name: c?.displayName, email: c?.emailAddress?.emailAddress, address: c?.defaultAddress?.formatted?.join(", ") }[get(el, "account-bind")];
+      if (v != null) setText(el, v);
+    });
+  }
   function pages() {
     pagesPart || (pagesPart = loadPart("account-pages").then((m6) => {
-      m6.setup({ server, serverFetch, query, customer, reset: () => {
+      m6.setup({ server, serverFetch, query, customer, bindCustomer, reset: () => {
         customerCache = null;
         serverState = null;
       } });

@@ -76,12 +76,13 @@
     return s;
   };
   var ADDRESS_FIELDS = ["firstName", "lastName", "company", "address1", "address2", "city", "zip", "zoneCode", "phoneNumber"];
-  function addressInput(a = {}) {
+  function addressInput(a = {}, { clear = false } = {}) {
     if (!a || typeof a !== "object" || Array.isArray(a)) throw new InputError("address");
     const out = {};
     ADDRESS_FIELDS.forEach((k) => {
       const v = text(a[k]);
       if (v !== void 0) out[k] = v;
+      else if (clear && k in a && (a[k] === "" || a[k] === null)) out[k] = "";
     });
     if (a.countryCode != null && a.countryCode !== "") {
       const c = String(a.countryCode).toUpperCase();
@@ -118,7 +119,7 @@
       return { addresses: (c?.addresses?.nodes || []).map((a) => ({ ...a, isDefault: a.id === def })) };
     },
     async saveAddress(ask, { id, address, isDefault }) {
-      const a = addressInput(address || {});
+      const a = addressInput(address || {}, { clear: Boolean(id) });
       const def = isDefault === true ? true : void 0;
       const p = id ? userErrors((await ask(M.addressUpdate, { id: idOf("CustomerAddress", id), address: Object.keys(a).length ? a : null, default: def ?? null }))?.customerAddressUpdate) : userErrors((await ask(M.addressCreate, { address: a, default: def ?? false }))?.customerAddressCreate);
       return { address: p.customerAddress };
@@ -332,7 +333,9 @@
       qsa(row, sel("fulfillment-bind")).concat(row.matches(sel("fulfillment-bind")) ? [row] : []).forEach((b) => {
         const k = get(b, "fulfillment-bind");
         if (k === "url") {
-          if (https(t.url)) b.setAttribute("href", t.url);
+          const ok = https(t.url);
+          if (ok) b.setAttribute("href", t.url);
+          show(b, ok);
           return;
         }
         const v = { status: lower(f.latestShipmentStatus || f.status), date: date(f.createdAt), eta: f.estimatedDeliveryAt ? date(f.estimatedDeliveryAt) : "", company: t.company || "", number: t.number || "" }[k];
@@ -347,7 +350,7 @@
       cancelled: Boolean(o.cancelledAt),
       shipped: ships.length > 0,
       returnable: [...returnable.values()].some((q) => q > 0),
-      "has-returns": (o.returns?.nodes || []).length > 0,
+      "has-returns": el.dataset.tetherReturned !== "1" && (o.returns?.nodes || []).length > 0,
       "return-requested": el.dataset.tetherReturned === "1"
     });
     state("ready");
@@ -365,13 +368,15 @@
     const boxes = qsa(root, sel("addresses"));
     if (!boxes.length) return;
     showGlobal(root, { "addresses-loading": true, "addresses-empty": false });
-    let list = [];
+    let list;
     try {
       list = addressCache = await addresses();
     } catch (err) {
       reportError(err, "addresses");
+      showGlobal(root, { "addresses-loading": false, "addresses-error": true });
+      return;
     }
-    showGlobal(root, { "addresses-loading": false, "addresses-empty": list.length === 0 });
+    showGlobal(root, { "addresses-loading": false, "addresses-empty": list.length === 0, "addresses-error": false });
     boxes.forEach((box) => repeat(box, list, (row, a) => {
       row.dataset.tetherAddress = a.id;
       qsa(row, sel("address-bind")).concat(row.matches(sel("address-bind")) ? [row] : []).forEach((b) => {
@@ -403,13 +408,15 @@
     const boxes = qsa(root, sel("subscriptions"));
     if (!boxes.length) return;
     showGlobal(root, { "subscriptions-loading": true, "subscriptions-empty": false });
-    let list = [];
+    let list;
     try {
       list = await subscriptions();
     } catch (err) {
       reportError(err, "subscriptions");
+      showGlobal(root, { "subscriptions-loading": false, "subscriptions-error": true });
+      return;
     }
-    showGlobal(root, { "subscriptions-loading": false, "subscriptions-empty": list.length === 0 });
+    showGlobal(root, { "subscriptions-loading": false, "subscriptions-empty": list.length === 0, "subscriptions-error": false });
     boxes.forEach((box) => repeat(box, list, (row, c) => {
       row.dataset.tetherSubscription = c.id;
       row.setAttribute(attr("subscription-status"), lower(c.status));
@@ -464,6 +471,7 @@
   }
   var fieldsOf = (form) => Object.fromEntries([...form.elements].filter((i) => i.name && i.type !== "submit" && i.type !== "button" && i.type !== "checkbox").map((i) => [i.name, i.value]));
   async function act(el, fn, { error } = {}) {
+    if (el.getAttribute("aria-busy") === "true") return void 0;
     el.classList.add("is-busy");
     el.setAttribute("aria-busy", "true");
     el.setAttribute(attr("form-state"), "pending");
@@ -488,7 +496,10 @@
       const f = e.target;
       if (f.matches?.(sel("profile-form"))) {
         e.preventDefault();
-        act(f, () => updateProfile(fieldsOf(f)));
+        act(f, async () => {
+          await updateProfile(fieldsOf(f));
+          await ctx.bindCustomer?.(document);
+        });
       } else if (f.matches?.(sel("address-form"))) {
         e.preventDefault();
         const id = f.dataset.tetherAddressId || void 0;
@@ -500,7 +511,7 @@
           await renderAddresses(document);
         });
       }
-    });
+    }, true);
     document.addEventListener("input", (e) => {
       if (e.target.closest?.(sel("profile-form"))) e.target.dataset.tetherTouched = "1";
     });
@@ -547,12 +558,14 @@
         const sub = btn.closest("[data-tether-subscription]");
         const a = get(btn, "subscription-action");
         if (!sub || !SUB_ACTIONS.includes(a) || btn.disabled || !confirmOk(btn)) return;
+        const id = sub.dataset.tetherSubscription;
         sub.setAttribute(attr("subscription-state"), "pending");
         act(sub, async () => {
-          await subscriptionAction(sub.dataset.tetherSubscription, a);
+          await subscriptionAction(id, a);
           await renderSubscriptions(document);
         }).then(() => {
-          sub.setAttribute(attr("subscription-state"), sub.getAttribute(attr("form-state")) === "error" ? "error" : "done");
+          const state = sub.getAttribute(attr("form-state")) === "error" ? "error" : "done";
+          qsa(document, "[data-tether-subscription]").filter((r) => r === sub || r.dataset.tetherSubscription === id).forEach((r) => r.setAttribute(attr("subscription-state"), state));
         });
       } else if (btn = t.closest?.(sel("order-return"))) {
         e.preventDefault();

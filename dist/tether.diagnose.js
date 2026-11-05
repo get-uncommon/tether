@@ -189,8 +189,10 @@
     "orders-loading",
     "addresses-loading",
     "addresses-empty",
+    "addresses-error",
     "subscriptions-loading",
-    "subscriptions-empty"
+    "subscriptions-empty",
+    "subscriptions-error"
   ]);
   var BIND = /* @__PURE__ */ new Set([
     "title",

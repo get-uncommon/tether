@@ -1077,29 +1077,34 @@
     },
     /** Cart-level attributes, merged with existing ones. Value '' removes a key. */
     setAttributes(obj) {
-      const merged = new Map((this.state?.attributes || []).map((a) => [a.key, a.value]));
-      toAttributes(obj).forEach((a) => merged.set(a.key, a.value));
-      const attributes = [...merged].filter(([, v]) => v !== "").map(([key, value]) => ({ key, value }));
-      return this._queue(async () => this._commit(
-        await this._mutate("cartAttributesUpdate", "$attributes: [AttributeInput!]!", "attributes: $attributes", { attributes }, { attributes }),
-        "attributes"
-      ));
+      const add = toAttributes(obj);
+      return this._queue(async () => {
+        const merged = new Map((this.state?.attributes || []).map((a) => [a.key, a.value]));
+        add.forEach((a) => merged.set(a.key, a.value));
+        const attributes = [...merged].filter(([, v]) => v !== "").map(([key, value]) => ({ key, value }));
+        return this._commit(
+          await this._mutate("cartAttributesUpdate", "$attributes: [AttributeInput!]!", "attributes: $attributes", { attributes }, { attributes }),
+          "attributes"
+        );
+      });
     },
     /** Replaces the discount codes. Pass [] to remove all. */
     setDiscountCodes(codes) {
-      const discountCodes = (Array.isArray(codes) ? codes : [codes]).map((c) => String(c).trim()).filter(Boolean);
-      return this._queue(async () => this._commit(
-        await this._mutate("cartDiscountCodesUpdate", "$discountCodes: [String!]!", "discountCodes: $discountCodes", { discountCodes }, { discountCodes }),
-        "discount"
-      ));
+      return this._queue(async () => {
+        const list = typeof codes === "function" ? codes((this.state?.discountCodes || []).map((d) => d.code)) : codes;
+        const discountCodes = (Array.isArray(list) ? list : [list]).map((c) => String(c).trim()).filter(Boolean);
+        return this._commit(
+          await this._mutate("cartDiscountCodesUpdate", "$discountCodes: [String!]!", "discountCodes: $discountCodes", { discountCodes }, { discountCodes }),
+          "discount"
+        );
+      });
     },
     /**
      * Adds a code. A code Shopify doesn't accept isn't kept in the cart (it would warn on every change):
      * it's removed again and the promise rejects with code INVALID_DISCOUNT.
      */
     async applyDiscount(code) {
-      const current = (this.state?.discountCodes || []).map((d) => d.code);
-      const cart = await this.setDiscountCodes([.../* @__PURE__ */ new Set([...current, code])]);
+      const cart = await this.setDiscountCodes((current) => [.../* @__PURE__ */ new Set([...current, code])]);
       const hit = (cart?.discountCodes || []).find((d) => d.code.toLowerCase() === String(code).toLowerCase());
       if (hit?.applicable) return cart;
       await this.removeDiscount(code).catch(() => {
@@ -1108,7 +1113,7 @@
     },
     removeDiscount(code) {
       const k = String(code).toLowerCase();
-      return this.setDiscountCodes((this.state?.discountCodes || []).map((d) => d.code).filter((c) => c.toLowerCase() !== k));
+      return this.setDiscountCodes((current) => current.filter((c) => c.toLowerCase() !== k));
     },
     /** { countryCode, email, phone } — changes currency/prices for that market. */
     setBuyerIdentity(buyerIdentity, { create = true } = {}) {
@@ -1137,8 +1142,10 @@
         }
       }
       try {
-        const data = await gql("query TetherCheckout($id: ID!) { cart(id: $id) { checkoutUrl } }", { id });
-        let url = this.beforeCheckout && await this.beforeCheckout().catch(() => null) || data.cart?.checkoutUrl;
+        const fresh = gql("query TetherCheckout($id: ID!) { cart(id: $id) { checkoutUrl } }", { id }).then((d) => d.cart?.checkoutUrl);
+        fresh.catch(() => {
+        });
+        let url = this.beforeCheckout && await this.beforeCheckout().catch(() => null) || await fresh;
         if (url && this.customerAccessToken) url += `${url.includes("?") ? "&" : "?"}logged_in=true`;
         if (!url) throw new TetherError("No checkoutUrl (cart empty or expired)");
         emit("checkout", { url, cart: this.state });
@@ -2256,11 +2263,13 @@
   coreModules["lazy.js"] = { loadPart, coreModules };
 
   // src/index.js
-  var VERSION = "0.6.6";
+  var VERSION = "0.6.7";
   var initPromise = null;
   var observer = null;
+  var mountedBody = null;
   function mount(root = document) {
     if (!isConfigured()) return 0;
+    if (root === document) mountedBody = document.body;
     let count = 0;
     pruneLive();
     hydrateFromPage(root);
@@ -2431,9 +2440,12 @@
         onPageMarket = Boolean(pageMarket());
         const differs = target?.country && (String(target.country).toUpperCase() !== String(cfg.country || "").toUpperCase() || String(target.language || "").toUpperCase() !== String(cfg.language || "").toUpperCase());
         if (differs) setCountry(target.country, { language: target.language ?? null, locale: target.locale, remember: false }).then(() => mount(document), () => mount(document));
-        else mount(document);
+        else if (mountedBody !== document.body) mount(document);
       }));
-      document.addEventListener("astro:before-swap", () => unmount());
+      document.addEventListener("astro:before-swap", () => {
+        mountedBody = null;
+        unmount();
+      });
     }
     window.addEventListener("online", () => {
       retryFailed();
