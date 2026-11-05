@@ -66,7 +66,7 @@ Site settings → Custom code → **Head**:
 
 **Versions:** `@0.6` gets every 0.6.x fix automatically (recommended), `@v0.6.4` pins one release,
 `@latest` always takes the newest. Hosting the file yourself? Put the optional parts next to it (`tether.markets.min.js`,
-`tether.search.min.js`, `tether.account.min.js`, `tether.analytics.min.js`, `tether.extras.min.js`,
+`tether.search.min.js`, `tether.account.min.js`, `tether.account-pages.min.js`, `tether.analytics.min.js`, `tether.extras.min.js`,
 `tether.diagnose.min.js`): each loads only when a page uses it.
 
 ## 3. Add attributes in the Designer

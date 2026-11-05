@@ -768,3 +768,99 @@ test('tether-products="url:q": a search results page on a static site', async ()
   assert.equal(search?.variables.query, 'tee shirt');
   window.history.replaceState(null, '', '/');
 });
+
+test('account pages (server mode): order page with returns, subscriptions with actions, addresses, profile', async () => {
+  const acc = await import('../src/account.js?pages'); // a fresh instance: an earlier test logged out
+  Tether.config.account = { server: '/_tether/account', orderUrl: '/account/order?id={id}', subscriptionsUrl: 'https://shopify.com/1/account/pages/subs' };
+  const realFetch = globalThis.fetch;
+  const posts = [];
+  let status = 'ACTIVE';
+  const money = (a) => ({ amount: a, currencyCode: 'EUR' });
+  globalThis.fetch = async (url, init = {}) => {
+    const u = new URL(String(url), 'https://astro.test');
+    if (!u.pathname.startsWith('/_tether/account')) return realFetch(url, init);
+    const path = u.pathname.slice('/_tether/account'.length);
+    const ok = (d) => ({ ok: true, status: 200, json: async () => d });
+    if (init.method === 'POST') { assert.equal(init.headers['X-Tether-Account'], '1'); posts.push({ path, body: JSON.parse(init.body) }); }
+    if (path === '/me') return ok({ loggedIn: true, customer: { firstName: 'Ada', lastName: 'L', email: 'ada@x.test' } });
+    if (path === '/orders') return ok({ orders: [{ id: 'gid://shopify/Order/7', name: '#1007', totalPrice: money('10'), lineItems: { nodes: [] } }] });
+    if (path === '/order') return ok({ ok: true, order: { id: 'gid://shopify/Order/7', name: '#1007', processedAt: '2026-11-01', totalPrice: money('10'), subtotal: money('8'), totalShipping: money('2'), financialStatus: 'PAID', fulfillmentStatus: 'FULFILLED', shippingAddress: { formatted: ['Street 1', 'Utrecht'] },
+      lineItems: { nodes: [{ id: 'gid://shopify/LineItem/1', title: 'Tee', quantity: 2, price: money('4'), suggestedReturnReasonDefinitions: { nodes: [{ id: 'gid://shopify/ReturnReasonDefinition/1', name: 'Too big' }] } }] },
+      fulfillments: { nodes: [{ status: 'SUCCESS', createdAt: '2026-11-02', trackingInformation: [{ company: 'PostNL', number: '3S123', url: 'https://track.example/3S123' }] }] },
+      returnInformation: { returnableLineItems: { nodes: [{ quantity: 2, lineItem: { id: 'gid://shopify/LineItem/1' } }] } }, returns: { nodes: [] } } });
+    if (path === '/subscriptions') return ok({ ok: true, subscriptions: [{ id: 'gid://shopify/SubscriptionContract/5', status, nextBillingDate: '2026-12-01', currencyCode: 'EUR', deliveryPolicy: { interval: 'MONTH', intervalCount: { count: 1 } },
+      lines: { nodes: [{ title: 'Socks', quantity: 1, currentPrice: money('9'), lineDiscountedPrice: money('9') }] }, upcomingBillingCycles: { nodes: [{ cycleIndex: 2, skipped: false }] } }] });
+    if (path === '/subscription') { status = 'PAUSED'; return ok({ ok: true, contract: { status } }); }
+    if (path === '/addresses') return ok({ ok: true, addresses: [{ id: 'gid://shopify/CustomerAddress/1', city: 'Utrecht', formatted: ['Street 1', 'Utrecht'], isDefault: true }] });
+    if (path === '/address') return { ok: false, status: 400, json: async () => ({ error: 'City is required', userErrors: [{ message: 'City is required' }] }) };
+    if (path === '/return') return ok({ ok: true, return: { id: 'gid://shopify/Return/1', status: 'REQUESTED' } });
+    if (path === '/profile') return ok({ ok: true, customer: { firstName: 'Ada' } });
+    return ok({});
+  };
+  try {
+    window.history.replaceState(null, '', '/account/order?id=7');
+    document.body.innerHTML = `
+      <a id="subs" tether-account-link="subscriptions" href="#">Manage</a>
+      <ul tether-orders><li><a tether-order-bind="url"><span tether-order-bind="name"></span></a></li></ul>
+      <section tether-order="url:id">
+        <p tether-order-show="loading">Loading</p>
+        <h1 tether-order-bind="name"></h1><span id="ship" tether-order-bind="shipping-address"></span><span id="tot" tether-order-bind="total"></span>
+        <div tether-order-lines><div><span tether-order-line="title"></span><span tether-order-line="price"></span>
+          <input tether-return-quantity type="number"><select tether-return-reason></select></div></div>
+        <div tether-order-fulfillments><p><span tether-fulfillment-bind="company"></span> <a tether-fulfillment-bind="url" tether-fulfillment-bind-text="number"></a></p></div>
+        <button id="ret" tether-order-show="returnable" tether-order-return>Return</button>
+        <p id="done" tether-order-show="return-requested" hidden>Requested</p>
+      </section>
+      <p id="sl" tether-show="subscriptions-loading"></p><p id="se" tether-show="subscriptions-empty"></p>
+      <div tether-subscriptions><div><span tether-subscription-bind="status"></span> <span tether-subscription-bind="interval"></span>
+        <button id="pause" tether-subscription-action="pause">Pause</button><button id="resume" tether-subscription-action="resume">Resume</button>
+        <span tether-subscription-show="paused" hidden>Paused</span></div></div>
+      <ul tether-addresses><li><span tether-address-bind="formatted"></span><b tether-address-show="default" hidden>Default</b></li></ul>
+      <form tether-address-form><input name="address1" value="x"><p tether-form-error></p><button>Save</button></form>
+      <form tether-profile-form><input name="firstName"><input name="lastName"></form>`;
+    await acc.mountAccount(document);
+    const $ = (q) => document.querySelector(q);
+    const visible = (el) => window.getComputedStyle(el).display !== 'none';
+    assert.equal($('#subs').getAttribute('href'), 'https://shopify.com/1/account/pages/subs');
+    assert.equal($('[tether-orders] a').getAttribute('href'), '/account/order?id=7', 'list links to the site\'s own order page');
+    assert.equal($('[tether-order] h1').textContent, '#1007');
+    assert.equal($('#ship').textContent, 'Street 1, Utrecht');
+    assert.equal($('[tether-order-line="title"]').textContent, 'Tee');
+    assert.equal($('[tether-fulfillment-bind="company"]').textContent, 'PostNL');
+    assert.equal($('[tether-fulfillment-bind="url"]').getAttribute('href'), 'https://track.example/3S123');
+    assert.equal($('[tether-return-quantity]').max, '2');
+    assert.equal($('[tether-return-reason]').options.length, 1);
+    assert.ok(visible($('#ret')));
+    assert.ok(!visible($('[tether-order-show="loading"]')));
+    // Subscriptions: rendered, states, actions follow the status.
+    assert.equal($('[tether-subscription-bind="status"]').textContent, 'active');
+    assert.equal($('[tether-subscription-bind="interval"]').textContent, 'month');
+    assert.ok(!visible($('#sl')) && !visible($('#se')));
+    assert.equal($('#resume').disabled, true);
+    $('#pause').click();
+    await tick(60);
+    assert.deepEqual(posts.find((p) => p.path === '/subscription').body, { id: 'gid://shopify/SubscriptionContract/5', action: 'pause' });
+    assert.equal($('[tether-subscription-bind="status"]').textContent, 'paused');
+    assert.ok(visible($('[tether-subscription-show="paused"]')));
+    assert.equal($('#pause').disabled, true);
+    // Return request: only lines with a quantity.
+    $('[tether-return-quantity]').value = '1';
+    $('#ret').click();
+    await tick(60);
+    assert.deepEqual(posts.find((p) => p.path === '/return').body, { orderId: 'gid://shopify/Order/7', lines: [{ lineItemId: 'gid://shopify/LineItem/1', quantity: 1, reasonId: 'gid://shopify/ReturnReasonDefinition/1' }] });
+    assert.ok(visible($('#done')));
+    // Addresses: list with default; a Shopify error shows in the form.
+    assert.equal($('[tether-address-bind="formatted"]').textContent, 'Street 1, Utrecht');
+    assert.ok(visible($('[tether-address-show="default"]')));
+    $('[tether-address-form]').dispatchEvent(new window.Event('submit', { cancelable: true, bubbles: true }));
+    await tick(40);
+    assert.equal($('[tether-address-form]').getAttribute('tether-form-state'), 'error');
+    assert.equal($('[tether-address-form] [tether-form-error]').textContent, 'City is required');
+    // Profile form prefilled.
+    assert.equal($('[tether-profile-form] [name="firstName"]').value, 'Ada');
+  } finally {
+    globalThis.fetch = realFetch;
+    Tether.config.account = null;
+    window.history.replaceState(null, '', '/');
+  }
+});

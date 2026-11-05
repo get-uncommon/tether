@@ -73,9 +73,10 @@ test('parts are small and the core is under budget', async () => {
   const gz = async (f) => gzipSync(await readFile(join(DIST, f)), { level: 9 }).length;
   // 20.5 KB: includes server hydration for Astro (0.9 KB), cart warnings, translated option names,
   // quick +/- clicks, cross-tab sync and shareable variant links.
-  assert.ok(await gz('tether.min.js') < 20.5 * 1024, 'core gzip budget');
+  assert.ok(await gz('tether.min.js') < 20.6 * 1024, 'core gzip budget'); // 20.6: account pages attributes in the part trigger
   assert.ok(await gz('tether.search.min.js') < 3 * 1024);
-  assert.ok(await gz('tether.account.min.js') < 4.5 * 1024);
+  assert.ok(await gz('tether.account.min.js') < 5 * 1024);
+  assert.ok(await gz('tether.account-pages.min.js') < 7 * 1024); // order page, addresses, subscriptions, returns: only on those pages
   assert.ok(await gz('tether.extras.min.js') < 1.5 * 1024);
   assert.ok(await gz('tether.markets.min.js') < 3 * 1024);
   assert.ok(await gz('tether.diagnose.min.js') < 6 * 1024); // console only, loaded on demand; knows every attribute for did-you-mean

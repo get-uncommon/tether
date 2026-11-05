@@ -42,7 +42,23 @@ function shopify({ tamper = false, wrongNonce = false } = {}) {
       return ok({ access_token: 'access-1', refresh_token: 'refresh-1', id_token: token, expires_in: 3600 });
     }
     if (u.includes('/account/customer/api/')) {
-      const q = JSON.parse(init.body).query;
+      const { query: q, variables: v = {} } = JSON.parse(init.body);
+      const op = (q.match(/(?:query|mutation)\s+(\w+)/) || [])[1];
+      calls.push({ op, variables: v, auth: init.headers.Authorization });
+      const mine = (id) => ['gid://shopify/Order/1', 'gid://shopify/SubscriptionContract/1', 'gid://shopify/CustomerAddress/1'].includes(id);
+      if (op === 'TetherOrder') return ok({ data: { order: mine(v.id) ? { id: v.id, name: '#1001', lineItems: { nodes: [{ id: 'gid://shopify/LineItem/1', title: 'Tee', quantity: 1 }] }, returnInformation: { returnableLineItems: { nodes: [{ quantity: 1, lineItem: { id: 'gid://shopify/LineItem/1' } }] } } } : null } });
+      if (op === 'TetherAddresses') return ok({ data: { customer: { defaultAddress: { id: 'gid://shopify/CustomerAddress/1' }, addresses: { nodes: [{ id: 'gid://shopify/CustomerAddress/1', city: 'Utrecht' }, { id: 'gid://shopify/CustomerAddress/2', city: 'Delft' }] } } } });
+      if (op === 'TetherSubscriptions') return ok({ data: { customer: { subscriptionContracts: { nodes: [{ id: 'gid://shopify/SubscriptionContract/1', status: 'ACTIVE' }] } } } });
+      if (op === 'TetherContract') return ok({ data: { customer: { subscriptionContract: mine(v.id) ? { id: v.id, status: 'ACTIVE', upcomingBillingCycles: { nodes: [{ cycleIndex: 3, skipped: false }] } } : null } } });
+      if (op === 'TetherProfile') return ok({ data: { customerUpdate: { customer: v.input, userErrors: [] } } });
+      if (op === 'TetherAddressCreate') return ok({ data: { customerAddressCreate: { customerAddress: { id: 'gid://shopify/CustomerAddress/9', ...v.address }, userErrors: v.address.city ? [] : [{ field: ['city'], message: 'City is required' }] } } });
+      if (op === 'TetherAddressUpdate') return ok({ data: { customerAddressUpdate: { customerAddress: { id: v.id, ...v.address }, userErrors: [] } } });
+      if (op === 'TetherAddressDelete') return ok({ data: { customerAddressDelete: { deletedAddressId: v.id, userErrors: [] } } });
+      if (op === 'TetherPause') return ok({ data: { subscriptionContractPause: { contract: { id: v.id, status: 'PAUSED' }, userErrors: [] } } });
+      if (op === 'TetherResume') return ok({ data: { subscriptionContractActivate: { contract: { id: v.id, status: 'ACTIVE' }, userErrors: [] } } });
+      if (op === 'TetherCancel') return ok({ data: { subscriptionContractCancel: { contract: { id: v.id, status: 'CANCELLED' }, userErrors: [] } } });
+      if (op === 'TetherSkip') return ok({ data: { subscriptionBillingCycleSkip: { billingCycle: { cycleIndex: v.input.selector.index, skipped: true }, userErrors: [] } } });
+      if (op === 'TetherReturn') return ok({ data: { orderRequestReturn: { return: { id: 'gid://shopify/Return/1', status: 'REQUESTED' }, userErrors: [] } } });
       if (/TetherOrders/.test(q)) return ok({ data: { customer: { orders: { nodes: [{ id: 'o1', name: '#1001', totalPrice: { amount: '10.0', currencyCode: 'EUR' } }] } } } });
       return ok({ data: { customer: { id: 'c1', firstName: 'Ada', lastName: 'L', displayName: 'Ada L', emailAddress: { emailAddress: 'ada@x.test' }, defaultAddress: null } } });
     }
@@ -266,4 +282,66 @@ test('the store domain refuses Workers (403 on .well-known): addresses come from
   const me = await run(req('/me', { origin: SITE, cookie }));
   assert.equal((await me.json()).customer.firstName, 'Ada');
   assert.ok(asked.some((u) => u.startsWith('https://shopify.com/1/account/customer/api/')), 'the Customer Account API by shop id');
+});
+
+test('account operations: fixed routes, own data only, CSRF and origin rules, validated input', async () => {
+  const { run, cookie, sh } = await loginFlow();
+  const get = (path) => run(req(path, { origin: SITE, cookie }));
+  const post = (path, body, opts = {}) => run(req(path, { method: 'POST', origin: SITE, cookie, body, ...opts }));
+  const body = async (r) => ({ status: r.status, ...(await r.json()) });
+
+  // Order detail: own order, numeric id accepted; someone else's order is null; a wrong id type is refused.
+  assert.equal((await body(await get('/order?id=1'))).order.name, '#1001');
+  assert.equal((await body(await get('/order?id=gid://shopify/Order/2'))).order, null);
+  assert.equal((await get('/order?id=gid://shopify/Customer/1')).status, 400);
+  assert.equal((await get('/order?id=1%20OR%201')).status, 400);
+
+  // Addresses: list (default marked), create with validation errors passed on, update, delete.
+  const list = await body(await get('/addresses'));
+  assert.deepEqual(list.addresses.map((a) => a.isDefault), [true, false]);
+  const created = await body(await post('/address', { address: { city: 'Leiden', countryCode: 'nl', evil: 'x', address1: 'Breestraat 1' }, isDefault: true }));
+  assert.equal(created.address.city, 'Leiden');
+  const sent = sh.calls.findLast((c) => c.op === 'TetherAddressCreate').variables;
+  assert.deepEqual(Object.keys(sent.address).sort(), ['address1', 'city', 'countryCode']);
+  assert.equal(sent.address.countryCode, 'NL');
+  assert.equal(sent.default, true);
+  const invalid = await body(await post('/address', { address: { address1: 'No city' } }));
+  assert.equal(invalid.status, 400);
+  assert.match(invalid.error, /City is required/);
+  assert.equal((await post('/address', { address: { city: 'x'.repeat(300) } })).status, 400);
+  assert.equal((await post('/address', { address: { city: 'X' }, id: 'gid://shopify/Order/1' })).status, 400, 'wrong id type');
+  assert.equal((await body(await post('/address/delete', { id: 'gid://shopify/CustomerAddress/2' }))).deleted, 'gid://shopify/CustomerAddress/2');
+
+  // Profile: only first and last name reach Shopify.
+  await post('/profile', { firstName: 'Ada', lastName: 'Lovelace', email: 'x@evil.test' });
+  assert.deepEqual(sh.calls.findLast((c) => c.op === 'TetherProfile').variables.input, { firstName: 'Ada', lastName: 'Lovelace' });
+
+  // Subscriptions: list; actions only on the customer's own contract, looked up through the customer first.
+  assert.equal((await body(await get('/subscriptions'))).subscriptions[0].status, 'ACTIVE');
+  assert.equal((await body(await post('/subscription', { id: 1, action: 'pause' }))).contract.status, 'PAUSED');
+  assert.equal((await body(await post('/subscription', { id: 1, action: 'resume' }))).contract.status, 'ACTIVE');
+  assert.equal((await body(await post('/subscription', { id: 1, action: 'skip' }))).billingCycle.cycleIndex, 3, 'skips the next unskipped cycle');
+  assert.equal((await body(await post('/subscription', { id: 1, action: 'cancel' }))).contract.status, 'CANCELLED');
+  const before = sh.calls.length;
+  const foreign = await post('/subscription', { id: 'gid://shopify/SubscriptionContract/2', action: 'cancel' });
+  assert.equal(foreign.status, 404, 'not the customer\'s contract');
+  assert.ok(!sh.calls.slice(before).some((c) => c.op === 'TetherCancel'), 'no mutation for a foreign contract');
+  assert.equal((await post('/subscription', { id: 1, action: 'delete' })).status, 400);
+
+  // Returns: validated lines.
+  assert.equal((await body(await post('/return', { orderId: 1, lines: [{ lineItemId: 1, quantity: 1, note: 'Too big' }] }))).return.status, 'REQUESTED');
+  assert.equal((await post('/return', { orderId: 1, lines: [{ lineItemId: 1, quantity: 0 }] })).status, 400);
+  assert.equal((await post('/return', { orderId: 1, lines: [] })).status, 400);
+
+  // Every call used the session's own token.
+  assert.ok(sh.calls.filter((c) => c.op).every((c) => /^access-/.test(c.auth)));
+
+  // CSRF and origin: no header -> refused; other origin -> refused; no cookie -> 401; GET-only routes refuse POST.
+  const n = sh.calls.length;
+  assert.equal((await post('/subscription', { id: 1, action: 'cancel' }, { header: false })).status, 400);
+  assert.equal((await run(req('/subscription', { method: 'POST', origin: 'https://evil.example', cookie, body: { id: 1, action: 'cancel' } }))).status, 403);
+  assert.equal((await run(req('/address/delete', { method: 'POST', origin: SITE, body: { id: 1 } }))).status, 401);
+  assert.equal((await run(req('/subscriptions', { origin: SITE }))).status, 401);
+  assert.equal((await run(req('/subscriptions', { method: 'POST', origin: SITE, cookie, body: {} }))).status, 404);
+  assert.equal(sh.calls.length, n, 'nothing reached Shopify');
 });

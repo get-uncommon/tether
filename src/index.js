@@ -51,7 +51,7 @@ export function mount(root = document) {
   }
 
   // Customer accounts: their own optional part, when configured and the page (or a login) needs it.
-  if ((cfg.account?.clientId || cfg.account?.server) && (within(root, `[${attr('account-login')}],[${attr('account-bind')}],[${attr('orders')}],[${attr('show')}^="logged-"]`).length
+  if ((cfg.account?.clientId || cfg.account?.server) && (within(root, ['account-login', 'account-bind', 'account-link', 'orders', 'order', 'addresses', 'subscriptions', 'profile-form', 'address-form'].map((n) => `[${attr(n)}]`).join(',') + `,[${attr('show')}^="logged-"]`).length
     || /[?&]code=/.test(window.location.search) || hasAccountSession())) {
     loadPart('account').then((m) => m.mountAccount(root)).catch((err) => reportError(err, 'account'));
   }
@@ -61,9 +61,6 @@ export function mount(root = document) {
     loadPart('search').then((m) => m.mountSearch(root)).catch((err) => reportError(err, 'search'));
   }
 
-  qsa(root, sel('account-link')).forEach((a) => {
-    a.setAttribute('href', `https://${cfg.domain}/account`);
-  });
 
   settleMarket();
   Cart.render();

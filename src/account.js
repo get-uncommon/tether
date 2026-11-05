@@ -21,8 +21,9 @@
  */
 import { cfg, log, reportError } from './config.js';
 import { TetherError } from './client.js';
-import { sel, get, qsa, setText, setImage, repeat, show, formatMoney, emit } from './dom.js';
+import { attr, sel, get, qsa, setText, setImage, repeat, show, formatMoney, emit } from './dom.js';
 import { Cart } from './cart.js';
+import { loadPart } from './lazy.js';
 
 const KEY = () => `${cfg.prefix}:account:${cfg.domain}`;
 const PENDING = () => `${cfg.prefix}:account-login:${cfg.domain}`;
@@ -52,7 +53,7 @@ async function serverFetch(path, { method = 'GET', body } = {}) {
     body: body ? JSON.stringify(body) : undefined,
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok && res.status !== 401) throw new TetherError(`Customer accounts: ${data.error || res.status}`, { status: res.status });
+  if (!res.ok && res.status !== 401) throw new TetherError(`Customer accounts: ${data.error || res.status}`, { status: res.status, userErrors: data.userErrors });
   return data;
 }
 async function serverMe() {
@@ -227,6 +228,7 @@ export async function orders({ first = 10 } = {}) {
   return data.customer?.orders?.nodes || [];
 }
 
+
 /** Logs out here and at Shopify, unlinks the cart. */
 export async function logout({ returnTo = cfg.account?.logoutUrl || `${window.location.origin}/` } = {}) {
   if (server()) {
@@ -261,6 +263,13 @@ export async function render(root = document) {
     if (k === 'logged-in') show(el, logged);
     if (k === 'logged-out') show(el, !logged);
   });
+  // Shopify's own pages, for what has to stay there: tether-account-link="subscriptions" / "payment"
+  // (account.subscriptionsUrl / paymentUrl), or the account itself.
+  qsa(root, sel('account-link')).forEach((a) => {
+    const k = get(a, 'account-link');
+    const u = (k === 'payment' && (cfg.account?.paymentUrl || cfg.account?.subscriptionsUrl)) || (k === 'subscriptions' && cfg.account?.subscriptionsUrl);
+    a.setAttribute('href', u || `https://${cfg.domain}/account`);
+  });
   if (!logged) return;
   const binds = qsa(root, sel('account-bind'));
   if (binds.length) {
@@ -286,24 +295,59 @@ export async function render(root = document) {
       const items = o.lineItems?.nodes || [];
       qsa(node, sel('order-bind')).forEach((el) => {
         const k = get(el, 'order-bind');
-        if (k === 'url') { if (https(o.statusPageUrl)) el.setAttribute('href', o.statusPageUrl); return; }
+        if (k === 'url') { const u = orderUrl(o); if (u) el.setAttribute('href', u); return; }
         if (k === 'image') { const im = items.find((l) => l.image)?.image; if (im) setImage(el, im.url, im.altText || items[0]?.title || ''); return; }
         const v = { name: o.name, date: date(o.processedAt), total: formatMoney(o.totalPrice), status: o.financialStatus?.toLowerCase(), fulfillment: o.fulfillmentStatus?.toLowerCase(), items: items.map((l) => `${l.quantity}× ${l.title}`).join(', ') }[k];
         if (v != null) setText(el, v);
       });
       // Per product of the order: <div tether-order-lines><div><img tether-order-line="image"> <span tether-order-line="title"></span></div></div>
-      qsa(node, sel('order-lines')).forEach((box) => repeat(box, items, (row, l) => {
-        qsa(row, sel('order-line')).concat(row.matches(sel('order-line')) ? [row] : []).forEach((el) => {
-          const k = get(el, 'order-line');
-          if (k === 'image') { if (l.image) setImage(el, l.image.url, l.image.altText || l.title); return; }
-          const v = { title: l.title, 'variant-title': l.variantTitle || '', quantity: String(l.quantity) }[k];
-          if (v != null) setText(el, v);
-        });
-      }));
-      if (get(node, 'order-bind') === 'url' && https(o.statusPageUrl)) node.setAttribute('href', o.statusPageUrl);
+      qsa(node, sel('order-lines')).forEach((box) => fillLines(box, items));
+      if (get(node, 'order-bind') === 'url' && orderUrl(o)) node.setAttribute('href', orderUrl(o));
     }));
   }
+  if (PAGE_ATTRS.some((n) => qsa(root, sel(n)).length)) await (await pages()).renderPages(root);
 }
+
+
+const nid = (g) => String(g || '').split('/').pop().split('?')[0];
+/** The order's page: your own (account.orderUrl: '/account/order?id={id}') or Shopify's status page. */
+function orderUrl(o) {
+  const t = cfg.account?.orderUrl;
+  if (t) return String(t).replace('{id}', encodeURIComponent(nid(o.id)));
+  return https(o.statusPageUrl) ? o.statusPageUrl : null;
+}
+function fillLines(box, items) {
+  repeat(box, items, (row, l) => {
+    qsa(row, sel('order-line')).concat(row.matches(sel('order-line')) ? [row] : []).forEach((el) => {
+      const k = get(el, 'order-line');
+      if (k === 'image') { if (l.image) setImage(el, l.image.url, l.image.altText || l.title); return; }
+      const v = { title: l.title, 'variant-title': l.variantTitle || '', quantity: String(l.quantity) }[k];
+      if (v != null) setText(el, v);
+    });
+  });
+}
+
+// Order page, profile, addresses, subscriptions, returns: their own part (account-pages), loaded
+// only on pages that use them. It gets this module's login state, so both share one session.
+const PAGE_ATTRS = ['order', 'addresses', 'subscriptions', 'profile-form', 'address-form'];
+let pagesPart = null;
+function pages() {
+  pagesPart ||= loadPart('account-pages').then((m) => { m.setup({ server, serverFetch, query, customer, reset: () => { customerCache = null; serverState = null; } }); return m; });
+  return pagesPart;
+}
+const viaPages = (name) => (...a) => pages().then((m) => m[name](...a));
+/** One of the customer's orders, in full (lines, totals, addresses, fulfillments, returns). */
+export const order = viaPages('order');
+export const updateProfile = viaPages('updateProfile');
+export const addresses = viaPages('addresses');
+/** saveAddress({ address1, city, zip, countryCode, … }, { id, isDefault }): creates, or updates with an id. */
+export const saveAddress = viaPages('saveAddress');
+export const deleteAddress = viaPages('deleteAddress');
+export const subscriptions = viaPages('subscriptions');
+/** subscriptionAction(id, 'pause' | 'resume' | 'skip' | 'unskip' | 'cancel') */
+export const subscriptionAction = viaPages('subscriptionAction');
+/** requestReturn(orderId, [{ lineItemId, quantity, reasonId, note }]) */
+export const requestReturn = viaPages('requestReturn');
 
 let bound = false;
 /** Called by the core on mount: finish a login that's coming back, then fill the page. */

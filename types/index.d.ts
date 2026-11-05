@@ -131,7 +131,16 @@ export interface TetherConfig {
   } | null;
   /** Customer accounts (optional part): the Headless channel's Customer Account API client id, and options. */
   account?: {
-    clientId: string;
+    /** Browser mode: the Customer Account API client id. */
+    clientId?: string;
+    /** Server mode (recommended): the Worker's account routes, a URL or a path on this site ('/_tether/account'). */
+    server?: string;
+    /** Your own order page: tether-order-bind="url" links there, e.g. '/account/order?id={id}' (else Shopify's status page). */
+    orderUrl?: string;
+    /** Shopify's subscription management page (tether-account-link="subscriptions"); payment methods are changed there too. */
+    subscriptionsUrl?: string;
+    /** A separate page for payment methods (tether-account-link="payment"); default subscriptionsUrl. */
+    paymentUrl?: string;
     /** The page Shopify sends the visitor back to after login (registered as callback URI). Default: the current page. */
     callbackUrl?: string;
     /** Where Shopify sends the visitor after logout (registered as logout URI). Default: the home page. */
@@ -351,6 +360,15 @@ export interface Tether {
     orders(opts?: { first?: number }): Promise<Array<{ id: string; name: string; processedAt: string; financialStatus?: string; fulfillmentStatus?: string; statusPageUrl: string; totalPrice: Money }>>;
     query<T = any>(query: string, variables?: Record<string, unknown>): Promise<T>;
     getToken(): Promise<string | null>;
+    /** One order in full (lines, totals, addresses, fulfillments with tracking, returnable lines); null if not the customer's. */
+    order(id: string | number): Promise<Record<string, any> | null>;
+    updateProfile(fields: { firstName?: string; lastName?: string }): Promise<{ firstName?: string | null; lastName?: string | null }>;
+    addresses(): Promise<Array<CustomerAddress & { isDefault: boolean }>>;
+    saveAddress(address: Partial<CustomerAddressInput> | null, opts?: { id?: string; isDefault?: boolean }): Promise<CustomerAddress>;
+    deleteAddress(id: string): Promise<string>;
+    subscriptions(): Promise<Array<Record<string, any>>>;
+    subscriptionAction(id: string | number, action: 'pause' | 'resume' | 'skip' | 'unskip' | 'cancel'): Promise<Record<string, any>>;
+    requestReturn(orderId: string | number, lines: Array<{ lineItemId: string; quantity: number; reasonId?: string; note?: string }>): Promise<{ id: string; status: string }>;
   };
   primeProduct(product: ShopifyProduct): void;
   normalizeProductKey(raw: string | number): string | null;
@@ -397,4 +415,12 @@ declare global {
     TETHER_COUNTRY?: string;
     TETHER_LANGUAGE?: string;
   }
+}
+
+export interface CustomerAddressInput {
+  firstName: string; lastName: string; company: string; address1: string; address2: string;
+  city: string; zip: string; zoneCode: string; countryCode: string; phoneNumber: string;
+}
+export interface CustomerAddress extends Partial<CustomerAddressInput> {
+  id: string; province?: string | null; country?: string | null; formatted: string[];
 }

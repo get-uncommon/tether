@@ -41,3 +41,6 @@ export function loadPart(name) {
   });
   return parts[name];
 }
+
+// Parts that load other parts (account -> account-pages) use this same loader.
+coreModules['lazy.js'] = { loadPart, coreModules };

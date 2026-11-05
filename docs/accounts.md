@@ -102,7 +102,7 @@ Shopify only allows `https` addresses, no `localhost`: test on a staging domain 
 <div tether-show="logged-in">
   Hi <span tether-account-bind="first-name"></span>
   <button tether-account-logout>Log out</button>
-  <a tether-account-link>Subscriptions and addresses</a>   <!-- Shopify's account pages -->
+  <a tether-account-link>Your Shopify account</a>   <!-- or ="subscriptions" / "payment" -->
 </div>
 
 <div tether-orders tether-limit="10">                      <!-- first child is the template -->
@@ -126,8 +126,134 @@ Shopify only allows `https` addresses, no `localhost`: test on a staging domain 
 `title`, `variant-title`, `quantity`, `image`.
 
 While logged in, checkout knows the customer (their details filled in, the order in their account).
-Logging out unlinks the cart. **Subscriptions** (skip, pause, cancel) are managed on Shopify's
-account pages, through your subscription app: `tether-account-link` goes there.
+Logging out unlinks the cart.
+
+## On your own site: order pages, profile, addresses, subscriptions, returns
+
+Everything the Customer Account API allows runs on your pages (their own part, 6 KB, loaded only
+where these attributes are). Only what has to stay with Shopify does: the login itself, checkout
+and payment, and changing a saved card.
+
+```js
+account: {
+  server: '/_tether/account',
+  orderUrl: '/account/order?id={id}',   // tether-order-bind="url" links to your order page (default: Shopify's)
+  subscriptionsUrl: 'https://shopify.com/…/account/pages/…', // Shopify Subscriptions → Settings → Subscription management URL
+}
+```
+
+**Order page** (`/account/order?id=1234`):
+
+```html
+<section tether-order="url:id">                        <!-- or tether-order="gid://shopify/Order/…" -->
+  <p tether-order-show="loading">Loading…</p>
+  <p tether-order-show="not-found" hidden>Order not found.</p>
+  <h1 tether-order-bind="name"></h1> <span tether-order-bind="date"></span>
+  <span tether-order-bind="status"></span> · <span tether-order-bind="fulfillment"></span>
+  <div tether-order-lines>
+    <div>
+      <img tether-order-line="image" alt=""> <span tether-order-line="title"></span>
+      <span tether-order-line="variant-title"></span> × <span tether-order-line="quantity"></span>
+      <span tether-order-line="total"></span>
+      <span tether-order-line-show="returnable">                 <!-- only lines that can be returned -->
+        <input tether-return-quantity type="number"> <select tether-return-reason></select>
+        <input tether-return-note placeholder="Note (optional)">
+      </span>
+    </div>
+  </div>
+  <p>Subtotal <span tether-order-bind="subtotal"></span> · Shipping <span tether-order-bind="shipping"></span>
+     · Tax <span tether-order-bind="tax"></span> · Total <span tether-order-bind="total"></span></p>
+  <p tether-order-bind="shipping-address"></p>
+  <div tether-order-fulfillments>
+    <p><span tether-fulfillment-bind="status"></span> <span tether-fulfillment-bind="company"></span>
+       <a tether-fulfillment-bind="url"><span tether-fulfillment-bind="number"></span></a></p>
+  </div>
+  <button tether-order-return tether-order-show="returnable" tether-confirm="Request this return?">Request a return</button>
+  <p tether-order-show="return-requested" hidden>Return requested. We'll email you.</p>
+  <p tether-form-error></p>
+</section>
+```
+
+- `tether-order-bind`: `name`, `date`, `total`, `subtotal`, `shipping`, `tax`, `status`, `fulfillment`,
+  `shipping-address`, `billing-address`, `items`, `cancelled`, `url` (Shopify's status page).
+- `tether-order-line`: `title`, `variant-title`, `quantity`, `price`, `total`, `sku`, `image`, `returnable`.
+- `tether-fulfillment-bind`: `status`, `date`, `eta`, `company`, `number`, `url` (tracking link).
+- `tether-order-show`: `loading`, `ready`, `not-found`, `error`, `shipped`, `cancelled`, `returnable`,
+  `has-returns`, `return-requested`. The order root gets `tether-order-state`.
+- **Returns:** the quantities typed in `tether-return-quantity` (at most what Shopify says is
+  returnable), with the reason from `tether-return-reason` (Shopify's suggested reasons), go to
+  Shopify as a return request. You approve it in the Shopify admin, as usual.
+
+**Profile and addresses:**
+
+```html
+<form tether-profile-form>
+  <input name="firstName"> <input name="lastName"> <button>Save</button>
+  <p tether-form-error></p>
+</form>
+
+<ul tether-addresses>
+  <li>
+    <span tether-address-bind="formatted"></span> <b tether-address-show="default">Default</b>
+    <button tether-address-edit>Edit</button>
+    <button tether-address-default tether-address-show="not-default">Make default</button>
+    <button tether-address-delete tether-confirm="Delete this address?">Delete</button>
+  </li>
+</ul>
+<p tether-show="addresses-empty" hidden>No addresses yet.</p>
+
+<form tether-address-form>                            <!-- new, or the one you clicked Edit on -->
+  <input name="firstName"> <input name="lastName"> <input name="address1"> <input name="address2">
+  <input name="zip"> <input name="city"> <input name="countryCode" placeholder="NL"> <input name="phoneNumber">
+  <label><input type="checkbox" name="isDefault"> Default address</label>
+  <button>Save</button> <button type="reset" tether-address-new>New</button>
+  <p tether-form-error></p>
+</form>
+```
+
+`tether-address-bind`: `formatted`, `name`, `company`, `address1`, `address2`, `city`, `zip`,
+`province`, `country`, `phone`. Forms get `tether-form-state="pending|saved|error"`, and Shopify's
+message (e.g. "Zip is invalid") goes in `tether-form-error`.
+
+**Subscriptions** (Shopify Subscriptions or any app that uses Shopify's subscription contracts):
+
+```html
+<p tether-show="subscriptions-loading">Loading…</p>
+<p tether-show="subscriptions-empty" hidden>No subscriptions.</p>
+<div tether-subscriptions>
+  <article>
+    <div tether-subscription-lines><p><span tether-subscription-line="quantity"></span>×
+      <span tether-subscription-line="title"></span> <span tether-subscription-line="price"></span></p></div>
+    <p>Every <span tether-subscription-bind="interval"></span> · next <span tether-subscription-bind="next"></span>
+       · <span tether-subscription-bind="status"></span></p>
+    <p tether-subscription-show="skipped" hidden>The next delivery is skipped.</p>
+    <button tether-subscription-action="skip">Skip next</button>
+    <button tether-subscription-action="unskip">Undo skip</button>
+    <button tether-subscription-action="pause">Pause</button>
+    <button tether-subscription-action="resume">Resume</button>
+    <button tether-subscription-action="cancel" tether-confirm="Cancel this subscription?">Cancel</button>
+    <p tether-form-error></p>
+  </article>
+</div>
+<a tether-account-link="payment">Change payment method</a>   <!-- Shopify's secure page -->
+```
+
+- `tether-subscription-bind`: `status`, `next` (next billing date), `interval` (month, 2 months, …),
+  `products`, `total`, `delivery`. `tether-subscription-line`: `title`, `variant-title`, `quantity`,
+  `price`, `image`.
+- `tether-subscription-show`: `active`, `paused`, `cancelled`, `expired`, `failed`, `skipped`,
+  `can-pause`, `can-resume`, `can-skip`, `can-unskip`, `can-cancel`. Actions that don't apply get
+  `disabled` and `is-disabled`; while one runs the row has `is-busy` and
+  `tether-subscription-state="pending"` (then `done` or `error`).
+- **Payment method:** card details never touch your site. `tether-account-link="payment"` (or
+  `"subscriptions"`) goes to Shopify's page for it (`paymentUrl`, default `subscriptionsUrl`).
+
+**Security (server mode):** each of these is one fixed operation in the Worker, with no query
+passthrough. Ids are checked for their type, address fields are limited to Shopify's address
+fields with bounded lengths, and a subscription is looked up through the logged-in customer before
+any action, so a customer can only act on their own orders, addresses and subscriptions (Shopify
+enforces the same through the customer's token). Every change needs the allowed origin and the
+`X-Tether-Account` header, like the routes above. Browser mode runs the same documents and checks.
 
 ## JavaScript
 
@@ -135,12 +261,22 @@ account pages, through your subscription app: `tether-account-link` goes there.
 await Tether.account.login();                 // to Shopify's login page and back
 const me = await Tether.account.customer();   // { firstName, lastName, emailAddress, … }
 const orders = await Tether.account.orders({ first: 5 });
+const order = await Tether.account.order(1234);          // lines, totals, fulfillments, returnable lines
+await Tether.account.updateProfile({ firstName: 'Ada' });
+const list = await Tether.account.addresses();           // [{ id, formatted, isDefault, … }]
+await Tether.account.saveAddress({ address1: 'Main St 1', zip: '1011 AB', city: 'Amsterdam', countryCode: 'NL' }, { isDefault: true });
+await Tether.account.deleteAddress(list[1].id);
+const subs = await Tether.account.subscriptions();
+await Tether.account.subscriptionAction(subs[0].id, 'skip');  // pause | resume | skip | unskip | cancel
+await Tether.account.requestReturn(order.id, [{ lineItemId: order.lineItems.nodes[0].id, quantity: 1 }]);
 await Tether.account.logout();
 ```
 
-Browser mode also has `Tether.account.query(gql, variables)` for any Customer Account API query;
-server mode answers only the profile and the orders, on purpose. Events: `tether:account-login`,
-`tether:account-logout`, `tether:account-error`.
+Errors are `TetherError`s; Shopify's validation messages are in `err.userErrors`. Browser mode also
+has `Tether.account.query(gql, variables)` for any Customer Account API query; server mode answers
+only these fixed operations, on purpose. Events: `tether:account-login`, `tether:account-logout`,
+`tether:account-updated` (`detail.what`: profile, addresses, subscriptions, orders),
+`tether:account-error`.
 
 ## Tested
 

@@ -2253,6 +2253,7 @@
     });
     return parts[name];
   }
+  coreModules["lazy.js"] = { loadPart, coreModules };
 
   // src/index.js
   var VERSION = "0.6.4";
@@ -2278,15 +2279,12 @@
     if (within(root, `${sel("country-select")},${sel("country-bind")}`).length) {
       loadPart("markets").then((m) => m.renderCountrySelects(root)).catch((err) => reportError(err, "markets"));
     }
-    if ((cfg.account?.clientId || cfg.account?.server) && (within(root, `[${attr("account-login")}],[${attr("account-bind")}],[${attr("orders")}],[${attr("show")}^="logged-"]`).length || /[?&]code=/.test(window.location.search) || hasAccountSession())) {
+    if ((cfg.account?.clientId || cfg.account?.server) && (within(root, ["account-login", "account-bind", "account-link", "orders", "order", "addresses", "subscriptions", "profile-form", "address-form"].map((n) => `[${attr(n)}]`).join(",") + `,[${attr("show")}^="logged-"]`).length || /[?&]code=/.test(window.location.search) || hasAccountSession())) {
       loadPart("account").then((m) => m.mountAccount(root)).catch((err) => reportError(err, "account"));
     }
     if (within(root, sel("search")).length) {
       loadPart("search").then((m) => m.mountSearch(root)).catch((err) => reportError(err, "search"));
     }
-    qsa(root, sel("account-link")).forEach((a) => {
-      a.setAttribute("href", `https://${cfg.domain}/account`);
-    });
     settleMarket();
     Cart.render();
     log(`mounted ${count} scope(s)`, root);

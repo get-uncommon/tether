@@ -186,7 +186,11 @@
     "logged-in",
     "logged-out",
     "orders-empty",
-    "orders-loading"
+    "orders-loading",
+    "addresses-loading",
+    "addresses-empty",
+    "subscriptions-loading",
+    "subscriptions-empty"
   ]);
   var BIND = /* @__PURE__ */ new Set([
     "title",
@@ -234,7 +238,10 @@
   country-bind country-label country-select default-plan default-purchase discount discount-code discount-form discount-input
   discount-remove display error group group-add hide-single language limit line line-attribute line-attributes line-id
   line-minus line-plan line-plus line-remove line-show list load-more market-pending one-time-label option option-list
-  option-selected option-value order-bind order-line order-lines orders page-country page-language page-locale page-title plan plan-bind plan-list
+  option-selected option-value order order-bind order-line order-lines order-line-show order-show order-state order-fulfillments
+  fulfillment-bind order-return return-quantity return-reason return-note orders profile-form address-form addresses address-bind
+  address-show address-edit address-new address-delete address-default subscriptions subscription-bind subscription-lines
+  subscription-line subscription-show subscription-action subscription-status subscription-state confirm form-state form-error page-country page-language page-locale page-title plan plan-bind plan-list
   plan-value product products purchase purchase-mode qty qty-minus qty-plus quantity recommendations reverse search
   search-bind search-collections search-input search-limit search-min search-products search-queries search-results
   search-state show soldout-text sort state subscribe-text variant variant-select variant-url max-width max-height crop

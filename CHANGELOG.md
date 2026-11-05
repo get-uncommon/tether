@@ -2,6 +2,13 @@
 
 ## 0.6.5 (2026-11-05)
 
+**Customer accounts on your own site:** order pages (lines, totals, addresses, tracking), profile
+and address editing, subscriptions (skip, pause, resume, cancel) and return requests, in both server
+and browser mode, with markup attributes and empty/loading states ([guide](docs/accounts.md)). Only
+the login, checkout and card changes stay on Shopify. In server mode each is a fixed Worker
+operation with validated input; a customer can only act on their own orders, addresses and
+subscriptions. A new optional part (6 KB) loads only on pages that use them.
+
 Fixes from a full security audit (Cloudflare's security-audit method; details in the release notes):
 
 - **Sync webhooks:** the `X-Shopify-Topic` header isn't covered by Shopify's signature, so it no

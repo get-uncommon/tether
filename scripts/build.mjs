@@ -83,7 +83,7 @@ const iifeLazyPlugin = {
 };
 
 // Parts reuse the main script's modules (window.Tether.__core) instead of bundling copies.
-const CORE = ['config.js', 'client.js', 'dom.js', 'fragments.js', 'loader.js', 'selling-plans.js', 'status.js', 'cart.js', 'product.js', 'collection.js', 'mounting.js'];
+const CORE = ['config.js', 'client.js', 'dom.js', 'fragments.js', 'loader.js', 'selling-plans.js', 'status.js', 'cart.js', 'product.js', 'collection.js', 'mounting.js', 'lazy.js'];
 async function coreExports() {
   const out = {};
   for (const f of CORE) out[f] = Object.keys(await import(pathToFileURL(join(SRC, f)).href));
@@ -122,7 +122,7 @@ async function builds() {
   return [
     { ...iife, outfile: join(ROOT, 'dist/tether.js') },
     { ...iife, outfile: join(ROOT, 'dist/tether.min.js'), minify: true, sourcemap: true },
-    ...['diagnose', 'markets', 'search', 'extras', 'account', 'analytics'].flatMap((n) => [part(n, false), part(n, true)]),
+    ...['diagnose', 'markets', 'search', 'extras', 'account', 'account-pages', 'analytics'].flatMap((n) => [part(n, false), part(n, true)]),
     {
       ...common, entryPoints: [join(SRC, 'index.js'), join(SRC, 'server.js'), join(SRC, 'astro.js')], format: 'esm', splitting: true, minify: true,
       external: ['@occluze/tether', 'node:*'],
@@ -134,7 +134,7 @@ async function builds() {
 
 async function report() {
   const rows = [];
-  for (const f of ['tether.min.js', 'tether.diagnose.min.js', 'tether.markets.min.js', 'tether.search.min.js', 'tether.extras.min.js', 'tether.account.min.js', 'tether.analytics.min.js']) {
+  for (const f of ['tether.min.js', 'tether.diagnose.min.js', 'tether.markets.min.js', 'tether.search.min.js', 'tether.extras.min.js', 'tether.account.min.js', 'tether.account-pages.min.js', 'tether.analytics.min.js']) {
     const buf = await readFile(join(ROOT, 'dist', f));
     rows.push(`${f.padEnd(24)} ${(buf.length / 1024).toFixed(1).padStart(5)} KB  gzip ${(gzipSync(buf, { level: 9 }).length / 1024).toFixed(1).padStart(4)} KB  brotli ${(brotliCompressSync(buf).length / 1024).toFixed(1).padStart(4)} KB`);
   }

@@ -21,6 +21,8 @@
  * ACCOUNT_SECRET if you set one).
  */
 
+import { ops, ROUTES, InputError } from './account-ops.js';
+
 export const BASE = '/_tether/account';
 const COOKIE = '__Host-tether-account';
 const PENDING_TTL = 600; // seconds a login may take
@@ -440,6 +442,21 @@ export async function handleAccount(request, env, { fetch: fetchImpl = globalThi
       if (!CART_ID.test(body.cartId || '')) return json({ error: 'cartId' }, 400, allow);
       const checkoutUrl = await linkCart(s, body.cartId, sess.access, fetchImpl);
       return json({ linked: Boolean(checkoutUrl), checkoutUrl }, 200, allow);
+    }
+    // ---- the fixed account operations (order detail, profile, addresses, subscriptions, returns)
+    const op = ROUTES[`${request.method} ${route}`];
+    if (op) {
+      if (!sess) return json({ loggedIn: false }, 401, allow);
+      const body = mutating ? await request.json().catch(() => ({})) : {};
+      const [name, input] = op(url, body && typeof body === 'object' ? body : {});
+      try {
+        const out = await ops[name](ask, input);
+        if (!sess) return json({ loggedIn: false }, 401, allow); // Shopify ended the session meanwhile
+        return json({ ok: true, ...out }, 200, allow);
+      } catch (err) {
+        if (err instanceof InputError) return json({ error: err.message, userErrors: err.userErrors || undefined }, err.status || 400, allow);
+        throw err;
+      }
     }
     return json({ error: 'not found' }, 404, allow);
   } catch (err) {

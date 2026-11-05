@@ -9,6 +9,7 @@ const PARTS = {
   search: () => import('./search.js'),
   extras: () => import('./extras.js'),
   account: () => import('./account.js'),
+  'account-pages': () => import('./account-pages.js'),
   analytics: () => import('./analytics.js'),
 };
 export const loadPart = (name) => PARTS[name]();

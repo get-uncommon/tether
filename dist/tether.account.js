@@ -8,16 +8,24 @@
   // src/account.js
   var account_exports = {};
   __export(account_exports, {
+    addresses: () => addresses,
     customer: () => customer,
+    deleteAddress: () => deleteAddress,
     getToken: () => getToken,
     handleCallback: () => handleCallback,
     isLoggedIn: () => isLoggedIn,
     login: () => login,
     logout: () => logout,
     mountAccount: () => mountAccount,
+    order: () => order,
     orders: () => orders,
     query: () => query,
-    render: () => render
+    render: () => render,
+    requestReturn: () => requestReturn,
+    saveAddress: () => saveAddress,
+    subscriptionAction: () => subscriptionAction,
+    subscriptions: () => subscriptions,
+    updateProfile: () => updateProfile
   });
 
   // tether-core:config.js
@@ -35,6 +43,10 @@
   // tether-core:cart.js
   var m4 = window.Tether.__core["cart.js"];
   var { Cart, focusables, toLineInput } = m4;
+
+  // tether-core:lazy.js
+  var m5 = window.Tether.__core["lazy.js"];
+  var { coreModules, loadPart } = m5;
 
   // src/account.js
   var KEY = () => `${cfg.prefix}:account:${cfg.domain}`;
@@ -73,7 +85,7 @@
       body: body ? JSON.stringify(body) : void 0
     });
     const data = await res.json().catch(() => ({}));
-    if (!res.ok && res.status !== 401) throw new TetherError(`Customer accounts: ${data.error || res.status}`, { status: res.status });
+    if (!res.ok && res.status !== 401) throw new TetherError(`Customer accounts: ${data.error || res.status}`, { status: res.status, userErrors: data.userErrors });
     return data;
   }
   async function serverMe() {
@@ -304,6 +316,11 @@
       if (k === "logged-in") show(el, logged);
       if (k === "logged-out") show(el, !logged);
     });
+    qsa(root, sel("account-link")).forEach((a) => {
+      const k = get(a, "account-link");
+      const u = k === "payment" && (cfg.account?.paymentUrl || cfg.account?.subscriptionsUrl) || k === "subscriptions" && cfg.account?.subscriptionsUrl;
+      a.setAttribute("href", u || `https://${cfg.domain}/account`);
+    });
     if (!logged) return;
     const binds = qsa(root, sel("account-bind"));
     if (binds.length) {
@@ -336,7 +353,8 @@
         qsa(node, sel("order-bind")).forEach((el) => {
           const k = get(el, "order-bind");
           if (k === "url") {
-            if (https(o.statusPageUrl)) el.setAttribute("href", o.statusPageUrl);
+            const u = orderUrl(o);
+            if (u) el.setAttribute("href", u);
             return;
           }
           if (k === "image") {
@@ -347,21 +365,52 @@
           const v = { name: o.name, date: date(o.processedAt), total: formatMoney(o.totalPrice), status: o.financialStatus?.toLowerCase(), fulfillment: o.fulfillmentStatus?.toLowerCase(), items: items.map((l) => `${l.quantity}\xD7 ${l.title}`).join(", ") }[k];
           if (v != null) setText(el, v);
         });
-        qsa(node, sel("order-lines")).forEach((box) => repeat(box, items, (row, l) => {
-          qsa(row, sel("order-line")).concat(row.matches(sel("order-line")) ? [row] : []).forEach((el) => {
-            const k = get(el, "order-line");
-            if (k === "image") {
-              if (l.image) setImage(el, l.image.url, l.image.altText || l.title);
-              return;
-            }
-            const v = { title: l.title, "variant-title": l.variantTitle || "", quantity: String(l.quantity) }[k];
-            if (v != null) setText(el, v);
-          });
-        }));
-        if (get(node, "order-bind") === "url" && https(o.statusPageUrl)) node.setAttribute("href", o.statusPageUrl);
+        qsa(node, sel("order-lines")).forEach((box) => fillLines(box, items));
+        if (get(node, "order-bind") === "url" && orderUrl(o)) node.setAttribute("href", orderUrl(o));
       }));
     }
+    if (PAGE_ATTRS.some((n) => qsa(root, sel(n)).length)) await (await pages()).renderPages(root);
   }
+  var nid = (g) => String(g || "").split("/").pop().split("?")[0];
+  function orderUrl(o) {
+    const t = cfg.account?.orderUrl;
+    if (t) return String(t).replace("{id}", encodeURIComponent(nid(o.id)));
+    return https(o.statusPageUrl) ? o.statusPageUrl : null;
+  }
+  function fillLines(box, items) {
+    repeat(box, items, (row, l) => {
+      qsa(row, sel("order-line")).concat(row.matches(sel("order-line")) ? [row] : []).forEach((el) => {
+        const k = get(el, "order-line");
+        if (k === "image") {
+          if (l.image) setImage(el, l.image.url, l.image.altText || l.title);
+          return;
+        }
+        const v = { title: l.title, "variant-title": l.variantTitle || "", quantity: String(l.quantity) }[k];
+        if (v != null) setText(el, v);
+      });
+    });
+  }
+  var PAGE_ATTRS = ["order", "addresses", "subscriptions", "profile-form", "address-form"];
+  var pagesPart = null;
+  function pages() {
+    pagesPart || (pagesPart = loadPart("account-pages").then((m6) => {
+      m6.setup({ server, serverFetch, query, customer, reset: () => {
+        customerCache = null;
+        serverState = null;
+      } });
+      return m6;
+    }));
+    return pagesPart;
+  }
+  var viaPages = (name) => (...a) => pages().then((m6) => m6[name](...a));
+  var order = viaPages("order");
+  var updateProfile = viaPages("updateProfile");
+  var addresses = viaPages("addresses");
+  var saveAddress = viaPages("saveAddress");
+  var deleteAddress = viaPages("deleteAddress");
+  var subscriptions = viaPages("subscriptions");
+  var subscriptionAction = viaPages("subscriptionAction");
+  var requestReturn = viaPages("requestReturn");
   var bound = false;
   async function mountAccount(root = document) {
     if (!bound) {
