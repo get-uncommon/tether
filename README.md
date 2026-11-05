@@ -25,6 +25,20 @@ MIT licensed · 20 KB gzipped · no dependencies · TypeScript types · [full re
 
 ---
 
+## Three ways to install
+
+| | Pick it when | How |
+|---|---|---|
+| **Script tag** (jsDelivr) | a static site or Webflow, no build step, no login needed | `<script src="https://cdn.jsdelivr.net/gh/ravi-klaassens/tether@0.6/dist/tether.min.js" defer></script>` ([steps below](#2-add-the-script-to-webflow)) |
+| **npm** | Astro, Vite or another bundler or framework | `npm install @occluze/tether` ([Astro guide](docs/astro.md), [other frameworks](docs/frameworks.md)) |
+| **With the Worker** | you also want the CMS sync, rebuilds when products change, or secure customer accounts | either of the above, plus your own free Cloudflare Worker ([Worker](server/README.md), [accounts](docs/accounts.md)) |
+
+The script tag pinned to one release: `…/tether@v0.6.2/dist/tether.min.js`. Its optional parts
+(search, accounts, markets, analytics) load from the same folder when a page uses them; host the
+files yourself and set `partsUrl` if they live somewhere else. Customer accounts without the Worker
+run in browser mode; [server mode](docs/accounts.md#server-mode) (recommended for live shops)
+needs the Worker.
+
 ## 1. Connect Shopify (5 minutes)
 
 1. Shopify admin → install the free **Headless** channel → Create storefront → copy the

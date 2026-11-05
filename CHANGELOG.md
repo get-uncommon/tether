@@ -33,6 +33,8 @@ From testers building an Astro store from the starter:
 - `tether-max-width` / `data-max-width` (and `-max-height`, `-crop`): valid HTML for image sizes.
 
 **Starter and docs**
+- README: the three ways to install side by side (script tag via jsDelivr, npm, with the Worker),
+  with when to pick each.
 - The Astro starter has `site`, canonical links, a favicon, a 404 page, a static search page,
   `tsconfig.json`, and no longer ignores `package-lock.json`. The first cards and the first product
   image load eagerly (`fetchpriority="high"`), the rest lazily.
