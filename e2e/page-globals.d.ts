@@ -1,6 +1,6 @@
 /**
  * The `window` globals the specs read inside `page.evaluate`: what the pages, Shopify's scripts and the specs' own init
- * scripts set, once a spec has waited for them.
+ * scripts set. The ones a script sets after the page loads are optional, since a spec polls for them.
  */
 
 interface DataLayerEntry {
@@ -14,10 +14,10 @@ interface ShopifyCustomerPrivacy {
 
 declare global {
   interface Window {
-    dataLayer: DataLayerEntry[];
+    dataLayer?: DataLayerEntry[];
     /** The class names `<html>` went through, recorded by an init script. */
     __classes: string[];
-    Shopify: { analytics: { publish: unknown }; customerPrivacy: ShopifyCustomerPrivacy };
+    Shopify?: { analytics?: { publish: unknown }; customerPrivacy?: ShopifyCustomerPrivacy };
     TETHER_CONFIG: { token: string };
   }
 }

@@ -72,8 +72,8 @@ globalThis.fetch = async (url, init) => {
   const host = new URL(url instanceof Request ? url.url : url).host;
   const { query, variables } = graphqlRequest(init);
   const op = operationName(query);
-  const ctx = query.match(/@inContext\(([^)]*)\)/)?.[1] || '';
-  const country = ctx.match(/country: (\w+)/)?.[1] || null;
+  const ctx = /@inContext\(([^)]*)\)/.exec(query)?.[1] || '';
+  const country = /country: (\w+)/.exec(ctx)?.[1] || null;
   /** @type {StorefrontCall} */
   const call = { host, op, variables, ctx, country, answered: false };
   calls.push(call);
@@ -262,7 +262,7 @@ test('tether-country-select lists the markets; switching re-renders prices and u
       <div tether-option-list="Size"><button>v</button></div></div>`;
   Tether.mount(document);
   await waitFor(
-    () => document.querySelector('select')?.options.length === 3 && /30/.test(priceText()),
+    () => document.querySelector('select')?.options.length === 3 && priceText().includes('30'),
     'the country select and the price',
   );
   const select = document.querySelector('select');
@@ -289,7 +289,7 @@ test('tether-country-select lists the markets; switching re-renders prices and u
   select.value = 'US';
   select.dispatchEvent(new window.Event('change', { bubbles: true }));
   await waitFor(
-    () => changes.length === 1 && /35/.test(priceText()) && find('#cur').textContent === 'USD',
+    () => changes.length === 1 && priceText().includes('35') && find('#cur').textContent === 'USD',
     'the switch to US',
   );
 
@@ -323,10 +323,10 @@ test('a list re-renders in the new market', async () => {
   document.body.innerHTML =
     '<div tether-products=""><div tether-list><div><span class="p" tether-bind="price"></span></div></div></div>';
   Tether.mount(document);
-  await waitFor(() => /35/.test(listPrice()), 'the list in US prices');
+  await waitFor(() => listPrice().includes('35'), 'the list in US prices');
   calls.length = 0;
   await Tether.setCountry('NL', { remember: false });
-  await waitFor(() => /30/.test(listPrice()), 'the list in NL prices');
+  await waitFor(() => listPrice().includes('30'), 'the list in NL prices');
   assert.equal(calls.find((call) => call.op === 'TetherSearch')?.country, 'NL');
   assert.match(find('.p').textContent, /30/);
   assert.equal(document.querySelectorAll('.p').length, 1);

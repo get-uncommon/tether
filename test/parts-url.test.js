@@ -61,7 +61,9 @@ async function pageWithCore(partsUrl) {
     beforeParse: storefront,
   });
   const win = dom.window;
-  await new Promise((resolve) => win.addEventListener('load', resolve));
+  await new Promise((resolve) => {
+    win.addEventListener('load', resolve);
+  });
   return win;
 }
 
@@ -73,7 +75,7 @@ async function pageWithCore(partsUrl) {
 async function loadDiagnoseFrom(partsUrl) {
   const win = await pageWithCore(partsUrl);
   const result = await win['Tether'].diagnose({ silent: true });
-  const script = [...win.document.scripts].find((element) => /tether\.diagnose\.min\.js$/.test(element.src));
+  const script = [...win.document.scripts].find((element) => element.src.endsWith('tether.diagnose.min.js'));
   assert.ok(script, 'the diagnose part has a script');
   return { win, script, result };
 }

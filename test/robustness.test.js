@@ -72,9 +72,11 @@ globalThis.fetch = async (_url, init) => {
  * @param {string} state
  */
 const waitForState = (state, selector = '[tether-product]') =>
-  waitFor(() => find(selector)?.getAttribute('tether-state') === state, `${selector} to be ${state}`);
+  waitFor(() => find(selector).getAttribute('tether-state') === state, `${selector} to be ${state}`);
 /** @param {string} url */
-const go = (url) => dom.reconfigure({ url });
+const go = (url) => {
+  dom.reconfigure({ url });
+};
 /** @type {typeof import('../src/index.ts').default} */
 let Tether;
 /** @type {{ error: unknown, context: string }[]} */

@@ -1,4 +1,4 @@
-import { test, beforeEach } from 'node:test';
+import { test, beforeEach, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
 
@@ -62,14 +62,13 @@ test('blocked storage reads as empty, and writes and removals do nothing', () =>
 });
 
 test('full storage keeps nothing, without throwing', () => {
-  const { setItem } = dom.window.Storage.prototype;
-  dom.window.Storage.prototype.setItem = () => {
+  const full = mock.method(dom.window.Storage.prototype, 'setItem', () => {
     throw new dom.window.DOMException('The quota has been exceeded.', 'QuotaExceededError');
-  };
+  });
   try {
     setStored('key', 'value');
   } finally {
-    dom.window.Storage.prototype.setItem = setItem;
+    full.mock.restore();
   }
   assert.equal(getStored('key'), null);
 });

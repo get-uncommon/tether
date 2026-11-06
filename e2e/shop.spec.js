@@ -72,11 +72,10 @@ test('the cart survives a reload and View Transitions, and checkout goes to Shop
   await expect(page.locator('[tether-cart-count]')).toHaveText(count);
 
   await page.locator('[tether-cart-open]').click();
-  const [checkout] = await Promise.all([
+  await Promise.all([
     page.waitForURL(/checkout\.hydrogen\.shop|\/cart\/c\//, { timeout: 20000 }),
     page.locator('[tether-checkout]').click(),
   ]);
-  void checkout;
   expect(page.url()).toMatch(/checkout\.hydrogen\.shop|\/cart\/c\//);
 });
 

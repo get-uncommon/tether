@@ -139,7 +139,7 @@ test('selling plan helpers', () => {
   const [v250, v1kg] = product.variants.nodes;
   assert.equal(plans.allPlans(product).length, 2);
   assert.equal(plans.planPrice(v250, PLAN_MONTH)?.amount, '27');
-  assert.deepEqual(plans.planSavings(v250, PLAN_MONTH)?.percentage, 10);
+  assert.deepEqual(plans.planSavings(v250, PLAN_MONTH).percentage, 10);
   assert.equal(plans.allocationFor(v1kg, PLAN_MONTH), null);
   assert.equal(plans.plansForVariant(product, v1kg).length, 1);
   assert.equal(plans.findPlan(product, 'every month')?.id, PLAN_MONTH);

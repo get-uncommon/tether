@@ -6,7 +6,16 @@ import { createApp, memoryStore, createWorker } from '../src/index.ts';
 import { runCheck, formatCheck } from '../src/check.ts';
 import { cleanEnv } from '../src/env.ts';
 import { applyEnv, normalizeConfig } from '../src/mapping.ts';
-import { createMockApis, shopifyProduct, instantSleep, checkStep, noWaitUntil, baseConfig, env } from './mocks.js';
+import {
+  createMockApis,
+  shopifyProduct,
+  instantSleep,
+  checkStep,
+  noWaitUntil,
+  baseConfig,
+  env,
+  urlOf,
+} from './mocks.js';
 
 /** @typedef {Awaited<ReturnType<typeof runCheck>>} CheckReport */
 /** @typedef {typeof globalThis.fetch} Fetch */
@@ -93,7 +102,7 @@ test('check with everything set tests the APIs, reports mapping problems and a s
   const by = (title) => report.steps.filter((step) => step.title === title);
   assert.match(by('Shopify API')[0]?.message ?? '', /Shop \(API 2026-07\)/);
   assert.match(by('Webflow API')[0]?.message ?? '', /collection "Products"/);
-  const skippedLine = by('Field mapping').filter((step) => /not synced/.test(step.message));
+  const skippedLine = by('Field mapping').filter((step) => step.message.includes('not synced'));
   assert.equal(skippedLine.length, 1, 'missing fields folded into one line');
   assert.match(skippedLine[0]?.message ?? '', /gallery/);
   assert.ok(!by('Field mapping').some((step) => step.level === 'warn'), 'no warnings for expected missing fields');
@@ -111,7 +120,7 @@ test('check explains a wrong collection id and a rejected Webflow token', async 
    * @returns {Fetch}
    */
   const failing = (status) => async (url, init) =>
-    String(url).includes('api.webflow.com')
+    urlOf(url).includes('api.webflow.com')
       ? new Response(JSON.stringify({ message: 'nope' }), { status })
       : apis.fetch(url, init);
   let report = await runCheck(defaultConfig, deployEnv, { fetch: failing(404) });
@@ -224,11 +233,13 @@ test('.dev.vars.example: only the six fields a deploy needs, all empty and descr
       'SYNC_SECRET',
     ],
   );
-  lines.forEach((line) => assert.match(line, /^[A-Z_]+=$/, line));
+  lines.forEach((line) => {
+    assert.match(line, /^[A-Z_]+=$/, line);
+  });
   const pkg = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
-  lines.forEach((line) =>
-    assert.ok(pkg.cloudflare.bindings[line.slice(0, -1)]?.description, `description for ${line}`),
-  );
+  lines.forEach((line) => {
+    assert.ok(pkg.cloudflare.bindings[line.slice(0, -1)]?.description, `description for ${line}`);
+  });
 });
 
 test('webhooks: the first reconcile registers them through the app, once; check reports them', async () => {
@@ -306,7 +317,10 @@ test('webhooks signed with either the client secret or SHOPIFY_WEBHOOK_SECRET ar
 
 test('the shipped config equals the test copy (skipped in a deployed, customizable copy)', async (context) => {
   const repo = process.env['GITHUB_REPOSITORY'];
-  if (repo && repo !== 'ravi-klaassens/tether') return context.skip('deployed copy: its config may be customized');
+  if (repo && repo !== 'ravi-klaassens/tether') {
+    context.skip('deployed copy: its config may be customized');
+    return;
+  }
   const shipped = (await import('../tether-sync.config.js')).default;
   assert.deepEqual(shipped, defaultConfig);
 });
@@ -318,7 +332,7 @@ test('check says when a newer release in the range exists (a stalled updater sho
    * @returns {Fetch}
    */
   const tags = (names) => async (url, init) =>
-    String(url).startsWith('https://data.jsdelivr.com/')
+    urlOf(url).startsWith('https://data.jsdelivr.com/')
       ? new Response(JSON.stringify({ versions: names.map((name) => ({ version: name.replace(/^v/, '') })) }), {
           status: 200,
         })
@@ -350,7 +364,7 @@ test('check refuses a TETHER_VERSION the updater would refuse, and picks release
   const apis = createMockApis({ products: [shopifyProduct(1)] });
   /** @type {Fetch} */
   const fetch = async (url, init) =>
-    String(url).startsWith('https://data.jsdelivr.com/')
+    urlOf(url).startsWith('https://data.jsdelivr.com/')
       ? new Response(JSON.stringify({ versions: [{ version: '0.3.3' }, { version: '0.3.10' }] }), { status: 200 })
       : apis.fetch(url, init);
   const options = { fetch, version: '0.3.3', sleep: instantSleep };

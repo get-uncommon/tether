@@ -1,10 +1,11 @@
 // The Worker around the sync: its KV namespace, the cron's failures, and what /check says about both.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { existsSync } from 'node:fs';
 import defaultConfig from './default-config.js';
 import { createWorker } from '../src/index.ts';
 import { signShopify } from '../src/hmac.ts';
-import { createMockApis, shopifyProduct, instantSleep, noWaitUntil } from './mocks.js';
+import { createMockApis, shopifyProduct, instantSleep, noWaitUntil, urlOf } from './mocks.js';
 
 const SECRET = 'a-long-random-sync-secret-123';
 const env = {
@@ -77,7 +78,7 @@ test('without the TETHER_SYNC namespace, POST /reconcile refuses to run and says
   assert.ok(response);
   assert.equal(response.status, 503);
   assert.match((await response.json()).error, /TETHER_SYNC/);
-  assert.ok(logged.some((line) => /reconcile: the TETHER_SYNC KV namespace is not bound/.test(line)));
+  assert.ok(logged.some((line) => line.includes('reconcile: the TETHER_SYNC KV namespace is not bound')));
   assert.equal(apis.calls.length, 0, 'nothing is synced into a store that forgets it');
 });
 
@@ -123,22 +124,22 @@ test('/check: a missing namespace is a warning for the sync and an error once ac
   };
   const unbound = await check(accounts);
   assert.equal(unbound.ok, false);
-  assert.ok(unbound.steps.some((step) => step.level === 'error' && /TETHER_SYNC/.test(step.message)));
+  assert.ok(unbound.steps.some((step) => step.level === 'error' && step.message.includes('TETHER_SYNC')));
 
   const bound = await check({ ...accounts, TETHER_SYNC: kv() });
   assert.equal(bound.kv, true);
-  assert.ok(!bound.steps.some((step) => /TETHER_SYNC/.test(step.message)));
+  assert.ok(!bound.steps.some((step) => step.message.includes('TETHER_SYNC')));
 
   const noSecret = await check({ ...accounts, ACCOUNT_SECRET: undefined, TETHER_SYNC: kv() });
   assert.equal(noSecret.ok, false);
-  const secretStep = noSecret.steps.find((step) => step.level === 'error' && /ACCOUNT_SECRET/.test(step.message));
+  const secretStep = noSecret.steps.find((step) => step.level === 'error' && step.message.includes('ACCOUNT_SECRET'));
   assert.match(secretStep?.fix ?? '', /Add the Worker secret ACCOUNT_SECRET, a random string of at least 24/);
 
   const sharedSecret = await check({ ...accounts, ACCOUNT_SECRET: SECRET, TETHER_SYNC: kv() });
   assert.equal(sharedSecret.ok, false);
   assert.ok(
     sharedSecret.steps.some(
-      (step) => step.level === 'error' && /ACCOUNT_SECRET is the same as SYNC_SECRET/.test(step.message),
+      (step) => step.level === 'error' && step.message.includes('ACCOUNT_SECRET is the same as SYNC_SECRET'),
     ),
   );
 });
@@ -150,7 +151,7 @@ test('with customer accounts but no ACCOUNT_SECRET only the account routes stop;
   const deploys = [];
   /** @type {typeof globalThis.fetch} */
   const fetchWithHook = async (url, init) => {
-    if (String(url) === hook) {
+    if (urlOf(url) === hook) {
       deploys.push(url);
       return new Response('{}');
     }
@@ -180,7 +181,7 @@ test('with customer accounts but no ACCOUNT_SECRET only the account routes stop;
     assert.equal(login.status, 503);
     assert.match((await login.json()).error, /accounts need the Worker secret ACCOUNT_SECRET/);
   });
-  assert.ok(logged.some((line) => /account setup ACCOUNT_SECRET is not set/.test(line)));
+  assert.ok(logged.some((line) => line.includes('account setup ACCOUNT_SECRET is not set')));
 
   /** @type {CheckAnswer} */
   const report = await (await send('/check', { headers: auth })).json();
@@ -225,8 +226,12 @@ test('the Worker and the browser script are released with one version', async (c
   const json = async (path) => JSON.parse(await readFile(new URL(path, import.meta.url), 'utf8'));
   const server = await json('../package.json');
   // A deployed copy holds only server/; whatever lies above it is not Tether's repository.
-  const root = await json('../../package.json').catch((error) => ({ unreadable: error }));
-  if (root.name !== '@occluze/tether') return context.skip('not in the Tether repository');
+  const rootPackage = new URL('../../package.json', import.meta.url);
+  const root = existsSync(rootPackage) ? await json(rootPackage.href) : null;
+  if (root?.name !== '@occluze/tether') {
+    context.skip('not in the Tether repository');
+    return;
+  }
   assert.equal(server.version, root.version, 'server/package.json and the root package.json');
   const browserVersion = /export const VERSION = '([^']+)'/.exec(
     await readFile(new URL('../../src/index.ts', import.meta.url), 'utf8'),

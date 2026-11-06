@@ -34,6 +34,7 @@ import { scopes } from './product.ts';
 import { listSelector } from './collection.ts';
 import { liveLists, liveProducts, mountedProducts, mountProduct, pruneLive, within } from './mounting.ts';
 import { toCountry, toLanguage } from './market-codes.ts';
+import { setCountry } from './page-market.ts';
 import { isHttpsUrl } from './shopify-values.ts';
 import { PART_INTEGRITY } from './part-integrity.ts';
 import { isTetherInternals } from './part-registry.ts';
@@ -99,6 +100,9 @@ export const coreModules = {
   },
   get 'market-codes.ts'() {
     return [toCountry, toLanguage];
+  },
+  get 'page-market.ts'() {
+    return [setCountry];
   },
   get 'shopify-values.ts'() {
     return [isHttpsUrl];

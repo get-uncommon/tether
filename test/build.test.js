@@ -63,7 +63,9 @@ before(async () => {
     },
   });
   win = dom.window;
-  await new Promise((resolve) => win.addEventListener('load', resolve));
+  await new Promise((resolve) => {
+    win.addEventListener('load', resolve);
+  });
   await waitFor(
     () => Boolean(win['Tether']?.__parts?.markets) && (win.document.querySelector('select')?.options.length ?? 0) > 1,
     'the markets part (its own file) to fill the country select',
@@ -84,13 +86,13 @@ test('the markets part loads from its own file when the page has a country selec
     [...select.options].map((option) => option.value),
     ['DE', 'NL'],
   );
-  assert.ok([...win.document.scripts].some((script) => /tether\.markets\.min\.js$/.test(script.src)));
+  assert.ok([...win.document.scripts].some((script) => script.src.endsWith('tether.markets.min.js')));
   assert.ok(win['Tether'].__parts.markets, 'registered');
 });
 
 test('a part beside the core loads with the integrity hash of the file built with it', async () => {
   const { createHash } = await import('node:crypto');
-  const script = [...win.document.scripts].find((element) => /tether\.markets\.min\.js$/.test(element.src));
+  const script = [...win.document.scripts].find((element) => element.src.endsWith('tether.markets.min.js'));
   assert.ok(script, 'the markets part has a script');
   const file = await readFile(join(DIST, 'tether.markets.min.js'));
   assert.equal(script.integrity, `sha384-${createHash('sha384').update(file).digest('base64')}`);
@@ -98,7 +100,7 @@ test('a part beside the core loads with the integrity hash of the file built wit
 });
 
 test('the diagnose part loads on first call and shares the core (same config, same cache)', async () => {
-  assert.ok(![...win.document.scripts].some((script) => /diagnose/.test(script.src)), 'not loaded up front');
+  assert.ok(![...win.document.scripts].some((script) => script.src.includes('diagnose')), 'not loaded up front');
   const report = await win['Tether'].diagnose({ silent: true });
   assert.equal(report.reachable, true);
   assert.equal(report.config.domain, 'shop.test');
@@ -141,10 +143,14 @@ test('e2e static server: stays inside its folders and listens on loopback only',
       );
       let out = '';
       socket.on('data', (chunk) => {
-        out += chunk;
+        out += String(chunk);
       });
-      socket.on('end', () => resolve(out));
-      socket.on('error', () => resolve('ERR'));
+      socket.on('end', () => {
+        resolve(out);
+      });
+      socket.on('error', () => {
+        resolve('ERR');
+      });
     });
   try {
     let first = 'ERR';
@@ -209,7 +215,7 @@ test('the release installs dependencies only in a job that can read the reposito
       assert.match(job, /persist-credentials: false/, `${name} keeps no token in the checkout`);
     }
   }
-  const signers = [...jobs].filter(([, job]) => /id-token: write/.test(job)).map(([name]) => name);
+  const signers = [...jobs].filter(([, job]) => job.includes('id-token: write')).map(([name]) => name);
   assert.deepEqual(signers, ['server-asset', 'npm']);
   assert.match(jobs.get('server-asset') ?? '', /attestations: write/);
   assert.match(jobs.get('npm') ?? '', /npm publish --provenance --access public --ignore-scripts --tag "\$NPM_TAG"/);

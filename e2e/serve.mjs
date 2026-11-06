@@ -16,7 +16,11 @@ const TYPES = {
   '.json': 'application/json',
 };
 
-createServer(async (req, res) => {
+/**
+ * @param {import('node:http').IncomingMessage} req
+ * @param {import('node:http').ServerResponse} res
+ */
+async function serve(req, res) {
   let path;
   try {
     // Node's types share `url` with client requests, where it is unset; a server's request always has one.
@@ -54,4 +58,11 @@ createServer(async (req, res) => {
     res.writeHead(404, { 'content-type': 'text/plain' });
     res.end('not found');
   }
+}
+
+createServer((req, res) => {
+  serve(req, res).catch((/** @type {unknown} */ error) => {
+    console.error(error);
+    res.destroy();
+  });
 }).listen(Number(process.env['PORT'] || 4399), '127.0.0.1');

@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import defaultConfig from './default-config.js';
 import { createApp, memoryStore } from '../src/index.ts';
 import { runCheck } from '../src/check.ts';
-import { createMockApis, shopifyProduct, baseConfig, instantSleep, checkStep } from './mocks.js';
+import { createMockApis, shopifyProduct, baseConfig, instantSleep, checkStep, urlOf } from './mocks.js';
 
 const HOOK = 'https://api.pages.test/deploy_hooks/abc';
 const shopEnv = { SHOPIFY_DOMAIN: 'shop.myshopify.com', SHOPIFY_ADMIN_TOKEN: 'shpat_x', DEPLOY_HOOK_URL: HOOK };
@@ -25,7 +25,7 @@ function setup({
   let clock = Date.parse('2026-11-04T12:00:00Z');
   /** @type {typeof globalThis.fetch} */
   const fetch = async (url, init) => {
-    if (String(url) === HOOK) {
+    if (urlOf(url) === HOOK) {
       hooks.push(clock);
       return new Response('{}', { status: hookStatus });
     }
@@ -81,7 +81,7 @@ test('deploy-only: a content change starts a build, a stock-only change does not
     {
       store: harness.store,
       fetch: async (url, init) =>
-        String(url) === HOOK ? (harness.hooks.push(Date.now()), new Response('{}')) : harness.apis.fetch(url, init),
+        urlOf(url) === HOOK ? (harness.hooks.push(Date.now()), new Response('{}')) : harness.apis.fetch(url, init),
       sleep: instantSleep,
     },
   );
@@ -145,7 +145,7 @@ test('Webflow + deploy hook: Webflow is written and a build starts', async () =>
 
 test('check in deploy-only mode: no Webflow errors, the hook is validated', async () => {
   const ok = await runCheck(defaultConfig, shopEnv, { deep: false });
-  assert.ok(!ok.steps.some((step) => /Webflow/.test(step.title)), ok.steps.map((step) => step.title).join(','));
+  assert.ok(!ok.steps.some((step) => step.title.includes('Webflow')), ok.steps.map((step) => step.title).join(','));
   assert.match(checkStep(ok, 'Deploy hook').message, /no Webflow/);
   assert.equal(ok.ok, true);
   const bad = await runCheck(defaultConfig, { ...shopEnv, DEPLOY_HOOK_URL: 'http://insecure.test' }, { deep: false });

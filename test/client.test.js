@@ -107,7 +107,7 @@ test('request errors are TetherErrors with a code', async () => {
   });
   const unauthorized = async () => jsonResponse({}, 401);
   const error = await request(storefront('down.test', unauthorized), '{ shop { name } }', {}, hasData).catch(
-    (failure) => failure,
+    /** @param {unknown} failure */ (failure) => failure,
   );
   assert.ok(error instanceof TetherError);
   assert.equal(error.code, 'HTTP_401');

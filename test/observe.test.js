@@ -57,31 +57,18 @@ before(async () => {
 });
 
 /**
- * @param {(selectors: string[]) => Promise<void>} run Given the selectors queried so far.
+ * @param {(queried: () => string[]) => Promise<void>} run Given a reader of the selectors queried so far.
  * @returns {Promise<string[]>} The selectors queried on the whole document while `run` ran.
  */
 async function documentQueries(run) {
-  /** @type {string[]} */
-  const selectors = [];
-  const { querySelectorAll } = document;
-  const spy = mock.method(
-    document,
-    'querySelectorAll',
-    /**
-     * @this {Document}
-     * @param {string} selector
-     */
-    function (selector) {
-      selectors.push(selector);
-      return querySelectorAll.call(this, selector);
-    },
-  );
+  const spy = mock.method(document, 'querySelectorAll');
+  const queried = () => spy.mock.calls.map((call) => call.arguments[0]);
   try {
-    await run(selectors);
+    await run(queried);
+    return queried();
   } finally {
     spy.mock.restore();
   }
-  return selectors;
 }
 
 test('a burst of added cards mounts each card, reads only their hydrate tags and renders the cart once', async () => {
@@ -101,7 +88,7 @@ test('a burst of added cards mounts each card, reads only their hydrate tags and
     await waitFor(
       () =>
         [...main.querySelectorAll('[tether-bind="title"]')].every((title) => title.textContent !== '') &&
-        queried.includes('[tether-cart-count]'),
+        queried().includes('[tether-cart-count]'),
       'the cards and the cart to render',
     );
   });

@@ -47,7 +47,7 @@ globalThis.fetch = async (_url, init) => {
           },
         ],
         collections: [{ handle: 'coffee', title: 'Coffee', image: null }],
-        queries: [{ text: variables['q'] }, { text: `${variables['q']} beans` }],
+        queries: [{ text: variables['q'] }, { text: `${stringAt(variables, 'q')} beans` }],
       },
     },
   });

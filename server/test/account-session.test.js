@@ -14,6 +14,7 @@ import {
   loginFlow,
   sessionKeys,
 } from './account-fixtures.js';
+import { urlOf } from './mocks.js';
 
 /** @typedef {typeof globalThis.fetch} Fetch */
 
@@ -63,7 +64,7 @@ test('cart link, refresh, absolute lifetime, a 401 from Shopify ends the session
       sh.calls.some(
         (call) =>
           call.url?.endsWith('/oauth/token') &&
-          call.init?.body instanceof URLSearchParams &&
+          call.init.body instanceof URLSearchParams &&
           call.init.body.get('grant_type') === 'refresh_token',
       ),
     );
@@ -79,7 +80,7 @@ test('logout never fails open: session ended and cookie cleared even when Shopif
   const { run, cookie, memory, sh } = await loginFlow();
   /** @type {Fetch} */
   const down = async (url, init) =>
-    /well-known|oauth\/token/.test(String(url)) ? new Response('down', { status: 503 }) : sh.fetch(url, init);
+    /well-known|oauth\/token/.test(urlOf(url)) ? new Response('down', { status: 503 }) : sh.fetch(url, init);
   const realNow = Date.now;
   Date.now = () => realNow() + 2 * 3600e3; // access expired, and refresh would fail
   let res;
@@ -109,7 +110,6 @@ test('logout never fails open: session ended and cookie cleared even when Shopif
   assert.match(location(go), /\/logout\?id_token_hint=.+&post_logout_redirect_uri=https%3A%2F%2Fshop\.example%2Fbye/);
   assert.match(cookiesOf(go).join(), /__Host-tether-logout=; .*Max-Age=0/);
   assert.equal((await (await run(req('/me', { origin: SITE, cookie }))).json()).loggedIn, false);
-  void run;
 });
 
 test('refresh race: two requests refresh at once (Shopify rotates the refresh token): both stay logged in', async () => {
@@ -120,7 +120,7 @@ test('refresh race: two requests refresh at once (Shopify rotates the refresh to
   const rotating = async (url, init) => {
     const body = init?.body;
     if (
-      String(url).endsWith('/oauth/token') &&
+      urlOf(url).endsWith('/oauth/token') &&
       body instanceof URLSearchParams &&
       body.get('grant_type') === 'refresh_token'
     ) {
@@ -152,7 +152,7 @@ test('a 401 from Shopify (session ended there) ends it here too', async () => {
   const { memory, cookie, sh } = await loginFlow();
   /** @type {Fetch} */
   const ended = async (url, init) =>
-    String(url).includes('/account/customer/api/') ? new Response('{}', { status: 401 }) : sh.fetch(url, init);
+    urlOf(url).includes('/account/customer/api/') ? new Response('{}', { status: 401 }) : sh.fetch(url, init);
   const me = await answer(req('/me', { origin: SITE, cookie }), env, { fetch: ended, memory });
   assert.equal((await me.json()).loggedIn, false);
   assert.equal(memory.size, 0);
@@ -169,7 +169,7 @@ test('a session without a refresh token lasts as long as its access token, witho
    */
   const withoutRefresh = (inner) => async (url, init) => {
     const res = await inner(url, init);
-    if (!String(url).endsWith('/oauth/token')) return res;
+    if (!urlOf(url).endsWith('/oauth/token')) return res;
     const answer = await res.json();
     delete answer.refresh_token;
     return new Response(JSON.stringify(answer), { status: 200 });
@@ -188,7 +188,7 @@ test('a session without a refresh token lasts as long as its access token, witho
   const refreshes = sh.calls.filter(
     (call) =>
       call.url?.endsWith('/oauth/token') &&
-      call.init?.body instanceof URLSearchParams &&
+      call.init.body instanceof URLSearchParams &&
       call.init.body.get('grant_type') === 'refresh_token',
   );
   assert.equal(refreshes.length, 0);
@@ -199,7 +199,7 @@ test('a refresh refused for a setup reason (invalid_client) keeps the session an
   const { memory, cookie, sh } = await loginFlow();
   /** @type {Fetch} */
   const misconfigured = async (url, init) => {
-    if (String(url).endsWith('/oauth/token')) {
+    if (urlOf(url).endsWith('/oauth/token')) {
       return new Response(JSON.stringify({ error: 'invalid_client' }), { status: 401 });
     }
     return sh.fetch(url, init);
@@ -258,5 +258,5 @@ test('logout step 2 with Shopify unreachable goes back to the site and logs that
     console.error = realError;
   }
   assert.equal(location(go), `${SITE}/bye`);
-  assert.ok(logged.some((line) => /Shopify not logged out/.test(line)));
+  assert.ok(logged.some((line) => line.includes('Shopify not logged out')));
 });

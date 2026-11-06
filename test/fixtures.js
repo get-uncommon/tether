@@ -184,7 +184,7 @@ export function cartFrom(lines) {
       nodes: lines.map((line, i) => ({
         id: `gid://shopify/CartLine/${i + 1}`,
         quantity: line.quantity,
-        attributes: line.attributes || [],
+        attributes: line.attributes ?? [],
         cost: {
           totalAmount: money(line.quantity * (line.sellingPlanId ? 27 : 30)),
           subtotalAmount: money(line.quantity * 30),

@@ -14,7 +14,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import { KEPT, MANAGED } from '../server/scripts/update-tether.ts';
 import { SHIPPED_REVISION, workflowRevisionAt } from '../server/scripts/workflow-check.ts';
-import { numberAt, stringAt } from '../server/test/mocks.js';
+import { fieldOf, numberAt, stringAt } from '../server/test/mocks.js';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 /**
@@ -196,10 +196,19 @@ async function fakeGitHub(tarball) {
     }
     response.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(answer));
   });
-  await new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve(undefined)));
+  await new Promise((resolve) =>
+    server.listen(0, '127.0.0.1', () => {
+      resolve(undefined);
+    }),
+  );
   const address = server.address();
   assert.ok(address && typeof address === 'object');
-  const close = () => new Promise((resolve) => server.close(() => resolve(undefined)));
+  const close = () =>
+    new Promise((resolve) =>
+      server.close(() => {
+        resolve(undefined);
+      }),
+    );
   return { url: `http://127.0.0.1:${String(address.port)}`, requests, close };
 }
 
@@ -288,9 +297,13 @@ for (const { tag, route } of OLD_UPDATERS) {
         // The test steps every revision of the workflow runs. A step is judged by its exit code, which node() checks;
         // the reporter is pinned only so the count below reads the same on every Node (24 defaults to the spec
         // reporter, which has no TAP summary), and so a run of no tests can't pass as success.
-        const tests = await node(copy, ['--test', '--test-reporter=tap', 'test/*.test.js']).catch((error) => {
-          assert.fail(`the copy's tests failed:\n${String(error.stdout)}${String(error.stderr)}`);
-        });
+        const tests = await node(copy, ['--test', '--test-reporter=tap', 'test/*.test.js']).catch(
+          (/** @type {unknown} */ error) => {
+            assert.fail(
+              `the copy's tests failed:\n${String(fieldOf(error, 'stdout'))}${String(fieldOf(error, 'stderr'))}`,
+            );
+          },
+        );
         assert.match(tests.stdout, /^# tests [1-9]\d*$/m, 'the copy ran its tests');
         assert.match(tests.stdout, /^# fail 0$/m);
         const entry = await node(copy, ['-e', "import('./src/entry.js').then(() => console.log('entry ok'))"]);

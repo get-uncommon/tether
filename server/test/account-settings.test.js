@@ -37,7 +37,7 @@ test('settings: ACCOUNT_SECRET is required, with no fallback to SYNC_SECRET; /ch
   } finally {
     console.error = realError;
   }
-  assert.ok(logged.some((line) => /account setup ACCOUNT_SECRET is not set/.test(line)));
+  assert.ok(logged.some((line) => line.includes('account setup ACCOUNT_SECRET is not set')));
 
   for (const unusable of ['choose-a-long-random-string', 'a']) {
     const settings = configured({ ...env, ACCOUNT_SECRET: unusable });
@@ -93,14 +93,14 @@ test('settings: unusable ACCOUNT_SESSION_DAYS and SHOPIFY_DOMAIN are reported, n
   for (const domain of ['shop.myshopify.com/admin', 'shop .myshopify.com', 'shop.myshopify.com?x=1']) {
     assert.ok(
       problems({ SHOPIFY_DOMAIN: domain }).some(
-        (problem) => problem.severity === 'error' && /SHOPIFY_DOMAIN/.test(problem.message),
+        (problem) => problem.severity === 'error' && problem.message.includes('SHOPIFY_DOMAIN'),
       ),
       domain,
     );
   }
   assert.ok(
     !problems({ SHOPIFY_DOMAIN: 'https://shop.myshopify.com/' }).some((problem) =>
-      /SHOPIFY_DOMAIN/.test(problem.message),
+      problem.message.includes('SHOPIFY_DOMAIN'),
     ),
   );
 });
@@ -118,7 +118,7 @@ test('without the TETHER_SYNC namespace the Worker refuses accounts instead of k
   } finally {
     console.error = realError;
   }
-  assert.ok(logged.some((line) => /TETHER_SYNC KV namespace is not bound/.test(line)));
+  assert.ok(logged.some((line) => line.includes('TETHER_SYNC KV namespace is not bound')));
 });
 
 test('settings: ACCOUNT_ORIGINS entries are compared the way the browser writes its Origin header', async () => {

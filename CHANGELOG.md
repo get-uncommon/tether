@@ -2,6 +2,12 @@
 
 ## 0.7.1 (unreleased)
 
+- Fix: when a cart change fails without a clear answer (a network error or a 5xx, when Shopify may
+  or may not have applied it), Tether loads the cart again, so the page and the visitor's other tabs
+  show what Shopify really has. The change still rejects and `tether:cart-error` still fires; a
+  clear refusal (Shopify's user errors, a 4xx) works as before.
+- Fix: a market chosen in another tab is followed even after another script has replaced
+  `window.Tether`.
 - Fix: cart changes and other Storefront mutations are no longer sent again after a network error or
   a 5xx, when Shopify may already have applied them, so a timed-out "Add to cart" can't add the line
   twice. They are still retried on 429 and `THROTTLED`, which Shopify answers without running them;

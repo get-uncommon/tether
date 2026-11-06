@@ -20,7 +20,7 @@ import {
  */
 const setup = (opts = {}, config = baseConfig) => {
   const apis = createMockApis(opts);
-  const store = opts.store || memoryStore();
+  const store = opts.store ?? memoryStore();
   const app = createApp(config, env, { store, fetch: apis.fetch, sleep: instantSleep });
   return { ...apis, store, app, sync: app.sync };
 };
@@ -103,7 +103,7 @@ test('subrequest budget: a Worker reconcile stops before the limit and resumes n
   assert.ok(runs.length > 1, 'needed more than one run');
   assert.ok(
     runs.every(({ used }) => used <= 15),
-    `subrequests per run: ${runs.map((run) => run.used)}`,
+    `subrequests per run: ${runs.map((run) => run.used).join(', ')}`,
   );
   assert.equal(runs.at(-1)?.result.complete, true);
   assert.equal(apis.wf.items.size, 12);

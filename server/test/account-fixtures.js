@@ -2,6 +2,7 @@
 // sends to the Worker's account routes.
 import assert from 'node:assert/strict';
 import { handleAccount, accountSettings, BASE } from '../src/account.ts';
+import { fieldOf, numberAt, recordAt, stringAt, urlOf } from './mocks.js';
 
 export const SHOP = 'shop.myshopify.com';
 export const SITE = 'https://shop.example';
@@ -48,182 +49,179 @@ export async function idToken(claims, { tamper = false, kid = 'k1' } = {}) {
  *       init?: undefined }} ShopifyCall
  */
 
+/**
+ * @param {unknown} data
+ * @param {number} [status]
+ */
+const ok = (data, status = 200) =>
+  new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json' } });
+
+const DISCOVERY = {
+  issuer: 'https://shopify.com/authentication/1',
+  authorization_endpoint: 'https://shopify.com/authentication/1/oauth/authorize',
+  token_endpoint: 'https://shopify.com/authentication/1/oauth/token',
+  end_session_endpoint: 'https://shopify.com/authentication/1/logout',
+  jwks_uri: 'https://shopify.com/authentication/1/.well-known/jwks.json',
+};
+
+/** @param {string} id */
+const mine = (id) =>
+  ['gid://shopify/Order/1', 'gid://shopify/SubscriptionContract/1', 'gid://shopify/CustomerAddress/1'].includes(id);
+
+/**
+ * The Customer Account API's `data`, by operation name.
+ * @type {Record<string, (variables: Record<string, unknown>) => unknown>}
+ */
+const ACCOUNT_DATA = {
+  TetherOrder: (variables) => ({
+    order: mine(stringAt(variables, 'id'))
+      ? {
+          id: stringAt(variables, 'id'),
+          name: '#1001',
+          lineItems: { nodes: [{ id: 'gid://shopify/LineItem/1', title: 'Tee', quantity: 1 }] },
+          returnInformation: {
+            returnableLineItems: { nodes: [{ quantity: 1, lineItem: { id: 'gid://shopify/LineItem/1' } }] },
+          },
+        }
+      : null,
+  }),
+  TetherAddresses: () => ({
+    customer: {
+      defaultAddress: { id: 'gid://shopify/CustomerAddress/1' },
+      addresses: {
+        nodes: [
+          { id: 'gid://shopify/CustomerAddress/1', city: 'Utrecht' },
+          { id: 'gid://shopify/CustomerAddress/2', city: 'Delft' },
+        ],
+      },
+    },
+  }),
+  TetherSubscriptions: () => ({
+    customer: {
+      subscriptionContracts: { nodes: [{ id: 'gid://shopify/SubscriptionContract/1', status: 'ACTIVE' }] },
+    },
+  }),
+  TetherContract: (variables) => ({
+    customer: {
+      subscriptionContract: mine(stringAt(variables, 'id'))
+        ? {
+            id: stringAt(variables, 'id'),
+            status: 'ACTIVE',
+            upcomingBillingCycles: { nodes: [{ cycleIndex: 3, skipped: false }] },
+          }
+        : null,
+    },
+  }),
+  TetherProfile: (variables) => ({ customerUpdate: { customer: fieldOf(variables, 'input'), userErrors: [] } }),
+  TetherAddressCreate: (variables) => ({
+    customerAddressCreate: {
+      customerAddress: { id: 'gid://shopify/CustomerAddress/9', ...recordAt(variables, 'address') },
+      userErrors: recordAt(variables, 'address')['city'] ? [] : [{ field: ['city'], message: 'City is required' }],
+    },
+  }),
+  TetherAddressUpdate: (variables) => ({
+    customerAddressUpdate: {
+      customerAddress: { id: stringAt(variables, 'id'), ...recordAt(variables, 'address') },
+      userErrors: [],
+    },
+  }),
+  TetherAddressDelete: (variables) => ({
+    customerAddressDelete: { deletedAddressId: stringAt(variables, 'id'), userErrors: [] },
+  }),
+  TetherPause: (variables) => ({
+    subscriptionContractPause: { contract: { id: stringAt(variables, 'id'), status: 'PAUSED' }, userErrors: [] },
+  }),
+  TetherResume: (variables) => ({
+    subscriptionContractActivate: { contract: { id: stringAt(variables, 'id'), status: 'ACTIVE' }, userErrors: [] },
+  }),
+  TetherCancel: (variables) => ({
+    subscriptionContractCancel: { contract: { id: stringAt(variables, 'id'), status: 'CANCELLED' }, userErrors: [] },
+  }),
+  TetherSkip: (variables) => ({
+    subscriptionBillingCycleSkip: {
+      billingCycle: {
+        cycleIndex: numberAt(recordAt(recordAt(variables, 'input'), 'selector'), 'index'),
+        skipped: true,
+      },
+      userErrors: [],
+    },
+  }),
+  TetherReturn: () => ({
+    orderRequestReturn: { return: { id: 'gid://shopify/Return/1', status: 'REQUESTED' }, userErrors: [] },
+  }),
+  TetherOrders: () => ({
+    customer: {
+      orders: { nodes: [{ id: 'o1', name: '#1001', totalPrice: { amount: '10.0', currencyCode: 'EUR' } }] },
+    },
+  }),
+};
+
+const CUSTOMER = {
+  customer: {
+    id: 'c1',
+    firstName: 'Ada',
+    lastName: 'L',
+    displayName: 'Ada L',
+    emailAddress: { emailAddress: 'ada@x.test' },
+    defaultAddress: null,
+  },
+};
+
 /** @param {ShopifyOptions} [options] */
 export function shopify({ tamper = false, wrongNonce = false, kid = 'k1', claims = {} } = {}) {
   /** @type {ShopifyCall[]} */
   const calls = [];
   /** @type {string | null} */
   let lastNonce = null;
+
+  /**
+   * @param {RequestInit} init
+   * @param {Headers} headers
+   */
+  const token = async (init, headers) => {
+    const body = init.body;
+    assert.ok(body instanceof URLSearchParams, 'a form body');
+    assert.equal(headers.get('Origin'), SITE, 'the site origin, as Shopify expects');
+    if (body.get('grant_type') === 'refresh_token') return ok({ access_token: 'access-2', expires_in: 3600 });
+    const idTokenSent = await idToken(
+      {
+        iss: 'https://shopify.com/authentication/1',
+        aud: 'client-1',
+        nonce: wrongNonce ? 'other' : lastNonce,
+        exp: Math.floor(Date.now() / 1000) + 3600,
+        iat: Math.floor(Date.now() / 1000),
+        sub: 'gid://shopify/Customer/1',
+        ...claims,
+      },
+      { tamper, kid },
+    );
+    return ok({ access_token: 'access-1', refresh_token: 'refresh-1', id_token: idTokenSent, expires_in: 3600 });
+  };
+
+  /**
+   * @param {RequestInit} init
+   * @param {Headers} headers
+   */
+  const customerAccount = (init, headers) => {
+    assert.ok(typeof init.body === 'string', 'a JSON body');
+    const { query, variables = {} } = JSON.parse(init.body);
+    const op = /(?:query|mutation)\s+(\w+)/.exec(query)?.[1];
+    calls.push({ op, variables, auth: headers.get('Authorization') });
+    const answer = op === undefined ? undefined : ACCOUNT_DATA[op];
+    return ok({ data: answer ? answer(variables) : CUSTOMER });
+  };
+
   /** @type {typeof globalThis.fetch} */
   const fetch = async (url, init = {}) => {
-    const target = String(url);
+    const target = urlOf(url);
     calls.push({ url: target, init });
     const headers = new Headers(init.headers);
-    /**
-     * @param {unknown} data
-     * @param {number} [status]
-     */
-    const ok = (data, status = 200) =>
-      new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json' } });
-    if (target.endsWith('/.well-known/openid-configuration')) {
-      return ok({
-        issuer: 'https://shopify.com/authentication/1',
-        authorization_endpoint: 'https://shopify.com/authentication/1/oauth/authorize',
-        token_endpoint: 'https://shopify.com/authentication/1/oauth/token',
-        end_session_endpoint: 'https://shopify.com/authentication/1/logout',
-        jwks_uri: 'https://shopify.com/authentication/1/.well-known/jwks.json',
-      });
-    }
+    if (target.endsWith('/.well-known/openid-configuration')) return ok(DISCOVERY);
     if (target.endsWith('/.well-known/customer-account-api'))
       return ok({ graphql_api: 'https://shopify.com/1/account/customer/api/2026-10/graphql' });
     if (target.endsWith('/jwks.json')) return ok({ keys: [jwk] });
-    if (target.endsWith('/oauth/token')) {
-      const body = init.body;
-      assert.ok(body instanceof URLSearchParams, 'a form body');
-      assert.equal(headers.get('Origin'), SITE, 'the site origin, as Shopify expects');
-      if (body.get('grant_type') === 'refresh_token') return ok({ access_token: 'access-2', expires_in: 3600 });
-      const token = await idToken(
-        {
-          iss: 'https://shopify.com/authentication/1',
-          aud: 'client-1',
-          nonce: wrongNonce ? 'other' : lastNonce,
-          exp: Math.floor(Date.now() / 1000) + 3600,
-          iat: Math.floor(Date.now() / 1000),
-          sub: 'gid://shopify/Customer/1',
-          ...claims,
-        },
-        { tamper, kid },
-      );
-      return ok({ access_token: 'access-1', refresh_token: 'refresh-1', id_token: token, expires_in: 3600 });
-    }
-    if (target.includes('/account/customer/api/')) {
-      assert.ok(typeof init.body === 'string', 'a JSON body');
-      const { query, variables = {} } = JSON.parse(init.body);
-      const op = query.match(/(?:query|mutation)\s+(\w+)/)?.[1];
-      calls.push({ op, variables, auth: headers.get('Authorization') });
-      /** @param {string} id */
-      const mine = (id) =>
-        ['gid://shopify/Order/1', 'gid://shopify/SubscriptionContract/1', 'gid://shopify/CustomerAddress/1'].includes(
-          id,
-        );
-      if (op === 'TetherOrder')
-        return ok({
-          data: {
-            order: mine(variables.id)
-              ? {
-                  id: variables.id,
-                  name: '#1001',
-                  lineItems: { nodes: [{ id: 'gid://shopify/LineItem/1', title: 'Tee', quantity: 1 }] },
-                  returnInformation: {
-                    returnableLineItems: { nodes: [{ quantity: 1, lineItem: { id: 'gid://shopify/LineItem/1' } }] },
-                  },
-                }
-              : null,
-          },
-        });
-      if (op === 'TetherAddresses')
-        return ok({
-          data: {
-            customer: {
-              defaultAddress: { id: 'gid://shopify/CustomerAddress/1' },
-              addresses: {
-                nodes: [
-                  { id: 'gid://shopify/CustomerAddress/1', city: 'Utrecht' },
-                  { id: 'gid://shopify/CustomerAddress/2', city: 'Delft' },
-                ],
-              },
-            },
-          },
-        });
-      if (op === 'TetherSubscriptions')
-        return ok({
-          data: {
-            customer: {
-              subscriptionContracts: { nodes: [{ id: 'gid://shopify/SubscriptionContract/1', status: 'ACTIVE' }] },
-            },
-          },
-        });
-      if (op === 'TetherContract')
-        return ok({
-          data: {
-            customer: {
-              subscriptionContract: mine(variables.id)
-                ? {
-                    id: variables.id,
-                    status: 'ACTIVE',
-                    upcomingBillingCycles: { nodes: [{ cycleIndex: 3, skipped: false }] },
-                  }
-                : null,
-            },
-          },
-        });
-      if (op === 'TetherProfile')
-        return ok({ data: { customerUpdate: { customer: variables.input, userErrors: [] } } });
-      if (op === 'TetherAddressCreate')
-        return ok({
-          data: {
-            customerAddressCreate: {
-              customerAddress: { id: 'gid://shopify/CustomerAddress/9', ...variables.address },
-              userErrors: variables.address.city ? [] : [{ field: ['city'], message: 'City is required' }],
-            },
-          },
-        });
-      if (op === 'TetherAddressUpdate')
-        return ok({
-          data: {
-            customerAddressUpdate: { customerAddress: { id: variables.id, ...variables.address }, userErrors: [] },
-          },
-        });
-      if (op === 'TetherAddressDelete')
-        return ok({ data: { customerAddressDelete: { deletedAddressId: variables.id, userErrors: [] } } });
-      if (op === 'TetherPause')
-        return ok({
-          data: { subscriptionContractPause: { contract: { id: variables.id, status: 'PAUSED' }, userErrors: [] } },
-        });
-      if (op === 'TetherResume')
-        return ok({
-          data: { subscriptionContractActivate: { contract: { id: variables.id, status: 'ACTIVE' }, userErrors: [] } },
-        });
-      if (op === 'TetherCancel')
-        return ok({
-          data: { subscriptionContractCancel: { contract: { id: variables.id, status: 'CANCELLED' }, userErrors: [] } },
-        });
-      if (op === 'TetherSkip')
-        return ok({
-          data: {
-            subscriptionBillingCycleSkip: {
-              billingCycle: { cycleIndex: variables.input.selector.index, skipped: true },
-              userErrors: [],
-            },
-          },
-        });
-      if (op === 'TetherReturn')
-        return ok({
-          data: {
-            orderRequestReturn: { return: { id: 'gid://shopify/Return/1', status: 'REQUESTED' }, userErrors: [] },
-          },
-        });
-      if (/TetherOrders/.test(query))
-        return ok({
-          data: {
-            customer: {
-              orders: { nodes: [{ id: 'o1', name: '#1001', totalPrice: { amount: '10.0', currencyCode: 'EUR' } }] },
-            },
-          },
-        });
-      return ok({
-        data: {
-          customer: {
-            id: 'c1',
-            firstName: 'Ada',
-            lastName: 'L',
-            displayName: 'Ada L',
-            emailAddress: { emailAddress: 'ada@x.test' },
-            defaultAddress: null,
-          },
-        },
-      });
-    }
+    if (target.endsWith('/oauth/token')) return token(init, headers);
+    if (target.includes('/account/customer/api/')) return customerAccount(init, headers);
     if (target.includes(`${SHOP}/api/`))
       return ok({
         data: {

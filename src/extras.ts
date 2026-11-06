@@ -7,6 +7,7 @@ import { cfg, warn, reportError } from './config.ts';
 import { sel, get, has, qsa, emit, parseJSONAttr, attributesFromJson } from './dom.ts';
 import { scopes } from './product.ts';
 import { Cart } from './cart.ts';
+import { setCountry } from './page-market.ts';
 import { isRecord } from '../server/src/shared/json.ts';
 import type { ShopifyCart } from './cart/store.ts';
 
@@ -15,11 +16,6 @@ interface StoredMarket {
   language: string | null;
   locale: string | undefined;
 }
-
-type SetCountry = (
-  country: string,
-  options: { language: string | null; locale: string | undefined; remember: boolean },
-) => Promise<unknown>;
 
 /** @param name The group's `tether-group` value. */
 function groupAttributes(group: Element, name: string | null) {
@@ -86,12 +82,9 @@ export function onStorage(event: StorageEvent): void {
   }
   if (event.key !== `${cfg.prefix}:market:${cfg.domain}` || !event.newValue) return;
   const market = parseStoredMarket(event.newValue);
-  // The core's `setCountry` takes the `null` language and `undefined` locale stored here, which the public type of
-  // `window.Tether` leaves out.
-  const tether = Reflect.get(window, 'Tether') as { setCountry: SetCountry } | undefined;
-  if (!market || !tether) return;
+  if (!market) return;
   const options = { language: market.language, locale: market.locale, remember: false };
-  tether.setCountry(market.country, options).catch((error: unknown) => {
+  setCountry(market.country, options).catch((error: unknown) => {
     reportError(error, 'market from another tab');
   });
 }

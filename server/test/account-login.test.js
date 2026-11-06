@@ -17,6 +17,7 @@ import {
   sessionKeys,
   loginFrom,
 } from './account-fixtures.js';
+import { urlOf } from './mocks.js';
 
 /** @typedef {typeof globalThis.fetch} Fetch */
 
@@ -96,7 +97,7 @@ test('a token answer whose id_token is not a string fails the login instead of c
    * @returns {Fetch}
    */
   const wrapFetch = (inner) => async (url, init) => {
-    if (!String(url).endsWith('/oauth/token')) return inner(url, init);
+    if (!urlOf(url).endsWith('/oauth/token')) return inner(url, init);
     return new Response(JSON.stringify({ access_token: 'access-1', id_token: 42, expires_in: 3600 }), { status: 200 });
   };
   const { back } = await loginFlow({ wrapFetch });
@@ -124,7 +125,7 @@ test('a replayed callback with the same login cookie gets no session: Shopify re
    * @returns {Fetch}
    */
   const wrapFetch = (inner) => async (url, init) => {
-    if (String(url).endsWith('/oauth/token')) {
+    if (urlOf(url).endsWith('/oauth/token')) {
       const body = init?.body;
       assert.ok(body instanceof URLSearchParams, 'a form body');
       const code = body.get('code');
@@ -198,7 +199,7 @@ test('the store domain refuses Workers (403 on .well-known): addresses come from
   const asked = [];
   /** @type {Fetch} */
   const fetch = async (url, init = {}) => {
-    const target = String(url);
+    const target = urlOf(url);
     asked.push(target);
     if (target.startsWith('https://blocked.myshopify.com/.well-known/'))
       return new Response('forbidden', { status: 403 });
@@ -282,7 +283,7 @@ test('discovery: when Shopify answers neither on the store domain nor on its acc
   const sh = shopify();
   /** @type {Fetch} */
   const fetch = async (url, init = {}) => {
-    const target = String(url);
+    const target = urlOf(url);
     if (target.includes('/.well-known/')) return new Response('forbidden', { status: 403 });
     if (target.startsWith('https://closed.myshopify.com/api/')) {
       return new Response(JSON.stringify({ data: { shop: { id: 'gid://shopify/Shop/9' } } }), { status: 200 });
@@ -307,7 +308,7 @@ test('discovery falls back to the shop id only for bot protection, not for a sto
   const asked = [];
   /** @type {Fetch} */
   const fetch = async (url, init = {}) => {
-    const target = String(url);
+    const target = urlOf(url);
     asked.push(target);
     if (target.startsWith('https://down.myshopify.com/.well-known/'))
       return new Response('bad gateway', { status: 502 });

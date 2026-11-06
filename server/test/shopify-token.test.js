@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createShopify } from '../src/shopify.ts';
 import { memoryStore } from '../src/store.ts';
+import { urlOf } from './mocks.js';
 
 const TOKEN = 'shpca_live-admin-token';
 
@@ -12,7 +13,7 @@ function fakeShopify() {
   const tokenRequests = [];
   /** @type {typeof globalThis.fetch} */
   const fetch = async (url, init) => {
-    if (String(url).endsWith('/admin/oauth/access_token')) {
+    if (urlOf(url).endsWith('/admin/oauth/access_token')) {
       const body = init?.body;
       assert.ok(typeof body === 'string', 'a form body');
       tokenRequests.push(new URLSearchParams(body).get('client_secret'));
@@ -63,7 +64,7 @@ test('a cached token Shopify rejects is replaced in the store, so the next run d
   const rejected = [];
   /** @type {typeof globalThis.fetch} */
   const fetch = async (url, init) => {
-    if (String(url).endsWith('/admin/oauth/access_token')) {
+    if (urlOf(url).endsWith('/admin/oauth/access_token')) {
       tokenRequests.push(issued);
       return Response.json({ access_token: issued, expires_in: 86399 });
     }

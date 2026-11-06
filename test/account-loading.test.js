@@ -61,8 +61,12 @@ function partRanWithin(search, waitMs) {
     console.log = (...args) => {
       if (args[1] === 'account') finish(true);
     };
-    const onEvent = () => finish(true);
-    const timer = setTimeout(() => finish(false), waitMs);
+    const onEvent = () => {
+      finish(true);
+    };
+    const timer = setTimeout(() => {
+      finish(false);
+    }, waitMs);
     document.addEventListener('tether:account-error', onEvent);
     globalThis.fetch = async () => {
       finish(true);

@@ -137,7 +137,7 @@ test('a failed update exits non-zero, and --from without a folder is refused', (
   assert.throws(
     () => execFileSync(process.execPath, [...NODE_FLAGS, script, '--from'], { encoding: 'utf8', stdio: 'pipe' }),
     /** @param {Error & import('node:child_process').SpawnSyncReturns<string>} error What execFileSync throws. */
-    (error) => error.status === 1 && /--from needs the folder/.test(String(error.stderr)),
+    (error) => error.status === 1 && error.stderr.includes('--from needs the folder'),
   );
 });
 

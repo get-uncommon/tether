@@ -9,6 +9,7 @@ import { emit, toAttributes } from './dom.ts';
 import {
   fetchCart,
   isCartGone,
+  isUnclearFailure,
   mutateCart,
   removeLines,
   setLineQuantity,
@@ -46,6 +47,35 @@ type DiscountCodes = string[] | string | ((current: string[]) => string[]);
 const currentLines = (): readonly ShopifyCartLine[] => currentCart()?.lines.nodes ?? [];
 
 /**
+ * Loads the saved cart again after a change whose outcome is unclear, so this page and the visitor's other tabs show
+ * what Shopify has. A failure here is reported; the change's own failure is what its caller hears.
+ */
+async function reloadAfterUnclearFailure(): Promise<void> {
+  const id = savedCartId();
+  if (!id) return;
+  try {
+    const cart = await fetchCart(id);
+    if (!cart) forgetSavedCart();
+    commit(cart, 'load');
+  } catch (error) {
+    reportError(error, 'cart reload after a failed change');
+  }
+}
+
+/**
+ * Runs a cart change in the queue (`enqueue`). After a failure that doesn't say whether Shopify applied the change,
+ * the cart is loaded again before the next change runs; the change still rejects.
+ */
+function runChange<T>(task: () => Promise<T>): Promise<T> {
+  return enqueue(() =>
+    task().catch(async (error: unknown) => {
+      if (isUnclearFailure(error)) await reloadAfterUnclearFailure();
+      throw error;
+    }),
+  );
+}
+
+/**
  * +1 / -1 for a line. Quick clicks add up: each builds on the quantity the click before asked for, which shows at once
  * (`tether-line="quantity"`, `quantityOf`) until Shopify has answered. Only the latest target is sent; the ones it
  * replaced are skipped.
@@ -58,7 +88,7 @@ function changeQuantity(lineId: string, delta: number): Promise<ShopifyCart | nu
   pendingQuantities.set(lineId, job);
   announce('pending');
   const isLatest = () => pendingQuantities.get(lineId) === job;
-  const sent = enqueue(async () => {
+  const sent = runChange(async () => {
     if (!isLatest()) return currentCart();
     const now = currentLines().find((candidate) => candidate.id === lineId);
     // A + then a -: Shopify already has the quantity.
@@ -192,7 +222,7 @@ export const Cart = {
     const lines: CartLineInput[] = (Array.isArray(input) ? input : [input]).map((line) =>
       toLineInput(line, quantity, options),
     );
-    return enqueue(async () => {
+    return runChange(async () => {
       const cart = await mutateCart({
         name: 'cartLinesAdd',
         args: '$lines: [CartLineInput!]!',
@@ -218,7 +248,7 @@ export const Cart = {
     const quantity = typeof patch === 'number' ? patch : patch.quantity;
     if (quantity !== undefined && quantity <= 0) return Cart.removeLine(lineId);
     const line = toLineUpdate(lineId, patch);
-    return enqueue(async () => commit(await updateLines([line]), 'update'));
+    return runChange(async () => commit(await updateLines([line]), 'update'));
   },
 
   changeQuantity,
@@ -228,7 +258,7 @@ export const Cart = {
 
   removeLine(lineIds: string | string[]): Promise<ShopifyCart | null> {
     const ids = Array.isArray(lineIds) ? lineIds : [lineIds];
-    return enqueue(async () => commit(await removeLines(ids), 'remove'));
+    return runChange(async () => commit(await removeLines(ids), 'remove'));
   },
 
   clear(): Promise<ShopifyCart | null> {
@@ -239,7 +269,7 @@ export const Cart = {
 
   setNote(note: string | null | undefined): Promise<ShopifyCart | null> {
     const variables = { note: note ?? '' };
-    return enqueue(async () =>
+    return runChange(async () =>
       commit(
         await mutateCart({
           name: 'cartNoteUpdate',
@@ -259,7 +289,7 @@ export const Cart = {
    * @param attributes The value `''` removes a key.
    */
   setAttributes(attributes: Attributes): Promise<ShopifyCart | null> {
-    return enqueue(async () => {
+    return runChange(async () => {
       const variables = { attributes: mergedAttributes(attributes) };
       const cart = await mutateCart({
         name: 'cartAttributesUpdate',
@@ -274,7 +304,7 @@ export const Cart = {
 
   /** Replaces the discount codes; `[]` removes them all. */
   setDiscountCodes(codes: DiscountCodes): Promise<ShopifyCart | null> {
-    return enqueue(async () => {
+    return runChange(async () => {
       const variables = { discountCodes: discountCodesFrom(codes) };
       const cart = await mutateCart({
         name: 'cartDiscountCodesUpdate',
@@ -319,7 +349,7 @@ export const Cart = {
     buyerIdentity: { countryCode?: string; email?: string; phone?: string },
     { create = true }: { create?: boolean } = {},
   ): Promise<ShopifyCart | null> {
-    return enqueue(async () => {
+    return runChange(async () => {
       const cart = await mutateCart({
         name: 'cartBuyerIdentityUpdate',
         args: '$buyerIdentity: CartBuyerIdentityInput!',
