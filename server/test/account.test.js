@@ -603,3 +603,20 @@ test('address update: fields sent empty are cleared; a new address leaves them o
     'fields not sent stay as they are',
   );
 });
+
+test('settings: the session key never comes from a placeholder, and a key shared with SYNC_SECRET is flagged', async () => {
+  const { accountSettings, accountProblems } = await import('../src/account.js');
+  const placeholder = accountSettings({ ...env, SYNC_SECRET: 'your-random-secret-of-24-characters' });
+  assert.equal(placeholder.secret, '', 'an example value is not an encryption key');
+  assert.ok(accountProblems(placeholder).some((p) => p.severity === 'error' && /ACCOUNT_SECRET/.test(p.message)));
+  const r = await handleAccount(req('/me'), { ...env, SYNC_SECRET: 'your-random-secret-of-24-characters' }, {});
+  assert.equal(r.status, 503);
+
+  const shared = accountSettings(env);
+  assert.equal(shared.secretSource, 'SYNC_SECRET');
+  assert.ok(accountProblems(shared).some((p) => p.severity === 'warning' && /ACCOUNT_SECRET/.test(p.message)));
+
+  const own = accountSettings({ ...env, ACCOUNT_SECRET: 'a-separate-account-secret-xyz' });
+  assert.deepEqual([own.secretSource, own.secret], ['ACCOUNT_SECRET', 'a-separate-account-secret-xyz']);
+  assert.ok(!accountProblems(own).some((p) => /SYNC_SECRET/.test(p.message)));
+});

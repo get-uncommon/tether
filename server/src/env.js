@@ -18,9 +18,9 @@ const UNSET = new Set(['none', '-', 'null', 'undefined']);
 /** Example values from the docs and the example vars file: never real credentials. */
 const PLACEHOLDER = /^(your[-_]|choose[-_]|example|changeme|change[-_]me|placeholder|xxx+|todo|<.*>$)|\.\.\.|…/i;
 
-/** Shortest SYNC_SECRET accepted; a shorter one counts as unset. */
+/** Shortest SYNC_SECRET or ACCOUNT_SECRET accepted; a shorter one counts as unset. */
 export const MIN_SYNC_SECRET = 24;
-const SECRETS = new Set(['SYNC_SECRET']);
+const SECRETS = new Set(['SYNC_SECRET', 'ACCOUNT_SECRET']);
 
 /**
  * Why a filled-in value is ignored, or `null` when it is usable or simply empty.
