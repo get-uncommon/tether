@@ -37,6 +37,18 @@ const KEEP_ALIVE = { job: 'keep-alive', step: 'Keep the weekly schedule alive' }
 
 const run = promisify(execFile);
 
+/**
+ * Drops the environment variables that tie a git command to a repository (GIT_DIR, GIT_INDEX_FILE, GIT_WORK_TREE, …,
+ * as git itself lists them). A git hook runs with them set to this repository, so without this, the pre-push gate's
+ * copies would `git init`, commit and configure this repository instead of their own.
+ */
+export function forgetHookRepository() {
+  const names = execFileSync('git', ['rev-parse', '--local-env-vars'], { encoding: 'utf8' }).split('\n');
+  for (const name of names.filter(Boolean)) Reflect.deleteProperty(process.env, name);
+}
+
+forgetHookRepository();
+
 /** The name of the `PATH` variable in this process's environment, which Windows spells `Path`. */
 const PATH_NAME = Object.keys(process.env).find((key) => key.toUpperCase() === 'PATH') ?? 'PATH';
 
@@ -228,6 +240,9 @@ async function deployedRepository(deployed, work) {
       encoding: 'utf8',
     }).trim();
   git(deployed, ['init', '--quiet', '--initial-branch=main']);
+  // Every later command commits, configures or pushes: refuse to go on unless they act on the copy's own repository.
+  const gitDir = git(deployed, ['rev-parse', '--absolute-git-dir']).replaceAll('\\', '/');
+  assert.equal(gitDir, `${slashed(deployed)}/.git`, `git in ${deployed} uses another repository: ${gitDir}`);
   git(deployed, ['add', '-A']);
   git(deployed, ['commit', '--quiet', '-m', 'Deploy tether-sync']);
   git(work, ['clone', '--quiet', '--bare', deployed, origin]);
