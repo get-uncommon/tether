@@ -2,6 +2,27 @@
 
 ## 0.7.0 (unreleased)
 
+**Before you update: one step for every deployed sync Worker.** Copies made from 0.6.1 to 0.6.8
+have `latest` in `TETHER_VERSION` unless it was changed, so they install 0.7.0 by themselves on
+their next scheduled update run (Mondays by default), and Cloudflare deploys it. Before that run:
+
+- **If the shop uses customer accounts:** add the Worker secret `ACCOUNT_SECRET` (24 or more random
+  characters, e.g. `openssl rand -hex 24`, not the value of `SYNC_SECRET`) in Cloudflare → your
+  Worker → Settings → Variables and Secrets. 0.6 already reads it, so it can be set now. Customers
+  are logged out once.
+- **Or, to wait:** write `0.6` in the copy's `TETHER_VERSION` file and commit it. The copy stays on
+  0.6 until the file says `0.7`.
+
+**If you do neither:** the Worker updates to 0.7.0 and keeps syncing products, answering webhooks
+and starting deploys. Only its customer account routes answer 503 with
+`accounts need the Worker secret ACCOUNT_SECRET (see /check)`, and `/check` shows the error, until
+the secret is added. Workers without customer accounts need nothing. After 0.7.0 is installed, every
+update run also asks you to copy the new update workflow file in, once, by hand (see "Sync Worker
+updates" below).
+
+Sites that load the script from jsDelivr as `@0.6` stay on 0.6 until they change the URL; `@latest`
+gets 0.7.0 at once. The breaking changes below list each one's upgrade step.
+
 - **Breaking (script build):** every optional part carries the sha384 `integrity` hash from the
   core's own build, a `partsUrl` included, and loads with CORS when it is on another origin. A
   self-hosted `partsUrl` must serve the files of the same release as the core: upload the whole
@@ -14,10 +35,20 @@
   Tether's release workflow built it from the tag's commit (still required to be on `main`). Run by
   hand without the GitHub CLI, the updater refuses unless `--allow-unverified` is given; a check
   that fails is always refused. Releases before 0.7.0 have no signed file and can't be installed by
-  the new updater. **Upgrade:** none needed. A copy on 0.6 moves to 0.7 when its `TETHER_VERSION`
-  says `0.7` (or `latest`): its own 0.6 updater installs 0.7.0 by commit as before, and from then on
-  every update is verified. The workflow's steps are unchanged, and `gh` comes with every GitHub
-  runner.
+  the new updater. **Upgrade:** none for the updater itself: a copy's own 0.6 updater installs
+  0.7.0 by commit, and from then on every update is verified (`gh` comes with every GitHub runner).
+  Which copies take 0.7.0 is decided by their `TETHER_VERSION` (next item).
+- **Breaking (sync Worker), act before 0.7.0 is released:** copies made from 0.6.1 to 0.6.8 have
+  `latest` in `TETHER_VERSION` unless it was changed, so they install 0.7.0 by themselves on the
+  first scheduled update run after its release (Mondays by default), and Cloudflare deploys it.
+  **Upgrade, before 0.7.0 is released, in each such copy:** do the one-time steps below that apply
+  to it (customer accounts: add `ACCOUNT_SECRET`; a host that runs the Node CLI itself: Node 22.18
+  or newer), or write `0.6` in `TETHER_VERSION` to stay on 0.6 and change it to `0.7` when ready.
+  Copies whose `TETHER_VERSION` says `0.6` (made from 0.6.0, or changed) get 0.7.0 only when it is
+  changed to `0.7`. A copy that installs 0.7.0 without `ACCOUNT_SECRET` keeps syncing, answering
+  webhooks and starting deploys; only its account routes answer 503 with
+  `accounts need the Worker secret ACCOUNT_SECRET (see /check)`, and `/check` shows the error,
+  until the secret is added.
 - **Breaking (customer accounts):** accounts run only through the Worker (`account.server`), so no
   customer token is ever kept in the browser. Browser mode is removed: the `account.clientId`,
   `callbackUrl`, `tokenUrl`, `shopDomain` and `remember` options, and `Tether.account.query()`,
@@ -58,6 +89,20 @@
   site's CSS through the element Tether fills (`[tether-bind="description"] h2 { … }`), not with
   classes inside the description.
 - Fix: the analytics part no longer throws on a `checkout` event without a cart.
+- **Breaking (descriptions):** iframes are kept only from YouTube (`www.youtube.com`,
+  `www.youtube-nocookie.com`), Vimeo's player, Loom and Wistia, so store content can't frame a
+  look-alike login page; an iframe from any other origin is removed. Kept embeds look as before.
+  **Upgrade:** list other players in the new `embedOrigins` option (bare https origins, e.g.
+  `['https://player.example.com']`); an entry that isn't one is skipped with a warning.
+- **Breaking (Barba preset):** `barbaPreset()`'s `gsap`, `lenis` and `scrollTrigger` take only
+  getters (`() => lenis`), as their types always said; a value throws a `TypeError` when the
+  preset is made. **Upgrade:** wrap the value in a function.
+- Fix (Barba preset): the default `scrollTrigger` getter calls `ScrollTrigger.refresh()` after an
+  async render again; it was skipped because ScrollTrigger is a class.
+- Types: `barbaPreset()` returns its hooks as set (not `| null`); a product option value's `swatch`
+  is typed (`{ color, image: { previewImage } }`) instead of `unknown`; the Astro integration
+  accepts `siteUrl` and `pageSize`, so the config shared with `createStorefront()` type-checks
+  (both are still left out of the page).
 - Types: `ResolvedTetherConfig.domain` is a `ShopDomain` (or `''`) and `apiVersion` an `ApiVersion`
   (or `'unstable'`), branded where the config is read; `TetherOptions` still takes plain strings.
 - **Breaking (errors):** the codes `NOT_ALLOWED`, `SESSION_ENDED` and `TOKEN_FAILED`, which nothing
@@ -111,22 +156,25 @@
   stayed at 0).
 - **Breaking (sync Worker):** customer accounts need `ACCOUNT_SECRET` (24+ random characters); the
   session key no longer falls back to `SYNC_SECRET`, the `/reconcile` and `/check` password.
-  Without it the account routes answer 503 and log `account setup ACCOUNT_SECRET is not set`, and
-  `/check` shows an error step that says what to set. **Upgrade, once, before a Worker with
+  Without it the account routes answer 503 `accounts need the Worker secret ACCOUNT_SECRET (see
+  /check)` and log `account setup ACCOUNT_SECRET is not set` (the sync, webhooks and deploys are
+  unaffected), and `/check` shows an error step that says what to set. **Upgrade, once, before a Worker with
   customer accounts runs 0.7.0:** if it has no `ACCOUNT_SECRET` yet, add one in Cloudflare → your
   Worker → Settings → Variables and Secrets (`openssl rand -hex 24`, not the value of
   `SYNC_SECRET`). 0.6 already uses it, so it can be set before the update. Changing the key logs
-  every customer out once. Self-updating copies follow the `0.6` range and get 0.7.0 only when
-  `TETHER_VERSION` is changed to `0.7`: set the secret first. A copy whose `TETHER_VERSION` is
-  `latest` updates by itself, so set the secret before 0.7.0 is released. Workers without customer
+  every customer out once. A copy whose `TETHER_VERSION` says `latest`, which is every copy
+  made from 0.6.1 to 0.6.8 unless changed, installs 0.7.0 by itself: set the secret before 0.7.0 is
+  released. A copy on `0.6` gets 0.7.0 only when the file says `0.7`: set the secret first. Workers without customer
   accounts, or with `ACCOUNT_SECRET` already set, need nothing.
 - Sync Worker updates: when a release ships a newer `.github/workflows/update-tether.yml` than the
   copy's (its `# Tether workflow revision:` line), the update run prints a GitHub Actions warning
   and adds the one-time manual step to the job summary. **Upgrade notes, for any later release that
   raises it:** copy `server/.github/workflows/update-tether.yml` from that release over the same
   file in your copy and commit it, once, by hand (GitHub doesn't let the workflow change its own
-  file; keep your own `cron` line). 0.7.0 ships revision 2: separate jobs, the release's tests run
-  with a read-only token that isn't kept in the checkout, and actions pinned by commit. Copies
+  file; keep your own `cron` line). 0.7.0 ships revision 3: separate jobs, the release's tests run
+  with a read-only token that isn't kept in the checkout, actions pinned by commit, and the update
+  uploaded with its sha256 as a job output before the release's tests run, so `publish` applies it
+  only when the hash matches and the tests can't change what is pushed. Copies
   deployed before 0.7.0 have revision 1 (no revision line). Their 0.6 updater installs 0.7.0
   without a warning; from then on every update run warns, also a run that finds nothing new, until
   the copy has the new workflow. The warning and the job summary link to the release's workflow
@@ -138,6 +186,17 @@
   and uploads it to the GitHub Release. The release runs the whole gate (`npm run check`);
   dependencies are installed only in a read-only job, the server asset is built and attested in a
   job that installs nothing, and npm publishes with `--ignore-scripts`.
+- Fix (sync Worker): only the exact example values from the docs (`your-store.myshopify.com`,
+  `choose-a-long-random-string`, `shpat_…`, …) count as unset. A real value that starts with `todo`,
+  `example` or `xxx`, or contains `...`, was silently ignored (e.g.
+  `WEBFLOW_OWNED=todo-notes,description`) and is now used.
+- Fix (sync Worker updates): a copy's update tests no longer read the copy's own `TETHER_VERSION` or
+  `tether-sync.config.js`, so a copy on `latest` or a pinned version, or with its own mapping, no
+  longer fails its update run. A test installs this release into a v0.6.8 copy with v0.6.8's own
+  updater and runs the copy's tests.
+- Releases: the signing job installs an exact npm (11.21.1); esbuild, jsdom and Playwright are
+  pinned exactly. The build finds GraphQL template literals with TypeScript's parser instead of by
+  pairing backticks, which a backtick in a regular expression could throw off.
 - Repository: CI runs `npm run check` on pull requests and pushes to `main`, on Node 22.18 and 24.
 - Repository: browser, Node-side, Worker and test code are type-checked as separate programs
   (`tsc -b`), so browser code can't use Node globals and the Worker can't use the DOM; the tests are

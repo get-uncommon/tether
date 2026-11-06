@@ -1,8 +1,8 @@
 /**
  * Parsers for the options with structure, whose values become URLs, credentials, storage names or query text: the
- * store's domain, the metafields and the nested `account`, `markets` and `analytics` objects. `account.server` becomes
- * the base of credentialed requests, so a value of the wrong kind is dropped (with a warning through `invalid`), never
- * used. `config.ts` resolves the rest.
+ * store's domain, the metafields, the embed origins and the nested `account`, `markets` and `analytics` objects.
+ * `account.server` becomes the base of credentialed requests, so a value of the wrong kind is dropped (with a warning
+ * through `invalid`), never used. `config.ts` resolves the rest.
  */
 import { isRecord } from '../server/src/shared/json.ts';
 import type { AccountConfig, AnalyticsConfig, MarketsConfig, MetafieldIdentifier, MetafieldRef } from './config.ts';
@@ -92,6 +92,39 @@ function isPageOrigin(value: string): boolean {
     // Not an absolute URL: `isSiteOrHttpsUrl` has judged it.
     return false;
   }
+}
+
+/** @returns An https origin written as just that (`https://video.example`), `null` for anything else. */
+function toHttpsOrigin(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:' && url.href === new URL(url.origin).href ? url.origin : null;
+  } catch {
+    // Not an absolute URL.
+    return null;
+  }
+}
+
+/**
+ * The origins a site lets description iframes load from. Each one is trusted to show only what the site expects in a
+ * description, so only a bare https origin is taken: a path would suggest a narrower trust than is given.
+ *
+ * @returns The valid origins; each other entry is skipped with a warning.
+ */
+export function embedOriginsOption(value: unknown, invalid: Invalid): string[] {
+  if (!Array.isArray(value)) {
+    invalid('embedOrigins', value);
+    return [];
+  }
+  const origins: string[] = [];
+  const entries: unknown[] = value;
+  for (const entry of entries) {
+    const origin = toHttpsOrigin(entry);
+    if (origin) origins.push(origin);
+    else invalid('embedOrigin', entry);
+  }
+  return origins;
 }
 
 /** @returns The identifier of `'namespace.key'` or `{ namespace, key }`, when both parts are valid identifiers. */

@@ -8,7 +8,7 @@
  * Settings and set-up: `docs/accounts.md`.
  */
 
-import type { ReadyAccountSettings } from './account/settings.ts';
+import type { AccountProblem, AccountSettings, ReadyAccountSettings } from './account/settings.ts';
 import type { Fetch } from './account/shopify.ts';
 import type { Session } from './account/session.ts';
 import type { ExpiringStore, MemoryEntries } from './account/kv.ts';
@@ -285,6 +285,18 @@ function sessionStorage(env: Record<string, unknown>, memory: MemoryEntries | un
 
 /** The answer while accounts can't work; what is missing is only logged and shown by an authorized /check. */
 const NOT_SET_UP = { error: 'accounts are not set up (see /check)' };
+/**
+ * The answer while ACCOUNT_SECRET is all that is missing. It is named because a Worker set up before 0.7.0 can run
+ * accounts without it until it updates, and the name says nothing about the shop.
+ */
+const NO_ACCOUNT_SECRET = { error: 'accounts need the Worker secret ACCOUNT_SECRET (see /check)' };
+
+/** Logs what stops accounts and answers 503. */
+function notSetUp(settings: AccountSettings, errors: AccountProblem[]): Response {
+  console.error('account setup', errors.map((problem) => problem.message).join('; '));
+  const onlySecretMissing = settings.secret === null && errors.length === 1;
+  return jsonResponse(onlySecretMissing ? NO_ACCOUNT_SECRET : NOT_SET_UP, 503);
+}
 
 /**
  * Handles `/_tether/account/*`.
@@ -304,10 +316,7 @@ export async function handleAccount(
   const configured = accountSettings(env);
   if (!configured) return jsonResponse({ error: 'accounts are not set up' }, 404);
   const ready = readyAccountSettings(configured);
-  if (ready.kind === 'not-ready') {
-    console.error('account setup', ready.errors.map((problem) => problem.message).join('; '));
-    return jsonResponse(NOT_SET_UP, 503);
-  }
+  if (ready.kind === 'not-ready') return notSetUp(configured, ready.errors);
   const store = sessionStorage(env, memory);
   if (!store) {
     console.error('account setup: the TETHER_SYNC KV namespace is not bound, so no login can be kept');

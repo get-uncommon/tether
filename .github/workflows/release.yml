@@ -7,7 +7,7 @@
 #
 # Only the `check` job installs the dependencies, and it can only read the repository. The jobs that can sign
 # (`server-asset`, `npm`) or write (`github-release`) run no dependency's code: an install script can't reach their
-# tokens.
+# tokens. The `npm` job installs only npm itself, at an exact version, for trusted publishing.
 name: release
 
 on:
@@ -29,6 +29,8 @@ jobs:
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: 22
+      # test/upgrade-from-v0.6.8.test.js installs this tree into a copy made from that tag.
+      - run: git fetch --depth=1 --no-tags origin tag v0.6.8
       - run: npm ci
       - name: Tag matches package.json
         run: |
@@ -94,8 +96,9 @@ jobs:
         with:
           node-version: 22
           registry-url: https://registry.npmjs.org
+      # Trusted publishing needs npm 11.5.1 or newer; the exact version keeps a new npm release out of this job.
       - name: npm with trusted publishing
-        run: npm install -g npm@^11.5
+        run: npm install -g npm@11.21.1
       - name: Publish to npm
         run: npm publish --provenance --access public --ignore-scripts
 

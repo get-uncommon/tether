@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import defaultConfig from './default-config.js';
 import { createWorker } from '../src/index.ts';
+import { signShopify } from '../src/hmac.ts';
 import { createMockApis, shopifyProduct, instantSleep, noWaitUntil } from './mocks.js';
 
 const SECRET = 'a-long-random-sync-secret-123';
@@ -26,7 +27,11 @@ function kv() {
   const map = new Map();
   return {
     map,
-    get: async (key) => map.get(key) ?? null,
+    get: async (key, type) => {
+      const value = map.get(key);
+      if (value === undefined) return null;
+      return type === 'json' ? JSON.parse(value) : value;
+    },
     put: async (key, value) => {
       map.set(key, value);
     },
@@ -115,6 +120,75 @@ test('/check: a missing namespace is a warning for the sync and an error once ac
   assert.equal(noSecret.ok, false);
   const secretStep = noSecret.steps.find((step) => step.level === 'error' && /ACCOUNT_SECRET/.test(step.message));
   assert.match(secretStep?.fix ?? '', /Add the Worker secret ACCOUNT_SECRET, a random string of at least 24/);
+});
+
+test('with customer accounts but no ACCOUNT_SECRET only the account routes stop; sync, webhooks and deploys run', async () => {
+  const hook = 'https://api.pages.test/deploy_hooks/abc';
+  const apis = createMockApis({ products: [shopifyProduct(1), shopifyProduct(2)] });
+  const deploys = [];
+  /** @type {typeof globalThis.fetch} */
+  const fetchWithHook = async (url, init) => {
+    if (String(url) === hook) {
+      deploys.push(url);
+      return new Response('{}');
+    }
+    return apis.fetch(url, init);
+  };
+  const worker = createWorker(defaultConfig, { fetch: fetchWithHook, sleep: instantSleep });
+  const accountsWithoutSecret = {
+    ...env,
+    ACCOUNT_CLIENT_ID: 'client-1',
+    ACCOUNT_ORIGINS: 'https://w.test',
+    STOREFRONT_TOKEN: 'public-token',
+    DEPLOY_HOOK_URL: hook,
+    DEPLOY_HOOK_MIN_SECONDS: '0',
+    TETHER_SYNC: kv(),
+  };
+  const tasks = [];
+  const context = { waitUntil: (task) => tasks.push(task) };
+  const send = (path, init) => worker.fetch(new Request(`https://w.test${path}`, init), accountsWithoutSecret, context);
+
+  const logged = await collectErrors(async () => {
+    const login = await send('/_tether/account/login', { headers: { origin: 'https://w.test' } });
+    assert.equal(login.status, 503);
+    assert.match((await login.json()).error, /accounts need the Worker secret ACCOUNT_SECRET/);
+  });
+  assert.ok(logged.some((line) => /account setup ACCOUNT_SECRET is not set/.test(line)));
+
+  const report = await (await send('/check', { headers: auth })).json();
+  const errors = report.steps.filter((step) => step.level === 'error');
+  assert.deepEqual(
+    errors.map((step) => step.title),
+    ['Customer accounts'],
+  );
+  assert.match(errors[0].message, /ACCOUNT_SECRET is not set/);
+
+  const imported = await send('/reconcile?since=all', { method: 'POST', headers: auth });
+  assert.equal(imported.status, 200);
+  assert.equal((await imported.json()).processed, 2);
+  assert.ok(apis.webflowWrites().length > 0, 'the products reach Webflow');
+  assert.equal(deploys.length, 1, 'the deploy hook starts a build');
+
+  apis.shop.products.set(shopifyProduct(1).id, shopifyProduct(1, { title: 'Renamed' }));
+  const body = JSON.stringify({ id: 1 });
+  const webhook = await send('/webhooks/shopify', {
+    method: 'POST',
+    body,
+    headers: {
+      'x-shopify-topic': 'products/update',
+      'x-shopify-shop-domain': env.SHOPIFY_DOMAIN,
+      'x-shopify-hmac-sha256': await signShopify(body, env.SHOPIFY_CLIENT_SECRET),
+    },
+  });
+  assert.equal(webhook.status, 200);
+  await Promise.all(tasks);
+  assert.ok(
+    apis.webflowWrites().some((call) => JSON.stringify(call.body).includes('Renamed')),
+    'the webhook syncs the product',
+  );
+
+  const cron = await worker.scheduled({}, accountsWithoutSecret, context);
+  assert.equal(cron.stopped, null);
 });
 
 test('the Worker and the browser script are released with one version', async (t) => {

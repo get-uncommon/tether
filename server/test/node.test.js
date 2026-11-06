@@ -5,6 +5,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileStore, loadConfig } from '../src/node.ts';
+import { waitFor } from './mocks.js';
 
 test('file store: a state file removed by another process leaves what this process holds', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'tether-sync-'));
@@ -27,7 +28,7 @@ test('file store: a timed write that fails is logged, and kept for the next flus
     log: { error: (message) => errors.push(message) },
   });
   await store.put('k', 1);
-  await new Promise((resolve) => setTimeout(resolve, 50));
+  await waitFor(() => errors.length > 0, 'the timed write to fail');
   assert.equal(errors.length, 1);
   assert.match(errors[0], /write failed, retried on the next change/);
   await assert.rejects(store.flush(), 'the key is still waiting to be written');

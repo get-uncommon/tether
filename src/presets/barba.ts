@@ -29,7 +29,7 @@ interface Gsap {
   to: (target: HTMLElement, to: TweenVars) => unknown;
 }
 
-/** Each getter may also be the value itself. */
+/** `gsap`, `lenis` and `scrollTrigger` are getters, read each time they are used, so an instance made later is found. */
 interface BarbaPresetOptions {
   /** Default `window.gsap`. */
   gsap?: () => unknown;
@@ -43,17 +43,19 @@ interface BarbaPresetOptions {
   unlockScroll?: (() => void) | null;
   /** After a cart line animated in or out. */
   onResize?: (() => void) | null;
-  onValueChange?: ((el: HTMLElement, previousText: string) => void) | null;
+  onValueChange?: TetherConfig['onValueChange'];
   /** Animate cart lines in and out (default true). */
   animateLines?: boolean;
   /** Seconds. */
   lineDuration?: number;
 }
 
-type BarbaPresetConfig = Pick<
-  TetherConfig,
-  'autoMount' | 'onLayoutChange' | 'onCartOpen' | 'onCartClose' | 'onLineEnter' | 'onLineLeave' | 'onValueChange'
->;
+/** The hooks the preset always sets, and `onValueChange` as passed (`null` when it isn't). */
+type BarbaPresetConfig = { autoMount: false } & {
+  [Hook in 'onLayoutChange' | 'onCartOpen' | 'onCartClose' | 'onLineEnter' | 'onLineLeave']: NonNullable<
+    TetherConfig[Hook]
+  >;
+} & Pick<TetherConfig, 'onValueChange'>;
 
 export type { BarbaPresetOptions, BarbaPresetConfig };
 
@@ -72,19 +74,28 @@ const ANIMATED_PROPS = 'height,paddingTop,paddingBottom,borderBottomWidth,opacit
 const reducedMotion = () =>
   typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-/** @returns What a getter option returns, or the option itself when it is the value. */
-function current(option: unknown): unknown {
-  if (typeof option !== 'function') return option;
-  // Every function option of this preset is a getter that takes no arguments.
-  const getter = option as () => unknown;
-  return getter();
+const GETTER_OPTIONS = ['gsap', 'lenis', 'scrollTrigger'] as const;
+
+/**
+ * @throws {TypeError} When a getter option is a value, which JavaScript callers can pass: a value that is a function
+ *   (ScrollTrigger is a class) can't be told from a getter.
+ */
+function checkGetters(options: BarbaPresetOptions) {
+  for (const name of GETTER_OPTIONS) {
+    const option: unknown = options[name];
+    if (option !== undefined && option !== null && typeof option !== 'function') {
+      throw new TypeError(`barbaPreset: ${name} must be a function that returns it, such as () => ${name}`);
+    }
+  }
 }
 
 /**
  * Calls `target[method]()` when it has one: Lenis and ScrollTrigger are optional and versions differ.
+ *
+ * @param target An object, or a class with a static method (`ScrollTrigger.refresh()`).
  */
 function callIfPresent(target: unknown, method: string) {
-  if (typeof target !== 'object' || target === null) return;
+  if ((typeof target !== 'object' && typeof target !== 'function') || target === null) return;
   const fn: unknown = Reflect.get(target, method);
   // A method of `target`, called on it.
   if (typeof fn === 'function') (fn as (this: unknown) => unknown).call(target);
@@ -100,6 +111,7 @@ const isGsap = (value: unknown): value is Gsap =>
  * Hooks for sites with page transitions, smooth scroll and GSAP: spread into `Tether.init()`.
  */
 export function barbaPreset(options: BarbaPresetOptions = {}): BarbaPresetConfig {
+  checkGetters(options);
   const {
     gsap = (): unknown => Reflect.get(window, 'gsap'),
     lenis = null,
@@ -118,7 +130,7 @@ export function barbaPreset(options: BarbaPresetOptions = {}): BarbaPresetConfig
   /** @returns GSAP, when this line should animate. */
   const animator = (node: HTMLElement): Gsap | null => {
     if (!animateLines || reducedMotion() || node.offsetHeight <= 0) return null;
-    const animation = current(gsap);
+    const animation = gsap();
     return isGsap(animation) ? animation : null;
   };
 
@@ -126,19 +138,19 @@ export function barbaPreset(options: BarbaPresetOptions = {}): BarbaPresetConfig
     autoMount: false,
 
     onLayoutChange() {
-      callIfPresent(current(lenis), 'resize');
-      callIfPresent(current(scrollTrigger), 'refresh');
+      callIfPresent(lenis?.(), 'resize');
+      callIfPresent(scrollTrigger(), 'refresh');
     },
 
     onCartOpen(drawers) {
       const drawer = drawers[0];
-      if (locked || typeof lockScroll !== 'function' || !drawer) return;
+      if (locked || !lockScroll || !drawer) return;
       lockScroll(drawer);
       locked = true;
     },
 
     onCartClose() {
-      if (locked && typeof unlockScroll === 'function') unlockScroll();
+      if (locked && unlockScroll) unlockScroll();
       locked = false;
     },
 
@@ -174,7 +186,7 @@ export function barbaPreset(options: BarbaPresetOptions = {}): BarbaPresetConfig
       });
     },
 
-    onValueChange: typeof onValueChange === 'function' ? onValueChange : null,
+    onValueChange,
   };
 }
 

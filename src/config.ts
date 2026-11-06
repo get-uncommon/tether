@@ -10,6 +10,7 @@ import {
   accountOption,
   analyticsOption,
   domainOption,
+  embedOriginsOption,
   marketsOption,
   metafieldsOption,
   partsUrlOption,
@@ -100,6 +101,8 @@ export interface TetherConfig {
   collectionPath: string;
   /** The product metafields to fetch. */
   metafields: MetafieldRef[];
+  /** Origins (`https://video.example`) a description's iframes may load from, besides the built-in video players. */
+  embedOrigins: string[];
   imagesFirst: number;
   variantsFirst: number;
   sellingPlanGroupsFirst: number;
@@ -176,6 +179,7 @@ export const DEFAULTS: Readonly<TetherConfig> = {
   productPath: '/product',
   collectionPath: '/collection',
   metafields: [],
+  embedOrigins: [],
   imagesFirst: 25,
   variantsFirst: 100,
   sellingPlanGroupsFirst: 10,
@@ -419,6 +423,7 @@ export function resolveConfig(options: TetherOptions | Readonly<Record<string, u
     storageKey:
       typeof options.storageKey === 'string' && options.storageKey ? options.storageKey : `${prefix}:cart:${domain}`,
     metafields: metafieldsOption(options.metafields ?? [], dropped),
+    embedOrigins: embedOriginsOption(options.embedOrigins ?? [], dropped),
     checkoutTarget: choiceOption('checkoutTarget', options.checkoutTarget, ['_self', '_blank']),
     defaultPurchase: choiceOption('defaultPurchase', options.defaultPurchase, ['one-time', 'subscription']),
   };

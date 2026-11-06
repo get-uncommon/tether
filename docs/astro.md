@@ -69,6 +69,7 @@ takes the keys it knows from `import.meta.env`, so spreading it is safe.
 
 Every [config option](reference.md#config) works in `shop.config.js`, except functions
 (`onError`, `formatMoney`, hooks): set those in `window.TETHER_CONFIG` in your layout, they are merged in.
+So do `createStorefront()`'s own `siteUrl` and `pageSize`: the integration leaves them out of the page.
 In dev, a change to `src/shop.config.js` restarts the dev server, so the browser and the server
 render agree (another file: `tether({ ...shopConfig, watch: ['config/shop.js'] })`). `.env` follows
 Astro's `--mode` (`.env.staging` with `astro build --mode staging`), and the two store variables

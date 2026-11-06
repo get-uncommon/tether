@@ -10,8 +10,13 @@
  * shop's own origin). Removed for that: `id` (it would clobber `window.<id>` and the site's own ids); `class`, which
  * would let a description borrow the site's own overlay or modal classes; and every style that takes content out of
  * the flow (`position`, `inset`, `z-index`), moves it from where the flow put it (transforms, motion paths, negative
- * margins) or sizes it to the window (viewport units). Styles that fetch anything go too, as do embeds from the site's
- * own origin, where a sandbox can be lifted from inside.
+ * margins) or sizes it to the window (viewport units). Styles that fetch anything go too.
+ *
+ * A frame shows whatever its origin serves, sized as the description likes, so a frame from a page store staff can
+ * write would be that fake login. Frames are kept only from the video players in `EMBED_ORIGINS` and the origins the
+ * site adds (`embedOrigins`), never from the site's own origin, where a sandbox can be lifted from inside. What an
+ * allowed frame shows is up to its host: the host's player, and whatever that player lets its users add (a call to
+ * action, an email gate). An origin a site adds is trusted the same way.
  *
  * Not prevented: content wider than the description (a table or embed on a narrow screen, or a box given a large
  * width in pixels) overflows beside it, and shadows and outlines paint past their element, as in any HTML. Tether
@@ -88,6 +93,17 @@ const IFRAME_FEATURES = new Set([
 ]);
 /** Players check which site embeds them (YouTube refuses to play without it): the origin is sent, never the path. */
 const IFRAME_REFERRER_POLICY = 'strict-origin-when-cross-origin';
+/**
+ * The video hosts product descriptions embed, by the origin of their embed code: YouTube (and its cookie-less
+ * domain), Vimeo, Loom and Wistia. Store staff choose the video these hosts play, not the page around it.
+ */
+const EMBED_ORIGINS = [
+  'https://www.youtube.com',
+  'https://www.youtube-nocookie.com',
+  'https://player.vimeo.com',
+  'https://www.loom.com',
+  'https://fast.wistia.net',
+];
 
 /** @param name An attribute name, lower case. */
 function isAllowedAttribute(tag: string, name: string): boolean {
@@ -118,21 +134,28 @@ interface Page {
   baseUrl: string;
   /** An element whose `style` parses declarations the way the browser applies them. */
   styleParser: HTMLElement;
+  /** The origins an iframe may load from. */
+  embedOrigins: ReadonlySet<string>;
 }
 
-function pageOf(document: Document, styleParser: HTMLElement): Page {
+function pageOf(document: Document, styleParser: HTMLElement, embedOrigins: readonly string[]): Page {
   const baseUrl = document.baseURI;
   const origin = urlOrNull(baseUrl)?.origin ?? 'null';
-  return { origin: origin === 'null' ? null : origin, baseUrl, styleParser };
+  return {
+    origin: origin === 'null' ? null : origin,
+    baseUrl,
+    styleParser,
+    embedOrigins: new Set([...EMBED_ORIGINS, ...embedOrigins]),
+  };
 }
 
 /**
  * @param value An iframe's `src`.
- * @returns True for an https URL on another origin than the page's: any other embed is removed.
+ * @returns True for a URL on an allowed embed origin other than the page's: any other embed is removed.
  */
-function isForeignHttpsEmbed(value: string, page: Page): boolean {
+function isAllowedEmbed(value: string, page: Page): boolean {
   const url = urlOrNull(value.trim(), page.baseUrl);
-  return url?.protocol === 'https:' && url.origin !== page.origin;
+  return url !== null && url.origin !== page.origin && page.embedOrigins.has(url.origin);
 }
 
 /**
@@ -218,7 +241,7 @@ function cleanElement(element: Element, page: Page): void {
     element.replaceWith(...element.childNodes);
     return;
   }
-  if (tag === 'iframe' && !isForeignHttpsEmbed(element.getAttribute('src') ?? '', page)) {
+  if (tag === 'iframe' && !isAllowedEmbed(element.getAttribute('src') ?? '', page)) {
     element.remove();
     return;
   }
@@ -230,17 +253,20 @@ function cleanElement(element: Element, page: Page): void {
  * Store HTML as a fragment of content elements only.
  *
  * @param document The document the fragment is for.
+ * @param embedOrigins Origins iframes may load from besides the video players in `EMBED_ORIGINS`: the config's
+ *   `embedOrigins`, already checked to be https origins.
  */
 export function storeHtmlFragment(
   html: string | null | undefined,
   document: Document = globalThis.document,
+  embedOrigins: readonly string[] = [],
 ): DocumentFragment {
   const template = document.createElement('template');
   // A <template>'s content is parsed inert: nothing in it loads or runs before it is cleaned.
   // eslint-disable-next-line no-restricted-syntax -- parsing into an inert template is the sanctioned way in
   template.innerHTML = html ?? '';
   // The template itself is never inserted, so its own `style` is a free parser for the content's declarations.
-  const page = pageOf(document, template);
+  const page = pageOf(document, template, embedOrigins);
   // Document order: a replaced element's content moves up and is visited after it; what a removed one held leaves
   // the fragment with it.
   for (const element of [...template.content.querySelectorAll('*')]) cleanElement(element, page);

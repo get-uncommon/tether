@@ -1,7 +1,7 @@
 // Rebuild-on-change: DEPLOY_HOOK_URL, with and without Webflow.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import defaultConfig from '../tether-sync.config.js';
+import defaultConfig from './default-config.js';
 import { createApp, memoryStore } from '../src/index.ts';
 import { runCheck } from '../src/check.ts';
 import { createMockApis, shopifyProduct, baseConfig, instantSleep, checkStep } from './mocks.js';

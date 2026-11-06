@@ -179,6 +179,28 @@ test('partsUrl must be https or on the site, checked when the config is resolved
   assert.equal(resolve('javascript:alert(1)').result.partsUrl, null);
 });
 
+test('embedOrigins keeps https origins alone, and skips every other entry with a warning', () => {
+  const { result, warned } = quietly(() =>
+    resolveConfig({
+      embedOrigins: [
+        'https://video.test',
+        'https://Player.Video.test/',
+        'http://video.test',
+        'https://video.test/embed',
+        'https://video.test?x=1',
+        'https://user@video.test',
+        'video.test',
+        42,
+      ],
+    }),
+  );
+  assert.deepEqual(result.embedOrigins, ['https://video.test', 'https://player.video.test']);
+  assert.equal(warned.length, 6);
+  const notAList = quietly(() => resolveConfig({ embedOrigins: 'https://video.test' }));
+  assert.deepEqual(notAList.result.embedOrigins, []);
+  assert.equal(notAList.warned.length, 1);
+});
+
 test('Tether.config shows the live config and refuses writes, which would skip validation', async () => {
   const { configView } = await import('../src/config.ts');
   quietly(() => configure({ domain: 'shop.test', markets: { detect: ['saved'] } }));

@@ -214,7 +214,9 @@ units (`100vw`) and any value with `url(`, so a description can't be laid over t
 elsewhere. Content wider than the element still overflows beside it, as in any HTML (Tether doesn't
 clip it, which would cut off wide tables and embeds); add `contain: paint` to the element in your
 own CSS if you want it clipped;
-iframes must be https from another origin than the site's, run sandboxed, and may only ask for
+iframes are kept only from YouTube (`www.youtube.com`, `www.youtube-nocookie.com`), Vimeo
+(`player.vimeo.com`), Loom (`www.loom.com`), Wistia (`fast.wistia.net`) and the origins in the
+`embedOrigins` option, never from the site's own origin, run sandboxed, and may only ask for
 `autoplay`, `encrypted-media`, `picture-in-picture`, `fullscreen`, `clipboard-write`,
 `accelerometer`, `gyroscope` and `web-share`; links that open a new tab get
 `rel="noopener noreferrer"`), `description-text`, `vendor`, `type`,
@@ -427,7 +429,10 @@ later, e.g. Finsweet load-more; off by default, or call `Tether.mount(el)` yours
 does nothing), `lowStock`, `variantUrl`, `warningText` (your text for Shopify's cart warnings, e.g.
 translated by `code`), `prefix`, and the hooks `onLayoutChange`, `onCartOpen`,
 `onCartClose`, `onLineEnter`, `onLineLeave`, `onValueChange`, `onError`, `cartFocus` (keyboard focus
-in the cart drawer, on by default) and `partsUrl` (folder of the optional parts when self-hosting: https or on your own site).
+in the cart drawer, on by default), `partsUrl` (folder of the optional parts when self-hosting: https or on your own site)
+and `embedOrigins` (more origins a description's iframes may load from, besides the built-in video
+players: `['https://video.example']`; whatever such an origin serves is shown in the description, so
+add only hosts whose embeds you trust).
 
 **Validation.** Every option is checked once, when Tether starts. An option Tether doesn't know (a
 typo such as `openCartOnAd`) logs a warning and is left out. A value it can't use logs a
@@ -436,7 +441,8 @@ quarterly version (`2026-07`; `unstable` works, with a warning), `domain` a host
 a path are stripped), `locale` a locale `Intl` accepts, `country` and `language` codes Shopify
 knows (written as you like: `'de'` becomes `DE`, `'pt-br'` becomes `PT_BR`), and the `account` URLs
 a path on your site or an https URL (http only on localhost). So is `partsUrl` (or an http URL on the
-page's own origin); one elsewhere is left out, and the parts load beside the core.
+page's own origin); one elsewhere is left out, and the parts load beside the core. Each
+`embedOrigins` entry must be an https origin alone (no path or query); any other entry is left out.
 
 **Server-rendered products.** The products in a `<script type="application/json" data-tether-hydrate>`
 tag (`shop.hydrate()`) are shown without a request, prices included, until the background refresh

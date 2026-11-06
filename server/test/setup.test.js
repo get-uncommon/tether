@@ -158,6 +158,18 @@ test('example values and a short SYNC_SECRET count as not set, and check names t
   assert.equal(r.ok, false);
 });
 
+test('only an exact example value is a placeholder: real values that resemble one are kept', async () => {
+  const { cleanEnv: clean } = await import('../src/env.ts');
+  const real = {
+    WEBFLOW_OWNED: 'todo-notes,description',
+    FIELD_MAP: '{"name":"title","teaser":"metafield:custom.teaser..."}',
+    SHOPIFY_DOMAIN: 'example-shop.myshopify.com',
+    SYNC_SECRET: 'your-own-long-random-sync-secret',
+  };
+  assert.deepEqual(clean(real), real);
+  assert.deepEqual(clean({ SHOPIFY_DOMAIN: 'your-store.myshopify.com', SHOPIFY_CLIENT_ID: 'your-app-client-id' }), {});
+});
+
 test('worker: placeholder SYNC_SECRET never unlocks /reconcile or the deep check', async () => {
   const apis = createMockApis();
   const worker = createWorker(defaultConfig, { fetch: apis.fetch, sleep: instantSleep });
