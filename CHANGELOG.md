@@ -10,8 +10,28 @@
   once.
 - Security (sync Worker): a webhook without the `X-Shopify-Shop-Domain` header is refused (403).
   Shopify always sends it.
+- Security: product and collection descriptions (`tether-bind="description"`,
+  `tether-collection-bind="description"`) are sanitized. Scripts, event handlers and `javascript:` links are
+  removed; markup, styles, images, links and video embeds stay. A description that relied on a script in its
+  HTML no longer runs it.
+- Security: the Astro integration refuses a secret Shopify token (`shpat_`, `shpss_`, …), because it would be
+  written into every page. It warns when the token comes from a name without `PUBLIC_`.
+- Security: a background image URL is escaped for CSS, and checkout only opens an https URL.
+- Security: `partsUrl` must be https or on the site's own origin.
+- Security (sync Worker): the public `/check` shows only each step's title and level. Details and the API
+  tests need `Authorization: Bearer <SYNC_SECRET>`.
+- Security (sync Worker): webhooks over 1 MB are refused (413), and a webhook is accepted only for the
+  configured store.
+- Security (sync Worker): customer accounts no longer accept an example value as the session key.
+  `/check` recommends a separate `ACCOUNT_SECRET` instead of reusing `SYNC_SECRET`.
+- Security (sync Worker): account discovery never guesses Shopify's endpoints. The id token must name
+  its signing key, and `iat`/`nbf` are checked.
+- Security (sync Worker updates): a release is installed by the commit its tag points at, and only when
+  that commit is on the upstream default branch.
+- Customer accounts (server mode): parallel requests share one token refresh. A failed cart unlink at
+  logout is logged.
 - Astro integration: `.env` files are read on Windows too.
-- Docs: `tether-bind="description"` inserts the product's HTML as it is written in Shopify.
+- The core script is about 21 KB gzipped (was 20 KB).
 
 ## 0.6.7 (2026-11-05)
 
