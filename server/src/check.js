@@ -7,15 +7,8 @@
  *   report.ok, report.steps -> [{ level: 'ok' | 'warn' | 'error', title, message, fix }]
  */
 import { accountSettings, accountProblems } from './account.js';
-import {
-  normalizeConfig,
-  cleanEnv,
-  applyEnv,
-  checkMapping,
-  mapProduct,
-  envProblems,
-  MIN_SYNC_SECRET,
-} from './mapping.js';
+import { cleanEnv, envProblems, MIN_SYNC_SECRET } from './env.js';
+import { normalizeConfig, applyEnv, checkMapping, mapProduct } from './mapping.js';
 import { createShopify } from './shopify.js';
 import { createWebflow } from './webflow.js';
 import { webhookStatus } from './webhooks.js';
@@ -110,7 +103,7 @@ export async function runCheck(
   if (acct) {
     const problems = accountProblems(acct);
     if (problems.length)
-      problems.forEach((p) => step(/STOREFRONT_TOKEN/.test(p) ? 'warn' : 'error', 'Customer accounts', p));
+      problems.forEach((p) => step(p.severity === 'warning' ? 'warn' : 'error', 'Customer accounts', p.message));
     else
       step(
         'ok',

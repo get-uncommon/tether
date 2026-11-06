@@ -21,7 +21,7 @@ import { kvStore, memoryStore } from './store.js';
 import { handleShopifyWebhook } from './webhook.js';
 import { safeEqual } from './hmac.js';
 import { runCheck } from './check.js';
-import { cleanEnv } from './mapping.js';
+import { cleanEnv } from './env.js';
 import { ensureWebhooks } from './webhooks.js';
 import { VERSION } from './version.js';
 import { handleAccount } from './account.js';

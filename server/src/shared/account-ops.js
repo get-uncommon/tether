@@ -1,18 +1,53 @@
-// @ts-nocheck
 /**
- * The customer account operations the Worker allows, as fixed GraphQL documents with validated
- * inputs: no query passthrough. Every one runs with the logged-in customer's own Customer Account
- * API token, so Shopify only ever returns or changes that customer's data; ids are also checked
- * for their type, and subscription contracts are looked up through the customer first.
+ * The customer account operations, as fixed GraphQL documents with validated inputs: there is no query passthrough.
+ * Every operation runs with the logged-in customer's own Customer Account API token, so Shopify only ever returns or
+ * changes that customer's data. Ids are also checked for their type, and a subscription contract is looked up through
+ * the customer before it is changed.
  *
- * Used by the Worker (server mode); the browser part has the same documents for browser mode.
+ * The Worker runs them in server mode, and the browser runs the same documents in browser mode.
  */
+
+/**
+ * Runs one of the documents below with the customer's token.
+ *
+ * @typedef {(query: string, variables: Record<string, unknown>) => Promise<Record<string, unknown> | null>} Ask
+ */
+
+/** @typedef {Record<string, unknown>} OperationInput */
+/** @typedef {Record<string, unknown>} OperationResult */
+/** @typedef {{ field?: string[] | null, message: string }} UserError */
+
+/** Input the operation refuses, or a `userErrors` answer from Shopify. Its message is safe to show the customer. */
+export class InputError extends Error {
+  /**
+   * @param {string} message
+   * @param {{ status?: number, userErrors?: UserError[] }} [details]
+   */
+  constructor(message, { status = 400, userErrors = [] } = {}) {
+    super(message);
+    this.name = 'InputError';
+    /** The HTTP status the Worker answers with. */
+    this.status = status;
+    /** Shopify's own errors for the input, when it refused it. */
+    this.userErrors = userErrors;
+  }
+}
 
 const MONEY = 'amount currencyCode';
 const ADDRESS =
   'id firstName lastName company address1 address2 city province zoneCode zip country countryCode phoneNumber formatted';
+const USER_ERRORS = 'userErrors { field message }';
 
-const Q = {
+/** The customer's profile, as `customer()` and `/me` return it. */
+export const CUSTOMER_QUERY =
+  'query TetherCustomer { customer { id firstName lastName displayName emailAddress { emailAddress } defaultAddress { formatted } } }';
+
+/** The customer's recent orders, as `orders()` and `/orders` return them. */
+export const ORDERS_QUERY = `query TetherOrders($first: Int!) { customer { orders(first: $first, sortKey: PROCESSED_AT, reverse: true) {
+  nodes { id name processedAt financialStatus fulfillmentStatus statusPageUrl totalPrice { ${MONEY} }
+    lineItems(first: 20) { nodes { title variantTitle quantity image { url altText } } } } } } }`;
+
+const QUERIES = {
   order: `query TetherOrder($id: ID!) { order(id: $id) {
   id name number processedAt cancelledAt financialStatus fulfillmentStatus statusPageUrl requiresShipping
   totalPrice { ${MONEY} } subtotal { ${MONEY} } totalShipping { ${MONEY} } totalTax { ${MONEY} }
@@ -33,52 +68,103 @@ const Q = {
   contract: `query TetherContract($id: ID!) { customer { subscriptionContract(id: $id) { id status upcomingBillingCycles(first: 3) { nodes { cycleIndex skipped } } } } }`,
 };
 
-const M = {
-  profile:
-    'mutation TetherProfile($input: CustomerUpdateInput!) { customerUpdate(input: $input) { customer { firstName lastName } userErrors { field message } } }',
-  addressCreate: `mutation TetherAddressCreate($address: CustomerAddressInput!, $default: Boolean) { customerAddressCreate(address: $address, defaultAddress: $default) { customerAddress { ${ADDRESS} } userErrors { field message } } }`,
-  addressUpdate: `mutation TetherAddressUpdate($id: ID!, $address: CustomerAddressInput, $default: Boolean) { customerAddressUpdate(addressId: $id, address: $address, defaultAddress: $default) { customerAddress { ${ADDRESS} } userErrors { field message } } }`,
-  addressDelete:
-    'mutation TetherAddressDelete($id: ID!) { customerAddressDelete(addressId: $id) { deletedAddressId userErrors { field message } } }',
-  pause:
-    'mutation TetherPause($id: ID!) { subscriptionContractPause(subscriptionContractId: $id) { contract { id status } userErrors { field message } } }',
-  resume:
-    'mutation TetherResume($id: ID!) { subscriptionContractActivate(subscriptionContractId: $id) { contract { id status } userErrors { field message } } }',
-  cancel:
-    'mutation TetherCancel($id: ID!) { subscriptionContractCancel(subscriptionContractId: $id) { contract { id status } userErrors { field message } } }',
-  skip: 'mutation TetherSkip($input: SubscriptionBillingCycleInput!) { subscriptionBillingCycleSkip(billingCycleInput: $input) { billingCycle { cycleIndex skipped } userErrors { field message } } }',
-  unskip:
-    'mutation TetherUnskip($input: SubscriptionBillingCycleInput!) { subscriptionBillingCycleUnskip(billingCycleInput: $input) { billingCycle { cycleIndex skipped } userErrors { field message } } }',
-  returnRequest:
-    'mutation TetherReturn($orderId: ID!, $lines: [RequestedLineItemInput!]!) { orderRequestReturn(orderId: $orderId, requestedLineItems: $lines) { return { id status } userErrors { field message } } }',
+const MUTATIONS = {
+  profile: `mutation TetherProfile($input: CustomerUpdateInput!) { customerUpdate(input: $input) { customer { firstName lastName } ${USER_ERRORS} } }`,
+  addressCreate: `mutation TetherAddressCreate($address: CustomerAddressInput!, $default: Boolean) { customerAddressCreate(address: $address, defaultAddress: $default) { customerAddress { ${ADDRESS} } ${USER_ERRORS} } }`,
+  addressUpdate: `mutation TetherAddressUpdate($id: ID!, $address: CustomerAddressInput, $default: Boolean) { customerAddressUpdate(addressId: $id, address: $address, defaultAddress: $default) { customerAddress { ${ADDRESS} } ${USER_ERRORS} } }`,
+  addressDelete: `mutation TetherAddressDelete($id: ID!) { customerAddressDelete(addressId: $id) { deletedAddressId ${USER_ERRORS} } }`,
+  returnRequest: `mutation TetherReturn($orderId: ID!, $lines: [RequestedLineItemInput!]!) { orderRequestReturn(orderId: $orderId, requestedLineItems: $lines) { return { id status } ${USER_ERRORS} } }`,
 };
 
-// ---------------------------------------------------------------- input checks
-
-export class InputError extends Error {}
-const gid = (type) => new RegExp(`^gid://shopify/${type}/\\d+(\\?[\\w=&.-]{1,80})?$`);
-const IDS = {
-  Order: gid('Order'),
-  CustomerAddress: gid('CustomerAddress'),
-  SubscriptionContract: gid('SubscriptionContract'),
-  LineItem: gid('LineItem'),
-  ReturnReasonDefinition: gid('ReturnReasonDefinition'),
+/**
+ * What each subscription action sends: its document and the payload field Shopify answers in.
+ *
+ * @type {Record<SubscriptionAction, { document: string, payload: string, input: 'contract' | 'billingCycle' }>}
+ */
+const SUBSCRIPTION_ACTIONS = {
+  pause: {
+    document: `mutation TetherPause($id: ID!) { subscriptionContractPause(subscriptionContractId: $id) { contract { id status } ${USER_ERRORS} } }`,
+    payload: 'subscriptionContractPause',
+    input: 'contract',
+  },
+  resume: {
+    document: `mutation TetherResume($id: ID!) { subscriptionContractActivate(subscriptionContractId: $id) { contract { id status } ${USER_ERRORS} } }`,
+    payload: 'subscriptionContractActivate',
+    input: 'contract',
+  },
+  cancel: {
+    document: `mutation TetherCancel($id: ID!) { subscriptionContractCancel(subscriptionContractId: $id) { contract { id status } ${USER_ERRORS} } }`,
+    payload: 'subscriptionContractCancel',
+    input: 'contract',
+  },
+  skip: {
+    document: `mutation TetherSkip($input: SubscriptionBillingCycleInput!) { subscriptionBillingCycleSkip(billingCycleInput: $input) { billingCycle { cycleIndex skipped } ${USER_ERRORS} } }`,
+    payload: 'subscriptionBillingCycleSkip',
+    input: 'billingCycle',
+  },
+  unskip: {
+    document: `mutation TetherUnskip($input: SubscriptionBillingCycleInput!) { subscriptionBillingCycleUnskip(billingCycleInput: $input) { billingCycle { cycleIndex skipped } ${USER_ERRORS} } }`,
+    payload: 'subscriptionBillingCycleUnskip',
+    input: 'billingCycle',
+  },
 };
-/** A gid of exactly this type ('123' becomes gid://shopify/Type/123). */
-function idOf(type, value) {
-  const v = /^\d{1,20}$/.test(String(value ?? '')) ? `gid://shopify/${type}/${value}` : String(value ?? '');
-  if (!IDS[type].test(v)) throw new InputError(`${type} id`);
-  return v;
+
+/** @typedef {'pause' | 'resume' | 'skip' | 'unskip' | 'cancel'} SubscriptionAction */
+
+/** @param {unknown} value @returns {value is SubscriptionAction} */
+function isSubscriptionAction(value) {
+  return typeof value === 'string' && Object.hasOwn(SUBSCRIPTION_ACTIONS, value);
 }
-const text = (v, max = 255) => {
-  if (v == null || v === '') return undefined;
-  if (typeof v !== 'string' && typeof v !== 'number') throw new InputError('text');
-  const s = String(v)
-    .replace(/[\u0000-\u001f\u007f]/g, '')
-    .trim();
-  if (s.length > max) throw new InputError('too long');
-  return s;
-};
+
+/** @param {unknown} value @param {string} key */
+function field(value, key) {
+  if (value === null || typeof value !== 'object') return undefined;
+  return /** @type {Record<string, unknown>} */ (value)[key];
+}
+
+/** @param {unknown} value @returns {unknown[]} */
+function nodes(value) {
+  const list = field(value, 'nodes');
+  return Array.isArray(list) ? list : [];
+}
+
+/** @typedef {'Order' | 'CustomerAddress' | 'SubscriptionContract' | 'LineItem' | 'ReturnReasonDefinition'} IdType */
+
+const NUMERIC_ID = /^\d{1,20}$/;
+
+/**
+ * A gid of exactly this type; a numeric id becomes `gid://shopify/<type>/<id>`.
+ *
+ * @param {IdType} type
+ * @param {unknown} value
+ * @throws {InputError} For anything else.
+ */
+function idOf(type, value) {
+  const raw = typeof value === 'string' || typeof value === 'number' ? String(value) : '';
+  const id = NUMERIC_ID.test(raw) ? `gid://shopify/${type}/${raw}` : raw;
+  if (!new RegExp(`^gid://shopify/${type}/\\d+(\\?[\\w=&.-]{1,80})?$`).test(id)) throw new InputError(`${type} id`);
+  return id;
+}
+
+/** Control characters, which no customer-facing text field needs. */
+// eslint-disable-next-line no-control-regex -- matching control characters is the point
+const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/g;
+
+/**
+ * A bounded single-line text, or `undefined` when empty.
+ *
+ * @param {unknown} value
+ * @param {number} [maxLength]
+ * @throws {InputError} For a non-text value or one longer than `maxLength`.
+ */
+function text(value, maxLength = 255) {
+  if (value === null || value === undefined || value === '') return undefined;
+  if (typeof value !== 'string' && typeof value !== 'number') throw new InputError('text');
+  const clean = String(value).replace(CONTROL_CHARACTERS, '').trim();
+  if (clean.length > maxLength) throw new InputError('too long');
+  return clean;
+}
+
 const ADDRESS_FIELDS = [
   'firstName',
   'lastName',
@@ -90,137 +176,164 @@ const ADDRESS_FIELDS = [
   'zoneCode',
   'phoneNumber',
 ];
+
 /**
- * Only the CustomerAddressInput fields, as bounded strings; countryCode two letters. On an update
- * (clear: true) a field sent empty is cleared ('') instead of left out, so an emptied apartment
- * line or phone number really goes away.
+ * Only the `CustomerAddressInput` fields, as bounded strings, with `countryCode` as two letters. On an update
+ * (`clear: true`) a field sent empty is cleared (`''`) instead of left out, so an emptied apartment line or phone
+ * number really goes away.
+ *
+ * @param {unknown} address
+ * @param {{ clear?: boolean }} [options]
+ * @returns {Record<string, string>}
  */
-export function addressInput(a = {}, { clear = false } = {}) {
-  if (!a || typeof a !== 'object' || Array.isArray(a)) throw new InputError('address');
+export function addressInput(address, { clear = false } = {}) {
+  if (address === null || typeof address !== 'object' || Array.isArray(address)) throw new InputError('address');
+  const source = /** @type {Record<string, unknown>} */ (address);
+  /** @type {Record<string, string>} */
   const out = {};
-  ADDRESS_FIELDS.forEach((k) => {
-    const v = text(a[k]);
-    if (v !== undefined) out[k] = v;
-    else if (clear && k in a && (a[k] === '' || a[k] === null)) out[k] = '';
-  });
-  if (a.countryCode != null && a.countryCode !== '') {
-    const c = String(a.countryCode).toUpperCase();
-    if (!/^[A-Z]{2}$/.test(c)) throw new InputError('countryCode');
-    out.countryCode = c;
+  for (const key of ADDRESS_FIELDS) {
+    const value = text(source[key]);
+    if (value !== undefined) out[key] = value;
+    else if (clear && key in source && (source[key] === '' || source[key] === null)) out[key] = '';
+  }
+  const country = text(source['countryCode']);
+  if (country !== undefined) {
+    const code = country.toUpperCase();
+    if (!/^[A-Z]{2}$/.test(code)) throw new InputError('countryCode');
+    out['countryCode'] = code;
   }
   return out;
 }
-const userErrors = (payload) => {
-  const errs = payload?.userErrors || [];
-  if (errs.length) {
-    const e = new InputError(errs.map((x) => x.message).join(' | '));
-    e.userErrors = errs;
-    throw e;
-  }
-  return payload;
-};
-
-// ---------------------------------------------------------------- operations
 
 /**
- * ask(query, variables) runs a fixed document with the customer's token. Each operation returns
- * plain data for the browser.
+ * The mutation's payload, or an `InputError` with Shopify's `userErrors`.
+ *
+ * @param {Record<string, unknown> | null} data
+ * @param {string} name The payload field.
  */
+function payloadOf(data, name) {
+  const payload = field(data, name);
+  const errors = field(payload, 'userErrors');
+  if (Array.isArray(errors) && errors.length) {
+    const userErrors = /** @type {UserError[]} */ (errors);
+    throw new InputError(userErrors.map((error) => error.message).join(' | '), { userErrors });
+  }
+  return payload;
+}
+
+/** @type {Record<string, (ask: Ask, input: OperationInput) => Promise<OperationResult>>} */
 export const ops = {
   async order(ask, { id }) {
-    const data = await ask(Q.order, { id: idOf('Order', id) });
-    return { order: data?.order || null };
+    const data = await ask(QUERIES.order, { id: idOf('Order', id) });
+    return { order: field(data, 'order') ?? null };
   },
+
   async profile(ask, { firstName, lastName }) {
+    /** @type {Record<string, string>} */
     const input = {};
-    if (firstName !== undefined) input.firstName = text(firstName, 100) ?? '';
-    if (lastName !== undefined) input.lastName = text(lastName, 100) ?? '';
+    if (firstName !== undefined) input['firstName'] = text(firstName, 100) ?? '';
+    if (lastName !== undefined) input['lastName'] = text(lastName, 100) ?? '';
     if (!Object.keys(input).length) throw new InputError('nothing to change');
-    const p = userErrors((await ask(M.profile, { input }))?.customerUpdate);
-    return { customer: p.customer };
+    const payload = payloadOf(await ask(MUTATIONS.profile, { input }), 'customerUpdate');
+    return { customer: field(payload, 'customer') };
   },
+
   async addresses(ask) {
-    const c = (await ask(Q.addresses, {}))?.customer;
-    const def = c?.defaultAddress?.id || null;
-    return { addresses: (c?.addresses?.nodes || []).map((a) => ({ ...a, isDefault: a.id === def })) };
+    const customer = field(await ask(QUERIES.addresses, {}), 'customer');
+    const defaultId = field(field(customer, 'defaultAddress'), 'id') ?? null;
+    const addresses = nodes(field(customer, 'addresses')).map((address) => ({
+      .../** @type {object} */ (address),
+      isDefault: field(address, 'id') === defaultId,
+    }));
+    return { addresses };
   },
+
   async saveAddress(ask, { id, address, isDefault }) {
-    const a = addressInput(address || {}, { clear: Boolean(id) });
-    const def = isDefault === true ? true : undefined;
-    const p = id // an update without fields only sets the default
-      ? userErrors(
-          (
-            await ask(M.addressUpdate, {
-              id: idOf('CustomerAddress', id),
-              address: Object.keys(a).length ? a : null,
-              default: def ?? null,
-            })
-          )?.customerAddressUpdate,
-        )
-      : userErrors((await ask(M.addressCreate, { address: a, default: def ?? false }))?.customerAddressCreate);
-    return { address: p.customerAddress };
+    const fields = addressInput(address ?? {}, { clear: Boolean(id) });
+    const makeDefault = isDefault === true;
+    if (!id) {
+      const created = await ask(MUTATIONS.addressCreate, { address: fields, default: makeDefault });
+      return { address: field(payloadOf(created, 'customerAddressCreate'), 'customerAddress') };
+    }
+    // An update without fields only sets the default.
+    const updated = await ask(MUTATIONS.addressUpdate, {
+      id: idOf('CustomerAddress', id),
+      address: Object.keys(fields).length ? fields : null,
+      default: makeDefault ? true : null,
+    });
+    return { address: field(payloadOf(updated, 'customerAddressUpdate'), 'customerAddress') };
   },
+
   async deleteAddress(ask, { id }) {
-    const p = userErrors((await ask(M.addressDelete, { id: idOf('CustomerAddress', id) }))?.customerAddressDelete);
-    return { deleted: p.deletedAddressId };
+    const data = await ask(MUTATIONS.addressDelete, { id: idOf('CustomerAddress', id) });
+    return { deleted: field(payloadOf(data, 'customerAddressDelete'), 'deletedAddressId') };
   },
+
   async subscriptions(ask) {
-    return { subscriptions: (await ask(Q.subscriptions, {}))?.customer?.subscriptionContracts?.nodes || [] };
+    const contracts = field(field(await ask(QUERIES.subscriptions, {}), 'customer'), 'subscriptionContracts');
+    return { subscriptions: nodes(contracts) };
   },
+
   async subscription(ask, { id, action }) {
-    if (!['pause', 'resume', 'skip', 'unskip', 'cancel'].includes(action)) throw new InputError('action');
+    if (!isSubscriptionAction(action)) throw new InputError('action');
     const contractId = idOf('SubscriptionContract', id);
     // Looked up through the customer: a contract that isn't theirs is simply not found.
-    const contract = (await ask(Q.contract, { id: contractId }))?.customer?.subscriptionContract;
-    if (!contract) {
-      const e = new InputError('not found');
-      e.status = 404;
-      throw e;
+    const contract = field(field(await ask(QUERIES.contract, { id: contractId }), 'customer'), 'subscriptionContract');
+    if (!contract) throw new InputError('not found', { status: 404 });
+    const { document, payload, input } = SUBSCRIPTION_ACTIONS[action];
+    if (input === 'contract') {
+      return { contract: field(payloadOf(await ask(document, { id: contractId }), payload), 'contract') };
     }
-    if (action === 'skip' || action === 'unskip') {
-      const cycles = contract.upcomingBillingCycles?.nodes || [];
-      const cycle = action === 'skip' ? cycles.find((c) => !c.skipped) : cycles.find((c) => c.skipped);
-      if (!cycle) throw new InputError(action === 'skip' ? 'no upcoming delivery to skip' : 'nothing skipped');
-      const p = userErrors(
-        (await ask(M[action], { input: { contractId, selector: { index: cycle.cycleIndex } } }))?.[
-          action === 'skip' ? 'subscriptionBillingCycleSkip' : 'subscriptionBillingCycleUnskip'
-        ],
-      );
-      return { billingCycle: p.billingCycle };
-    }
-    const name = {
-      pause: 'subscriptionContractPause',
-      resume: 'subscriptionContractActivate',
-      cancel: 'subscriptionContractCancel',
-    }[action];
-    const p = userErrors((await ask(M[action], { id: contractId }))?.[name]);
-    return { contract: p.contract };
+    const cycles = nodes(field(contract, 'upcomingBillingCycles'));
+    const wantSkipped = action === 'unskip';
+    const cycle = cycles.find((candidate) => Boolean(field(candidate, 'skipped')) === wantSkipped);
+    if (!cycle) throw new InputError(wantSkipped ? 'nothing skipped' : 'no upcoming delivery to skip');
+    const variables = { input: { contractId, selector: { index: field(cycle, 'cycleIndex') } } };
+    return { billingCycle: field(payloadOf(await ask(document, variables), payload), 'billingCycle') };
   },
+
   async requestReturn(ask, { orderId, lines }) {
-    const oid = idOf('Order', orderId);
+    const order = idOf('Order', orderId);
     if (!Array.isArray(lines) || !lines.length || lines.length > 50) throw new InputError('lines');
-    const requested = lines.map((l) => {
-      const q = Number(l?.quantity);
-      if (!Number.isInteger(q) || q < 1 || q > 1000) throw new InputError('quantity');
-      const out = { lineItemId: idOf('LineItem', l.lineItemId), quantity: q };
-      if (l.reasonId) out.returnReasonDefinitionId = idOf('ReturnReasonDefinition', l.reasonId);
-      const note = text(l.note, 300);
-      if (note) out.customerNote = note;
+    const requested = lines.map((/** @type {unknown} */ line) => {
+      const quantity = Number(field(line, 'quantity'));
+      if (!Number.isInteger(quantity) || quantity < 1 || quantity > 1000) throw new InputError('quantity');
+      /** @type {Record<string, unknown>} */
+      const out = { lineItemId: idOf('LineItem', field(line, 'lineItemId')), quantity };
+      const reason = field(line, 'reasonId');
+      if (reason) out['returnReasonDefinitionId'] = idOf('ReturnReasonDefinition', reason);
+      const note = text(field(line, 'note'), 300);
+      if (note) out['customerNote'] = note;
       return out;
     });
-    const p = userErrors((await ask(M.returnRequest, { orderId: oid, lines: requested }))?.orderRequestReturn);
-    return { return: p.return };
+    const data = await ask(MUTATIONS.returnRequest, { orderId: order, lines: requested });
+    return { return: field(payloadOf(data, 'orderRequestReturn'), 'return') };
   },
 };
 
-/** Worker routes: method + path -> operation, and where its input comes from. */
+/** @typedef {{ name: string, input: OperationInput }} OperationCall */
+
+/**
+ * The Worker's routes for the operations: method and path, and where each input field comes from.
+ *
+ * @type {Record<string, (url: URL, body: Record<string, unknown>) => OperationCall>}
+ */
 export const ROUTES = {
-  'GET /order': (url) => ['order', { id: url.searchParams.get('id') }],
-  'GET /addresses': () => ['addresses', {}],
-  'GET /subscriptions': () => ['subscriptions', {}],
-  'POST /profile': (url, body) => ['profile', { firstName: body.firstName, lastName: body.lastName }],
-  'POST /address': (url, body) => ['saveAddress', { id: body.id, address: body.address, isDefault: body.isDefault }],
-  'POST /address/delete': (url, body) => ['deleteAddress', { id: body.id }],
-  'POST /subscription': (url, body) => ['subscription', { id: body.id, action: body.action }],
-  'POST /return': (url, body) => ['requestReturn', { orderId: body.orderId, lines: body.lines }],
+  'GET /order': (url) => ({ name: 'order', input: { id: url.searchParams.get('id') } }),
+  'GET /addresses': () => ({ name: 'addresses', input: {} }),
+  'GET /subscriptions': () => ({ name: 'subscriptions', input: {} }),
+  'POST /profile': (_url, body) => ({
+    name: 'profile',
+    input: { firstName: body['firstName'], lastName: body['lastName'] },
+  }),
+  'POST /address': (_url, body) => ({
+    name: 'saveAddress',
+    input: { id: body['id'], address: body['address'], isDefault: body['isDefault'] },
+  }),
+  'POST /address/delete': (_url, body) => ({ name: 'deleteAddress', input: { id: body['id'] } }),
+  'POST /subscription': (_url, body) => ({ name: 'subscription', input: { id: body['id'], action: body['action'] } }),
+  'POST /return': (_url, body) => ({
+    name: 'requestReturn',
+    input: { orderId: body['orderId'], lines: body['lines'] },
+  }),
 };

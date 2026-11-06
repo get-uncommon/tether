@@ -49,36 +49,12 @@
   },
   "server/src/account.js": {
     "@typescript-eslint/no-confusing-void-expression": {
-      "count": 2
-    },
-    "@typescript-eslint/no-unnecessary-condition": {
-      "count": 1
-    },
-    "@typescript-eslint/prefer-includes": {
-      "count": 1
-    },
-    "@typescript-eslint/prefer-nullish-coalescing": {
-      "count": 1
-    },
-    "@typescript-eslint/prefer-optional-chain": {
-      "count": 1
-    },
-    "@typescript-eslint/require-await": {
-      "count": 3
-    },
-    "@typescript-eslint/restrict-plus-operands": {
       "count": 1
     },
     "@typescript-eslint/use-unknown-in-catch-callback-variable": {
       "count": 1
     },
     "complexity": {
-      "count": 1
-    },
-    "max-lines": {
-      "count": 1
-    },
-    "max-lines-per-function": {
       "count": 1
     }
   },
@@ -92,10 +68,7 @@
   },
   "server/src/check.js": {
     "@typescript-eslint/no-unnecessary-condition": {
-      "count": 4
-    },
-    "@typescript-eslint/prefer-includes": {
-      "count": 1
+      "count": 5
     },
     "@typescript-eslint/prefer-nullish-coalescing": {
       "count": 1
@@ -153,14 +126,6 @@
     },
     "no-restricted-syntax": {
       "count": 2
-    }
-  },
-  "server/src/shared/account-ops.js": {
-    "@typescript-eslint/no-unnecessary-condition": {
-      "count": 1
-    },
-    "no-control-regex": {
-      "count": 1
     }
   },
   "server/src/shopify.js": {

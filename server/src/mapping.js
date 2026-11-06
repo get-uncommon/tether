@@ -58,46 +58,6 @@ export function normalizeConfig(raw = {}) {
   return cfg;
 }
 
-const UNSET = new Set(['none', '-', 'null', 'undefined']);
-// Example values from docs and older .dev.vars.example files: never real credentials.
-const PLACEHOLDER = /^(your[-_]|choose[-_]|example|changeme|change[-_]me|placeholder|xxx+|todo|<.*>$)|\.\.\.|…/i;
-export const MIN_SYNC_SECRET = 24;
-
-/** Why an env value is ignored: 'placeholder' or 'too-short', or null when it's usable. */
-function envValueProblem(key, value) {
-  if (typeof value !== 'string') return null;
-  const t = value.trim();
-  if (!t || UNSET.has(t.toLowerCase())) return null;
-  if (PLACEHOLDER.test(t)) return 'placeholder';
-  if (key === 'SYNC_SECRET' && t.length < MIN_SYNC_SECRET) return 'too-short';
-  return null;
-}
-
-/** Env values that were filled in but are ignored (for check): [{ key, reason }]. */
-export function envProblems(env = {}) {
-  return Object.entries(env)
-    .map(([key, v]) => ({ key, reason: envValueProblem(key, v) }))
-    .filter((x) => x.reason);
-}
-
-/**
- * Empty values, 'none'/'-', example placeholders ('your-...', 'choose-...') and a
- * SYNC_SECRET shorter than 24 characters all count as unset.
- */
-export function cleanEnv(env = {}) {
-  const out = {};
-  Object.entries(env).forEach(([k, v]) => {
-    if (typeof v !== 'string') {
-      out[k] = v;
-      return;
-    }
-    const t = v.trim();
-    if (!t || UNSET.has(t.toLowerCase()) || envValueProblem(k, t)) return;
-    out[k] = t;
-  });
-  return out;
-}
-
 /**
  * Environment overrides on top of the config file:
  *   FIELD_MAP='{"material":"metafield:custom.material","gallery":null}'  (null removes a field)

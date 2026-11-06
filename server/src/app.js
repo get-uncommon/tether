@@ -1,6 +1,7 @@
 // @ts-nocheck
 /** Wires config + secrets into a sync instance. Shared by the Worker and the CLI. */
-import { normalizeConfig, cleanEnv, applyEnv } from './mapping.js';
+import { cleanEnv } from './env.js';
+import { normalizeConfig, applyEnv } from './mapping.js';
 import { createShopify } from './shopify.js';
 import { createWebflow } from './webflow.js';
 import { createSync } from './sync.js';

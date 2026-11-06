@@ -4,7 +4,8 @@ import assert from 'node:assert/strict';
 import defaultConfig from './default-config.js';
 import { createApp, memoryStore, createWorker } from '../src/index.js';
 import { runCheck, formatCheck } from '../src/check.js';
-import { cleanEnv, applyEnv, normalizeConfig } from '../src/mapping.js';
+import { cleanEnv } from '../src/env.js';
+import { applyEnv, normalizeConfig } from '../src/mapping.js';
 import { createMockApis, shopifyProduct, instantSleep } from './mocks.js';
 
 const COL = '0123456789abcdef01234567';
@@ -131,7 +132,7 @@ test('worker GET /check: config presence for anyone, API tests only with SYNC_SE
 });
 
 test('example values and a short SYNC_SECRET count as not set, and check names them', async () => {
-  const { cleanEnv: clean } = await import('../src/mapping.js');
+  const { cleanEnv: clean } = await import('../src/env.js');
   const filled = {
     SHOPIFY_DOMAIN: 'your-store.myshopify.com',
     WEBFLOW_TOKEN: 'your-webflow-site-token',

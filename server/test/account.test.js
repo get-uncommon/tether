@@ -243,7 +243,7 @@ test('login: PKCE redirect, pending login sealed in a cookie (nothing in KV), th
   assert.match(set, /__Host-tether-account=[\w-]{40,}; Path=\/; Secure; HttpOnly; SameSite=Lax/);
   assert.match(set, /__Host-tether-login=; .*Max-Age=0/, 'login cookie cleared');
   assert.ok(!/access-1|refresh-1/.test(set), 'no token in cookies');
-  const stored = [...memory.values()].map((e) => e.v).join(' ');
+  const stored = [...memory.values()].map((entry) => entry.value).join(' ');
   assert.equal(memory.size, 1, 'only the session in KV');
   assert.ok(!/access-1|refresh-1|eyJ/.test(stored), 'tokens are encrypted at rest');
   assert.ok(![...memory.keys()].some((k) => k.includes(cookie.split('=')[1])), 'the session id itself is not a key');
