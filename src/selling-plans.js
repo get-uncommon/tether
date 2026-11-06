@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Pure helpers for Shopify selling plans (subscriptions). No DOM, easy to test.
  */

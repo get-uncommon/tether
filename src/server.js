@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * @occluze/tether/server: Shopify product data at build time or on the server (Astro, Eleventy,
  * Node, Cloudflare Workers). No browser APIs. Uses the same queries as the browser script, so

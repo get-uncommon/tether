@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Webflow Data API v2, CMS items only. Token: a site API token with
  * cms:read + cms:write (Site settings -> Apps & integrations -> API access).

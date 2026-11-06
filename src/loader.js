@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Data loading. Products are batched per tick into one request and cached for
  * the lifetime of the page (survives Barba/Swup page swaps).

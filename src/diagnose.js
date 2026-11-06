@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Tether.diagnose(): one call in the browser console that explains what's
  * wrong on a page. Logs a readable report and returns it as an object.

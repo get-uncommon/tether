@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Optional part with features that load when first needed: bundles (on the first "add set"
  * click), tab sync (on the first change in another tab) and shareable variant links (on the

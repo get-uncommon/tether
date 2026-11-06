@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Rebuild-on-change for statically built sites (Astro, Eleventy, ...): when a product's content
  * changes in Shopify, call the site's deploy hook (Cloudflare Pages, Netlify, Vercel, any URL

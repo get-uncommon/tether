@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Analytics, as an optional part (loaded when config.analytics is set).
  *

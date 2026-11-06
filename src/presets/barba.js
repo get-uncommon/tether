@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Preset for sites with page transitions (Barba, Swup, …), smooth scroll (Lenis)
  * and GSAP. Nothing is read from globals: pass in what your site has.

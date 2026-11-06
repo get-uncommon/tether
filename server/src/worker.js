@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Cloudflare Worker: webhook endpoint + cron reconcile.
  *

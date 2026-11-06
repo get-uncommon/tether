@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Product lists: [tether-collection="handle"] or [tether-products="search query"].
  * The first child of [tether-list] is the card template; every card becomes a

@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Shopify Admin GraphQL client (read-only: products).
  *

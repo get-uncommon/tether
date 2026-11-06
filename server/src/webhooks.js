@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Registers the product webhooks through the app itself, so nobody has to set them up in
  * Shopify's admin. Webhooks created by an app are signed with its client secret, which the

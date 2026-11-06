@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Shopify webhook signature: X-Shopify-Hmac-Sha256 is base64(HMAC-SHA256(raw body, secret)).
  * The secret is your app's client secret (or the key shown under

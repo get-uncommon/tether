@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Shopify API versions are quarterly (YYYY-01, -04, -07, -10) and supported for 12 months.
  * Tether pins a dated version and never targets `unstable` (it changes without notice).

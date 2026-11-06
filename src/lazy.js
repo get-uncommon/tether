@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Optional parts that most pages never need, loaded on first use.
  * ESM / Node: dynamic import (bundlers split these into their own chunks).

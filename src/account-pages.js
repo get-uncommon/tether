@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Customer account pages (optional part, loaded by the account part on pages that use them):
  * order detail with returns, profile, addresses, subscriptions. The operations and their input

@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Customer accounts through the Worker (the safe mode): the visitor's browser never holds a Shopify
  * token. The Worker logs the customer in with Shopify's Customer Account API (OAuth + PKCE, the

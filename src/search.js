@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Search as you type (Shopify predictive search). Optional part: loaded only on pages with
  * [tether-search].

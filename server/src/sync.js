@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * The sync engine. Idempotent: the same Shopify product never causes a second
  * Webflow write, because the mapped fieldData is hashed and compared with the

@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Guided first-run check: says exactly what's missing and how to fix it.
  * Used by `tether-sync check` and the Worker's GET /check. Never returns secret values.

@@ -1,3 +1,4 @@
+// @ts-nocheck
 /** Product scopes and lists that are mounted, shared by index.js and the optional markets part. */
 import { cfg, log, warn, reportError } from './config.js';
 import { ProductScope, scopes, rememberOptionNames } from './product.js';
@@ -52,7 +53,6 @@ function mountProduct(el) {
       if (!current()) return;
       const existing = scopes.get(el);
       if (existing) existing.update(p);
-      // eslint-disable-next-line no-new
       else new ProductScope(el, p);
       applyPageTitle(el, p);
       if (cfg.revalidate !== false && takeStale(key)) queueRefresh(key);

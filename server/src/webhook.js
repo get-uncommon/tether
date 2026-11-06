@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Shopify webhook endpoint (products/create, products/update, products/delete).
  * Answers within Shopify's 5 second deadline and does the work afterwards:

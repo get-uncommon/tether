@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// @ts-nocheck
 /**
  * Updates this deployed copy of tether-sync to the newest Tether release that matches
  * TETHER_VERSION (a file next to package.json), the way jsDelivr version ranges work:

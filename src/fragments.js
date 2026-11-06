@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * GraphQL fragments. Built at call time because counts and metafields come
  * from config. Operations put these AFTER the operation (see withContext).

@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Customer accounts (Shopify Customer Account API), as an optional part: loaded only when
  * config.account is set and the page uses it (or a login is in progress / the visitor is logged in).

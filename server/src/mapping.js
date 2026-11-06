@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Field mapping: Shopify product (normalized, see shopify.js) -> Webflow fieldData.
  *

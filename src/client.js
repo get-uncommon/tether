@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Storefront API client: one fetch wrapper with @inContext, retries and
  * readable errors. Exposed as Tether.query() for anything Tether doesn't cover.

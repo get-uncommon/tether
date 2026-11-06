@@ -1,3 +1,4 @@
+// @ts-nocheck
 /** Node-only bits: JSON file store, config loading, HTTP server for webhooks. */
 import { readFile, writeFile, rename, stat } from 'node:fs/promises';
 import { existsSync } from 'node:fs';

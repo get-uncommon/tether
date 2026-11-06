@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * The customer account operations the Worker allows, as fixed GraphQL documents with validated
  * inputs: no query passthrough. Every one runs with the logged-in customer's own Customer Account

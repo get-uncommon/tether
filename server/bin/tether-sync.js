@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// @ts-nocheck
 /**
  * tether-sync: Shopify -> Webflow CMS.
  *
@@ -63,7 +64,7 @@ async function main() {
     log.error(`${err.message}\nRun \`tether-sync check\` to see everything that's missing.`);
     return 1;
   }
-  const { sync, shopify, webflow } = app;  // eslint-disable-line no-unused-vars
+  const { sync, shopify, webflow } = app;
   if (dryRun) log.info('dry run: nothing is written');
 
   switch (cmd) {

@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Astro integration: Tether on every page, configured from .env.
  *

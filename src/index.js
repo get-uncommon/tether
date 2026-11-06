@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Tether — Shopify <-> Webflow (or any HTML) sync via the Storefront API.
  *

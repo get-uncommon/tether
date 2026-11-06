@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Cart: Shopify Cart API, state in localStorage, document-wide rendering.
  *

@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Markets: which country/language prices, currency and translations follow.
  *

@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Optional part, loaded on first use: market detection, select[tether-country-select],
  * tether-country-bind and Tether.setCountry(). See markets.js for the detection rules.

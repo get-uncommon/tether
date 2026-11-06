@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Runtime config. One shared object, mutated by configure(), read everywhere.
  */

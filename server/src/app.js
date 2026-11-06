@@ -1,3 +1,4 @@
+// @ts-nocheck
 /** Wires config + secrets into a sync instance. Shared by the Worker and the CLI. */
 import { normalizeConfig, cleanEnv, applyEnv } from './mapping.js';
 import { createShopify } from './shopify.js';

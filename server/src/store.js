@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Sync state: product id -> { itemId, hash }, plus the reconcile cursor.
  * Any object with async get/put/delete works.

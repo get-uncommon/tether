@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Builds dist/ (or the folder after --out, which the tests use so the committed dist/ only changes in a
  * release):

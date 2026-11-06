@@ -1,3 +1,4 @@
+// @ts-nocheck
 /** Small shared helpers. Web-standard APIs only, so this runs in Workers and Node 20+. */
 
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

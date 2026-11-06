@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Where a product scope gets its key from, and the loading / ready / error /
  * not-found state of a scope (so a failing API never leaves a broken page).

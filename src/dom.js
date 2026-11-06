@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * DOM helpers. Attribute names go through attr() so the prefix is configurable
  * (e.g. prefix: 'wfs' for markup that uses wfs-* attributes).

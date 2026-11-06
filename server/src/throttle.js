@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Spaces requests evenly (perMinute) and retries 429s with Retry-After.
  * Webflow: 60 requests/min on Starter/Basic site plans, 120 on CMS/eCommerce/Business,

@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * <script> build: optional parts are separate files next to tether(.min).js, e.g.
  * tether.markets.min.js, loaded on first use. Override the folder with config.partsUrl.

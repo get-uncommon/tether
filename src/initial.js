@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * What the browser script will show first for a product, so a server can render the same
  * (no flash when Tether takes over): the selected variant, price, purchase mode and conditions.

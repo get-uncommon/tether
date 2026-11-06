@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * ProductScope: everything inside [tether-product="<handle>"] binds to one
  * Shopify product: options, variants, quantity, subscriptions, add to cart.

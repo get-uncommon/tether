@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Live check against a real Storefront API: every query and mutation Tether
  * sends must validate against Shopify's schema.
