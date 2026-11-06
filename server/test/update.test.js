@@ -6,6 +6,7 @@ import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { pickVersion } from '../scripts/update-tether.mjs';
 
 const WORKFLOW_HASH = 'a369c8e1628b'; // change only together with a plan for existing copies
@@ -23,7 +24,7 @@ test('version ranges work like jsDelivr', () => {
 });
 
 test('updating a copy replaces the code and keeps config, wrangler ids and TETHER_VERSION', async () => {
-  const root = new URL('..', import.meta.url).pathname;
+  const root = fileURLToPath(new URL('..', import.meta.url));
   const base = await mkdtemp(join(tmpdir(), 'tether-update-'));
   const copy = join(base, 'copy');
   const release = join(base, 'release');

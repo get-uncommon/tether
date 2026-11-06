@@ -75,7 +75,8 @@ export default function tether(options = {}) {
         addWatchFile,
         updateConfig,
       }) => {
-        const root = astroConfig?.root ? decodeURIComponent(new URL(astroConfig.root).pathname) : process.cwd();
+        const { fileURLToPath } = await import('node:url');
+        const root = astroConfig?.root ? fileURLToPath(astroConfig.root) : process.cwd();
         // The options usually come from a file the Astro config imports (src/shop.config.js):
         // the dev server restarts when it changes, so the browser gets the new config too.
         if (command === 'dev' && addWatchFile) {

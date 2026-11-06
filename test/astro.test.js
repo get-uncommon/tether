@@ -2,6 +2,9 @@
 import { test, before, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { product, cartFrom } from './fixtures.js';
 
 const dom = new JSDOM('<!doctype html><body></body>', { url: 'https://astro.test/' });
@@ -263,7 +266,7 @@ test('integration: injects the page script with .env values, drops functions wit
   await tether({ country: 'NL', onError: () => {} }).hooks['astro:config:setup']({
     injectScript: (stage, code) => scripts.push({ stage, code }),
     command: 'build',
-    config: { root: new URL('file:///tmp/astro-site/') },
+    config: { root: pathToFileURL(join(tmpdir(), 'astro-site/')) },
     logger: { warn: (m) => warnings.push(m) },
   });
   process.env = prev;
@@ -289,7 +292,7 @@ test('integration: warns clearly when the store is missing', async () => {
   await tether().hooks['astro:config:setup']({
     injectScript() {},
     command: 'dev',
-    config: { root: new URL('file:///tmp/none/') },
+    config: { root: pathToFileURL(join(tmpdir(), 'none/')) },
     logger: { warn: (m) => warnings.push(m) },
   });
   process.env = prev;
@@ -314,7 +317,7 @@ test('integration: reads .env, .env.local and .env.production like Vite (process
   await tether().hooks['astro:config:setup']({
     injectScript: (s, c) => scripts.push(c),
     command: 'build',
-    config: { root: new URL(`file://${dir}/`) },
+    config: { root: pathToFileURL(`${dir}/`) },
     logger: { warn() {} },
   });
   process.env = prev;
@@ -346,7 +349,7 @@ test('integration: --mode picks the .env file; shop.config.js changes restart th
       injectScript: (s, c) => scripts.push(c),
       command: 'dev',
       addWatchFile: (f) => watched.push(String(f)),
-      config: { root: new URL(`file://${dir}/`) },
+      config: { root: pathToFileURL(`${dir}/`) },
       logger: { warn() {} },
     });
   } finally {
