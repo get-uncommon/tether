@@ -5,10 +5,12 @@
  *
  * A signed webhook replayed later is harmless: no webhook changes anything by itself. Each one only makes the sync ask
  * Shopify for the product's current state, and the sync writes to Webflow and KV only when that state differs from
- * what it last wrote. A replay therefore costs Shopify reads and subrequests, never a wrong write. Repeats of one
- * delivery are dropped by their `X-Shopify-Webhook-Id` without any KV write, because KV's free plan allows only 1,000
- * writes a day: first by the ids this isolate accepted, then, in a Worker, by Cloudflare's Cache API, which every
- * isolate of the data centre shares and which costs nothing.
+ * what it last wrote. A replay therefore costs one Shopify read, one KV read and their subrequests, never a write.
+ * Repeats of one delivery are dropped by their `X-Shopify-Webhook-Id` without any KV write, because KV's free plan
+ * allows only 1,000 writes a day: first by the ids this isolate accepted, then by Cloudflare's Cache API, which every
+ * isolate of the data centre shares and which costs nothing. Cloudflare's Cache API works only for a Worker on the
+ * shop's own zone (a custom domain or a route), and only when Shopify sends the webhooks there: they go to the origin
+ * `/reconcile` was called on. On `*.workers.dev` a repeat that reaches another isolate is synced again.
  */
 import { readRequestCapped } from './capped-body.ts';
 import { verifyShopifyHmac } from './hmac.ts';
@@ -62,7 +64,10 @@ interface WebhookOptions {
   /** The store's `.myshopify.com` domain; webhooks from any other shop are refused. */
   shopDomain: string;
   log?: WebhookLog;
-  /** The deliveries other isolates accepted; without it (in Node), only this process's are known. */
+  /**
+   * The deliveries other isolates of the data centre accepted. Without it (in Node) only this process's are known;
+   * on `*.workers.dev`, where the Cache API stores nothing, it never finds one.
+   */
   deliveries?: DeliveryCache | null;
   createDelayMs?: number;
   sleep?: (ms: number) => Promise<void>;

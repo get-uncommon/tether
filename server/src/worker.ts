@@ -123,7 +123,10 @@ async function check(setup: WorkerSetup, request: Request, env: WorkerEnv, url: 
   return Response.json(body, { status: report.ok ? 200 : 503 });
 }
 
-/** The Cache API cache that remembers accepted webhook deliveries for every isolate of the data centre. */
+/**
+ * The Cache API cache that remembers accepted webhook deliveries for every isolate of the data centre. It stores
+ * something only on the shop's own zone (a custom domain or a route); on `*.workers.dev` it opens but stays empty.
+ */
 const DELIVERY_CACHE = 'tether-webhook-deliveries';
 
 /**

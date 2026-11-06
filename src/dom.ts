@@ -154,19 +154,36 @@ export function setSelected(el: Element, selected: boolean): void {
 
 let layoutTimer: ReturnType<typeof setTimeout> | undefined;
 
-/** GSAP's ScrollTrigger, when the site has it, measures positions that a height change makes stale. */
-type WindowWithScrollTrigger = Window & { ScrollTrigger?: { refresh?: () => void } };
+/**
+ * A global the page's own scripts set on `window`: `TETHER_CONFIG`, the site's config, `TETHER_INTEGRATION`, set by a
+ * framework integration (Astro) that starts Tether itself, and GSAP's `ScrollTrigger`. Another script wrote it, so it
+ * is read as unknown and checked where it is used.
+ */
+export const pageGlobal = (name: 'TETHER_CONFIG' | 'TETHER_INTEGRATION' | 'ScrollTrigger'): unknown =>
+  Reflect.get(window, name);
+
+/** Refreshes GSAP's ScrollTrigger, when the site has it: it measures positions that a height change makes stale. */
+function refreshScrollTrigger(): void {
+  // ScrollTrigger is a class, and `refresh` a static method of it.
+  const scrollTrigger = pageGlobal('ScrollTrigger');
+  if (typeof scrollTrigger !== 'function') return;
+  const refresh: unknown = Reflect.get(scrollTrigger, 'refresh');
+  if (typeof refresh === 'function') Reflect.apply(refresh, scrollTrigger, []);
+}
 
 /**
  * Async renders change the page height after the site's page-transition hooks ran. After a burst of them this calls
- * `onLayoutChange` (else refreshes ScrollTrigger) and emits `tether:layout-changed`.
+ * `onLayoutChange` (else refreshes ScrollTrigger) and emits `tether:layout-changed`, also when either of those throws.
  */
 export function notifyLayoutChanged(reason: string): void {
   clearTimeout(layoutTimer);
   layoutTimer = setTimeout(() => {
-    const { ScrollTrigger } = window as WindowWithScrollTrigger;
-    if (cfg.onLayoutChange) cfg.onLayoutChange(reason);
-    else ScrollTrigger?.refresh?.();
+    try {
+      if (cfg.onLayoutChange) cfg.onLayoutChange(reason);
+      else refreshScrollTrigger();
+    } catch (error) {
+      reportError(error, 'layout-changed');
+    }
     emit('layout-changed', { reason });
   }, LAYOUT_DEBOUNCE_MS);
 }

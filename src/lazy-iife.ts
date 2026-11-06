@@ -19,7 +19,7 @@ import * as marketCodes from './market-codes.ts';
 import * as shopifyValues from './shopify-values.ts';
 import * as storeHtml from './store-html.ts';
 import { PART_INTEGRITY } from './part-integrity.ts';
-import type { Parts, PartName } from './lazy.ts';
+import type { Parts, PartName, TetherInternals } from './lazy.ts';
 
 const { cfg } = config;
 
@@ -105,8 +105,8 @@ function loadScript(name: PartName, folder: string, file: string, integrity: str
     script.async = true;
     applyIntegrity(script, integrity);
     script.onload = () => {
-      const { Tether } = window as { Tether?: { __parts?: Record<string, unknown> } };
-      const part = Tether?.__parts?.[name];
+      const { Tether } = window as { Tether?: TetherInternals };
+      const part = Tether?.__parts[name];
       if (part) {
         resolve(part);
         return;

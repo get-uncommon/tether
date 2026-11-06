@@ -26,9 +26,11 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
+      # No dependency cache: a cache written by another workflow's run must not reach what this one publishes.
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: 22
+          package-manager-cache: false
       # test/upgrade-from-v0.6.8.test.js installs this tree into a copy made from that tag.
       - run: git fetch --depth=1 --no-tags origin tag v0.6.8
       - run: npm ci
@@ -96,9 +98,10 @@ jobs:
         with:
           node-version: 22
           registry-url: https://registry.npmjs.org
+          package-manager-cache: false
       # Trusted publishing needs npm 11.5.1 or newer; the exact version keeps a new npm release out of this job.
       - name: npm with trusted publishing
-        run: npm install -g npm@11.21.1
+        run: npm install -g npm@11.21.1 # zizmor: ignore[adhoc-packages] npm itself, at an exact version
       - name: Publish to npm
         run: npm publish --provenance --access public --ignore-scripts
 

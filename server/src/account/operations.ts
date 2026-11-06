@@ -6,12 +6,26 @@
  * The browser asks for them through the routes in `shared/account-routes.ts`.
  */
 import { field, isRecord } from '../shared/json.ts';
-import type { OperationInput, OperationName, SubscriptionAction } from '../shared/account-routes.ts';
+import type { OperationName, SubscriptionAction, UncheckedInputs } from '../shared/account-routes.ts';
 
 /** Runs one of the documents below with the customer's token. */
 type Ask = (query: string, variables: Record<string, unknown>) => Promise<Record<string, unknown> | null>;
 
-type OperationResult = Record<string, unknown>;
+/**
+ * What each operation answers, besides `ok: true`. The values are Shopify's answers to the operation's document, as
+ * it selected them; the browser reads them into its typed shapes where they arrive (`src/account/page-answers.ts`).
+ */
+interface OperationResults {
+  order: { order: unknown };
+  addresses: { addresses: (Record<string, unknown> & { isDefault: boolean })[] };
+  subscriptions: { subscriptions: unknown[] };
+  profile: { customer: unknown };
+  saveAddress: { address: unknown };
+  deleteAddress: { deleted: unknown };
+  subscription: { contract: unknown } | { billingCycle: unknown };
+  requestReturn: { return: unknown };
+}
+
 interface UserError {
   field?: string[] | null;
   message: string;
@@ -208,7 +222,10 @@ function payloadOf(data: Record<string, unknown> | null, name: string): unknown 
   return payload;
 }
 
-type Operation = (ask: Ask, input: OperationInput) => Promise<OperationResult>;
+/** Each operation checks its input fields, then runs its documents. */
+type Operations = {
+  [Name in OperationName]: (ask: Ask, input: UncheckedInputs[Name]) => Promise<OperationResults[Name]>;
+};
 
 export const ops = {
   async order(ask, { id }) {
@@ -296,4 +313,4 @@ export const ops = {
     const data = await ask(MUTATIONS.returnRequest, { orderId: order, lines: requested });
     return { return: field(payloadOf(data, 'orderRequestReturn'), 'return') };
   },
-} satisfies Record<OperationName, Operation>;
+} satisfies Operations;

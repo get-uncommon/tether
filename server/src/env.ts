@@ -54,7 +54,7 @@ const PLACEHOLDERS = new Set([
 ]);
 
 /** Shortest SYNC_SECRET or ACCOUNT_SECRET accepted; a shorter one counts as unset. */
-export const MIN_SYNC_SECRET = 24;
+export const MIN_SECRET_LENGTH = 24;
 const SECRETS = new Set(['SYNC_SECRET', 'ACCOUNT_SECRET']);
 
 /**
@@ -64,7 +64,7 @@ const SECRETS = new Set(['SYNC_SECRET', 'ACCOUNT_SECRET']);
  */
 function valueProblem(key: string, value: string): EnvProblem['reason'] | null {
   if (PLACEHOLDERS.has(value)) return 'placeholder';
-  if (SECRETS.has(key) && value.length < MIN_SYNC_SECRET) return 'too-short';
+  if (SECRETS.has(key) && value.length < MIN_SECRET_LENGTH) return 'too-short';
   return null;
 }
 
@@ -87,7 +87,7 @@ export function envProblems(env: Record<string, unknown>): EnvProblem[] {
 
 /**
  * The string settings that count as set. Empty values, `none` / `-`, example placeholders and a secret shorter than
- * {@link MIN_SYNC_SECRET} characters are left out. Bindings (KV namespaces) are not strings and are left out too.
+ * {@link MIN_SECRET_LENGTH} characters are left out. Bindings (KV namespaces) are not strings and are left out too.
  */
 export function cleanEnv(env: Record<string, unknown>): CleanEnv {
   const clean: Record<string, string> = {};

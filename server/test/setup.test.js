@@ -6,7 +6,7 @@ import { createApp, memoryStore, createWorker } from '../src/index.ts';
 import { runCheck, formatCheck } from '../src/check.ts';
 import { cleanEnv } from '../src/env.ts';
 import { applyEnv, normalizeConfig } from '../src/mapping.ts';
-import { createMockApis, shopifyProduct, instantSleep, checkStep, noWaitUntil } from './mocks.js';
+import { createMockApis, shopifyProduct, instantSleep, checkStep, noWaitUntil, baseConfig, env } from './mocks.js';
 
 const COL = '0123456789abcdef01234567';
 const deployEnv = {
@@ -333,4 +333,18 @@ test('check refuses a TETHER_VERSION the updater would refuse, and picks release
   assert.match(refused.message, /TETHER_VERSION must be/);
   r = await runCheck(defaultConfig, deployEnv, { ...options, range: '*' });
   assert.match(checkStep(r, 'Tether version').message, /0\.3\.10 is available/);
+});
+
+test('SYNC_SECRET "none" does not open /reconcile; /check without it hides values', async () => {
+  const apis = createMockApis();
+  const worker = createWorker(baseConfig, { fetch: apis.fetch, sleep: instantSleep });
+  const wenv = { ...env, SYNC_SECRET: 'none', SHOPIFY_DOMAIN: 'secret-shop.myshopify.com' };
+  const r = await worker.fetch(
+    new Request('https://w.test/reconcile', { method: 'POST', headers: { authorization: 'Bearer none' } }),
+    wenv,
+    noWaitUntil,
+  );
+  assert.equal(r.status, 401);
+  const check = await (await worker.fetch(new Request('https://w.test/check'), wenv, noWaitUntil)).text();
+  assert.ok(!check.includes('secret-shop'));
 });

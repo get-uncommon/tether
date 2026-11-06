@@ -10,7 +10,10 @@
  * shop's own origin). Removed for that: `id` (it would clobber `window.<id>` and the site's own ids); `class`, which
  * would let a description borrow the site's own overlay or modal classes; and every style that takes content out of
  * the flow (`position`, `inset`, `z-index`), moves it from where the flow put it (transforms, motion paths, negative
- * margins) or sizes it to the window (viewport units). Styles that fetch anything go too.
+ * margins) or sizes it to the window (viewport units). Outlines, shadows, filters, border-image outsets, reflections,
+ * text decoration and text stroke paint beyond their element, so they are kept only while every length they give is a
+ * few dozen pixels at most (`MAX_PAINT_PX`): enough to set off an image or a callout, too little to cover the page.
+ * Styles that fetch anything go too.
  *
  * A frame shows whatever its origin serves, sized as the description likes, so a frame from a page store staff can
  * write would be that fake login. Frames are kept only from the video players in `EMBED_ORIGINS` and the origins the
@@ -19,7 +22,7 @@
  * action, an email gate). An origin a site adds is trusted the same way.
  *
  * Not prevented: content wider than the description (a table or embed on a narrow screen, or a box given a large
- * width in pixels) overflows beside it, and shadows and outlines paint past their element, as in any HTML. Tether
+ * width in pixels) overflows beside it, as in any HTML, and a capped shadow or outline still paints just past it. Tether
  * doesn't clip the element it fills (`contain: paint`, `overflow`), because that would cut off those wide tables and
  * embeds, stop margins collapsing through it and make it contain floats, changing how ordinary descriptions look. A
  * site that wants the clip sets it on that element in its own CSS.
@@ -71,6 +74,29 @@ const OUT_OF_PLACE_PROPERTIES = new Set(['position', 'top', 'right', 'bottom', '
 const OUT_OF_PLACE_PREFIXES = ['inset', 'transform', 'translate', 'rotate', 'scale', 'offset'];
 /** A length in viewport units (`100vw`, `50dvh`, `10vmax`), which sizes content to the window, not the description. */
 const VIEWPORT_LENGTH = /\d(?:[sld]?v(?:w|h|i|b|min|max))\b/i;
+/**
+ * Style properties that paint beyond their element's box by as far as their lengths say, matched by prefix: outlines
+ * and their offset, shadows, `filter` (`drop-shadow()`, `blur()`), a border image's or mask border's outset, a
+ * reflection, text decoration and its offset, and text stroke.
+ */
+const PAINTS_BEYOND_PREFIXES = [
+  ...['outline', 'box-shadow', 'text-shadow', 'filter', 'border-image', 'mask-border', '-webkit-mask-box-image'],
+  ...['-webkit-box-reflect', 'text-decoration', 'text-underline-offset', '-webkit-text-stroke'],
+];
+/** The longest length, in pixels, those properties may give. */
+const MAX_PAINT_PX = 40;
+/**
+ * A number with a unit (`5000px`, `1.5em`, `5e3px`, `90deg`), with the unit captured. Digits inside a word or a hex
+ * colour (`#5000ff`) are not one.
+ */
+const DIMENSION = /(?<![\w#.-])[+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?([a-z]+)/gi;
+/** Angles, which a filter's `hue-rotate()` takes: they paint nothing beyond the box. */
+const ANGLE_UNITS = new Set(['deg', 'rad', 'grad', 'turn']);
+/**
+ * Values whose lengths depend on more than the declaration (the page's custom properties, arithmetic, the
+ * environment), so they can't be checked against `MAX_PAINT_PX`.
+ */
+const COMPUTED_VALUE = /(?:var|calc|min|max|clamp|env|attr)\(/i;
 /** Style values that fetch a resource or run code (`expression()` in old Internet Explorer). */
 const FETCHING_VALUE = /url\(|expression\(|@import/i;
 
@@ -180,7 +206,23 @@ function isOutOfPlace(property: string, value: string): boolean {
 }
 
 /**
- * An inline style as the browser's own parser reads it, without out-of-place or fetching declarations. The parsed
+ * @param property A style property name, lower case.
+ * @returns True for a declaration that would paint farther beyond its element than `MAX_PAINT_PX`. Only pixel
+ *   lengths can be checked: a length in any other unit (`em` grows with the font size, which a description sets too)
+ *   counts as too far.
+ */
+function paintsTooFar(property: string, value: string): boolean {
+  if (!PAINTS_BEYOND_PREFIXES.some((prefix) => property.startsWith(prefix))) return false;
+  if (COMPUTED_VALUE.test(value)) return true;
+  return [...value.matchAll(DIMENSION)].some(([length = '', unit = '']) => {
+    const lowerUnit = unit.toLowerCase();
+    if (ANGLE_UNITS.has(lowerUnit)) return false;
+    return lowerUnit !== 'px' || Math.abs(parseFloat(length)) > MAX_PAINT_PX;
+  });
+}
+
+/**
+ * An inline style as the browser's own parser reads it, without out-of-place, far-painting or fetching declarations. The parsed
  * form is written back, so text the parser skipped (an unknown or malformed declaration) is gone too.
  */
 function cleanStyle(value: string, styleParser: HTMLElement): string {
@@ -189,7 +231,8 @@ function cleanStyle(value: string, styleParser: HTMLElement): string {
   const properties = Array.from({ length: style.length }, (_, index) => style.item(index));
   for (const property of properties) {
     const value = style.getPropertyValue(property);
-    if (isOutOfPlace(property, value) || FETCHING_VALUE.test(value)) style.removeProperty(property);
+    const remove = isOutOfPlace(property, value) || paintsTooFar(property, value) || FETCHING_VALUE.test(value);
+    if (remove) style.removeProperty(property);
   }
   const cleaned = style.cssText;
   styleParser.removeAttribute('style');

@@ -461,3 +461,108 @@ test('worker: webhook route with waitUntil, cron reconcile writes KV only on cha
   );
   assert.equal(ok.status, 200);
 });
+
+test('a failed publish is not committed, so the next run publishes again', async () => {
+  const { sync, wf, flags } = setup({ products: [shopifyProduct(1)] });
+  flags.failPublish = true;
+  await assert.rejects(sync.importAll());
+  assert.equal(wf.items.size, 1);
+  assert.equal(wf.live.size, 0);
+  flags.failPublish = false;
+  const r = await sync.importAll();
+  assert.equal(r.stats.updated, 1, 'not "unchanged": it was never live');
+  assert.equal(wf.items.size, 1, 'found the created item, no duplicate');
+  assert.equal(wf.live.size, 1);
+});
+
+test('concurrent create + update webhooks in two Worker invocations: one item (unique slug)', async () => {
+  const apis = createMockApis({ products: [shopifyProduct(5)] });
+  const kv = new Map();
+  /** @type {import('../src/env.ts').KvBinding} */
+  const TETHER_SYNC = {
+    async get(k, t) {
+      const v = kv.get(k);
+      if (v == null) return null;
+      return t === 'json' ? JSON.parse(v) : v;
+    },
+    async put(k, v) {
+      kv.set(k, v);
+    },
+    async delete(k) {
+      kv.delete(k);
+    },
+  };
+  const worker = createWorker(baseConfig, { fetch: apis.fetch, sleep: instantSleep });
+  const tasks = [];
+  const ctx = { waitUntil: (p) => tasks.push(p) };
+  const hook = async (topic) => {
+    const body = JSON.stringify({ id: 5 });
+    return new Request('https://w.test/webhooks/shopify', {
+      method: 'POST',
+      body,
+      headers: {
+        'x-shopify-topic': topic,
+        'x-shopify-hmac-sha256': await signShopify(body, 'whsec'),
+        'x-shopify-shop-domain': 'shop.myshopify.com',
+      },
+    });
+  };
+  // separate invocations = separate sync instances
+  await Promise.all([
+    worker.fetch(await hook('products/update'), { ...env, TETHER_SYNC }, ctx),
+    worker.fetch(await hook('products/update'), { ...env, TETHER_SYNC }, ctx),
+  ]);
+  await Promise.all(tasks);
+  assert.equal(apis.wf.items.size, 1);
+});
+
+test('slug conflict with a stale index: refreshes, finds the item by shopify-id, updates it', async () => {
+  const apis = createMockApis({ products: [shopifyProduct(5)] });
+  const storeB = memoryStore();
+  await storeB.put('index', { at: new Date().toISOString(), byId: {}, bySlug: {} }); // fresh but stale cache
+  const a = createApp(baseConfig, env, { store: memoryStore(), fetch: apis.fetch, sleep: instantSleep });
+  const b = createApp(baseConfig, env, { store: storeB, fetch: apis.fetch, sleep: instantSleep });
+  assert.equal((await a.sync.syncById(5)).action, 'created');
+  assert.equal((await b.sync.syncById(5)).action, 'updated');
+  assert.equal(apis.wf.items.size, 1);
+});
+
+test('caches: the Shopify token and the item index are reused across invocations', async () => {
+  const apis = createMockApis({ products: [shopifyProduct(1), shopifyProduct(2)] });
+  const store = memoryStore();
+  const cc = { WEBFLOW_TOKEN: 'wf', SHOPIFY_CLIENT_ID: 'id', SHOPIFY_CLIENT_SECRET: 'sec' };
+  const run = () => createApp(baseConfig, cc, { store, fetch: apis.fetch, sleep: instantSleep }).sync.syncById(1);
+  await run();
+  await store.delete('p:1'); // force a lookup on the next run
+  await run();
+  assert.equal(apis.calls.filter((c) => c.path === '/admin/oauth/access_token').length, 1);
+  assert.equal(
+    apis.calls.filter((c) => c.method === 'GET' && c.path.includes('/items?')).length,
+    1,
+    'collection listed once',
+  );
+});
+
+test('a draft product whose item was deleted in Webflow is not recreated', async () => {
+  const { sync, shop, wf, store } = setup({ products: [shopifyProduct(1)] });
+  await sync.importAll();
+  wf.items.clear();
+  shop.products.set('gid://shopify/Product/1', shopifyProduct(1, { status: 'DRAFT', title: 'x' }));
+  assert.equal((await sync.syncById(1)).action, 'skipped');
+  assert.equal(wf.items.size, 0);
+  assert.equal(await store.get('p:1'), null);
+});
+
+test('prune with onDelete "unpublish" does not repeat itself', async () => {
+  const { sync, webflowWrites } = setup(
+    {
+      products: [shopifyProduct(1)],
+      items: [{ id: 'orphan', fieldData: { name: 'Gone', slug: 'gone', 'shopify-id': '42' } }],
+    },
+    { ...baseConfig, onDelete: 'unpublish' },
+  );
+  assert.equal((await sync.importAll({ prune: true })).pruned.length, 1);
+  const n = webflowWrites().length;
+  assert.equal((await sync.importAll({ prune: true })).pruned.length, 0);
+  assert.equal(webflowWrites().length, n);
+});
