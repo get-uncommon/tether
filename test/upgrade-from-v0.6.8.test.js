@@ -114,10 +114,13 @@ test(
       assert.equal(JSON.parse(await readFile(join(copy, 'package.json'), 'utf8')).version, RELEASE_VERSION);
       assert.equal(await readFile(join(copy, 'tether-sync.config.js'), 'utf8'), ownConfig, 'the copy keeps its config');
 
-      // The steps of the v0.6.8 workflow, which the copy keeps.
-      const tests = await node(copy, ['--test', 'test/*.test.js']).catch((error) => {
+      // The steps of the v0.6.8 workflow, which the copy keeps. The workflow judges this step by its exit code,
+      // which node() checks; the reporter is pinned only so the count below reads the same on every Node (24
+      // defaults to the spec reporter, which has no TAP summary), and so a run of no tests can't pass as success.
+      const tests = await node(copy, ['--test', '--test-reporter=tap', 'test/*.test.js']).catch((error) => {
         assert.fail(`the copy's tests failed:\n${String(error.stdout)}${String(error.stderr)}`);
       });
+      assert.match(tests.stdout, /^# tests [1-9]\d*$/m, 'the copy ran its tests');
       assert.match(tests.stdout, /^# fail 0$/m);
       const entry = await node(copy, ['-e', "import('./src/entry.js').then(() => console.log('entry ok'))"]);
       assert.equal(entry.stdout.trim(), 'entry ok');
