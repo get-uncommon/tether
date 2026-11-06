@@ -3,7 +3,7 @@
  * `prefix: 'wfs'`), and so do the selectors and the DOM events built from them.
  */
 import { cfg } from './config.ts';
-import type { ShopifyCart } from './cart/store.ts';
+import type { CartUpdateReason, ShopifyCart } from './cart/store.ts';
 import type { CartLineInput } from './cart/mutations.ts';
 import type { CartWarning } from './config.ts';
 import type { Product, ProductVariant } from './fragments.ts';
@@ -40,8 +40,8 @@ export const scoped = (root: Element | null | undefined, selector: string, scope
 
 /**
  * The events Tether dispatches, as `<prefix>:<name>` (`tether:cart-updated`), bubbling up to `document`, with the
- * detail each carries. `emit` takes only these, and `Tether.on()` passes on only the events `emit` dispatched, so a listener gets the
- * detail its event really has.
+ * detail each carries. `emit` takes only these, and `Tether.on()` passes on only the events `emit` dispatched, so a
+ * listener gets the detail its event really has.
  */
 export interface TetherEvents {
   ready: { cart: ShopifyCart | null };
@@ -60,7 +60,7 @@ export interface TetherEvents {
   added: { cart: ShopifyCart; lines: CartLineInput[] };
   'group-added': { group: string | null; lines: CartLineInput[] };
   'cart-warning': { warnings: readonly CartWarning[] };
-  'cart-updated': { cart: ShopifyCart | null; reason: string };
+  'cart-updated': { cart: ShopifyCart | null; reason: CartUpdateReason };
   'cart-toggled': { open: boolean };
   'cart-error': { error: unknown };
   checkout: { url: string; cart: ShopifyCart | null };
@@ -109,7 +109,9 @@ export function ownEvent<Name extends keyof TetherEvents>(
   return event;
 }
 
-/** @returns True for an event `ownEvent` created as `name`, false for any other, such as one another script dispatched. */
+/**
+ * @returns True for an event `ownEvent` created as `name`, false for any other, such as one another script dispatched.
+ */
 export function isOwnEvent<Name extends keyof TetherEvents>(
   event: Event,
   name: Name,

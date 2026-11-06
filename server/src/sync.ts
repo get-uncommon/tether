@@ -11,7 +11,7 @@ import { normalizeConfig } from './mapping.ts';
 import { reconcile } from './reconcile.ts';
 import { createSerialQueue } from './serial.ts';
 import { SINCE_KEY } from './sync-state.ts';
-import { flushPublish, queueRetry, removeProduct, syncProduct } from './sync-product.ts';
+import { PublishError, flushPublish, queueRetry, removeProduct, syncProduct } from './sync-product.ts';
 import { noopLogger, productGid, scalarText } from './util.ts';
 import { messageOf } from './shared/error-message.ts';
 
@@ -87,6 +87,18 @@ async function prune(ctx: SyncContext, seen: Set<string>): Promise<PrunedItem[]>
   return pruned;
 }
 
+/**
+ * Publishes the batch. Items Webflow leaves out are import failures; a failed publish call ends the import.
+ */
+async function publishImported(ctx: SyncContext, failures: ImportResult['failures']): Promise<void> {
+  try {
+    await flushPublish(ctx);
+  } catch (err) {
+    if (!(err instanceof PublishError) || !err.refused) throw err;
+    for (const { id, handle } of err.products) failures.push({ id, handle, error: err.message });
+  }
+}
+
 async function importAll(ctx: SyncContext, shopify: ProductSource, options: ImportOptions = {}): Promise<ImportResult> {
   const { prune: shouldPrune = false, force = false, query = ctx.cfg.shopify.query || null, onProgress } = options;
   const seen = new Set<string>();
@@ -95,8 +107,8 @@ async function importAll(ctx: SyncContext, shopify: ProductSource, options: Impo
   let after: string | null = null;
   let count = 0;
   for (;;) {
-    const page = await shopify.listProducts({ after, query });
-    for (const product of page.products) {
+    const page = await shopify.listProductEdges({ after, query });
+    for (const { product } of page.edges) {
       seen.add(product.legacyId);
       try {
         await syncProduct(ctx, product, { force, publishNow: false });
@@ -109,11 +121,11 @@ async function importAll(ctx: SyncContext, shopify: ProductSource, options: Impo
       count++;
       if (onProgress) onProgress(count, product);
     }
-    if (ctx.toPublish.size >= IMPORT_PUBLISH_BATCH) await flushPublish(ctx);
+    if (ctx.toPublish.size >= IMPORT_PUBLISH_BATCH) await publishImported(ctx, failures);
     if (!page.pageInfo.hasNextPage) break;
     after = page.pageInfo.endCursor;
   }
-  await flushPublish(ctx);
+  await publishImported(ctx, failures);
 
   let pruned: PrunedItem[] = [];
   if (shouldPrune && !query) pruned = await prune(ctx, seen);

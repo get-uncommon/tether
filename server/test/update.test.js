@@ -8,7 +8,13 @@ import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { parseJson, stringAt } from './mocks.js';
-import { listTags, newestPublished, releaseCommit, releasesInRange } from '../scripts/update-tether.ts';
+import {
+  listTags,
+  newestPublished,
+  outsideRangeWarning,
+  releaseCommit,
+  releasesInRange,
+} from '../scripts/update-tether.ts';
 import {
   GitHubError,
   fetchSignedRelease,
@@ -118,6 +124,32 @@ test('updating a copy replaces the code and keeps config, wrangler ids and TETHE
   assert.match(again, /up to date/);
   assert.equal(workflowVersion(out), version, 'the workflow reads the new version');
   assert.equal(workflowVersion(again), '', 'an empty version tells every workflow there is nothing to commit');
+});
+
+test('a copy without TETHER_VERSION takes the minor version it updated to, not the one it had', async () => {
+  const root = fileURLToPath(new URL('..', import.meta.url));
+  const base = await mkdtemp(join(tmpdir(), 'tether-update-'));
+  const copy = join(base, 'copy');
+  const release = join(base, 'release');
+  await mkdir(copy);
+  await cp(join(root, 'scripts'), join(copy, 'scripts'), { recursive: true });
+  await cp(join(root, 'src'), join(copy, 'src'), { recursive: true });
+  await writeFile(join(copy, 'package.json'), JSON.stringify({ name: '@occluze/tether-sync', version: '0.0.1' }));
+  await cp(root, release, { recursive: true, filter: (source) => !source.includes('node_modules') });
+  const version = stringAt(parseJson(await readFile(join(release, 'package.json'), 'utf8')), 'version');
+
+  execFileSync(process.execPath, [...NODE_FLAGS, join(copy, 'scripts', 'update-tether.mjs'), '--from', release]);
+  const minor = version.split('.').slice(0, 2).join('.');
+  assert.equal(await readFile(join(copy, 'TETHER_VERSION'), 'utf8'), `${minor}\n`);
+});
+
+test('a copy whose own version is outside its range is warned that the range never updates it', () => {
+  assert.equal(outsideRangeWarning([0, 6, 3], '0.6'), null);
+  assert.equal(outsideRangeWarning([0, 7, 2], 'latest'), null);
+  assert.match(
+    outsideRangeWarning([0, 7, 2], '0.6') ?? '',
+    /^::warning title=Tether version outside its range::this copy is 0\.7\.2, outside its TETHER_VERSION range 0\.6,/,
+  );
 });
 
 /**

@@ -7,7 +7,8 @@
 # so the Release comes before npm: a failed npm publish doesn't hold back the Worker copies, and is run again alone.
 #
 # A maintenance release (a version below the newest tag, from a `release/X.Y` branch) is not marked as GitHub's latest
-# release, and goes to npm under the `latest-X.Y` dist-tag instead of `latest`.
+# release, and goes to npm under the `latest-X.Y` dist-tag instead of `latest`. The `check` job refuses a tag that
+# isn't in main's history, or not on its `release/X.Y` branch when there is one, before anything is published.
 #
 # Only the `check` job installs the dependencies, and it can only read the repository. The jobs that can sign
 # (`server-asset`, `npm`) or write (`github-release`) run no dependency's code: an install script can't reach their
@@ -27,16 +28,29 @@ jobs:
     permissions:
       contents: read
     steps:
+      # The whole history, every branch and every tag: the check below needs main's and release/X.Y's history, and
+      # test/upgrade-from-released.test.js installs this tree into copies made from the release tags.
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
+          fetch-depth: 0
+      # Deployed copies install only a tag whose commit is in main's history (server/scripts/update-tether.ts), and
+      # one they refuse would block every copy in its range. A maintenance release's commit is on release/X.Y too,
+      # and main has it through the merge commit `npm run release` makes.
+      - name: Tag is on main, and on release/X.Y when that branch exists
+        shell: bash
+        run: |
+          V="${GITHUB_REF_NAME#v}"
+          branches=(main)
+          if git rev-parse --verify --quiet "refs/remotes/origin/release/${V%.*}" > /dev/null; then branches+=("release/${V%.*}"); fi
+          for branch in "${branches[@]}"; do
+            git merge-base --is-ancestor "$GITHUB_SHA" "origin/$branch" || { echo "::error::$GITHUB_REF_NAME ($GITHUB_SHA) is not on $branch: deployed copies would refuse it"; exit 1; }
+          done
       # No dependency cache: a cache written by another workflow's run must not reach what this one publishes.
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: 22
           package-manager-cache: false
-      # test/upgrade-from-released.test.js installs this tree into copies made from these tags, one per updater.
-      - run: git fetch --depth=1 --no-tags origin tag v0.6.7 tag v0.6.8 tag v0.7.0
       - run: npm ci
       - name: Tag matches package.json
         run: |
@@ -146,8 +160,9 @@ jobs:
             echo '```bash'; echo "npm install $PACKAGE"; echo '```'
           } >> notes.md
           # Every script next to the core, so a site can self-host the folder: the core loads its parts from beside it.
-          # dist/esm/ is left out: its chunks import each other by path, which flat Release assets don't keep.
-          mapfile -t assets < <(find dist -maxdepth 1 -type f | sort)
+          # The ES module build (dist/esm/ and tether.esm.js, which re-exports it) is left out: its chunks import each
+          # other by path, which flat Release assets don't keep. Bundlers take it from npm.
+          mapfile -t assets < <(find dist -maxdepth 1 -type f ! -name tether.esm.js | sort)
           gh release create "$GITHUB_REF_NAME" --title "Tether $V" --notes-file notes.md --latest="$LATEST" "${assets[@]}" "$SERVER_ASSET"
 
   # Publishes the committed files as they are: `--ignore-scripts`, because the lifecycle scripts need the

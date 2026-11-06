@@ -19,7 +19,9 @@ interface PageHooks {
 /** The body the last full-document mount ran on: Astro's first `astro:page-load` comes after that mount. */
 let mountedBody: HTMLElement | null = null;
 
-/** Records a mount of the whole document, so the `astro:page-load` of the same page sends no second round of requests. */
+/**
+ * Records a mount of the whole document, so the `astro:page-load` of the same page sends no second round of requests.
+ */
 export function rememberDocumentMount(): void {
   mountedBody = document.body;
 }

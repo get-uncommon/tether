@@ -80,7 +80,7 @@ test('reconcile: overlap catches a product indexed late, just before the cursor'
 test('reconcile: a Shopify error saves progress instead of throwing', async () => {
   const { sync, store, app } = setup({ products: [shopifyProduct(1)] });
   await store.put('reconcile:since', '2026-01-01T00:00:00Z');
-  app.shopify.listProducts = async () => {
+  app.shopify.listProductEdges = async () => {
     throw new Error('boom');
   };
   const result = await sync.reconcile();
@@ -185,4 +185,84 @@ test('webhook failure is queued for the next reconcile', async () => {
     asList(await store.get('tether-sync:reconcile:retry'), 'the retry queue').map((entry) => stringAt(entry, 'id')),
     ['1'],
   );
+});
+
+test('reconcile: a failed publish leaves every product of the run for the next one, retries included', async () => {
+  const products = Array.from({ length: 6 }, (_, i) => shopifyProduct(i + 1));
+  // Product 7 was updated before the window: only the retry list brings it back.
+  const outside = shopifyProduct(7, { updatedAt: '2026-10-01T00:00:00Z' });
+  const { sync, store, wf, flags } = setup({ products: [...products, outside], maxFirst: 2 });
+  await store.put('reconcile:since', '2026-11-01T00:00:00Z');
+  await store.put('reconcile:retry', [{ id: '7', attempts: 1, error: 'webhook failed' }]);
+  flags.failPublish = true;
+  const failed = await sync.reconcile();
+  assert.equal(failed.stopped, 'publish');
+  assert.ok(failed.pages >= 3, 'the listing went past the first page');
+  assert.equal(wf.live.size, 0);
+  const retry = asList(await store.get('reconcile:retry'), 'the retry list');
+  assert.deepEqual(retry.map((entry) => stringAt(entry, 'id')).sort(), ['1', '2', '3', '4', '5', '6', '7']);
+  assert.ok(
+    retry.every((entry) => fieldOf(entry, 'attempts') === 1),
+    'a publish call that failed as a whole costs no attempt',
+  );
+  flags.failPublish = false;
+  for (let run = 0; run < 5 && !(await sync.reconcile()).complete; run++);
+  assert.equal(wf.live.size, 7, 'every product is live');
+  assert.deepEqual(await store.get('reconcile:retry'), []);
+});
+
+test('reconcile: a product Webflow refuses to publish is retried, and given up after the attempts', async () => {
+  const { sync, store, wf, flags } = setup({ products: [shopifyProduct(1), shopifyProduct(2)] });
+  await store.put('reconcile:since', '2026-11-01T00:00:00Z');
+  flags.refusePublishFor = 'product-2';
+  /** @returns {Promise<unknown[]>} The retry list, as [id, attempts]. */
+  const retries = async () =>
+    asList(await store.get('reconcile:retry'), 'the retry list').map((entry) => [
+      stringAt(entry, 'id'),
+      fieldOf(entry, 'attempts'),
+    ]);
+  const result = await sync.reconcile();
+  assert.equal(result.stopped, 'publish');
+  assert.equal(wf.live.size, 1);
+  assert.deepEqual(await retries(), [['2', 1]]);
+  await sync.reconcile();
+  assert.deepEqual(await retries(), [['2', 2]], 'each refusal costs an attempt');
+  await store.put('reconcile:retry', [{ id: '2', attempts: 5, error: 'refused' }]);
+  await store.put('reconcile:since', '2026-11-02T00:00:00Z');
+  await sync.reconcile();
+  assert.deepEqual(await retries(), [], 'dropped after the fifth attempt');
+});
+
+test('reconcile: products edited between two runs of a window are neither skipped nor lost', async () => {
+  const products = Array.from({ length: 4 }, (_, i) => shopifyProduct(i + 1));
+  const { sync, store, shop, wf } = setup({ products, maxFirst: 4 });
+  await store.put('reconcile:since', '2026-11-01T00:00:00Z');
+  const first = await sync.reconcile({ maxProducts: 2 });
+  assert.equal(first.stopped, 'products');
+  // The merchant edits product 1, which the first run did: it moves to the end of the listing.
+  shop.products.set(
+    'gid://shopify/Product/1',
+    shopifyProduct(1, { title: 'Edited', updatedAt: '2026-11-01T00:05:00Z' }),
+  );
+  for (let run = 0; run < 5 && !(await sync.reconcile({ maxProducts: 2 })).complete; run++);
+  const slugs = [...wf.items.values()].map((item) => item.fieldData['slug']).sort();
+  assert.deepEqual(slugs, ['product-1', 'product-2', 'product-3', 'product-4']);
+  assert.ok([...wf.items.values()].some((item) => item.fieldData['name'] === 'Edited'));
+  assert.equal(await store.get('reconcile:since'), '2026-11-01T00:05:00Z');
+});
+
+test('reconcile: a window position stored with a page offset resumes from that page, without skipping', async () => {
+  const products = Array.from({ length: 4 }, (_, i) => shopifyProduct(i + 1));
+  const { sync, store, wf } = setup({ products, maxFirst: 4 });
+  await store.put('reconcile:since', '2026-11-01T00:00:00Z');
+  await store.put('reconcile:page', {
+    since: '2026-11-01T00:00:00Z',
+    after: null,
+    offset: 2,
+    newest: '2026-11-01T00:00:02Z',
+  });
+  const result = await sync.reconcile();
+  assert.equal(result.complete, true);
+  assert.equal(wf.items.size, 4, 'the products before the offset are synced too');
+  assert.equal(await store.get('reconcile:page'), null);
 });

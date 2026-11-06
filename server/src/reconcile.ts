@@ -1,15 +1,21 @@
 /**
  * A reconcile run: the products updated since the last one, after the retries. It stops at the first budget it hits
- * (Webflow writes, products, Shopify pages, Worker subrequests) and saves its exact position, so the next run
- * continues there. Each window overlaps the previous one by a few minutes, because Shopify's search index lags
- * slightly behind updates.
+ * (Webflow writes, products, Shopify pages, Worker subrequests) and saves the cursor of the last product it did, so
+ * the next run continues right after it. A product edited meanwhile moves behind the cursor, to the end of the
+ * listing, so this window still reaches it. Each window overlaps the previous one by a few minutes, because
+ * Shopify's search index lags slightly behind updates.
+ *
+ * The products synced go live in one publish at the end. One the publish leaves unconfirmed goes on the retry list,
+ * so the position can move past it. The retries are stored before the position: a run that dies between the two
+ * writes repeats work, and never loses a product.
  */
-import { flushPublish, removeProduct, syncProduct } from './sync-product.ts';
+import { PublishError, flushPublish, removeProduct, syncProduct } from './sync-product.ts';
 import { PAGE_KEY, RETRY_KEY, SINCE_KEY, readPage, readRetries, readSince } from './sync-state.ts';
 import { numericId, productGid } from './util.ts';
 import { messageOf } from './shared/error-message.ts';
 
 import type { Product } from './product.ts';
+import type { ProductEdge } from './shopify.ts';
 import type { SyncContext, SyncResult, SyncStats } from './sync-product.ts';
 import type { ReconcilePage, RetryEntry } from './sync-state.ts';
 
@@ -18,11 +24,11 @@ export interface ProductSource {
   /** `null` when the product is gone. */
   getProduct: (gid: string) => Promise<Product | null>;
   /** One page, oldest update first. */
-  listProducts: (options: { after: string | null; query: string | null }) => Promise<ProductPage>;
+  listProductEdges: (options: { after: string | null; query: string | null }) => Promise<ProductPage>;
 }
 
 interface ProductPage {
-  products: Product[];
+  edges: ProductEdge[];
   pageInfo: { hasNextPage: boolean; endCursor: string | null };
 }
 
@@ -65,9 +71,8 @@ interface Run {
   pages: number;
   stopped: StopReason | null;
   failures: ReconcileFailure[];
+  /** The cursor of the last product done, `null` before the window's first. */
   after: string | null;
-  /** How many products of the current page are done. */
-  offset: number;
   newest: string;
 }
 
@@ -123,14 +128,12 @@ function productStop({ outOfBudget, limits }: RunDeps, run: Run): StopReason | n
   return null;
 }
 
-/** Syncs a page from `run.offset` on. Stopping part-way leaves `run.offset` at the first product not done. */
+/** Syncs a page in order, until a budget stops it. */
 async function runPage(deps: RunDeps, run: Run, page: ProductPage): Promise<void> {
   const { ctx } = deps;
-  for (const [i, product] of page.products.entries()) {
-    if (i < run.offset) continue;
+  for (const { cursor, product } of page.edges) {
     const stop = productStop(deps, run);
     if (stop) {
-      run.offset = i;
       run.stopped = stop;
       return;
     }
@@ -143,8 +146,8 @@ async function runPage(deps: RunDeps, run: Run, page: ProductPage): Promise<void
       run.failures.push({ id: numericId(product.id), attempts: 1, error: messageOf(err) });
     }
     if (product.updatedAt > run.newest) run.newest = product.updatedAt;
+    run.after = cursor;
   }
-  run.offset = 0;
 }
 
 /** Lists the products updated since `start` page by page until a budget stops it or the last page is done. */
@@ -162,7 +165,7 @@ async function runPages(deps: RunDeps, run: Run, start: string): Promise<void> {
     }
     let page;
     try {
-      page = await shopify.listProducts({ after: run.after, query });
+      page = await shopify.listProductEdges({ after: run.after, query });
     } catch (err) {
       ctx.log.error(`listing products failed: ${messageOf(err)}`);
       run.stopped = 'error';
@@ -172,12 +175,33 @@ async function runPages(deps: RunDeps, run: Run, start: string): Promise<void> {
     run.pages++;
     await runPage(deps, run, page);
     if (run.stopped || !page.pageInfo.hasNextPage) return;
-    run.after = page.pageInfo.endCursor;
+  }
+}
+
+/**
+ * Puts the products a publish left unconfirmed on the retry list.
+ *
+ * @param attemptsBefore The attempts of the products that came from the retry list, by id.
+ */
+function retryUnpublished(
+  ctx: SyncContext,
+  run: Run,
+  error: PublishError,
+  attemptsBefore: ReadonlyMap<string, number>,
+): void {
+  for (const { id } of error.products) {
+    const before = attemptsBefore.get(id) ?? 0;
+    // A publish call that failed as a whole says nothing about the product, so it costs no attempt.
+    const attempts = error.refused ? before + 1 : Math.max(before, 1);
+    if (attempts > MAX_ATTEMPTS) ctx.log.error(`giving up on product ${id}: ${error.message}`);
+    else run.failures.push({ id, attempts, error: error.message });
   }
 }
 
 interface Position {
   run: Run;
+  /** A budget or an error stopped the listing before the window's end. */
+  listingStopped: boolean;
   start: string;
   storedSince: string | null;
   resume: ReconcilePage | null;
@@ -186,29 +210,25 @@ interface Position {
 }
 
 /**
- * Stores the cursor, or the position of a window stopped part-way, and the retries. Only what moved is written:
+ * Stores the retries, then the cursor or the position of a window stopped part-way. Only what moved is written:
  * KV's free tier allows 1,000 writes a day.
  */
 async function savePosition(
   ctx: SyncContext,
-  { run, start, storedSince, resume, restart }: Position,
+  { run, listingStopped, start, storedSince, resume, restart }: Position,
   { retry, retryLeft }: { retry: RetryEntry[]; retryLeft: RetryEntry[] },
 ): Promise<void> {
   const { store } = ctx;
-  if (!run.stopped) {
+  const failed = run.failures.filter((failure): failure is RetryEntry => failure.id !== null);
+  // A product both failed and deferred, or both failed and left unpublished, is retried once.
+  const nextRetry = [...new Map([...retryLeft, ...failed].map((entry) => [entry.id, entry])).values()];
+  if (nextRetry.length || retry.length) await store.put(RETRY_KEY, nextRetry);
+  if (!listingStopped) {
     if (storedSince !== run.newest) await store.put(SINCE_KEY, run.newest);
     if (resume || restart) await store.delete(PAGE_KEY);
-  } else if (
-    resume?.since !== start ||
-    resume.after !== run.after ||
-    resume.offset !== run.offset ||
-    resume.newest !== run.newest
-  ) {
-    await store.put(PAGE_KEY, { since: start, after: run.after, offset: run.offset, newest: run.newest });
+  } else if (resume?.since !== start || resume.after !== run.after || resume.newest !== run.newest) {
+    await store.put(PAGE_KEY, { since: start, after: run.after, newest: run.newest });
   }
-  const failed = run.failures.filter((failure): failure is RetryEntry => failure.id !== null);
-  const nextRetry = [...retryLeft, ...failed];
-  if (nextRetry.length || retry.length) await store.put(RETRY_KEY, nextRetry);
 }
 
 export async function reconcile(
@@ -240,7 +260,6 @@ export async function reconcile(
     stopped: null,
     failures: [],
     after: resumed ? resumed.after : null,
-    offset: resumed ? resumed.offset : 0,
     newest: resumed ? resumed.newest : start,
   };
   const reserve = cfg.reconcile.reserveSubrequests;
@@ -254,15 +273,18 @@ export async function reconcile(
   const retry = await readRetries(store);
   const retryLeft = await runRetries(deps, run, retry);
   await runPages(deps, run, start);
+  const listingStopped = run.stopped !== null;
   try {
     await flushPublish(ctx);
   } catch (err) {
-    // The hashes weren't stored, so the next run retries these products.
-    ctx.log.error(`publish failed: ${messageOf(err)}`);
-    run.stopped = 'publish';
+    if (!(err instanceof PublishError)) throw err;
+    ctx.log.error(err.message);
+    retryUnpublished(ctx, run, err, new Map(retry.map((entry) => [entry.id, entry.attempts])));
+    run.stopped ??= 'publish';
   }
   if (!ctx.dryRun) {
-    await savePosition(ctx, { run, start, storedSince, resume, restart: Boolean(sinceOverride) }, { retry, retryLeft });
+    const position = { run, listingStopped, start, storedSince, resume, restart: Boolean(sinceOverride) };
+    await savePosition(ctx, position, { retry, retryLeft });
   }
   const { changes, processed, pages, stopped, failures, newest } = run;
   return {

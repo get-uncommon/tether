@@ -1,5 +1,6 @@
 /** Node-only bits: JSON file store, config loading, HTTP server for webhooks. */
-import { readFile, writeFile, rename, stat } from 'node:fs/promises';
+import { open, readFile, writeFile, rename, rm, stat } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { resolve } from 'node:path';
@@ -21,8 +22,48 @@ type WebhookSync = Parameters<typeof handleShopifyWebhook>[1]['sync'];
 
 export type FileStore = Store & { path: string; flush: () => Promise<void> };
 
+const hasCode = (error: unknown, code: string) => error instanceof Error && 'code' in error && error.code === code;
+
 function isFileMissing(error: unknown): boolean {
-  return error instanceof Error && 'code' in error && error.code === 'ENOENT';
+  return hasCode(error, 'ENOENT');
+}
+
+/** A write holds the lock for milliseconds; a lock this old was left by a process that died holding it. */
+const STALE_LOCK_MS = 30_000;
+/** Past taking over a stale lock: the lock can't be created at all. */
+const LOCK_TIMEOUT_MS = 2 * STALE_LOCK_MS;
+const LOCK_RETRY_MS = 20;
+
+/**
+ * Runs `work` holding `${path}.lock`, an advisory lock every process writing the state file takes, so one process's
+ * read, merge and rename never overlaps another's and loses its keys.
+ *
+ * @throws {Error} When the lock can't be taken within {@link LOCK_TIMEOUT_MS}.
+ */
+async function withFileLock<T>(path: string, work: () => Promise<T>): Promise<T> {
+  const lockPath = `${path}.lock`;
+  const deadline = Date.now() + LOCK_TIMEOUT_MS;
+  for (;;) {
+    try {
+      await (await open(lockPath, 'wx')).close();
+      break;
+    } catch (err) {
+      // Windows answers EPERM for the lock while another process's delete of it is still pending.
+      if (!hasCode(err, 'EEXIST') && !hasCode(err, 'EPERM')) throw err;
+      if (Date.now() > deadline) throw new Error(`state file lock ${lockPath} could not be taken`, { cause: err });
+    }
+    const held = await stat(lockPath).catch((err: unknown) => {
+      if (isFileMissing(err) || hasCode(err, 'EPERM')) return null; // released, or being released
+      throw err;
+    });
+    if (held && Date.now() - held.mtimeMs > STALE_LOCK_MS) await rm(lockPath, { force: true });
+    else await new Promise((resolve) => setTimeout(resolve, LOCK_RETRY_MS));
+  }
+  try {
+    return await work();
+  } finally {
+    await rm(lockPath, { force: true });
+  }
 }
 
 /**
@@ -49,15 +90,36 @@ async function readStateFile(path: string): Promise<{ entries: Map<string, unkno
   }
 }
 
+/** How long a rename onto the state file is tried again while another process has it open. */
+const RENAME_RETRY_MS = 5_000;
+
+/**
+ * Windows refuses to rename onto a file another process has open, even for a moment to read it, with EPERM, EACCES or
+ * EBUSY; the rename is tried again until that reader is done.
+ */
+async function renameOver(from: string, to: string): Promise<void> {
+  const deadline = Date.now() + RENAME_RETRY_MS;
+  for (;;) {
+    try {
+      await rename(from, to);
+      return;
+    } catch (err) {
+      const busy = hasCode(err, 'EPERM') || hasCode(err, 'EACCES') || hasCode(err, 'EBUSY');
+      if (!busy || Date.now() > deadline) throw err;
+    }
+    await new Promise((resolve) => setTimeout(resolve, LOCK_RETRY_MS));
+  }
+}
+
 /**
  * Replaces the file in one rename, so another process never reads half of it.
  *
  * @returns The written file's version stamp.
  */
 async function writeStateFile(path: string, entries: Map<string, unknown>): Promise<string> {
-  const tmp = `${path}.${String(process.pid)}.tmp`;
+  const tmp = `${path}.${randomUUID()}.tmp`;
   await writeFile(tmp, JSON.stringify(Object.fromEntries(entries)));
-  await rename(tmp, path);
+  await renameOver(tmp, path);
   return stamp(await stat(path));
 }
 
@@ -84,8 +146,8 @@ function applyChanges(target: Map<string, unknown>, changes: Map<string, unknown
 
 /**
  * JSON file store. Writes are batched (one file write per `delayMs`, and on flush()) and
- * merged into the file as it is on disk, so `serve` and a cron `reconcile` can share one
- * state file. Reads reload the file when another process changed it.
+ * merged into the file as it is on disk under a lock file, so `serve` and a cron `reconcile`
+ * can share one state file. Reads reload the file when another process changed it.
  *
  * @param options `log` reports a failed timed write.
  */
@@ -110,10 +172,12 @@ export function fileStore(
   };
   const write = async (batch: Map<string, unknown>) => {
     try {
-      const disk = await readStateFile(path); // merge: keep keys other processes wrote meanwhile
-      applyChanges(disk.entries, batch);
-      version = await writeStateFile(path, disk.entries);
-      data = disk.entries;
+      await withFileLock(path, async () => {
+        const disk = await readStateFile(path); // merge: keep keys other processes wrote meanwhile
+        applyChanges(disk.entries, batch);
+        version = await writeStateFile(path, disk.entries);
+        data = disk.entries;
+      });
     } catch (err) {
       // Tried again on the next flush, unless a newer value for the key is waiting already.
       batch.forEach((value, key) => {

@@ -106,7 +106,7 @@ test('logout never fails open: session ended and cookie cleared even when Shopif
   }
   assert.equal(res.status, 200);
   assert.match(pick(res, '__Host-tether-account') + cookiesOf(res).join(), /Max-Age=0/);
-  assert.equal(memory.size, 0, 'session deleted');
+  assert.equal(sessionKeys(memory).length, 0, 'session deleted');
   const body = await jsonOf(res);
   assert.equal(fieldOf(body, 'loggedOut'), true);
   assert.ok(!JSON.stringify(body).includes('eyJ'), 'no id token for scripts');
@@ -154,6 +154,49 @@ test('refresh race: two requests refresh at once (Shopify rotates the refresh to
   }
 });
 
+test('a refresh in flight when the customer logs out does not bring the session back', async () => {
+  const { memory, cookie, sh } = await loginFlow();
+  /** @type {(value?: unknown) => void} */
+  let answerRefresh = () => {};
+  /** @type {(value?: unknown) => void} */
+  let refreshSent = () => {};
+  const sent = new Promise((resolve) => {
+    refreshSent = resolve;
+  });
+  /** @type {Fetch} */
+  const slowRefresh = async (url, init) => {
+    const body = init?.body;
+    if (urlOf(url).endsWith('/oauth/token') && body instanceof URLSearchParams) {
+      refreshSent();
+      await new Promise((resolve) => {
+        answerRefresh = resolve;
+      });
+      return new Response(JSON.stringify({ access_token: 'access-2', refresh_token: 'refresh-2', expires_in: 3600 }), {
+        status: 200,
+      });
+    }
+    return sh.fetch(url, init);
+  };
+  const realNow = Date.now;
+  Date.now = () => realNow() + 2 * 3600e3;
+  try {
+    const me = answer(req('/me', { origin: SITE, cookie }), env, { fetch: slowRefresh, memory });
+    await sent;
+    const logout = await answer(req('/logout', { method: 'POST', origin: SITE, cookie, body: {} }), env, {
+      fetch: sh.fetch,
+      memory,
+    });
+    assert.equal(fieldOf(await jsonOf(logout), 'loggedOut'), true);
+    answerRefresh();
+    assert.equal(fieldOf(await jsonOf(await me), 'loggedIn'), false, 'the request that refreshed is logged out too');
+    assert.equal(sessionKeys(memory).length, 0, 'the refreshed session is not stored');
+    const again = await answer(req('/me', { origin: SITE, cookie }), env, { fetch: sh.fetch, memory });
+    assert.equal(fieldOf(await jsonOf(again), 'loggedIn'), false);
+  } finally {
+    Date.now = realNow;
+  }
+});
+
 test('a 401 from Shopify (session ended there) ends it here too', async () => {
   const { memory, cookie, sh } = await loginFlow();
   /** @type {Fetch} */
@@ -161,7 +204,7 @@ test('a 401 from Shopify (session ended there) ends it here too', async () => {
     urlOf(url).includes('/account/customer/api/') ? new Response('{}', { status: 401 }) : sh.fetch(url, init);
   const me = await answer(req('/me', { origin: SITE, cookie }), env, { fetch: ended, memory });
   assert.equal(fieldOf(await jsonOf(me), 'loggedIn'), false);
-  assert.equal(memory.size, 0);
+  assert.equal(sessionKeys(memory).length, 0);
   assert.match(cookiesOf(me).join(), /__Host-tether-account=; .*Max-Age=0/, 'the dead session cookie is cleared');
   const orders = await answer(req('/orders', { origin: SITE, cookie }), env, { fetch: ended, memory });
   assert.equal(orders.status, 401, 'data routes answer 401 without a session; /me answers 200');

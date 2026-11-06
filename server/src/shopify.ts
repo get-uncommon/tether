@@ -101,6 +101,21 @@ interface PageInfo {
   endCursor: string | null;
 }
 
+/**
+ * A listed product and its cursor. Shopify's cursor encodes the product's place in the sort order, not its index, so
+ * listing `after` it still continues right behind that product when others were edited since.
+ */
+export interface ProductEdge {
+  cursor: string;
+  product: Product;
+}
+
+interface ListOptions {
+  first?: number | undefined;
+  after?: string | null | undefined;
+  query?: string | null | undefined;
+}
+
 interface WebhookSubscription {
   id: string;
   topic: string;
@@ -123,11 +138,9 @@ export interface ShopifyClient {
   getProduct: (gid: string) => Promise<Product | null>;
   readonly pageSize: number;
   /** One page of products, oldest update first. Shrinks the page if Shopify says it costs too much. */
-  listProducts: (options?: {
-    first?: number | undefined;
-    after?: string | null | undefined;
-    query?: string | null | undefined;
-  }) => Promise<{ products: Product[]; pageInfo: PageInfo }>;
+  listProducts: (options?: ListOptions) => Promise<{ products: Product[]; pageInfo: PageInfo }>;
+  /** {@link ShopifyClient.listProducts} with each product's cursor, to continue right after any of them. */
+  listProductEdges: (options?: ListOptions) => Promise<{ edges: ProductEdge[]; pageInfo: PageInfo }>;
   shopName: () => Promise<{ name: string; myshopifyDomain: string }>;
   /** This app's webhook subscriptions. */
   listWebhooks: () => Promise<WebhookSubscription[]>;
@@ -212,6 +225,36 @@ function parsePageInfo(raw: unknown): PageInfo {
   return { hasNextPage: hasNextPage === true, endCursor: stringOrNull(endCursor) };
 }
 
+/** @throws {SyncError} When the edge has no cursor. */
+function parseEdge(raw: unknown, metafields: string[]): ProductEdge {
+  const { cursor, node } = asRecord(raw);
+  if (typeof cursor !== 'string') throw new SyncError('Shopify listed a product without a cursor');
+  return { cursor, product: normalizeProduct(node, metafields) };
+}
+
+/** One page of products in `UPDATED_AT` order, with their cursors. */
+async function listPage(
+  gql: Gql,
+  { fragment, metafields }: { fragment: string; metafields: string[] },
+  variables: { first: number; after: string | null; query: string | null },
+): Promise<{ edges: ProductEdge[]; pageInfo: PageInfo }> {
+  const data = await gql(
+    `query TetherSyncProducts($first: Int!, $after: String, $query: String) {
+  products(first: $first, after: $after, query: $query, sortKey: UPDATED_AT) {
+    edges { cursor node { ...TetherSyncProduct } }
+    pageInfo { hasNextPage endCursor }
+  }
+}
+${fragment}`,
+    variables,
+  );
+  const products = asRecord(data['products']);
+  return {
+    edges: asList(products['edges']).map((edge) => parseEdge(edge, metafields)),
+    pageInfo: parsePageInfo(products['pageInfo']),
+  };
+}
+
 function costTooHigh(error: unknown): boolean {
   return error instanceof SyncError && error.code === 'MAX_COST_EXCEEDED';
 }
@@ -232,26 +275,17 @@ function shopifyClient(
   const fragment = productFragment({ metafields, inventory, variantsFirst, mediaFirst });
   let pageSize = pageSizeFor({ variantsFirst, mediaFirst, metafields });
 
-  async function listPage(
-    first: number,
-    after: string | null,
-    query: string | null,
-  ): Promise<{ products: Product[]; pageInfo: PageInfo }> {
-    const data = await gql(
-      `query TetherSyncProducts($first: Int!, $after: String, $query: String) {
-  products(first: $first, after: $after, query: $query, sortKey: UPDATED_AT) {
-    nodes { ...TetherSyncProduct }
-    pageInfo { hasNextPage endCursor }
-  }
-}
-${fragment}`,
-      { first, after, query },
-    );
-    const products = asRecord(data['products']);
-    return {
-      products: asList(products['nodes']).map((node) => normalizeProduct(node, metafields)),
-      pageInfo: parsePageInfo(products['pageInfo']),
-    };
+  async function listProductEdges({ first, after = null, query = null }: ListOptions = {}) {
+    let size = first ?? pageSize;
+    for (;;) {
+      try {
+        return await listPage(gql, { fragment, metafields }, { first: size, after, query });
+      } catch (err) {
+        if (!costTooHigh(err) || size <= 1) throw err;
+        size = Math.max(1, Math.floor(size / 2));
+        if (!first) pageSize = size;
+      }
+    }
   }
 
   return {
@@ -271,18 +305,12 @@ ${fragment}`,
       return pageSize;
     },
 
-    async listProducts({ first, after = null, query = null } = {}) {
-      let size = first ?? pageSize;
-      for (;;) {
-        try {
-          return await listPage(size, after, query);
-        } catch (err) {
-          if (!costTooHigh(err) || size <= 1) throw err;
-          size = Math.max(1, Math.floor(size / 2));
-          if (!first) pageSize = size;
-        }
-      }
+    async listProducts(options) {
+      const { edges, pageInfo } = await listProductEdges(options);
+      return { products: edges.map((edge) => edge.product), pageInfo };
     },
+
+    listProductEdges,
 
     async shopName() {
       const data = await gql('query TetherSyncShop { shop { name myshopifyDomain } }');

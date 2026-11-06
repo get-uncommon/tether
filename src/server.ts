@@ -71,8 +71,8 @@ const DEFAULT_CARD_IMAGES = 2;
 const HYDRATE_VERSION = 1;
 
 /**
- * @returns `productPath` `/products` → `/products/<handle>`; templates with `{handle}` and `{id}` work too. `null` when
- *   the path needs a handle or an id that is empty.
+ * @returns `productPath` `/products` → `/products/<handle>`; templates with `{handle}` and `{id}` work too. `null`
+ *   when the path needs a handle or an id that is empty.
  */
 export function productUrl(
   handle: string,
@@ -191,8 +191,8 @@ export function createStorefront(options: StorefrontOptions = {}) {
 
   return {
     config: conf,
-    query: <T>(query: string, variables?: Record<string, unknown>, requestOptions?: { context?: boolean }) =>
-      untypedQuery<T>(conf, query, variables, requestOptions),
+    query: (query: string, variables?: Record<string, unknown>, requestOptions?: { context?: boolean }) =>
+      untypedQuery(conf, query, variables, requestOptions),
     ...catalog,
     hydrate,
     formatMoney: (money: Money | null | undefined, locale: string | undefined = conf.locale) =>

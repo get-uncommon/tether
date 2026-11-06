@@ -87,8 +87,8 @@ async function checkWebhookRegistration(steps: Steps, shopify: ShopifyClient, ur
       steps.add(
         'warn',
         'Shopify webhooks',
-        `not registered yet: ${missing.join(', ')}.`,
-        'Run the first import (POST /reconcile?since=all): it registers them. Until then the cron syncs every 10 minutes.',
+        `not registered: ${missing.join(', ')}.`,
+        'POST /reconcile with the SYNC_SECRET (?since=all for the first import) registers the missing ones. Until then the cron syncs every 10 minutes.',
       );
   } catch (error) {
     steps.add('warn', 'Shopify webhooks', `couldn't list them: ${messageOf(error)}`);

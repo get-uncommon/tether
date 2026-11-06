@@ -188,7 +188,9 @@ export function notifyLayoutChanged(reason: string): void {
   }, LAYOUT_DEBOUNCE_MS);
 }
 
-/** Notifies a layout change (`<reason>:images`) once every image in `root` that is still loading has loaded or failed. */
+/**
+ * Notifies a layout change (`<reason>:images`) once every image in `root` that is still loading has loaded or failed.
+ */
 export function watchImages(root: ParentNode, reason: string): void {
   const loading = [...root.querySelectorAll('img')].filter((img) => !img.complete);
   let left = loading.length;

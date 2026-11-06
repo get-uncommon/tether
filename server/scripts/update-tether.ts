@@ -18,8 +18,9 @@
  * installed only when the commit its tag points at is part of the upstream default branch, and only from the signed
  * asset on its GitHub Release, after `gh attestation verify` confirms the upstream release workflow built it from that
  * commit (scripts/release-asset.ts). A tag whose Release doesn't carry the asset yet is skipped with a warning, and the
- * newest one that does is installed. It is staged inside the copy first and then swapped in by renames, so a failure
- * part-way leaves the copy as it was.
+ * newest one that does is installed. It is staged inside the copy first and then swapped in by renames, and a rename
+ * that fails is rolled back. A process killed during the swap leaves the copy half moved, with its own entries in a
+ * `.tether-update-*` folder (git-ignored) for a person to put back.
  *
  * The version rules live in `src/release-range.ts`, which every copy has next to this script.
  *
@@ -72,10 +73,11 @@ const UPSTREAM = process.env['TETHER_UPSTREAM'] ?? 'ravi-klaassens/tether';
 const MAX_TAG_PAGES = 20;
 
 /**
- * What a release replaces. Everything else in the copy is left alone. Every top-level entry of the release's
- * `server/` is here, in {@link KEPT}, or `.github` (a test holds it so). A copy installs a release with the list of
- * the updater it already has, so an entry added here is skipped by every copy updating from an older release: a new
- * top-level entry can't be one the release needs.
+ * What a release replaces: the copy's entry is swapped for the release's, or removed when the release has none.
+ * Everything else in the copy is left alone. Every top-level entry of the release's `server/` is here, in
+ * {@link KEPT}, or `.github` (a test holds it so). A copy installs a release with the list of the updater it already
+ * has, so an entry added here is skipped by every copy updating from an older release: a new top-level entry can't
+ * be one the release needs.
  */
 export const MANAGED = [
   'src',
@@ -90,6 +92,11 @@ export const MANAGED = [
 ];
 /** What a release never replaces, though a brand-new copy takes the release's version once. */
 export const KEPT = ['tether-sync.config.js', 'wrangler.jsonc', 'TETHER_VERSION'];
+/**
+ * The files every shipped workflow runs after an update, so a release without one is refused before anything is
+ * swapped: installing it would leave a copy that can't update again.
+ */
+const WORKFLOW_ENTRY_POINTS = ['scripts/update-tether.mjs', 'src/entry.js'];
 
 /** The prefix of a release tag: `v0.3.3` installs version `0.3.3`. */
 const TAG_PREFIX = 'v';
@@ -188,9 +195,10 @@ export interface InstallTarget {
 const OWN_COPY: InstallTarget = { root: ROOT, rename };
 
 /**
- * Moves each staged entry into the copy, the copy's own entry out of the way first. When a rename fails, the entries
- * already swapped are put back, so the copy is either all old or all new.
+ * Moves each of `names` out of the copy, when the copy has it, and the staged entry in, when the release has it. When
+ * a rename fails, the entries already swapped are put back, so the copy is either all old or all new.
  *
+ * @param names Entries of {@link MANAGED}: only these are moved out of the copy.
  * @param staged The folder holding the release's entries.
  * @param previous An empty folder for the copy's current entries.
  */
@@ -201,7 +209,7 @@ async function swapIn(target: InstallTarget, names: string[], staged: string, pr
     for (const name of names) {
       if (existsSync(join(root, name))) await target.rename(join(root, name), join(previous, name));
       moved.push(name);
-      await target.rename(join(staged, name), join(root, name));
+      if (existsSync(join(staged, name))) await target.rename(join(staged, name), join(root, name));
     }
   } catch (error) {
     await putBack(target, moved.reverse(), previous, error);
@@ -234,15 +242,18 @@ async function putBack(target: InstallTarget, names: string[], previous: string,
 }
 
 /**
- * Replaces the managed files with the release's, and adds the kept ones a new copy doesn't have yet. The release is
- * staged inside the copy, so the swap is a rename on one file system.
+ * Replaces the managed entries with the release's, removes those the release doesn't have, and adds the kept ones a
+ * new copy doesn't have yet. The release is staged inside the copy, so the swap is a rename on one file system.
  *
  * @param source The release's `server/` folder.
- * @throws The swap's error after putting the copy back, or a {@link RollbackError} when that failed too; the work
- *   folder (`.tether-update-*`) is kept only then.
+ * @throws When the release lacks one of {@link WORKFLOW_ENTRY_POINTS}, before the copy is changed. The swap's error
+ *   after putting the copy back, or a {@link RollbackError} when that failed too; the work folder
+ *   (`.tether-update-*`) is kept only then.
  */
 export async function install(source: string, target: InstallTarget = OWN_COPY): Promise<void> {
   const { root } = target;
+  const unshipped = WORKFLOW_ENTRY_POINTS.filter((path) => !existsSync(join(source, path)));
+  if (unshipped.length) throw new Error(`the release has no ${unshipped.join(' or ')}: not installed`);
   const work = await mkdtemp(join(root, '.tether-update-'));
   let keepWork = false;
   try {
@@ -250,9 +261,9 @@ export async function install(source: string, target: InstallTarget = OWN_COPY):
     const previous = join(work, 'old');
     await mkdir(staged);
     await mkdir(previous);
-    const names = MANAGED.filter((name) => existsSync(join(source, name)));
-    for (const name of names) await cp(join(source, name), join(staged, name), { recursive: true });
-    await swapIn(target, names, staged, previous);
+    const shipped = MANAGED.filter((name) => existsSync(join(source, name)));
+    for (const name of shipped) await cp(join(source, name), join(staged, name), { recursive: true });
+    await swapIn(target, MANAGED, staged, previous);
   } catch (error) {
     keepWork = error instanceof RollbackError;
     throw error;
@@ -391,6 +402,20 @@ async function updateFromFolder(fromDir: string, current: Version, dryRun: boole
 }
 
 /**
+ * The warning for a copy whose own version is outside its range, or `null`. Such a copy installs only a release in the
+ * range newer than itself, so a range below it never updates the copy, and every run would say "up to date".
+ *
+ * @param spec The range the update uses, `0.3` or `latest`.
+ */
+export function outsideRangeWarning(current: Version, spec: string): string | null {
+  if (versionsInRange([current.join('.')], spec).length) return null;
+  const why =
+    `this copy is ${current.join('.')}, outside its TETHER_VERSION range ${spec}, so it installs only a release ` +
+    'in that range newer than itself. Set TETHER_VERSION to the range you want.';
+  return `::warning title=Tether version outside its range::${workflowCommandText(why)}`;
+}
+
+/**
  * Installs the newest published release in the range that is newer than the copy.
  *
  * @param spec The TETHER_VERSION file's range, empty without the file.
@@ -411,11 +436,21 @@ async function updateFromGitHub(
   const range = spec || `(none: ${effective})`;
   console.log(`current ${current.join('.')}, TETHER_VERSION ${range}, newest match ${inRange[0]?.join('.') ?? 'none'}`);
   if (!inRange.length) throw new Error(`no release matches "${effective}"`);
+  const outside = outsideRangeWarning(current, effective);
+  if (outside) console.log(outside);
   const newer = inRange.filter((version) => compareVersions(version, current) > 0);
   const release = await newestPublished(githubJson, UPSTREAM, newer);
   if (!release) return null;
   if (!options.dryRun) await installFromGitHub(release, tags, options.policy);
   return release.version;
+}
+
+/**
+ * @param version `0.3.3`.
+ * @returns Its minor version's range, `0.3`.
+ */
+function minorOf(version: string): string {
+  return version.split('.').slice(0, 2).join('.');
 }
 
 async function main(args: string[]): Promise<void> {
@@ -438,8 +473,8 @@ async function main(args: string[]): Promise<void> {
     console.log('updated=');
     return;
   }
-  // A copy without the file takes the range it updated within, its own minor version.
-  if (!spec && !existsSync(specFile)) await writeFile(specFile, `${current.slice(0, 2).join('.')}\n`);
+  // A copy without the file takes the minor version it now has: with `--from` that can be another than it had.
+  if (!spec && !existsSync(specFile)) await writeFile(specFile, `${minorOf(installed)}\n`);
   await stat(join(ROOT, 'src', 'entry.js'));
   console.log(`updated to ${installed}`);
   console.log(`updated=${installed}`);
