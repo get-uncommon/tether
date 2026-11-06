@@ -470,7 +470,7 @@ product loads from Shopify instead. `Tether.mount()` reads every tag in the docu
 the elements added later are read and mounted on their own, once per burst of additions.
 
 **Pinning a release.** A minor line in the URL, like the README's
-[script tag](../README.md#2-add-the-script-to-webflow) (`@X.Y`), takes every X.Y.Z fix automatically,
+[script tag](../README.md#install) (`@X.Y`), takes every X.Y.Z fix automatically,
 which is what most sites want. To pin exactly what runs, load a fixed release (`@vX.Y.Z`, a tag from
 the [Releases](https://github.com/ravi-klaassens/tether/releases)) and add the file's
 [`integrity`](https://www.srihash.org/) hash to the script tag (an `integrity` hash on `@X.Y` breaks
