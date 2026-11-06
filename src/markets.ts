@@ -17,11 +17,12 @@
  *   webflow locale subdirectory (/de/...) or <html lang="de-DE">, through `locales`
  * then the static `country` / `language` config. Without `detect`, only `saved` applies, so a country select keeps
  * working across pages; `detect: false` turns even that off. Tether never calls an IP lookup service: a country from
- * the visitor's IP only comes from the site's own server (see README).
+ * the visitor's IP only comes from the site's own server (docs/reference.md, Markets and localization).
  */
 import { MARKET_SOURCES, cfg, parseMarkets } from './config.ts';
 import { toCountry, toLanguage } from './market-codes.ts';
 import { getStored, setStored } from './storage.ts';
+import { decodeOrKeep } from './uri.ts';
 import type { MarketsConfig } from './config.ts';
 import type { CountryCode, LanguageCode } from './market-codes.ts';
 
@@ -125,24 +126,33 @@ function toMarket(value: unknown): Market | null {
 }
 
 /**
- * The visitor's saved market (`setCountry()`, `tether-country-select`), validated: storage is written by other tabs,
- * older versions and other scripts too.
+ * A market as `rememberMarket` stores it, validated: storage is written by other tabs, older versions and other
+ * scripts too.
+ *
+ * @param text The value stored under `storageKey()`.
+ * @returns `null` when it isn't a valid market.
+ */
+export const parseSavedMarket = (text: string): Market | null => toMarket(parseJsonOrNull(text));
+
+/**
+ * The visitor's saved market (`setCountry()`, `tether-country-select`).
  *
  * @param storage Default `localStorage`.
  * @returns `null` when nothing valid is saved.
  */
 export function readSavedMarket(storage: Pick<Storage, 'getItem'> = pageStorage): Market | null {
   const text = storage.getItem(storageKey());
-  return text ? toMarket(parseJsonOrNull(text)) : null;
+  return text ? parseSavedMarket(text) : null;
 }
 
+/** @returns The cookie's value; one with a malformed escape is kept as written, which no country code is. */
 function readCookie(doc: Pick<Document, 'cookie'> | null, name: string): string | null {
   if (!doc || !name) return null;
   const cookie = doc.cookie
     .split(';')
     .map((part) => part.trim())
     .find((part) => part.startsWith(`${name}=`));
-  return cookie ? decodeURIComponent(cookie.slice(name.length + 1)) : null;
+  return cookie ? decodeOrKeep(cookie.slice(name.length + 1)) : null;
 }
 
 /** The entry of `locales` for `key`, ignoring case. */

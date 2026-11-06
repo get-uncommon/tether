@@ -1,12 +1,12 @@
 // The lint gate. Type-aware typescript-eslint rules run on the TypeScript sources (the shipped code in src/ and
-// server/src/, and the scripts) and on the JavaScript tests, which tsconfig.test.json and tsconfig.e2e.json type-check.
+// server/src/, and the scripts) and on the JavaScript tests, which .config/tsconfig/test.json and e2e.json type-check.
 // The JavaScript shims that old deployed copies call get the untyped rules only.
 import js from '@eslint/js';
 import prettier from 'eslint-config-prettier';
 import globals from 'globals';
 import tseslint from 'typescript-eslint';
 
-const TEST_FILES = ['test/**/*.js', 'server/test/**/*.js', 'e2e/**/*.{js,mjs}'];
+const TEST_FILES = ['test/**/*.js', 'server/test/**/*.js', 'test/e2e/**/*.{js,mjs}'];
 const TYPED_FILES = [
   'src/**/*.ts',
   'server/src/**/*.ts',
@@ -44,7 +44,7 @@ export default tseslint.config(
       'examples/**',
       'test-results/**',
       'playwright-report/**',
-      // Declarations only, outside the source's programs (tsconfig.browser.json); npm run test:types compiles them.
+      // Declarations only, outside the source's programs (.config/tsconfig/browser.json); npm run test:types compiles them.
       'src/globals.d.ts',
     ],
   },
@@ -78,12 +78,12 @@ export default tseslint.config(
       'server/**/*.{js,mjs,ts}',
       'scripts/**/*.ts',
       'test/**/*.js',
-      'e2e/**/*.{js,mjs}',
+      'test/e2e/**/*.{js,mjs}',
     ],
     languageOptions: { globals: { ...globals.node, ...globals.serviceworker } },
   },
   {
-    files: ['test/**/*.js', 'e2e/**/*.{js,mjs}'],
+    files: ['test/**/*.js', 'test/e2e/**/*.{js,mjs}'],
     languageOptions: { globals: { ...globals.browser } },
   },
   {

@@ -65,14 +65,13 @@ export function isCartGone(error: unknown): boolean {
 
 /**
  * @returns True when a change failed without saying whether Shopify applied it: no answer or no whole body came (the
- *   network), a 2xx whose body isn't valid, or a server error (5xx), which can come after the change was committed.
- *   Shopify's user errors and a 4xx are clear.
+ *   network), a 2xx whose body isn't valid, or a server error (a 5xx, or a 2xx with `SERVER_ERROR`), which can come
+ *   after the change was committed. Shopify's user errors and a 4xx are clear.
  */
 export function isUnclearFailure(error: unknown): boolean {
-  return (
-    error instanceof TetherError &&
-    (error.code === 'NETWORK' || error.code === 'INVALID_RESPONSE' || (error.status ?? 0) >= 500)
-  );
+  if (!(error instanceof TetherError)) return false;
+  const { code, status = 0 } = error;
+  return code === 'NETWORK' || code === 'INVALID_RESPONSE' || code === 'SERVER_ERROR' || status >= 500;
 }
 
 /**

@@ -16,7 +16,15 @@ Object.assign(globalThis, {
 globalThis.fetch = async () => assert.fail('no request');
 
 const { default: Tether } = await import('../src/index.ts');
-await Tether.init({ domain: 'shop.test', token: 't', autoMount: false, country: 'NL' });
+/** @type {string[]} */
+const reported = [];
+await Tether.init({
+  domain: 'shop.test',
+  token: 't',
+  autoMount: false,
+  country: 'NL',
+  onError: (_error, context) => reported.push(context),
+});
 
 const MARKET_KEY = 'tether:market:shop.test';
 /** @param {string} newValue What the other tab stored. */
@@ -28,4 +36,12 @@ test('a market another tab chose is followed, also after another script replaced
   otherTab(JSON.stringify({ country: 'US', language: null }));
   await waitFor(() => Tether.config.country === 'US', 'the market from the other tab');
   assert.equal(localStorage.getItem(MARKET_KEY), null, 'this tab stores nothing: the other tab did');
+});
+
+test('a value under the market key that is not a valid market is skipped, not reported', async () => {
+  otherTab(JSON.stringify({ country: 'Germany' }));
+  otherTab(JSON.stringify({ language: 'FR' }));
+  otherTab(JSON.stringify({ country: 'BE' }));
+  await waitFor(() => Tether.config.country === 'BE', 'the valid market after the invalid ones');
+  assert.deepEqual(reported, []);
 });

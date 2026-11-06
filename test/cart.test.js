@@ -234,6 +234,12 @@ test('a change without a clear answer is not sent again, and the cart is loaded 
       lost: () => jsonResponse({ data: { cartLinesAdd: { cart: { id: 1 } } } }),
     },
     {
+      code: 'SERVER_ERROR',
+      lost: () =>
+        jsonResponse({ errors: [{ message: 'Internal error', extensions: { code: 'INTERNAL_SERVER_ERROR' } }] }),
+    },
+    { code: 'SERVER_ERROR', lost: () => jsonResponse({ data: null, errors: [{ message: 'Internal error' }] }) },
+    {
       code: 'NETWORK',
       lost: () => {
         throw new TypeError('Failed to fetch');
@@ -278,6 +284,23 @@ test('a clear refusal (user errors, a 4xx) loads nothing more: the cart stays as
     );
     assert.equal(Cart.count, 1);
   }
+});
+
+test('clear() removes the lines the cart has when its turn comes, including one added just before it', async () => {
+  await loadSaved(null);
+  calls.length = 0;
+  answers['Tether_cartCreate'] = () => payload('cartCreate', oneLine());
+  answers['Tether_cartLinesRemove'] = () => payload('cartLinesRemove', cartFrom([]));
+  const added = Cart.add(VARIANT);
+  const cleared = Cart.clear();
+  await added;
+  assert.equal((await cleared)?.totalQuantity, 0);
+  assert.deepEqual(
+    calls.map((call) => call.op),
+    ['Tether_cartCreate', 'Tether_cartLinesRemove'],
+  );
+  assert.deepEqual(calls[1]?.variables['lineIds'], ['gid://shopify/CartLine/1']);
+  assert.equal(Cart.count, 0);
 });
 
 test('a cart load is retried after a 5xx: it changes nothing', async () => {
@@ -414,7 +437,7 @@ test('applyDiscount: a refused code is removed again; a failed removal is report
     const codes = listAt(variables, 'discountCodes').map((code, i) => asString(code, `discountCodes[${i}]`));
     if (!codes.length) {
       removals += 1;
-      return { errors: [{ message: 'Internal error' }] };
+      return new Response('{}', { status: 400 });
     }
     const discountCodes = codes.map((code) => ({ code, applicable: false }));
     return payload('cartDiscountCodesUpdate', { ...oneLine(), discountCodes });

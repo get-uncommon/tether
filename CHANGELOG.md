@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.7.2 (unreleased)
+
+- Fix: a 2xx answer carrying Shopify's `INTERNAL_SERVER_ERROR`, or GraphQL errors without `data` for
+  a mutation, rejects with the new code `SERVER_ERROR` (`status` 200) instead of `HTTP_200`. A cart
+  change that gets one is treated like a 5xx: it isn't sent again and the cart is loaded again. A
+  query that gets `INTERNAL_SERVER_ERROR` is retried.
+- Fix: `Cart.clear()` removes the lines the cart has when its turn in the queue comes, so a line
+  added just before it (`Cart.add(v); Cart.clear()`) is removed too.
+- Types: `Tether.query()` takes the query as a string, as the docs and the server's `query()` do.
+  The function its type also allowed could resend a query Shopify refused for `quantityAvailable`
+  without end; such a refusal now costs at most one extra request.
+- Fix: a `tether_country` cookie with a malformed escape (`%E0%A4%A`) is ignored like any other
+  value that isn't a country, instead of turning off market detection (`Tether.detectMarket()`
+  rejected, and the saved choice and the Webflow locale were lost with it).
+- Fix: a value another script writes under the saved market's key that isn't a valid market (such as
+  `{"country":"Germany"}`) is skipped by the other tabs, as on the next page, instead of reported.
+- Astro starter: new projects depend on `^0.7.0`, not `^0.6.0`, so they get the 0.7 line, and the
+  starter comes with a `package-lock.json`. Each release keeps the range at its minor version.
+
 ## 0.7.1 (2026-11-06)
 
 - Fix: when a cart change fails without a clear answer (a network error, a connection that drops

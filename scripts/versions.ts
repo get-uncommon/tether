@@ -1,13 +1,18 @@
 /**
  * The package version is written in one place, the root package.json. The copies the code reads at run time (the
  * browser script's `VERSION`, the Worker's, which runs from source without the root package.json, and the Worker's
- * own package.json) are written from it here, by the release script; a test checks they agree.
+ * own package.json) are written from it here, by the release script; a test checks they agree. So is the Tether range of
+ * the Astro starter, which `npm create astro` copies into new projects.
  */
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 const VERSION_CONSTANT = /export const VERSION = '[^']*';/;
 const PACKAGE_VERSION = /"version": "[^"]*"/;
+// In the lockfile the first match is the root package's range, which says what its package.json says.
+const STARTER_RANGE = /"@occluze\/tether": "[^"]*"/;
+/** New projects get every patch of this minor version. */
+const starterRange = (version: string) => `"@occluze/tether": "^${version.split('.').slice(0, 2).join('.')}.0"`;
 
 interface VersionCopy {
   /** Relative to the repository root. */
@@ -32,6 +37,10 @@ export const VERSION_COPIES: readonly VersionCopy[] = [
     pattern: /^(latest|\d+\.\d+(\.\d+)?)$/m,
     written: (version) => version.split('.').slice(0, 2).join('.'),
   },
+  // The lockfile's locked Tether stays at the previous minor until it is published: then refresh it in examples/astro
+  // with `npm install --package-lock-only --ignore-scripts`.
+  { file: 'examples/astro/package.json', pattern: STARTER_RANGE, written: starterRange },
+  { file: 'examples/astro/package-lock.json', pattern: STARTER_RANGE, written: starterRange },
 ];
 
 /**

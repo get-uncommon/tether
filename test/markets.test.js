@@ -220,6 +220,8 @@ test('detect: server hints (global, meta, cookie) and the saved choice win, in t
 test('detect: invalid or unknown countries are ignored; off by default; sources can be limited', () => {
   assert.equal(detectOnly({ detect: true }, env({ meta: 'XX' })).country, undefined);
   assert.equal(detectOnly({ detect: true }, env({ cookie: 'tether_country=Germany' })).country, undefined);
+  const malformed = env({ path: '/de/', cookie: 'tether_country=%E0%A4%A' });
+  assert.equal(detectOnly({ detect: true, locales }, malformed).country, 'DE', 'a malformed cookie is ignored');
   assert.equal(detectOnly(null, env({ meta: 'US' })).country, undefined, 'server hints need detect');
   assert.equal(
     detectOnly(null, env({ meta: 'US', saved: { country: 'BE' } })).country,

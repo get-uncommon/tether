@@ -6,6 +6,7 @@
 import { cfg, reportError } from '../config.ts';
 import { getProduct } from '../loader.ts';
 import { allPlans } from '../selling-plans.ts';
+import { isSelect } from '../product-render.ts';
 import { isGreaterAmount } from '../amounts.ts';
 import {
   attr,
@@ -170,11 +171,11 @@ function renderLine(node: HTMLElement, line: ShopifyCartLine, view: CartView) {
     if (value !== undefined) setTextTracked(el, value);
   });
   renderLineState(node, line, view);
-  qsa(node, `select${sel('line-plan')}`).forEach((select) => {
+  const planSelects = qsa(node, sel('line-plan')).filter(isSelect);
+  planSelects.forEach((select) => {
     getProduct(variant.product.handle)
       .then((product) => {
-        // The selector matches only <select> elements.
-        fillPlanSelect(select as HTMLSelectElement, line, product);
+        fillPlanSelect(select, line, product);
       })
       .catch((error: unknown) => {
         reportError(error, 'line plan options');

@@ -65,9 +65,9 @@ export function apiVersionStatus(version: string, now = new Date()): ApiVersionS
   let note = `supported until about ${supportedUntil.toISOString().slice(0, 7)}`;
   if (!isReleased) note = 'not released yet (release candidate at best)';
   else if (monthsLeft <= 0) {
-    note = 'no longer supported: Shopify falls back to the oldest supported version. Upgrade (see README)';
+    note = 'no longer supported: Shopify falls back to the oldest supported version. Upgrade (see docs/reference.md)';
   } else if (monthsLeft < UPGRADE_WARNING_MONTHS) {
-    note = `${note}: plan the upgrade to ${nextApiVersion(version)} or later (see README)`;
+    note = `${note}: plan the upgrade to ${nextApiVersion(version)} or later (see docs/reference.md)`;
   }
   return {
     version,

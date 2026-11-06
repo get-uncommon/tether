@@ -4,8 +4,8 @@ import { readFile, stat } from 'node:fs/promises';
 import { join, extname, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const ROOT = fileURLToPath(new URL('../examples/astro/dist/', import.meta.url));
-const DIST = fileURLToPath(new URL('../dist/', import.meta.url));
+const ROOT = fileURLToPath(new URL('../../examples/astro/dist/', import.meta.url));
+const DIST = fileURLToPath(new URL('../../dist/', import.meta.url));
 const PLAIN = fileURLToPath(new URL('./plain/', import.meta.url));
 /** @type {Partial<Record<string, string>>} */
 const TYPES = {

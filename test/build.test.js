@@ -128,7 +128,7 @@ test('e2e static server: stays inside its folders and listens on loopback only',
   const { spawn } = await import('node:child_process');
   const { connect } = await import('node:net');
   const port = 40000 + Math.floor(Math.random() * 20000);
-  const child = spawn(process.execPath, ['e2e/serve.mjs'], {
+  const child = spawn(process.execPath, ['test/e2e/serve.mjs'], {
     env: { ...process.env, PORT: String(port) },
     stdio: 'ignore',
   });

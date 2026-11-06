@@ -8,7 +8,7 @@
  *   tether.esm.js                         re-export of esm/index.js (older import path)
  *   presets/barba.esm.js
  *   types/                               the published .d.ts, generated from the source by tsc
- *                                         (tsconfig.declarations.json)
+ *                                         (.config/tsconfig/declarations.json)
  *
  * Size comes from the build, not from golfed source: ES2020 output (no helpers for ?. and ??), GraphQL strings
  * minified, the parts in their own files.
@@ -218,7 +218,7 @@ const diagnosticHost: ts.FormatDiagnosticsHost = {
 async function buildTypes(): Promise<void> {
   const outDir = join(OUT, 'types');
   const parsed = ts.getParsedCommandLineOfConfigFile(
-    join(ROOT, 'tsconfig.declarations.json'),
+    join(ROOT, '.config', 'tsconfig', 'declarations.json'),
     { outDir },
     {
       ...ts.sys,
@@ -227,7 +227,7 @@ async function buildTypes(): Promise<void> {
       },
     },
   );
-  if (!parsed) throw new Error('tsconfig.declarations.json could not be read');
+  if (!parsed) throw new Error('.config/tsconfig/declarations.json could not be read');
   const program = ts.createProgram({ rootNames: parsed.fileNames, options: parsed.options });
   const problems = [...parsed.errors, ...ts.getPreEmitDiagnostics(program)];
   if (problems.length)

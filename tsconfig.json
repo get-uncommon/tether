@@ -4,11 +4,11 @@
   // editors and ESLint find a file's program through these references).
   "files": [],
   "references": [
-    { "path": "./tsconfig.browser.json" },
-    { "path": "./tsconfig.node.json" },
-    { "path": "./tsconfig.worker.json" },
-    { "path": "./tsconfig.worker-node.json" },
-    { "path": "./tsconfig.test.json" },
-    { "path": "./tsconfig.e2e.json" }
+    { "path": "./.config/tsconfig/browser.json" },
+    { "path": "./.config/tsconfig/node.json" },
+    { "path": "./.config/tsconfig/worker.json" },
+    { "path": "./.config/tsconfig/worker-node.json" },
+    { "path": "./.config/tsconfig/test.json" },
+    { "path": "./.config/tsconfig/e2e.json" }
   ]
 }
