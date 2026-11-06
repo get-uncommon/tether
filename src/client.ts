@@ -1,8 +1,8 @@
 /**
  * The one Storefront API client: a fetch wrapper that adds the market (`@inContext`), retries what is safe to send
- * again (`Operation`), and turns every failure into a `TetherError`, an answer whose `data` lacks what its caller reads included
- * (`DataCheck`). The browser (`gql`, and `query` for `Tether.query()`) and the server helpers (`request` with their own
- * config) share it.
+ * again (`Operation`), and turns every failure, including an answer whose `data` lacks what its caller reads
+ * (`DataCheck`), into a `TetherError`. The browser (`gql`, and `query` for `Tether.query()`) and the server helpers
+ * (`request` with their own config) share it.
  */
 import { cfg, log } from './config.ts';
 import { toCountry, toLanguage } from './market-codes.ts';
@@ -462,24 +462,27 @@ export function gql<T>(
 /** The check of `Tether.query()` and the server's `query()`, whose callers read `data` themselves. */
 export const hasData = (data: unknown): data is object => typeof data === 'object' && data !== null;
 
-/** `Tether.query()` and the server's `query()`: a document Tether didn't write, sent with `conf`. */
-export function untypedQuery<T>(
+/**
+ * `Tether.query()` and the server's `query()`: a document Tether didn't write, sent with `conf`.
+ *
+ * @returns Shopify's `data`, checked only for being an object: the caller's own query decides its shape, so the caller
+ *   checks the fields it reads.
+ */
+export function untypedQuery(
   conf: StorefrontConfig,
   text: string,
   variables: Record<string, unknown> = {},
   options?: Omit<RequestOptions, 'operation'>,
-): Promise<T> {
-  // The caller's own query text decides the shape of `data`, and the caller's `T` states it: nothing checks `data`
-  // beyond `hasData`.
-  return request(conf, text, variables, hasData, { ...options, operation: operationOf(text) }) as Promise<T>;
+): Promise<object> {
+  return request(conf, text, variables, hasData, { ...options, operation: operationOf(text) });
 }
 
 /** `Tether.query()`: `untypedQuery` with the browser's shared config. */
-export function query<T>(
+export function query(
   text: string,
   variables?: Record<string, unknown>,
   options?: Omit<RequestOptions, 'operation'>,
-): Promise<T> {
+): Promise<object> {
   return untypedQuery(cfg, text, variables, options);
 }
 

@@ -71,13 +71,23 @@ test('metafields keep valid identifiers as written and skip the rest', () => {
   assert.equal(warned.length, 2);
 });
 
-test('hooks that are not functions are dropped; the domain loses protocol and path', () => {
+test('hooks that are not functions are dropped with a warning; the domain loses protocol and path', () => {
   const onError = () => {};
-  const { result } = quietly(() =>
-    resolveConfig({ onError, onCartOpen: 'open', domain: 'https://shop.example/admin', token: 't' }),
+  const { result, warned } = quietly(() =>
+    resolveConfig({
+      onError,
+      onCartOpen: 'open',
+      formatMoney: null,
+      onLineEnter: undefined,
+      domain: 'https://shop.example/admin',
+      token: 't',
+    }),
   );
   assert.equal(result.onError, onError);
   assert.equal(result.onCartOpen, null);
+  assert.equal(result.formatMoney, null);
+  assert.equal(result.onLineEnter, null);
+  assert.deepEqual(warned, ['[tether] invalid onCartOpen "open": ignored']);
   assert.equal(result.domain, 'shop.example');
   assert.equal(result.storageKey, 'tether:cart:shop.example');
 });

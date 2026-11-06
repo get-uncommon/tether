@@ -167,8 +167,16 @@ export function render(): void {
   });
 }
 
+/**
+ * Why `tether:cart-updated` fired: `load` when the saved cart was loaded, failed to load or was forgotten; `pending`
+ * when quick clicks changed a quantity Shopify doesn't have yet, and `settled` once their last request is done; any
+ * other value names the change Shopify just answered. `docs/reference.md` lists them.
+ */
+export type CartUpdateReason =
+  'load' | 'add' | 'update' | 'remove' | 'note' | 'attributes' | 'discount' | 'buyer-identity' | 'pending' | 'settled';
+
 /** @param reason The `reason` of `tether:cart-updated`. */
-export function announce(reason: string): void {
+export function announce(reason: CartUpdateReason): void {
   render();
   emit('cart-updated', { cart: currentCart(), reason });
 }
@@ -178,7 +186,7 @@ export function announce(reason: string): void {
  *
  * @returns `cart`.
  */
-export function commit(cart: ShopifyCart | null, reason: string): ShopifyCart | null {
+export function commit(cart: ShopifyCart | null, reason: CartUpdateReason): ShopifyCart | null {
   keepQuietly(cart);
   // Other tabs reload the cart on this storage event; the next page shows the count before its cart has loaded.
   setStored(seenKey(), `${Date.now()}|${cart?.totalQuantity ?? 0}`);

@@ -389,7 +389,7 @@ and the markup, and tells you what to fix.
 | `jsonLd(product, { url })`, `jsonLdData(product)`                    | schema.org Product / ProductGroup for search engines                                                                                                      |
 | `formatMoney(money)`, `formatPercent(n)`, `imageUrl(url, { width })` | strings, same rules as the browser                                                                                                                        |
 | `productUrl(handle)`                                                 | the product's link from `productPath`, or `null` for an empty handle                                                                                      |
-| `query(graphql, variables)`                                          | any Storefront API query, in the configured market                                                                                                        |
+| `query(graphql, variables)`                                          | any Storefront API query, in the configured market; answers its `data` as an `object` you check                                                           |
 
 A product is the Storefront API product, the same shape the browser uses: `title`, `handle`,
 `descriptionHtml`, `featuredImage`, `images.nodes`, `options[].optionValues[].name`,

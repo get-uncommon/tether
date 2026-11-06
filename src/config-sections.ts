@@ -187,23 +187,21 @@ function sectionOption<Section extends object>(
   value: unknown,
   schema: Schema<Section>,
   invalid: Invalid,
-): Section | null {
+): Partial<Section> | null {
   if (value === null || value === undefined) return null;
   if (!isRecord(value)) {
     invalid(name, value);
     return null;
   }
-  const section: Record<string, unknown> = {};
-  const readers: Readonly<Record<string, (value: unknown) => unknown>> = schema;
-  for (const [key, read] of Object.entries(readers)) {
+  const section: Partial<Section> = {};
+  for (const key in schema) {
     const field = value[key];
     if (field === undefined) continue;
-    const parsed = read(field);
+    const parsed = schema[key](field);
     if (parsed === undefined) invalid(`${name}.${key}`, field);
     else section[key] = parsed;
   }
-  // Each field went through the reader its schema entry gives it, which returns that field's type in `Section`.
-  return section as Section;
+  return section;
 }
 
 const ACCOUNT: Schema<Partial<AccountConfig>> = {

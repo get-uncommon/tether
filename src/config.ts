@@ -332,16 +332,15 @@ function warnUnknownKeys(options: Readonly<Record<string, unknown>>): void {
   }
 }
 
-/** @returns A site's hook, `null` for anything that isn't a function. */
-function hookOption(value: unknown): ((...args: never[]) => unknown) | null {
-  return typeof value === 'function' ? (value as (...args: never[]) => unknown) : null;
-}
-
-function hookOptions(options: Readonly<Record<string, unknown>>): Pick<TetherConfig, HookOption> {
-  const hooks = Object.fromEntries(HOOK_OPTIONS.map((name) => [name, hookOption(options[name])]));
-  // A function from the site can only be checked for being callable; how it is called is the documented signature
-  // of its option.
-  return hooks as Pick<TetherConfig, HookOption>;
+/** Sets the site's function for option `name`; a value that isn't one is dropped with a warning, unless it is null. */
+function setHook<Name extends HookOption>(config: Pick<TetherConfig, Name>, name: Name, value: unknown): void {
+  if (typeof value === 'function') {
+    // A function from the site can only be checked for being callable; how it is called is the documented signature
+    // of its option.
+    config[name] = value as TetherConfig[Name];
+  } else if (value !== undefined && value !== null) {
+    dropped(name, value);
+  }
 }
 
 /** @returns `value` when it is a non-negative integer, else the default. */
@@ -414,7 +413,6 @@ export function resolveConfig(options: TetherOptions | Readonly<Record<string, u
       : invalidOption('prefix', options.prefix, DEFAULTS.prefix);
   const resolved: TetherConfig = {
     ...DEFAULTS,
-    ...hookOptions(options),
     domain,
     apiVersion: apiVersionOption(options.apiVersion),
     country: codeOption('country', options.country, toCountry),
@@ -435,6 +433,7 @@ export function resolveConfig(options: TetherOptions | Readonly<Record<string, u
   for (const name of COUNT_OPTIONS) resolved[name] = countOption(name, options[name]);
   for (const name of SWITCH_OPTIONS) resolved[name] = switchOption(name, options[name]);
   for (const name of TEXT_OPTIONS) resolved[name] = textOption(name, options[name]);
+  for (const name of HOOK_OPTIONS) setHook(resolved, name, options[name]);
   return resolved;
 }
 

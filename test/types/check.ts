@@ -202,3 +202,22 @@ void api.__parts;
 // @ts-expect-error: TetherError is a type here; the class is Tether.TetherError
 void ({} instanceof TetherError);
 void [resolved.prefix, country, first, answers, added, variantOf];
+
+// `cart-updated`'s reason is one of the values the reference lists.
+import type { CartUpdateReason } from '@occluze/tether';
+api.on('cart-updated', ({ reason }) => {
+  const known: CartUpdateReason = reason;
+  // @ts-expect-error: not a reason Tether sends
+  const typo = reason === 'remvoe';
+  void [known, typo];
+});
+// A query Tether didn't write answers `data` as an object; the caller checks the fields it reads.
+async function ownQuery() {
+  const data: object = await api.query('query { shop { name } }');
+  const name = 'shop' in data ? data.shop : null;
+  // @ts-expect-error: no type argument stands in for checking the answer
+  await api.query<{ shop: { name: string } }>('query { shop { name } }');
+  const server: object = await shop.query('query { shop { name } }');
+  void [name, server];
+}
+void ownQuery;

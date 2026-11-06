@@ -71,7 +71,13 @@ export type {
   ProductWithPlans,
   VariantWithPlans,
 } from './selling-plans.ts';
-export type { CartStatus, CartVariant as ShopifyCartVariant, ShopifyCart, ShopifyCartLine } from './cart/store.ts';
+export type {
+  CartStatus,
+  CartUpdateReason,
+  CartVariant as ShopifyCartVariant,
+  ShopifyCart,
+  ShopifyCartLine,
+} from './cart/store.ts';
 export type { Attributes, LineSpec as LineInput } from './cart/mutations.ts';
 export type { TetherError, TetherErrorCode, GraphQLError, UserError } from './client.ts';
 export type { ProductScope } from './product.ts';
