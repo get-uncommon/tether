@@ -21,7 +21,7 @@ An open-source, free alternative to Smootify and Storesynk (formerly Shopyflow):
 - **Astro too:** build-time product pages with live prices and cart, View Transitions included ([Astro guide](docs/astro.md)).
 - **Hand-over ready:** loading, error and not-found states, `Tether.diagnose()`, error reporting.
 
-MIT licensed · 25 KB gzipped · no dependencies · TypeScript types · [full reference](docs/reference.md) · [comparison](docs/comparison.md) · [changelog](CHANGELOG.md)
+MIT licensed · 29 KB gzipped · no dependencies · TypeScript types · [full reference](docs/reference.md) · [comparison](docs/comparison.md) · [changelog](CHANGELOG.md)
 
 ---
 
@@ -31,13 +31,13 @@ MIT licensed · 25 KB gzipped · no dependencies · TypeScript types · [full re
 |---|---|---|
 | **Script tag** (jsDelivr) | a static site or Webflow, no build step, no login needed | `<script src="https://cdn.jsdelivr.net/gh/ravi-klaassens/tether@0.6/dist/tether.min.js" defer></script>` ([steps below](#2-add-the-script-to-webflow)) |
 | **npm** | Astro, Vite or another bundler or framework | `npm install @occluze/tether` ([Astro guide](docs/astro.md), [other frameworks](docs/frameworks.md)) |
-| **With the Worker** | you also want the CMS sync, rebuilds when products change, or secure customer accounts | either of the above, plus your own free Cloudflare Worker ([Worker](server/README.md), [accounts](docs/accounts.md)) |
+| **With the Worker** | you also want the CMS sync, rebuilds when products change, or customer accounts | either of the above, plus your own free Cloudflare Worker ([Worker](server/README.md), [accounts](docs/accounts.md)) |
 
 The script tag pinned to one release: `…/tether@v0.6.8/dist/tether.min.js`. Its optional parts
-(search, accounts, markets, analytics) load from the same folder when a page uses them; host the
-files yourself and set `partsUrl` if they live somewhere else. Customer accounts without the Worker
-run in browser mode; [server mode](docs/accounts.md#server-mode) (recommended for live shops)
-needs the Worker.
+(search, accounts, markets, analytics) load from the same folder when a page uses them, each checked
+against a hash built into the core. To host them yourself, put the same release's files in one folder
+and set `partsUrl`. Customer accounts need the Worker
+([setup](docs/accounts.md#setup)): it keeps the customer's tokens, so the browser never holds one.
 
 ## 1. Connect Shopify (5 minutes)
 
@@ -64,8 +64,8 @@ Site settings → Custom code → **Head**:
 <script src="https://cdn.jsdelivr.net/gh/ravi-klaassens/tether@0.6/dist/tether.min.js" defer></script>
 ```
 
-**Versions:** `@0.6` gets every 0.6.x fix automatically (recommended), `@v0.6.8` pins one release,
-`@latest` always takes the newest. Hosting the file yourself? Put the optional parts next to it (`tether.markets.min.js`,
+**Versions:** `@0.6` gets every 0.6.x fix automatically (recommended), `@v0.6.8` pins one release
+(add its [`integrity`](docs/reference.md#config) hash to pin exactly what runs), `@latest` always takes the newest. Hosting the file yourself? Put the optional parts next to it (`tether.markets.min.js`,
 `tether.search.min.js`, `tether.account.min.js`, `tether.account-pages.min.js`, `tether.analytics.min.js`, `tether.extras.min.js`,
 `tether.diagnose.min.js`): each loads only when a page uses it.
 

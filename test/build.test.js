@@ -88,6 +88,14 @@ test('the markets part loads from its own file when the page has a country selec
   assert.ok(win.Tether.__parts.markets, 'registered');
 });
 
+test('a part beside the core loads with the integrity hash of the file built with it', async () => {
+  const { createHash } = await import('node:crypto');
+  const script = [...win.document.scripts].find((x) => /tether\.markets\.min\.js$/.test(x.src));
+  const file = await readFile(join(DIST, 'tether.markets.min.js'));
+  assert.equal(script.integrity, `sha384-${createHash('sha384').update(file).digest('base64')}`);
+  assert.equal(script.crossOrigin, 'anonymous', 'the core is on another origin (file:) than the page');
+});
+
 test('the diagnose part loads on first call and shares the core (same config, same cache)', async () => {
   assert.ok(![...win.document.scripts].some((x) => /diagnose/.test(x.src)), 'not loaded up front');
   const r = await win.Tether.diagnose({ silent: true });
@@ -100,12 +108,12 @@ test('the diagnose part loads on first call and shares the core (same config, sa
 test('parts are small and the core is under budget', async () => {
   const { gzipSync } = await import('node:zlib');
   const gz = async (f) => gzipSync(await readFile(join(DIST, f)), { level: 9 }).length;
-  // The README promises a core of about 25 KB gzipped. Each budget sits about half a KB above today's build, so growth
+  // The README promises a core of about 29 KB gzipped. Each budget sits about half a KB above today's build, so growth
   // is a decision; the build, not golfed source, keeps the files small.
-  assert.ok((await gz('tether.min.js')) < 25.5 * 1024, 'core gzip budget');
+  assert.ok((await gz('tether.min.js')) < 30 * 1024, 'core gzip budget');
   assert.ok((await gz('tether.search.min.js')) < 3 * 1024);
-  assert.ok((await gz('tether.account.min.js')) < 7 * 1024);
-  assert.ok((await gz('tether.account-pages.min.js')) < 7.5 * 1024);
+  assert.ok((await gz('tether.account.min.js')) < 8.25 * 1024, 'account part budget');
+  assert.ok((await gz('tether.account-pages.min.js')) < 9 * 1024, 'account pages part budget');
   assert.ok((await gz('tether.extras.min.js')) < 1.5 * 1024);
   assert.ok((await gz('tether.markets.min.js')) < 3 * 1024);
   assert.ok((await gz('tether.diagnose.min.js')) < 6 * 1024);
@@ -150,4 +158,16 @@ test('e2e static server: stays inside its folders and listens on loopback only',
   } finally {
     child.kill();
   }
+});
+
+test('the release attests the server asset the sync Worker updater installs, by the same name', async () => {
+  const { releaseAssetName } = await import('../server/scripts/release-asset.ts');
+  const workflow = await readFile(new URL('../.github/workflows/release.yml', import.meta.url), 'utf8');
+  assert.equal(releaseAssetName('$V'), 'tether-server-$V.tar.gz');
+  assert.ok(workflow.includes('-o "tether-server-$V.tar.gz" HEAD -- server'), 'the archive of the tagged server/');
+  assert.match(workflow, /uses: actions\/attest-build-provenance@[0-9a-f]{40} #/, 'attested, pinned by commit');
+  assert.match(workflow, /subject-path: \$\{\{ env\.SERVER_ASSET \}\}/);
+  assert.match(workflow, /^ {2}id-token: write/m);
+  assert.match(workflow, /^ {2}attestations: write/m);
+  assert.match(workflow, /--latest "\$\{assets\[@\]\}" "\$SERVER_ASSET"/, 'uploaded to the GitHub Release');
 });

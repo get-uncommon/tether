@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fileStore, loadConfig } from '../src/node.js';
+import { fileStore, loadConfig } from '../src/node.ts';
 
 test('file store: a state file removed by another process leaves what this process holds', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'tether-sync-'));

@@ -29,8 +29,10 @@ jobs:
       TETHER_DOMAIN: ${{ secrets.TETHER_DOMAIN }}
       TETHER_TOKEN: ${{ secrets.TETHER_TOKEN }}
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: 22
           cache: npm
@@ -40,8 +42,8 @@ jobs:
       - name: API versions
         id: versions
         run: |
-          echo "pinned=$(node scripts/api-version.mjs)" >> "$GITHUB_OUTPUT"
-          echo "next=$(node scripts/api-version.mjs --next)" >> "$GITHUB_OUTPUT"
+          echo "pinned=$(node --experimental-strip-types scripts/api-version.ts)" >> "$GITHUB_OUTPUT"
+          echo "next=$(node --experimental-strip-types scripts/api-version.ts --next)" >> "$GITHUB_OUTPUT"
       - name: Smoke (pinned ${{ steps.versions.outputs.pinned }})
         id: pinned
         run: npm run smoke

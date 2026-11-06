@@ -1,0 +1,65 @@
+/**
+ * The claim checks of the id token Shopify returns at login (OpenID Connect Core, section 3.1.3.7). They say nothing
+ * about who wrote the token, so `id-token.ts` runs them after checking its signature.
+ */
+import { isRecord, textOrNull } from '../shared/json.ts';
+
+/** Clock difference allowed between Shopify and the checking side for `iat` and `nbf`. */
+const CLOCK_SKEW_SECONDS = 300;
+
+/** What this login expects of the token. */
+interface ExpectedClaims {
+  /** The `issuer` of Shopify's discovery document. */
+  issuer: string;
+  /** The Customer Account API client id. */
+  clientId: string;
+  /** The nonce this login sent. */
+  nonce: string;
+  /** The current time, in seconds since the epoch. */
+  nowSeconds: number;
+}
+
+type ClaimsCheck = { kind: 'valid'; subject: string } | { kind: 'invalid'; reason: string };
+
+/** The `aud` claim as a list: a JWT carries one audience or several. */
+function audiencesOf(claim: unknown): unknown[] {
+  return Array.isArray(claim) ? claim : [claim];
+}
+
+/** The first claim that doesn't hold, or `null`. */
+function claimProblem(
+  claims: Record<string, unknown>,
+  { issuer, clientId, nonce, nowSeconds }: ExpectedClaims,
+): string | null {
+  const audiences = audiencesOf(claims['aud']);
+  const { exp: expiresAt, iat: issuedAt, nbf: notBefore, azp: authorizedParty } = claims;
+  if (claims['iss'] !== issuer) return 'issuer';
+  if (!audiences.includes(clientId)) return 'audience';
+  // With several audiences the token must name the party it was issued to; when it names one, that is this client.
+  if (audiences.length > 1 && authorizedParty === undefined) return 'authorized party missing';
+  if (authorizedParty !== undefined && authorizedParty !== clientId) return 'authorized party';
+  if (claims['nonce'] !== nonce) return 'nonce';
+  if (typeof expiresAt !== 'number' || !(expiresAt > nowSeconds)) return 'expired';
+  if (typeof issuedAt !== 'number') return 'issued-at missing';
+  if (issuedAt > nowSeconds + CLOCK_SKEW_SECONDS) return 'issued in the future';
+  if (notBefore !== undefined && (typeof notBefore !== 'number' || notBefore > nowSeconds + CLOCK_SKEW_SECONDS)) {
+    return 'not valid yet';
+  }
+  return null;
+}
+
+/**
+ * Checks issuer, audience, authorized party, nonce, expiry, issue time, not-before and subject. Times must be JSON
+ * numbers: a string `exp` is refused, never converted.
+ *
+ * @param claims The token's decoded payload.
+ * @returns The customer's `sub` when every claim holds; else the first that doesn't, for the log.
+ */
+export function checkIdTokenClaims(claims: unknown, expected: ExpectedClaims): ClaimsCheck {
+  if (!isRecord(claims)) return { kind: 'invalid', reason: 'not a claims object' };
+  const problem = claimProblem(claims, expected);
+  if (problem) return { kind: 'invalid', reason: problem };
+  const subject = textOrNull(claims['sub']);
+  if (subject === null) return { kind: 'invalid', reason: 'subject missing' };
+  return { kind: 'valid', subject };
+}

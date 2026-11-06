@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-const { default: tether } = await import('../src/astro.js');
+const { default: tether } = await import('../src/astro.ts');
 
 test('integration: inject false adds no script; the options are not changed by a run', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'astro-options-'));
@@ -33,4 +33,26 @@ test('integration: inject false adds no script; the options are not changed by a
   assert.deepEqual(scripts, []);
   assert.deepEqual(updates, []);
   assert.deepEqual(options, { inject: false, country: 'NL', onError });
+});
+
+test('integration: server-only options stay out of the page silently, unknown ones with a warning', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'astro-options-'));
+  const scripts = [];
+  const warnings = [];
+  await tether({
+    domain: 'a.myshopify.com',
+    token: 't',
+    siteUrl: 'https://shop.test',
+    pageSize: 50,
+    opneCart: true,
+  }).hooks['astro:config:setup']({
+    injectScript: (stage, code) => scripts.push(code),
+    command: 'build',
+    config: { root: pathToFileURL(`${dir}/`) },
+    logger: { warn: (message) => warnings.push(message) },
+  });
+  const page = scripts.find((code) => code.includes('TETHER_CONFIG'));
+  assert.match(page, /"domain":"a\.myshopify\.com"/);
+  assert.doesNotMatch(page, /siteUrl|pageSize|opneCart/);
+  assert.deepEqual(warnings, ['opneCart is not a Tether option: left out of the page.']);
 });

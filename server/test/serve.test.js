@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { connect } from 'node:net';
-import { serve } from '../src/node.js';
+import { serve } from '../src/node.ts';
 
 const quiet = { info() {}, warn() {}, error() {} };
 const app = {
@@ -61,5 +61,22 @@ test('serve: an aborted upload, a huge body and unknown paths do not crash or bu
     assert.equal(bad.status, 401);
   } finally {
     server.close();
+  }
+});
+
+test('serve logs the address it really listens on', async () => {
+  const lines = [];
+  const log = { ...quiet, info: (line) => lines.push(line) };
+  const local = await serve(app, { port: 0, host: '127.0.0.1', log });
+  const everywhere = await serve(app, { port: 0, log });
+  try {
+    assert.equal(lines[0], `tether-sync listening on http://127.0.0.1:${local.address().port}/webhooks/shopify`);
+    assert.match(
+      lines[1],
+      /^tether-sync listening on every interface \((::|0\.0\.0\.0)\), e\.g\. http:\/\/localhost:\d+\//,
+    );
+  } finally {
+    local.close();
+    everywhere.close();
   }
 });

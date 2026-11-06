@@ -1,12 +1,12 @@
-// Regression tests for the 0.3.0 review: query cost, cursor progress, publish commits,
+// The sync under load and failure: query cost, cursor progress, publish commits,
 // concurrent creates, subrequest budget, caches, file store, auth.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createApp, memoryStore, createWorker, signShopify, createShopify, pageSizeFor } from '../src/index.js';
-import { fileStore } from '../src/node.js';
+import { createApp, memoryStore, createWorker, signShopify, createShopify, pageSizeFor } from '../src/index.ts';
+import { fileStore } from '../src/node.ts';
 import { createMockApis, shopifyProduct, baseConfig, env, instantSleep } from './mocks.js';
 
 const setup = (opts = {}, config = baseConfig, extra = {}) => {

@@ -1,8 +1,8 @@
 // Settings parsed from the env that more than one module reads.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { deployHookMinSeconds } from '../src/settings.js';
-import { runCheck } from '../src/check.js';
+import { deployHookMinSeconds } from '../src/settings.ts';
+import { runCheck } from '../src/check.ts';
 import defaultConfig from './default-config.js';
 
 test('DEPLOY_HOOK_MIN_SECONDS: a number is used, anything else falls back to 60 seconds', () => {

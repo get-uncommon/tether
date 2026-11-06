@@ -1,5 +1,2 @@
-// Cloudflare Worker entry (used by wrangler.jsonc and the Deploy to Cloudflare button).
-import config from '../tether-sync.config.js';
-import { createWorker } from './worker.js';
-
-export default createWorker(config);
+// wrangler.jsonc files of deployed copies (kept by every update) and their update workflow name src/entry.js.
+export { default } from './entry.ts';

@@ -30,6 +30,9 @@ export default {
     slug: 'handle',
     'shopify-id': 'legacyId',
     'shopify-handle': 'handle',
+    // Shopify's HTML as written, not cleaned by the sync: anyone who can edit products writes it. Tether's script
+    // cleans it on pages that show it through tether-bind="description"; see the README before rendering it any
+    // other way.
     description: 'descriptionHtml',
     price: 'price',
     'compare-at-price': 'compareAtPrice',

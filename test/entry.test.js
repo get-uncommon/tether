@@ -2,6 +2,10 @@
 import { test, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
+import { captureTetherWarnings } from './fixtures.js';
+
+// The failures these tests cause on purpose are checked through onError and states, not the console.
+captureTetherWarnings();
 
 const dom = new JSDOM('<!doctype html><body></body>', { url: 'https://site.test/' });
 Object.assign(globalThis, {
@@ -18,7 +22,7 @@ const errors = [];
 let Tether;
 
 before(async () => {
-  ({ default: Tether } = await import('../src/index.js'));
+  ({ default: Tether } = await import('../src/index.ts'));
   await Tether.init({
     domain: 'shop.test',
     token: 't',
@@ -34,15 +38,12 @@ test('Tether.account is a plain object of the account part’s functions, not a 
     'addresses',
     'customer',
     'deleteAddress',
-    'getToken',
-    'handleCallback',
     'isLoggedIn',
     'login',
     'logout',
     'mountAccount',
     'order',
     'orders',
-    'query',
     'render',
     'requestReturn',
     'saveAddress',
@@ -50,7 +51,7 @@ test('Tether.account is a plain object of the account part’s functions, not a 
     'subscriptions',
     'updateProfile',
   ]);
-  const part = await import('../src/account.js');
+  const part = await import('../src/account.ts');
   for (const name of Object.keys(Tether.account)) assert.equal(typeof part[name], 'function', name);
   assert.equal(await Tether.account.isLoggedIn(), part.isLoggedIn());
 });

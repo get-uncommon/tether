@@ -47,7 +47,8 @@ curl -H "Authorization: Bearer YOUR_SYNC_SECRET" https://tether-sync.YOUR-NAME.w
 ```
 
 It tests both connections, the field mapping and the webhooks, and shows how a product will be
-written. Anything wrong comes with the fix.
+written. Anything wrong comes with the fix. Without the secret, `/check` answers only each step's
+title and level (pass, warning, error), never the store, collection or values.
 
 ---
 
@@ -57,13 +58,43 @@ Your copy updates itself, like a jsDelivr version. The `TETHER_VERSION` file in 
 
 | `TETHER_VERSION` | Gets |
 |---|---|
-| `latest` (default) | every release, automatically |
-| `0.6` | only 0.6.x fixes |
+| `0.6` (default) | only 0.6.x fixes |
 | `0.6.0` | pinned: never changes |
+| `latest` | every release, including a new 0.x minor version, which can need changes in your copy |
+
+A new minor version (0.7) is never installed by itself: when you're ready for it, change the file to `0.7`.
 
 It checks every Monday (want daily? change the `cron` line in your copy's `.github/workflows/update-tether.yml` to `'23 5 * * *'`), and only updates when the new version's tests pass. To update right away: your copy on GitHub → **Actions** → **Update Tether**
 → **Run workflow**. It tests the new version, then Cloudflare redeploys. Your settings stay as they are.
-`https://YOUR-WORKER/health` shows the version that's running.
+A release is installed only when the commit its `v…` tag points at is on the Tether repository's
+`main` branch, and only from the signed `tether-server-X.Y.Z.tar.gz` on its GitHub Release: the
+updater runs `gh attestation verify` to check that Tether's release workflow built that file from
+that commit, and refuses it otherwise. Releases before 0.7.0 have no signed file, so a copy on 0.7.0
+or newer never installs one of them. `https://YOUR-WORKER/health` answers
+`{ "ok": true, "version": "…" }` with the version that's running.
+
+To update by hand (`node scripts/update-tether.mjs` in your copy), install the
+[GitHub CLI](https://cli.github.com) first. Without it the updater refuses, unless you pass
+`--allow-unverified`, which installs the release without checking where the file came from. A
+check that `gh` runs and that fails is always refused.
+
+**The workflow file.** GitHub doesn't let a workflow change its own file, so an update never
+replaces `.github/workflows/update-tether.yml`. When a release needs a newer one, the update run
+shows a warning and a note in its summary (Actions → the run). Then, once, by hand: open the
+release's `server/.github/workflows/update-tether.yml` on GitHub
+(`https://github.com/ravi-klaassens/tether/tree/vX.Y.Z/server/.github/workflows`), copy it over the
+same file in your copy and commit it (keep your own `cron` line if you changed it).
+
+An update replaces `src/`, `bin/`, `scripts/`, `test/`, `docs/`, `package.json` and this README with
+the release's, so keep your own code and tests outside those folders. The new release's code runs
+only in a job that can read your repository, not change it; a second job commits the tested change.
+
+**Product descriptions.** The sync writes Shopify's description HTML into the Webflow field as it
+is. Anyone who can edit products in Shopify, apps included, writes that HTML, and the sync does not
+clean it. On a page that shows it through `tether-bind="description"`, Tether's script cleans it in
+the browser. Webflow doesn't document what its rich-text field strips, so don't count on that: if
+your pages render the field themselves and you don't trust everyone who can edit products, map
+`description` to the plain-text `description` source instead.
 
 ## Several stores or client sites
 
@@ -83,7 +114,8 @@ Add these later as secrets, only if you need them: Cloudflare → your Worker �
 | `WEBFLOW_OWNED` | Fields Shopify fills in once, then editors own: `description,intro` |
 | `SHOPIFY_ADMIN_TOKEN` | Stores with an old admin-created custom app (`shpat_…`) instead of a Dev Dashboard app |
 | `SHOPIFY_WEBHOOK_SECRET` | Webhooks you created yourself under Shopify → Settings → Notifications |
-| `ACCOUNT_CLIENT_ID`, `ACCOUNT_ORIGINS`, `STOREFRONT_TOKEN` (+ `ACCOUNT_CLIENT_SECRET`) | Customer accounts through this Worker, the safe mode: the browser never holds a Shopify token ([setup](../docs/accounts.md#server-mode)) |
+| `ACCOUNT_CLIENT_ID`, `ACCOUNT_ORIGINS`, `STOREFRONT_TOKEN` (+ `ACCOUNT_CLIENT_SECRET`) | Customer accounts through this Worker: the browser never holds a Shopify token. Needs the `TETHER_SYNC` KV binding, which the deploy creates, and `ACCOUNT_SECRET` ([setup](../docs/accounts.md#setup)) |
+| `ACCOUNT_SECRET` | Required with customer accounts: 24+ random characters, not the same as `SYNC_SECRET`, the sessions' own encryption key. Without it the account routes answer 503 and `/check` says what to set. Changing it logs every customer out once |
 | `DEPLOY_HOOK_URL` | A statically built site (Astro, …): start a build when product content changes ([how](../docs/astro.md#7-rebuild-when-products-change)). Without Webflow, set the Webflow fields to `none` |
 | `DEPLOY_HOOK_MIN_SECONDS` | At most one build per this many seconds (default 60) |
 | `MAX_SUBREQUESTS` | A paid Workers plan, to let each run do more (default 45) |

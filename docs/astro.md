@@ -386,7 +386,8 @@ and the markup, and tells you what to fix.
 | `initialState(product, { variant })` | what Tether shows first: `variant`, `selected`, `price`, `compareAtPrice`, `available`, `purchase`, `plan`, `plans`, `savings`, `show`, `isUnavailable()` |
 | `hydrate(products, { card, images })` | the `<script>` tag for the browser (see above); cards keep 2 images by default |
 | `jsonLd(product, { url })`, `jsonLdData(product)` | schema.org Product / ProductGroup for search engines |
-| `formatMoney(money)`, `formatPercent(n)`, `productUrl(handle)`, `imageUrl(url, { width })` | strings, same rules as the browser |
+| `formatMoney(money)`, `formatPercent(n)`, `imageUrl(url, { width })` | strings, same rules as the browser |
+| `productUrl(handle)` | the product's link from `productPath`, or `null` for an empty handle |
 | `query(graphql, variables)` | any Storefront API query, in the configured market |
 
 A product is the Storefront API product, the same shape the browser uses: `title`, `handle`,
@@ -394,3 +395,16 @@ A product is the Storefront API product, the same shape the browser uses: `title
 `variants.nodes` (`id`, `price`, `availableForSale`, `selectedOptions`), `priceRange`,
 `sellingPlanGroups.nodes`, `seo`, `metafields`. Full types: `ShopifyProduct` in the included
 TypeScript definitions (your editor shows them).
+`descriptionHtml` is the HTML as written in Shopify, by anyone who can edit products, including apps.
+Never put it in the page with `set:html` as it is: it can carry script that runs on your shop's
+domain. In the browser, `tether-bind="description"` cleans it through an allow-list. Tether has no
+cleaner for the build, because Node has no DOM, so the starter renders the plain-text `description`
+in that element and lets the script swap in the cleaned HTML:
+
+```astro
+<div tether-bind="description">{product.description}</div>
+```
+
+To render the HTML at build time instead, sanitize it first with a maintained library such as
+[sanitize-html](https://www.npmjs.com/package/sanitize-html), with an allow-list of tags and
+attributes, and only then use `set:html`.

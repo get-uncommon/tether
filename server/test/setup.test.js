@@ -2,10 +2,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import defaultConfig from './default-config.js';
-import { createApp, memoryStore, createWorker } from '../src/index.js';
-import { runCheck, formatCheck } from '../src/check.js';
-import { cleanEnv } from '../src/env.js';
-import { applyEnv, normalizeConfig } from '../src/mapping.js';
+import { createApp, memoryStore, createWorker } from '../src/index.ts';
+import { runCheck, formatCheck } from '../src/check.ts';
+import { cleanEnv } from '../src/env.ts';
+import { applyEnv, normalizeConfig } from '../src/mapping.ts';
 import { createMockApis, shopifyProduct, instantSleep } from './mocks.js';
 
 const COL = '0123456789abcdef01234567';
@@ -136,7 +136,7 @@ test('worker GET /check: config presence for anyone, API tests only with SYNC_SE
 });
 
 test('example values and a short SYNC_SECRET count as not set, and check names them', async () => {
-  const { cleanEnv: clean } = await import('../src/env.js');
+  const { cleanEnv: clean } = await import('../src/env.ts');
   const filled = {
     SHOPIFY_DOMAIN: 'your-store.myshopify.com',
     WEBFLOW_TOKEN: 'your-webflow-site-token',
@@ -240,7 +240,7 @@ test('webhooks: the first reconcile registers them through the app, once; check 
 test('webhooks signed with either the client secret or SHOPIFY_WEBHOOK_SECRET are accepted', async () => {
   const apis = createMockApis({ products: [shopifyProduct(1)] });
   const worker = createWorker(defaultConfig, { fetch: apis.fetch, sleep: instantSleep });
-  const { signShopify } = await import('../src/hmac.js');
+  const { signShopify } = await import('../src/hmac.ts');
   const send = async (key) => {
     const body = JSON.stringify({ id: 1 });
     return worker.fetch(
@@ -298,4 +298,19 @@ test('check says when a newer release in the range exists (a stalled updater sho
     sleep: instantSleep,
   });
   assert.match(r.steps.find((s) => s.title === 'Tether version').message, /0\.4\.0 is available/);
+});
+
+test('check refuses a TETHER_VERSION the updater would refuse, and picks releases by the same rules', async () => {
+  const apis = createMockApis({ products: [shopifyProduct(1)] });
+  const fetch = async (url, init) =>
+    String(url).startsWith('https://data.jsdelivr.com/')
+      ? new Response(JSON.stringify({ versions: [{ version: '0.3.3' }, { version: '0.3.10' }] }), { status: 200 })
+      : apis.fetch(url, init);
+  const options = { fetch, version: '0.3.3', sleep: instantSleep };
+  let r = await runCheck(defaultConfig, deployEnv, { ...options, range: '^0.3' });
+  const refused = r.steps.find((s) => s.title === 'Tether version');
+  assert.equal(refused.level, 'warn');
+  assert.match(refused.message, /TETHER_VERSION must be/);
+  r = await runCheck(defaultConfig, deployEnv, { ...options, range: '*' });
+  assert.match(r.steps.find((s) => s.title === 'Tether version').message, /0\.3\.10 is available/);
 });

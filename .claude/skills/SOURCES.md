@@ -12,4 +12,4 @@ These are copies of the upstream rule text, each pinned to a commit. Nothing her
 | `shopify-apis/SKILL.md` | Tether | | | Written for this repository |
 | `../agents/type-design-analyzer.md`, `comment-analyzer.md`, `silent-failure-hunter.md` | [anthropics/claude-plugins-official](https://github.com/anthropics/claude-plugins-official) `plugins/pr-review-toolkit/agents` | `30202c767cfa` | Apache-2.0 (`../agents/LICENSE-pr-review-toolkit`) | None |
 
-Considered and not copied: [webflow/webflow-skills](https://github.com/webflow/webflow-skills) (MIT). Every skill there operates a Webflow site through Webflow's MCP server. None of them covers code that calls the Data API, which is what `server/src/webflow.js` does.
+Considered and not copied: [webflow/webflow-skills](https://github.com/webflow/webflow-skills) (MIT). Every skill there operates a Webflow site through Webflow's MCP server. None of them covers code that calls the Data API, which is what `server/src/webflow.ts` does.

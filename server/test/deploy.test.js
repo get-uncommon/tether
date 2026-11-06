@@ -2,8 +2,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import defaultConfig from '../tether-sync.config.js';
-import { createApp, memoryStore } from '../src/index.js';
-import { runCheck } from '../src/check.js';
+import { createApp, memoryStore } from '../src/index.ts';
+import { runCheck } from '../src/check.ts';
 import { createMockApis, shopifyProduct, baseConfig, instantSleep } from './mocks.js';
 
 const HOOK = 'https://api.pages.test/deploy_hooks/abc';
@@ -130,6 +130,7 @@ test('Webflow + deploy hook: Webflow is written and a build starts', async () =>
   await app.sync.importAll();
   assert.equal(t.apis.wf.items.size, 2);
   assert.equal(t.hooks.length, 1);
+  assert.ok(app.webflow.requests > 0, 'the request count follows the Webflow client');
 });
 
 test('check in deploy-only mode: no Webflow errors, the hook is validated', async () => {
@@ -142,7 +143,7 @@ test('check in deploy-only mode: no Webflow errors, the hook is validated', asyn
 });
 
 test('deploy hook: a network error keeps the build pending for the next run', async () => {
-  const { createDeployHook } = await import('../src/deploy.js');
+  const { createDeployHook } = await import('../src/deploy.ts');
   const store = memoryStore();
   let calls = 0;
   const fetch = async () => {

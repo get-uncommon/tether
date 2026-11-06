@@ -9,7 +9,7 @@ Object.assign(globalThis, {
   document: dom.window.document,
   getComputedStyle: dom.window.getComputedStyle,
 });
-const { barbaPreset } = await import('../src/presets/barba.js');
+const { barbaPreset } = await import('../src/presets/barba.ts');
 
 test('barba preset: no auto-mount, the scroll lock it took is the one it releases', () => {
   const log = [];

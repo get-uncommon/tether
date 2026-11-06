@@ -2,6 +2,10 @@
 import { test, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
+import { captureTetherWarnings } from './fixtures.js';
+
+// The failures these tests cause on purpose are checked through onError and states, not the console.
+captureTetherWarnings();
 
 const dom = new JSDOM('<!doctype html><html><body></body></html>', { url: 'https://site.test/' });
 Object.assign(globalThis, {
@@ -52,7 +56,7 @@ const errors = [];
 let mountSearch;
 
 before(async () => {
-  const { configure } = await import('../src/config.js');
+  const { configure } = await import('../src/config.ts');
   configure({
     domain: 'shop.test',
     token: 't',
@@ -60,7 +64,7 @@ before(async () => {
     retries: 0,
     onError: (error, context) => errors.push(context),
   });
-  ({ mountSearch } = await import('../src/search.js'));
+  ({ mountSearch } = await import('../src/search.ts'));
 });
 
 const markup = `

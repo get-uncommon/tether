@@ -6,7 +6,7 @@ pre-commit:
       glob: '*.{js,mjs,cjs,ts,json,yml,yaml,html}'
       run: npx prettier --check {staged_files}
     lint:
-      glob: '*.{js,mjs,cjs}'
+      glob: '*.{js,mjs,cjs,ts}'
       run: npx eslint {staged_files}
 pre-push:
   commands:

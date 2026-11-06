@@ -1,4 +1,3 @@
-// The account part on its own: outages, the logout's privacy step, the documents it shares with the Worker.
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
@@ -15,38 +14,41 @@ Object.assign(globalThis, {
   getComputedStyle: dom.window.getComputedStyle,
 });
 
-const { configure } = await import('../src/config.js');
-const { Cart } = await import('../src/cart.js');
-const account = await import('../src/account.js');
-const { CUSTOMER_QUERY, ORDERS_QUERY } = await import('../server/src/shared/account-documents.js');
+const { configure } = await import('../src/config.ts');
+const { Cart } = await import('../src/cart.ts');
+const account = await import('../src/account.ts');
+const { forgetServerLogin, serverCheckoutUrl } = await import('../src/account/server-client.ts');
 
 const CART_KEY = 'tether:cart:shop.test';
-const SESSION_KEY = 'tether:account:shop.test';
-const GRAPHQL = 'https://shopify.com/1/account/customer/api/2026-10/graphql';
+const SERVER = { server: '/_tether/account' };
 const reported = [];
 const json = (data, status = 200) => ({ ok: status < 400, status, json: async () => data });
 const visible = (id) => window.getComputedStyle(document.getElementById(id)).display !== 'none';
+const ADA = {
+  id: 'gid://shopify/Customer/1',
+  firstName: 'Ada',
+  lastName: 'Lovelace',
+  displayName: 'Ada Lovelace',
+  emailAddress: { emailAddress: 'ada@x.test' },
+  defaultAddress: { formatted: ['Street 1', 'Utrecht'] },
+};
 
-/** The shop's `.well-known` documents, for browser mode. */
-function discovery(url) {
-  if (url.endsWith('/.well-known/openid-configuration')) {
-    return json({
-      issuer: 'https://shopify.com/authentication/1',
-      authorization_endpoint: 'https://shopify.com/authentication/1/oauth/authorize',
-      token_endpoint: 'https://shopify.com/authentication/1/oauth/token',
-      end_session_endpoint: 'https://shopify.com/authentication/1/logout',
-    });
+/**
+ * The account events sent on `document` while `run` runs.
+ *
+ * @param {() => Promise<unknown>} run
+ */
+async function eventsDuring(run) {
+  const seen = [];
+  const names = ['tether:account-login', 'tether:account-error'];
+  const listener = (event) => seen.push({ name: event.type, detail: event.detail });
+  names.forEach((name) => document.addEventListener(name, listener));
+  try {
+    await run();
+  } finally {
+    names.forEach((name) => document.removeEventListener(name, listener));
   }
-  if (url.endsWith('/.well-known/customer-account-api')) return json({ graphql_api: GRAPHQL });
-  return null;
-}
-
-/** A browser-mode session as the part stores it, valid for an hour. */
-function storeSession(session = {}) {
-  sessionStorage.setItem(
-    SESSION_KEY,
-    JSON.stringify({ access: 'tok-1', expiresAt: Date.now() + 3600_000, refresh: null, idToken: null, ...session }),
-  );
+  return seen;
 }
 
 /** The test configuration, to extend with an `account`. */
@@ -63,12 +65,14 @@ beforeEach(() => {
   localStorage.clear();
   sessionStorage.clear();
   reported.length = 0;
-  Cart.setCustomer({ accessToken: null, beforeCheckout: null });
+  Cart.setCheckoutResolver(null);
   document.body.innerHTML = '';
+  forgetServerLogin();
+  window.history.replaceState(null, '', '/account');
 });
 
-test('server mode: a Worker outage is reported, not shown as a logout without a word', async () => {
-  configure({ ...testConfig(), account: { server: '/_tether/account' } });
+test('a Worker outage is reported, not shown as a logout without a word', async () => {
+  configure({ ...testConfig(), account: SERVER });
   globalThis.fetch = async () => {
     throw new TypeError('Failed to fetch');
   };
@@ -87,8 +91,8 @@ test('server mode: a Worker outage is reported, not shown as a logout without a 
   assert.ok(visible('order-error') && visible('addresses-error'), 'the pages show their error state');
 });
 
-test('server mode: a 401 is a logout, not a failure; a failing checkout link is left to the cart to report', async () => {
-  configure({ ...testConfig(), account: { server: '/_tether/account' } });
+test('a 401 is a logout, not a failure; a failing checkout link is left to the cart to report', async () => {
+  configure({ ...testConfig(), account: SERVER });
   const answers = {
     '/me': () => json({ loggedIn: true, customer: { firstName: 'Ada' } }),
     '/orders': () => json({ loggedIn: false, orders: [] }, 401),
@@ -98,67 +102,129 @@ test('server mode: a 401 is a logout, not a failure; a failing checkout link is 
   assert.deepEqual(await account.orders(), []);
   assert.equal(reported.length, 0);
   localStorage.setItem(CART_KEY, 'gid://shopify/Cart/1');
-  await account.mountAccount(document);
-  await assert.rejects(Cart.beforeCheckout(), /Shopify is down/);
+  await assert.rejects(serverCheckoutUrl(), /Shopify is down/);
+  assert.equal(reported.length, 0, 'the cart reports it, when checkout asks');
 });
 
-test('browser mode: when Shopify is not told about the logout, the cart is forgotten here', async () => {
-  configure({ ...testConfig(), account: { clientId: 'client-1' } });
-  storeSession();
-  localStorage.setItem(CART_KEY, 'gid://shopify/Cart/1');
-  const sent = [];
+for (const [outcome, events] of [
+  ['in', [{ name: 'tether:account-login', detail: {} }]],
+  ['expired', [{ name: 'tether:account-error', detail: { error: 'expired' } }]],
+  ['error', [{ name: 'tether:account-error', detail: { error: 'error' } }]],
+]) {
+  test(`?account=${outcome} from the Worker's login sends ${events[0].name}`, async () => {
+    configure({ ...testConfig(), account: SERVER });
+    globalThis.fetch = async () => json({ loggedIn: outcome === 'in', customer: { firstName: 'Ada' } });
+    window.history.replaceState(null, '', `/account?account=${outcome}&page=2`);
+    const fresh = await import(`../src/account.ts?account-${outcome}`);
+    assert.deepEqual(await eventsDuring(() => fresh.mountAccount(document)), events);
+    assert.equal(window.location.search, '?page=2', 'the mark is dropped, the rest of the URL kept');
+  });
+}
+
+test('another ?account= value is not the login redirect, and is left alone', async () => {
+  configure({ ...testConfig(), account: SERVER });
+  globalThis.fetch = async () => json({ loggedIn: false });
+  window.history.replaceState(null, '', '/account?account=settings');
+  const fresh = await import('../src/account.ts?account-other');
+  assert.deepEqual(await eventsDuring(() => fresh.mountAccount(document)), []);
+  assert.equal(window.location.search, '?account=settings');
+});
+
+test('customer() reads the Worker’s /me into the public shape, the id included when the Worker sends it', async () => {
+  configure({ ...testConfig(), account: SERVER });
+  const { emailAddress, defaultAddress, ...names } = ADA;
+  const me = { ...names, email: emailAddress.emailAddress, address: defaultAddress.formatted };
+  globalThis.fetch = async () => json({ loggedIn: true, customer: me });
+  const fromWorker = await account.customer();
+  assert.deepEqual(fromWorker, ADA);
+  forgetServerLogin();
+  const { id, ...withoutId } = me;
+  globalThis.fetch = async () => json({ loggedIn: true, customer: withoutId });
+  assert.equal(id, ADA.id);
+  assert.equal('id' in (await account.customer()), false, 'no id: left out, not null');
+});
+
+test('nobody logged in is customer() null and orders() empty, not an error', async () => {
+  configure({ ...testConfig(), account: SERVER });
+  globalThis.fetch = async () => json({ loggedIn: false }, 401);
+  assert.equal(await account.customer(), null);
+  assert.deepEqual(await account.orders(), []);
+});
+
+test('input the Worker or Shopify refuses is INVALID, with Shopify’s messages', async () => {
+  configure({ ...testConfig(), account: SERVER });
+  globalThis.fetch = async () =>
+    json({ error: 'City is required', code: 'INVALID', userErrors: [{ message: 'City is required' }] }, 400);
+  await assert.rejects(account.saveAddress({ address1: 'Main St 1' }), (error) => {
+    assert.equal(error.code, 'INVALID');
+    assert.deepEqual(
+      error.userErrors.map((userError) => userError.message),
+      ['City is required'],
+    );
+    return true;
+  });
+});
+
+test('orders({ first }) takes a whole number from 1 to 50, checked before any request', async () => {
+  const asked = [];
   globalThis.fetch = async (url) => {
-    sent.push(String(url));
-    if (String(url).startsWith('https://shop.test/api/')) throw new TypeError('Failed to fetch');
-    return discovery(String(url)) ?? json({}, 404);
+    asked.push(String(url));
+    return json({ orders: [] });
   };
-  const loggedOut = [];
-  document.addEventListener('tether:account-logout', () => loggedOut.push(true), { once: true });
-  await account.logout();
-  assert.ok(
-    sent.some((url) => url.startsWith('https://shop.test/api/')),
-    'the unlink was tried',
-  );
+  configure({ ...testConfig(), account: SERVER });
+  for (const first of ['10&x=1', 0, 51, 2.5, Number.NaN]) {
+    await assert.rejects(account.orders({ first }), { code: 'INVALID' }, String(first));
+  }
+  assert.deepEqual(asked, []);
+  configure({ ...testConfig(), account: SERVER });
+  await account.orders({ first: 50 });
+  document.body.innerHTML = '<div tether-orders tether-limit="100"><a></a></div>';
+  globalThis.fetch = async (url) => {
+    asked.push(String(url));
+    return new URL(url).pathname.endsWith('/me') ? json({ loggedIn: true, customer: ADA }) : json({ orders: [] });
+  };
+  await account.render(document);
   assert.deepEqual(
-    reported.map((entry) => entry.context),
-    ['account cart unlink'],
+    asked.filter((url) => url.includes('/orders')).map((url) => new URL(url).search),
+    ['?first=50', '?first=50'],
+    'a tether-limit above 50 asks for 50',
   );
-  assert.equal(localStorage.getItem(CART_KEY), null, 'the next visitor does not check out as this customer');
-  assert.equal(Cart.customerAccessToken, null);
-  assert.equal(sessionStorage.getItem(SESSION_KEY), null);
-  assert.deepEqual(loggedOut, [true]);
 });
 
-test('browser mode: a stored session of another shape is not a login', async () => {
-  configure({ ...testConfig(), account: { clientId: 'client-1' } });
-  sessionStorage.setItem(SESSION_KEY, JSON.stringify({ access: 42, expiresAt: 'soon' }));
+test('an answer without the ids the page acts on is an error, other fields read as null', async () => {
+  configure({ ...testConfig(), account: SERVER });
+  globalThis.fetch = async (url) =>
+    new URL(url).pathname.endsWith('/orders')
+      ? json({ orders: [{ id: 'gid://shopify/Order/1', name: 7, lineItems: { nodes: [{ title: 'Tee' }] } }] })
+      : json({ order: { name: '#1' } });
+  const [first] = await account.orders();
+  assert.equal(first.name, null);
+  assert.equal(first.totalPrice, null);
+  assert.deepEqual(first.lineItems.nodes, [{ title: 'Tee', variantTitle: null, quantity: 0, image: null }]);
+  await assert.rejects(account.order(1), /the answer has no order id/);
+});
+
+test('without account.server every account function rejects with NOT_CONFIGURED, before any request', async () => {
   globalThis.fetch = async () => {
     throw new Error('no request expected');
   };
-  assert.equal(await account.getToken(), null);
+  for (const call of [
+    () => account.login(),
+    () => account.customer(),
+    () => account.orders(),
+    () => account.logout(),
+  ]) {
+    await assert.rejects(call(), { code: 'NOT_CONFIGURED', message: /set account\.server/ });
+  }
   assert.equal(account.isLoggedIn(), false);
 });
 
-// Runs last: it leaves a session in memory.
-test('browser mode: customer() and orders() send the documents the Worker uses', async () => {
-  configure({ ...testConfig(), account: { clientId: 'client-1' } });
-  storeSession();
-  const queries = [];
-  globalThis.fetch = async (url, init) => {
-    if (String(url) !== GRAPHQL) return discovery(String(url)) ?? json({}, 404);
-    assert.equal(init.headers.Authorization, 'tok-1');
-    const { query, variables } = JSON.parse(init.body);
-    queries.push({ query, variables });
-    if (query === CUSTOMER_QUERY) return json({ data: { customer: { id: 'c1', firstName: 'Ada' } } });
-    return json({ data: { customer: { orders: { nodes: [{ id: 'o1', name: '#1001', lineItems: { nodes: [] } }] } } } });
-  };
-  assert.equal((await account.customer()).firstName, 'Ada');
-  assert.deepEqual(
-    (await account.orders({ first: 3 })).map((order) => order.name),
-    ['#1001'],
-  );
-  assert.deepEqual(queries, [
-    { query: CUSTOMER_QUERY, variables: {} },
-    { query: ORDERS_QUERY, variables: { first: 3 } },
-  ]);
+test('the part keeps no token in the browser, only the hint that a customer may be logged in', async () => {
+  configure({ ...testConfig(), account: SERVER });
+  globalThis.fetch = async () => json({ loggedIn: true, customer: ADA });
+  await account.render(document);
+  assert.equal(account.isLoggedIn(), true);
+  assert.deepEqual(Object.keys(localStorage), ['tether:account-hint:shop.test']);
+  assert.equal(sessionStorage.length, 0);
+  for (const removed of ['getToken', 'handleCallback', 'query']) assert.equal(account[removed], undefined, removed);
 });

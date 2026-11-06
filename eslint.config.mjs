@@ -1,22 +1,24 @@
-// The lint gate. Type-aware typescript-eslint rules run on the shipped code (src/, server/src/) and the build and
-// release scripts, through tsconfig.json's checkJs. Tests get the untyped rules only.
+// The lint gate. Type-aware typescript-eslint rules run on the TypeScript sources: the shipped code (src/, server/src/)
+// and the scripts. Tests, and the JavaScript shims that old deployed copies call, get the untyped rules only.
 import js from '@eslint/js';
 import prettier from 'eslint-config-prettier';
 import globals from 'globals';
 import tseslint from 'typescript-eslint';
 
-// scripts/smoke.mjs runs the built dist/, like the tests, so it is linted untyped with them.
-const TYPED_FILES = [
-  'src/**/*.js',
-  'server/src/**/*.js',
-  'server/bin/*.js',
-  'server/scripts/*.mjs',
-  'scripts/{build,release,api-version}.mjs',
-];
+const TYPED_FILES = ['src/**/*.ts', 'server/src/**/*.ts', 'server/bin/*.ts', 'server/scripts/*.ts', 'scripts/*.ts'];
 
 export default tseslint.config(
   {
-    ignores: ['dist/**', '.test-dist/**', 'node_modules/**', 'examples/**', 'test-results/**', 'playwright-report/**'],
+    ignores: [
+      'dist/**',
+      '.test-dist/**',
+      'node_modules/**',
+      'examples/**',
+      'test-results/**',
+      'playwright-report/**',
+      // Declarations only, outside the source's program (tsconfig.json); npm run test:types compiles them.
+      'src/globals.d.ts',
+    ],
   },
   js.configs.recommended,
   {
@@ -34,15 +36,15 @@ export default tseslint.config(
     },
   },
   {
-    files: ['src/**/*.js'],
+    files: ['src/**/*.ts'],
     languageOptions: { globals: { ...globals.browser } },
   },
   {
     files: [
-      'src/server.js',
-      'src/astro.js',
-      'server/**/*.{js,mjs}',
-      'scripts/**/*.mjs',
+      'src/server.ts',
+      'src/astro.ts',
+      'server/**/*.{js,mjs,ts}',
+      'scripts/**/*.ts',
       'test/**/*.js',
       'e2e/**/*.{js,mjs}',
     ],
@@ -68,15 +70,21 @@ export default tseslint.config(
       'no-restricted-syntax': [
         'error',
         {
-          selector:
+          // An empty handler, one that never names the error, or one that only answers a constant
+          // (`() => null`, `(error) => ({})`, `() => undefined`) all drop the rejection unseen.
+          selector: [
             "CallExpression[callee.property.name='catch'] > ArrowFunctionExpression[body.type='BlockStatement'][body.body.length=0]",
+            "CallExpression[callee.property.name='catch'] > ArrowFunctionExpression[params.length=0]",
+            "CallExpression[callee.property.name='catch'] > ArrowFunctionExpression[body.type=/^(Literal|ObjectExpression|ArrayExpression|TemplateLiteral)$/]",
+            "CallExpression[callee.property.name='catch'] > ArrowFunctionExpression > Identifier.body[name='undefined']",
+          ].join(', '),
           message: "Don't swallow a rejection. Report it, or ignore it through a helper whose name says why.",
         },
         {
           selector:
             "AssignmentExpression > MemberExpression.left[property.name=/^(innerHTML|outerHTML)$/], CallExpression > MemberExpression.callee[property.name='insertAdjacentHTML']",
           message:
-            'HTML from Shopify goes through setStoreHtml() in src/dom.js, which removes script; everything else is text.',
+            'HTML from Shopify goes through setStoreHtml() in src/dom.ts, which removes script; everything else is text.',
         },
       ],
     },
