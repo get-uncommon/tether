@@ -10,7 +10,7 @@ npm run build
 ```
 
 - Keep it dependency-free and small. Tether runs on every page load.
-- Every new attribute goes in the README attribute reference.
+- Every new attribute goes in the attribute reference (`docs/reference.md`).
 - Anything that sends a new query or mutation must pass `npm run smoke`, against a
   dev store with selling plans if it touches subscriptions
   (`TETHER_DOMAIN=... TETHER_TOKEN=... npm run smoke`).

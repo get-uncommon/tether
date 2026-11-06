@@ -17,7 +17,7 @@
  *   webflow locale subdirectory (/de/...) or <html lang="de-DE">, through `locales`
  * then the static `country` / `language` config. Without `detect`, only `saved` applies, so a country select keeps
  * working across pages; `detect: false` turns even that off. Tether never calls an IP lookup service: a country from
- * the visitor's IP only comes from the site's own server (see README).
+ * the visitor's IP only comes from the site's own server (docs/reference.md, Markets and localization).
  */
 import { MARKET_SOURCES, cfg, parseMarkets } from './config.ts';
 import { toCountry, toLanguage } from './market-codes.ts';
