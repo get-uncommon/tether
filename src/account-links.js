@@ -11,7 +11,7 @@ export { isHttpsUrl };
  */
 export function localDate(iso) {
   try {
-    return new Date(iso).toLocaleDateString(/** @type {string | undefined} */ (cfg.locale));
+    return new Date(iso).toLocaleDateString(cfg.locale);
   } catch {
     return iso;
   }
@@ -25,9 +25,7 @@ export function localDate(iso) {
  * @returns {string | null}
  */
 export function orderUrl(order) {
-  // `account` is a config key that DEFAULTS doesn't declare yet (typing config.js is still to do).
-  const { account } = /** @type {{ account?: { orderUrl?: string } }} */ (cfg);
-  const template = account?.orderUrl;
+  const template = cfg.account?.orderUrl;
   if (template) {
     const numericId = order.id.split('/').pop()?.split('?')[0] ?? '';
     return template.replace('{id}', encodeURIComponent(numericId));

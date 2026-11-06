@@ -1,342 +1,287 @@
-// @ts-nocheck
 /**
- * DOM helpers. Attribute names go through attr() so the prefix is configurable
- * (e.g. prefix: 'wfs' for markup that uses wfs-* attributes).
+ * The browser modules' DOM toolkit: what Shopify values look like on the page (money, dates, text, images, lists)
+ * and how elements show, hide and report layout changes. Attribute names go through `attr()` so the prefix is
+ * configurable. The optional parts import all of it from here (`window.Tether.__core['dom.js']`).
  */
-import { cfg, warn } from './config.js';
+import { cfg, reportError, warn } from './config.js';
+import { attr, emit, get } from './markup.js';
 import { storeHtmlFragment } from './store-html.js';
 import { formatMoney as formatMoneyIn, productUrl as productUrlFor } from './shopify-values.js';
+/** @import { Money } from './shopify-values.js' */
 
-export const attr = (name) => `${cfg.prefix}-${name}`;
-export const sel = (name, value) => (value === undefined ? `[${attr(name)}]` : `[${attr(name)}="${value}"]`);
-export const get = (el, name) => el.getAttribute(attr(name));
-export const has = (el, name) => el.hasAttribute(attr(name));
-const dataKey = () => `data-${cfg.prefix}-key`;
+export { attr, sel, get, has, qsa, scoped, emit } from './markup.js';
+export { imageUrl, cdnUrl, sameImage, setImage } from './images.js';
+export { hasTemplate, repeat, repeatKeyed } from './repeaters.js';
 
 /**
- * productPath '/product' -> /product/<handle>.
- * Templates: '/product?handle={handle}' (one static page for every product,
- * with tether-product="url:handle"), '/p/{id}' (numeric product id).
+ * State Tether keeps on elements, as `data-tether-*` attributes whatever the prefix: sites style and test against
+ * these names, so they stay fixed where the `tether-*` markup attributes follow `prefix`.
+ */
+const SEEN = 'data-tether-seen';
+const SHOWN = 'data-tether-shown';
+const PREVIOUS_DISPLAY = 'data-tether-prev-display';
+
+/** Async renders change the page height in bursts; one notification per burst. */
+const LAYOUT_DEBOUNCE_MS = 120;
+
+/**
+ * The product page of a product (`productPath`).
+ *
+ * @param {string | null | undefined} handle
+ * @param {string | null} [id]
  */
 export function productUrl(handle, id) {
   return productUrlFor(cfg.productPath || '/product', handle, id);
 }
 
-export const qsa = (root, s) => (root ? [...root.querySelectorAll(s)] : []);
-
-/** Elements in `root` whose nearest `scopeSelector` ancestor is `root` itself. */
-export const scoped = (root, s, scopeSelector) => qsa(root, s).filter((el) => el.closest(scopeSelector) === root);
-
-export function emit(name, detail, target = document) {
-  target.dispatchEvent(new CustomEvent(`${cfg.prefix}:${name}`, { detail, bubbles: true }));
-}
-
-/** 30 -> "30%" (en, nl) or "30 %" (de, fr), in the configured locale. */
-export function formatPercent(n, locale = cfg.locale) {
-  if (!n) return '';
+/**
+ * `Intl` throws a RangeError for a locale or currency it doesn't know; the caller then shows a plain fallback.
+ *
+ * @template T
+ * @param {() => T} format
+ * @param {T} fallback
+ * @returns {T}
+ */
+function formatOr(format, fallback) {
   try {
-    return new Intl.NumberFormat(locale || undefined, { style: 'percent', maximumFractionDigits: 0 }).format(n / 100);
-  } catch {
-    return `${n}%`;
+    return format();
+  } catch (error) {
+    if (error instanceof RangeError) return fallback;
+    throw error;
   }
 }
 
+/**
+ * `30` → `30%` (en, nl) or `30 %` (de, fr), in the configured locale.
+ *
+ * @param {number | null | undefined} percentage
+ * @param {string | undefined} [locale]
+ * @returns {string} `''` for no or a zero percentage.
+ */
+export function formatPercent(percentage, locale = cfg.locale) {
+  if (!percentage) return '';
+  const format = () =>
+    new Intl.NumberFormat(locale || undefined, { style: 'percent', maximumFractionDigits: 0 }).format(percentage / 100);
+  return formatOr(format, `${percentage}%`);
+}
+
+/**
+ * Money in the configured locale, through the site's `formatMoney` when it has one.
+ *
+ * @param {Money | null | undefined} money
+ */
 export function formatMoney(money) {
   if (!money) return '';
-  if (typeof cfg.formatMoney === 'function') return cfg.formatMoney(money, cfg.locale);
+  if (cfg.formatMoney) return cfg.formatMoney(money, cfg.locale);
   return formatMoneyIn(money, cfg.locale);
 }
 
+/**
+ * @param {string | null | undefined} iso
+ * @returns {string} The date in the configured locale, `''` without one.
+ */
 export function formatDate(iso) {
   if (!iso) return '';
-  try {
-    return new Date(iso).toLocaleDateString(cfg.locale || undefined);
-  } catch {
-    return '';
-  }
-}
-
-/** Shopify CDN resize via max-width / max-height / crop attributes on the element. */
-/**
- * Shopify CDN image at a size: imageUrl(url, { width: 800 }). Use the same width as the element's
- * max-width attribute, so the browser script keeps the image instead of loading it again.
- */
-export function imageUrl(url, { width, height, crop } = {}) {
-  if (!url) return url;
-  try {
-    const u = new URL(url);
-    if (width) u.searchParams.set('width', String(width));
-    if (height) u.searchParams.set('height', String(height));
-    if (crop) u.searchParams.set('crop', crop);
-    return u.toString();
-  } catch {
-    return url;
-  }
-}
-
-export function cdnUrl(url, el) {
-  if (!url || !el) return url;
-  // max-width (Webflow's custom attribute), or valid HTML: tether-max-width / data-max-width.
-  const g = (k) => el.getAttribute(k) ?? el.getAttribute(`${cfg.prefix}-${k}`) ?? el.getAttribute(`data-${k}`);
-  return imageUrl(url, {
-    width: g('max-width'),
-    height: g('max-height'),
-    crop: g('max-width') || g('max-height') ? g('crop') : null,
-  });
-}
-
-/** Same image, whatever size parameters: the server-rendered one is kept (no second download). */
-export const sameImage = (a, b) => Boolean(a && b) && a.split('?')[0] === b.split('?')[0];
-
-/**
- * A CSS `url()` for an image URL from Shopify. Characters that would end the string are escaped, so the URL can't
- * add declarations; only http(s), relative and data:image URLs are used.
- */
-function cssUrl(url) {
-  const hasScheme = /^\s*[a-z][a-z0-9+.-]*:/i.test(url);
-  if (hasScheme && !/^\s*(https?:|data:image\/)/i.test(url)) return 'none';
-  const escaped = url.replace(/["\\\n\r\f]/g, (char) => `\\${char.charCodeAt(0).toString(16)} `);
-  return `url("${escaped}")`;
-}
-
-export function setImage(el, url, alt) {
-  if (!url) return;
-  const src = cdnUrl(url, el);
-  if (el.tagName === 'IMG' && sameImage(el.getAttribute('src'), src)) {
-    if (alt != null && !el.getAttribute('alt')) el.setAttribute('alt', alt);
-    return;
-  }
-  if (el.tagName === 'IMG') {
-    el.removeAttribute('srcset');
-    el.removeAttribute('sizes');
-    el.setAttribute('src', src);
-    if (alt != null) el.setAttribute('alt', alt);
-    if (!el.getAttribute('loading')) el.setAttribute('loading', 'lazy');
-  } else {
-    el.style.backgroundImage = cssUrl(src);
-  }
+  return formatOr(() => new Date(iso).toLocaleDateString(cfg.locale || undefined), '');
 }
 
 /**
  * Writes HTML from the Shopify admin (product and collection descriptions) into `el`, with script removed
  * (`store-html.js`). Everything else from Shopify is written as text (`setText`).
+ *
+ * @param {Element} el
+ * @param {string | null | undefined} html
  */
 export function setStoreHtml(el, html) {
   el.replaceChildren(storeHtmlFragment(html, el.ownerDocument));
 }
 
-export function setText(el, v) {
-  const text = v == null ? '' : String(v);
-  if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') el.value = text;
+/**
+ * @param {Element} el
+ * @returns {el is HTMLInputElement | HTMLTextAreaElement}
+ */
+const isTextField = (el) => el.tagName === 'INPUT' || el.tagName === 'TEXTAREA';
+
+/**
+ * @param {Element} el
+ * @returns {el is HTMLInputElement}
+ */
+const isInput = (el) => el.tagName === 'INPUT';
+
+/**
+ * Sets the text of `el`, or its value when it is a form field.
+ *
+ * @param {Element} el
+ * @param {string | number | boolean | null | undefined} value `null` and `undefined` clear it.
+ */
+export function setText(el, value) {
+  const text = value == null ? '' : String(value);
+  if (isTextField(el)) el.value = text;
   else el.textContent = text;
 }
 
-const readText = (el) => (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' ? el.value : el.textContent);
+/** @param {Element} el */
+const readText = (el) => (isTextField(el) ? el.value : el.textContent);
 
-/** setText that reports changes to cfg.onValueChange (for scramble/roll effects). */
-export function setTextTracked(el, v) {
+/**
+ * `setText` that hands a change after the first render to `onValueChange`, for scramble and roll effects.
+ *
+ * @param {HTMLElement} el
+ * @param {string | number | boolean | null | undefined} value
+ */
+export function setTextTracked(el, value) {
   const before = readText(el);
-  setText(el, v);
-  const after = readText(el);
-  if (before !== after && el.dataset.tetherSeen && typeof cfg.onValueChange === 'function') {
+  setText(el, value);
+  if (before !== readText(el) && el.hasAttribute(SEEN) && cfg.onValueChange) {
     try {
       cfg.onValueChange(el, before);
-    } catch {
-      /* ignore */
+    } catch (error) {
+      reportError(error, 'onValueChange');
     }
   }
-  el.dataset.tetherSeen = '1';
-}
-
-export function show(el, visible) {
-  const k = 'tetherPrevDisplay';
-  if (visible) {
-    if (el.dataset.tetherShown !== undefined) return; // already visible, nothing to check
-    el.dataset.tetherShown = '';
-    el.removeAttribute('hidden');
-    if (el.dataset[k] !== undefined) {
-      el.style.display = el.dataset[k];
-      delete el.dataset[k];
-    } else if (el.style.display === 'none') {
-      el.style.display = '';
-    }
-    // Hidden before the script ran (a class, an inline display:none, a hidden attribute): show it
-    // as block or the value of tether-display.
-    if (typeof getComputedStyle === 'function' && getComputedStyle(el).display === 'none') {
-      el.style.display = el.getAttribute(`${cfg.prefix}-display`) || 'block';
-    }
-  } else {
-    delete el.dataset.tetherShown;
-    // Remember a real display value to restore, never 'none'.
-    if (el.dataset[k] === undefined && el.style.display !== 'none') el.dataset[k] = el.style.display || '';
-    el.style.display = 'none';
-  }
-}
-
-export function setSelected(el, selected) {
-  el.classList.toggle('is-selected', selected);
-  el.setAttribute('aria-pressed', selected ? 'true' : 'false');
-  if (el.tagName === 'INPUT' && (el.type === 'radio' || el.type === 'checkbox')) el.checked = selected;
-  const input = el.querySelector?.('input[type="radio"],input[type="checkbox"]');
-  if (input) input.checked = selected;
-}
-
-// ---------------------------------------------------------------------------
-// Repeaters: the first child in Webflow is the template, the rest is removed.
-// ---------------------------------------------------------------------------
-
-const templates = new WeakMap();
-
-/** True once a repeater's template has been captured (it may be empty after that). */
-export const hasTemplate = (container) => Boolean(templates.get(container));
-
-function template(container) {
-  if (!templates.has(container)) {
-    const tpl = container.firstElementChild?.cloneNode(true) ?? null;
-    templates.set(container, tpl);
-    container.replaceChildren();
-  }
-  return templates.get(container);
-}
-
-/** Rebuilds the list on every render. Fine for images, tags, options. */
-export function repeat(container, items, render) {
-  const tpl = template(container);
-  if (!tpl) {
-    if (items.length) warn('repeater without a template child', container);
-    return;
-  }
-  container.replaceChildren();
-  items.forEach((item, i) => {
-    const node = tpl.cloneNode(true);
-    render(node, item, i);
-    container.appendChild(node);
-  });
+  el.setAttribute(SEEN, '1');
 }
 
 /**
- * Keyed repeater: keeps existing nodes, inserts new ones, removes old ones.
- * Used for cart lines, so values can animate and lines can slide in/out.
+ * Shows an element hidden before the script ran (a class, an inline `display: none`, a `hidden` attribute), as
+ * `block` or the value of `tether-display`.
+ *
+ * @param {HTMLElement} el
  */
-export function repeatKeyed(container, items, keyOf, render, { onEnter, onLeave } = {}) {
-  const tpl = template(container);
-  if (!tpl) {
-    warn('repeater without a template child', container);
-    return;
+function reveal(el) {
+  if (el.hasAttribute(SHOWN)) return;
+  el.setAttribute(SHOWN, '');
+  el.removeAttribute('hidden');
+  const previous = el.getAttribute(PREVIOUS_DISPLAY);
+  if (previous !== null) {
+    el.style.display = previous;
+    el.removeAttribute(PREVIOUS_DISPLAY);
+  } else if (el.style.display === 'none') {
+    el.style.display = '';
   }
-
-  const KEY = dataKey();
-  const LEAVING = `data-${cfg.prefix}-leaving`;
-  const live = () => [...container.children].filter((n) => n.hasAttribute(KEY) && !n.hasAttribute(LEAVING));
-
-  const existing = new Map(live().map((n) => [n.getAttribute(KEY), n]));
-  const wanted = [];
-  const fresh = new Set();
-
-  items.forEach((item, i) => {
-    const k = String(keyOf(item, i));
-    let node = existing.get(k);
-    if (node) existing.delete(k);
-    else {
-      node = tpl.cloneNode(true);
-      node.setAttribute(KEY, k);
-      fresh.add(node);
-    }
-    render(node, item, i, fresh.has(node));
-    wanted.push(node);
-  });
-
-  const staying = wanted.filter((n) => !fresh.has(n));
-  const current = live().filter((n) => staying.includes(n));
-  const orderOk = current.length === staying.length && current.every((n, i) => n === staying[i]);
-
-  if (!orderOk) {
-    existing.forEach((n) => n.remove());
-    wanted.forEach((n) => container.appendChild(n));
-    return;
+  if (typeof getComputedStyle === 'function' && getComputedStyle(el).display === 'none') {
+    el.style.display = el.getAttribute(attr('display')) || 'block';
   }
-
-  wanted.forEach((node, i) => {
-    if (!fresh.has(node)) return;
-    const prev = wanted[i - 1];
-    if (prev && prev.parentNode === container) prev.after(node);
-    else container.prepend(node);
-    if (onEnter) {
-      try {
-        onEnter(node);
-      } catch {
-        /* ignore */
-      }
-    }
-  });
-
-  existing.forEach((node) => {
-    node.setAttribute(LEAVING, '');
-    node.removeAttribute(KEY);
-    node.style.pointerEvents = 'none';
-    node.inert = true;
-    const done = () => node.remove();
-    if (onLeave) {
-      try {
-        onLeave(node, done);
-      } catch {
-        done();
-      }
-    } else done();
-  });
 }
 
-// ---------------------------------------------------------------------------
-// Layout notifications: async renders change page height after your
-// page-transition hooks ran. Debounced, then cfg.onLayoutChange or a default.
-// ---------------------------------------------------------------------------
+/**
+ * Shows or hides `el`, restoring its own display value when shown again.
+ *
+ * @param {HTMLElement} el
+ * @param {boolean} visible
+ */
+export function show(el, visible) {
+  if (visible) {
+    reveal(el);
+    return;
+  }
+  el.removeAttribute(SHOWN);
+  // The display value to restore is a real one, never 'none'.
+  if (!el.hasAttribute(PREVIOUS_DISPLAY) && el.style.display !== 'none') {
+    el.setAttribute(PREVIOUS_DISPLAY, el.style.display);
+  }
+  el.style.display = 'none';
+}
 
-let layoutTimer = null;
+/**
+ * Marks an option button or input as chosen: `is-selected`, `aria-pressed`, and its own or inner radio/checkbox.
+ *
+ * @param {Element} el
+ * @param {boolean} selected
+ */
+export function setSelected(el, selected) {
+  el.classList.toggle('is-selected', selected);
+  el.setAttribute('aria-pressed', selected ? 'true' : 'false');
+  if (isInput(el) && (el.type === 'radio' || el.type === 'checkbox')) el.checked = selected;
+  const input = el.querySelector('input[type="radio"],input[type="checkbox"]');
+  if (input && isInput(input)) input.checked = selected;
+}
 
+/** @type {ReturnType<typeof setTimeout> | undefined} */
+let layoutTimer;
+
+/**
+ * Async renders change the page height after the site's page-transition hooks ran. After a burst of them this calls
+ * `onLayoutChange` (else refreshes ScrollTrigger) and emits `tether:layout-changed`.
+ *
+ * @param {string} reason
+ */
 export function notifyLayoutChanged(reason) {
   clearTimeout(layoutTimer);
   layoutTimer = setTimeout(() => {
-    if (typeof cfg.onLayoutChange === 'function') cfg.onLayoutChange(reason);
-    else if (window.ScrollTrigger?.refresh) window.ScrollTrigger.refresh();
+    // GSAP's ScrollTrigger, when the site has it, measures positions that a height change makes stale.
+    const { ScrollTrigger } = /** @type {Window & { ScrollTrigger?: { refresh?: () => void } }} */ (window);
+    if (cfg.onLayoutChange) cfg.onLayoutChange(reason);
+    else ScrollTrigger?.refresh?.();
     emit('layout-changed', { reason });
-  }, 120);
+  }, LAYOUT_DEBOUNCE_MS);
 }
 
+/**
+ * Notifies a layout change (`<reason>:images`) once every image in `root` that is still loading has loaded or failed.
+ *
+ * @param {ParentNode} root
+ * @param {string} reason
+ */
 export function watchImages(root, reason) {
-  const imgs = qsa(root, 'img').filter((i) => !i.complete);
-  if (!imgs.length) return;
-  let left = imgs.length;
+  const loading = [...root.querySelectorAll('img')].filter((img) => !img.complete);
+  let left = loading.length;
   const done = () => {
-    if (--left === 0) notifyLayoutChanged(`${reason}:images`);
+    left -= 1;
+    if (left === 0) notifyLayoutChanged(`${reason}:images`);
   };
-  imgs.forEach((img) => {
+  loading.forEach((img) => {
     img.addEventListener('load', done, { once: true });
     img.addEventListener('error', done, { once: true });
   });
 }
 
-export function busy(el, fn) {
-  if (el.getAttribute('aria-busy') === 'true') return Promise.resolve();
+/**
+ * Runs `task` with `aria-busy` on `el`; does nothing while `el` is already busy.
+ *
+ * @template T
+ * @param {Element} el
+ * @param {() => T | Promise<T>} task
+ * @returns {Promise<T | undefined>} The task's result, `undefined` when it didn't run.
+ */
+export function busy(el, task) {
+  if (el.getAttribute('aria-busy') === 'true') return Promise.resolve(undefined);
   el.setAttribute('aria-busy', 'true');
   return Promise.resolve()
-    .then(fn)
-    .finally(() => el.removeAttribute('aria-busy'));
+    .then(task)
+    .finally(() => {
+      el.removeAttribute('aria-busy');
+    });
 }
 
+/**
+ * @param {Element | null | undefined} el
+ * @param {string} name
+ * @returns {unknown} The attribute's JSON, `null` when it is missing or not JSON (with a warning).
+ */
 export function parseJSONAttr(el, name) {
-  const raw = el && get(el, name);
+  const raw = el ? get(el, name) : null;
   if (!raw) return null;
   try {
-    return JSON.parse(raw);
+    return /** @type {unknown} */ (JSON.parse(raw));
   } catch {
     warn(`invalid JSON in ${attr(name)}`, el);
     return null;
   }
 }
 
-/** {a: 1} or [{key, value}] -> [{key, value}] as Shopify wants it. */
-export function toAttributes(obj) {
-  if (!obj) return [];
-  if (Array.isArray(obj)) return obj.map((a) => ({ key: String(a.key), value: String(a.value ?? '') }));
-  return Object.entries(obj).map(([key, value]) => ({ key, value: String(value ?? '') }));
+/** @typedef {string | number | boolean | null | undefined} AttributeValue */
+
+/**
+ * `{ a: 1 }` or `[{ key, value }]` → `[{ key, value }]` as Shopify wants cart and line attributes.
+ *
+ * @param {Record<string, AttributeValue> | { key: string | number, value?: AttributeValue }[] | null | undefined} attributes
+ * @returns {{ key: string, value: string }[]}
+ */
+export function toAttributes(attributes) {
+  if (!attributes) return [];
+  if (Array.isArray(attributes)) {
+    return attributes.map((attribute) => ({ key: String(attribute.key), value: String(attribute.value ?? '') }));
+  }
+  return Object.entries(attributes).map(([key, value]) => ({ key, value: String(value ?? '') }));
 }

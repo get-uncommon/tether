@@ -70,7 +70,7 @@
   },
   "src/account-pages.js": {
     "@typescript-eslint/no-confusing-void-expression": {
-      "count": 9
+      "count": 10
     },
     "@typescript-eslint/no-floating-promises": {
       "count": 6
@@ -99,7 +99,7 @@
   },
   "src/account.js": {
     "@typescript-eslint/no-confusing-void-expression": {
-      "count": 9
+      "count": 10
     },
     "@typescript-eslint/no-empty-function": {
       "count": 1
@@ -108,10 +108,10 @@
       "count": 2
     },
     "@typescript-eslint/no-unnecessary-condition": {
-      "count": 6
+      "count": 2
     },
     "@typescript-eslint/prefer-nullish-coalescing": {
-      "count": 2
+      "count": 1
     },
     "@typescript-eslint/prefer-optional-chain": {
       "count": 1
@@ -130,14 +130,8 @@
     "@typescript-eslint/no-confusing-void-expression": {
       "count": 2
     },
-    "@typescript-eslint/no-unnecessary-condition": {
-      "count": 2
-    },
     "@typescript-eslint/no-unnecessary-type-conversion": {
       "count": 1
-    },
-    "@typescript-eslint/prefer-nullish-coalescing": {
-      "count": 3
     },
     "@typescript-eslint/restrict-plus-operands": {
       "count": 1
@@ -162,7 +156,7 @@
   },
   "src/cart.js": {
     "@typescript-eslint/no-confusing-void-expression": {
-      "count": 14
+      "count": 16
     },
     "@typescript-eslint/no-empty-function": {
       "count": 3
@@ -171,7 +165,7 @@
       "count": 3
     },
     "@typescript-eslint/no-unnecessary-condition": {
-      "count": 10
+      "count": 9
     },
     "@typescript-eslint/prefer-optional-chain": {
       "count": 1
@@ -192,20 +186,6 @@
       "count": 3
     }
   },
-  "src/client.js": {
-    "@typescript-eslint/prefer-string-starts-ends-with": {
-      "count": 1
-    },
-    "@typescript-eslint/restrict-plus-operands": {
-      "count": 1
-    },
-    "complexity": {
-      "count": 1
-    },
-    "no-nested-ternary": {
-      "count": 1
-    }
-  },
   "src/collection.js": {
     "@typescript-eslint/no-confusing-void-expression": {
       "count": 4
@@ -220,29 +200,15 @@
       "count": 1
     }
   },
-  "src/config.js": {
-    "@typescript-eslint/no-dynamic-delete": {
-      "count": 1
-    },
-    "@typescript-eslint/no-unnecessary-condition": {
-      "count": 1
-    },
-    "@typescript-eslint/no-unnecessary-type-conversion": {
-      "count": 1
-    },
-    "@typescript-eslint/prefer-nullish-coalescing": {
-      "count": 1
-    }
-  },
   "src/diagnose.js": {
     "@typescript-eslint/no-confusing-void-expression": {
       "count": 2
     },
     "@typescript-eslint/no-unnecessary-condition": {
-      "count": 10
+      "count": 8
     },
     "@typescript-eslint/prefer-nullish-coalescing": {
-      "count": 4
+      "count": 1
     },
     "@typescript-eslint/restrict-plus-operands": {
       "count": 4
@@ -251,17 +217,6 @@
       "count": 1
     },
     "max-lines-per-function": {
-      "count": 2
-    }
-  },
-  "src/dom.js": {
-    "@typescript-eslint/no-dynamic-delete": {
-      "count": 1
-    },
-    "@typescript-eslint/no-unnecessary-condition": {
-      "count": 2
-    },
-    "@typescript-eslint/prefer-nullish-coalescing": {
       "count": 2
     }
   },
@@ -282,17 +237,9 @@
       "count": 1
     }
   },
-  "src/fragments.js": {
-    "@typescript-eslint/no-unnecessary-condition": {
-      "count": 1
-    },
-    "@typescript-eslint/restrict-plus-operands": {
-      "count": 1
-    }
-  },
   "src/index.js": {
     "@typescript-eslint/no-confusing-void-expression": {
-      "count": 17
+      "count": 20
     },
     "@typescript-eslint/no-empty-function": {
       "count": 2
@@ -304,7 +251,7 @@
       "count": 2
     },
     "@typescript-eslint/no-unnecessary-condition": {
-      "count": 5
+      "count": 1
     },
     "@typescript-eslint/no-unnecessary-type-conversion": {
       "count": 2
@@ -313,7 +260,7 @@
       "count": 4
     },
     "@typescript-eslint/prefer-nullish-coalescing": {
-      "count": 3
+      "count": 1
     },
     "@typescript-eslint/prefer-optional-chain": {
       "count": 1
@@ -336,40 +283,18 @@
       "count": 1
     }
   },
-  "src/lazy-iife.js": {
-    "@typescript-eslint/no-confusing-void-expression": {
-      "count": 2
-    },
-    "@typescript-eslint/no-dynamic-delete": {
-      "count": 1
-    },
-    "@typescript-eslint/no-unnecessary-condition": {
-      "count": 1
-    }
-  },
-  "src/loader.js": {
-    "@typescript-eslint/no-confusing-void-expression": {
-      "count": 2
-    },
-    "@typescript-eslint/no-misused-promises": {
-      "count": 1
-    },
-    "prefer-const": {
-      "count": 1
-    }
-  },
   "src/markets-ui.js": {
     "@typescript-eslint/no-confusing-void-expression": {
       "count": 2
     },
     "@typescript-eslint/no-unnecessary-condition": {
-      "count": 3
+      "count": 1
     },
     "@typescript-eslint/no-unnecessary-type-conversion": {
       "count": 1
     },
     "@typescript-eslint/prefer-nullish-coalescing": {
-      "count": 3
+      "count": 1
     },
     "@typescript-eslint/use-unknown-in-catch-callback-variable": {
       "count": 1
@@ -379,9 +304,6 @@
     }
   },
   "src/markets.js": {
-    "@typescript-eslint/no-unnecessary-condition": {
-      "count": 1
-    },
     "@typescript-eslint/prefer-nullish-coalescing": {
       "count": 1
     },
@@ -395,23 +317,6 @@
       "count": 1
     },
     "no-nested-ternary": {
-      "count": 1
-    }
-  },
-  "src/mounting.js": {
-    "@typescript-eslint/no-confusing-void-expression": {
-      "count": 1
-    },
-    "@typescript-eslint/no-floating-promises": {
-      "count": 1
-    },
-    "@typescript-eslint/no-unnecessary-boolean-literal-compare": {
-      "count": 1
-    },
-    "@typescript-eslint/no-unnecessary-condition": {
-      "count": 1
-    },
-    "@typescript-eslint/prefer-nullish-coalescing": {
       "count": 1
     }
   },
@@ -443,7 +348,7 @@
   },
   "src/search.js": {
     "@typescript-eslint/no-confusing-void-expression": {
-      "count": 1
+      "count": 2
     },
     "@typescript-eslint/no-misused-promises": {
       "count": 1
@@ -456,14 +361,8 @@
     }
   },
   "src/server.js": {
-    "@typescript-eslint/no-unnecessary-condition": {
-      "count": 2
-    },
     "@typescript-eslint/no-unnecessary-type-conversion": {
       "count": 1
-    },
-    "@typescript-eslint/prefer-nullish-coalescing": {
-      "count": 2
     },
     "@typescript-eslint/prefer-optional-chain": {
       "count": 1
@@ -472,14 +371,6 @@
       "count": 1
     },
     "no-nested-ternary": {
-      "count": 1
-    }
-  },
-  "src/status.js": {
-    "@typescript-eslint/prefer-optional-chain": {
-      "count": 1
-    },
-    "no-useless-assignment": {
       "count": 1
     }
   },

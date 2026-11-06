@@ -1,31 +1,71 @@
-// @ts-nocheck
 /**
- * Storefront API client: one fetch wrapper with @inContext, retries and
- * readable errors. Exposed as Tether.query() for anything Tether doesn't cover.
+ * The one Storefront API client: a fetch wrapper that adds the market (`@inContext`), retries what Shopify asks to be
+ * retried, and turns every failure into a `TetherError`. The browser (`gql`, also `Tether.query()`) and the server
+ * helpers (`request` with their own config) share it.
  */
 import { cfg, log } from './config.js';
 import { toCountry, toLanguage } from './market-codes.js';
+/** @import { TetherConfig } from './config.js' */
+
+/**
+ * @typedef {'NOT_FOUND' | 'NETWORK' | 'NOT_CONFIGURED' | 'NOT_LOGGED_IN' | 'NOT_ALLOWED' | 'INVALID'
+ *   | 'INVALID_COUNTRY' | 'INVALID_DISCOUNT' | 'SESSION_ENDED' | 'TOKEN_FAILED' | 'ERROR' | `HTTP_${number}`}
+ *   TetherErrorCode
+ */
+/** @typedef {{ message: string, extensions?: { code?: string } }} GraphQLError */
+/** @typedef {{ data?: unknown, errors?: GraphQLError[] }} GraphQLResponse The response shape the GraphQL spec sets. */
+/** @typedef {{ message: string, field?: string[] | null, code?: string | null }} UserError */
+/**
+ * @typedef {object} TetherErrorDetails
+ * @property {TetherErrorCode} [code] Default `HTTP_<status>` with a status, else `ERROR`.
+ * @property {number} [status] The HTTP status of the response that failed.
+ * @property {GraphQLError[]} [errors] The GraphQL errors of that response.
+ * @property {readonly UserError[]} [userErrors] A mutation's user errors.
+ */
 
 export class TetherError extends Error {
+  /**
+   * @param {string} message
+   * @param {TetherErrorDetails} [details]
+   */
   constructor(message, { status, errors, userErrors, code } = {}) {
     super(message);
     this.name = 'TetherError';
-    this.code = code || (status ? `HTTP_${status}` : 'ERROR');
+    /** @type {TetherErrorCode} */
+    this.code = code ?? (status ? `HTTP_${status}` : 'ERROR');
+    /** @type {number | undefined} */
     this.status = status;
+    /** @type {GraphQLError[] | undefined} */
     this.errors = errors;
+    /** @type {readonly UserError[] | undefined} */
     this.userErrors = userErrors;
   }
 }
 
+/**
+ * What a request needs from a config: the browser's `cfg`, or a config the server helpers build.
+ *
+ * @typedef {Pick<TetherConfig, 'domain' | 'token' | 'apiVersion' | 'country' | 'language' | 'maxAge' | 'retries'>
+ *   & { fetch?: typeof fetch }} StorefrontConfig
+ */
+/** @typedef {{ context?: boolean }} RequestOptions `context: false` sends the query without `@inContext`. */
+
+/**
+ * @param {Pick<TetherConfig, 'domain' | 'apiVersion'>} [conf]
+ * @returns {string} The Storefront GraphQL endpoint of `conf`'s store.
+ */
 export function endpoint(conf = cfg) {
   return `https://${conf.domain}/api/${conf.apiVersion}/graphql.json`;
 }
 
 /**
- * Adds @inContext(country, language) to the first operation in the document,
- * so prices, currency and translations follow the configured market.
- * Operations are always written first, fragments after, so the first match is
- * the operation. A country or language that isn't a valid code is left out.
+ * Adds @inContext(country, language) to the first operation in the document, so prices, currency and translations
+ * follow the configured market. Operations are always written first, fragments after, so the first match is the
+ * operation. A country or language that isn't a valid code is left out.
+ *
+ * @param {string} query
+ * @param {{ country?: string | undefined, language?: string | undefined }} [ctx]
+ * @returns {string}
  */
 export function withContext(query, ctx = cfg) {
   const args = [];
@@ -33,7 +73,7 @@ export function withContext(query, ctx = cfg) {
   const language = toLanguage(ctx.language);
   if (country) args.push(`country: ${country}`);
   if (language) args.push(`language: ${language}`);
-  if (!args.length || /@inContext/.test(query)) return query;
+  if (!args.length || query.includes('@inContext')) return query;
 
   const tag = `@inContext(${args.join(', ')})`;
   // Named (query Name($x: T)), anonymous (query { … }) and shorthand ({ … }) queries.
@@ -41,121 +81,187 @@ export function withContext(query, ctx = cfg) {
   return query.replace(/^(\s*(?:query|mutation)(?:\s+\w+)?\s*(?:\([^)]*\))?)/, `$1 ${tag}`);
 }
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+/** Backoff after a network error or a 429/5xx: this times 2^attempt. */
+const RETRY_BACKOFF_MS = 300;
+/** Backoff after Shopify's `THROTTLED` error, which asks for a longer wait: this times 2^attempt. */
+const THROTTLE_BACKOFF_MS = 500;
+/** Shopify's status for a request its bot protection rejected; retrying doesn't help. */
+const SECURITY_REJECTION = 430;
 
-/** What a status means, for errors Shopify sends without a message (401/403 have none). */
+/**
+ * `quantityAvailable` needs the token's `unauthenticated_read_product_inventory` scope; without it Shopify refuses the
+ * whole query with an error naming the field. That refusal is learned once per page and store: every later query to
+ * the store goes out without the field, so stock levels are unknown and everything else works for one extra request.
+ */
+const INVENTORY_FIELD = 'quantityAvailable';
+
+/** @type {Set<string>} The stores (domain, version and token) whose token can't read inventory. */
+const storesWithoutInventory = new Set();
+
+/** @param {StorefrontConfig} conf */
+const storeOf = (conf) => `${conf.domain} ${conf.apiVersion} ${conf.token}`;
+
+/** @param {number} ms */
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * What a status means, for errors Shopify sends without a message (401/403 have none).
+ *
+ * @param {number} status
+ * @param {StorefrontConfig} conf
+ */
 function statusText(status, conf) {
   if (status === 401 || status === 403) {
-    return `Shopify rejected the Storefront token for ${conf.domain} (${status}): use the public Storefront API token (Headless channel)${/^shpat_/.test(conf.token) ? ', not an Admin API token (shpat_…)' : ''}`;
+    const adminHint = conf.token.startsWith('shpat_') ? ', not an Admin API token (shpat_…)' : '';
+    return `Shopify rejected the Storefront token for ${conf.domain} (${status}): use the public Storefront API token (Headless channel)${adminHint}`;
   }
-  return status === 404
-    ? `Store or API version not found (404): check domain ${conf.domain} and apiVersion ${conf.apiVersion}`
-    : `HTTP ${status} from ${conf.domain}`;
+  if (status === 404) {
+    return `Store or API version not found (404): check domain ${conf.domain} and apiVersion ${conf.apiVersion}`;
+  }
+  return `HTTP ${status} from ${conf.domain}`;
 }
 
 /**
- * One Storefront API request with retries, for any config object (the browser's shared config,
- * or the server module's own). gql() below is the browser version.
+ * @param {Response} res
+ * @param {GraphQLError[]} errors
+ * @param {StorefrontConfig} conf
+ */
+function graphQLFailure(res, errors, conf) {
+  const message = errors
+    .map((error) => error.message)
+    .filter(Boolean)
+    .join(' | ');
+  let text = message || 'Storefront API error';
+  if (!res.ok) text = res.status === 401 || res.status === 403 || !message ? statusText(res.status, conf) : message;
+  return new TetherError(text, { status: res.status, errors });
+}
+
+/**
+ * @typedef {{ kind: 'data', data: unknown }
+ *   | { kind: 'retry', backoffMs: number }
+ *   | { kind: 'inventory-refused' }} Attempt
+ */
+
+/**
+ * One request. Failures that retrying can't fix throw.
+ *
+ * @param {StorefrontConfig} conf
+ * @param {string} query
+ * @param {Record<string, unknown>} variables
+ * @param {boolean} canRetry False on the last attempt: a retryable failure then throws too.
+ * @returns {Promise<Attempt>}
+ */
+async function attempt(conf, query, variables, canRetry) {
+  let res;
+  try {
+    res = await (conf.fetch ?? fetch)(endpoint(conf), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Shopify-Storefront-Access-Token': conf.token },
+      body: JSON.stringify({ query, variables }),
+    });
+  } catch (error) {
+    if (canRetry) return { kind: 'retry', backoffMs: RETRY_BACKOFF_MS };
+    throw new TetherError(`Network error: ${error instanceof Error ? error.message : String(error)}`, {
+      code: 'NETWORK',
+    });
+  }
+  if (res.status === SECURITY_REJECTION) {
+    throw new TetherError('Shopify security rejection (430)', { status: SECURITY_REJECTION });
+  }
+  if (canRetry && (res.status === 429 || res.status >= 500)) {
+    return { kind: 'retry', backoffMs: RETRY_BACKOFF_MS };
+  }
+
+  /** @type {unknown} */
+  let json;
+  try {
+    json = await res.json();
+  } catch {
+    const text = res.ok ? `Invalid response (${res.status})` : statusText(res.status, conf);
+    throw new TetherError(text, { status: res.status });
+  }
+  // The Storefront API answers in the shape the GraphQL spec sets, or with an error page that isn't JSON.
+  const { data, errors = [] } = /** @type {GraphQLResponse | null} */ (json) ?? {};
+  if (errors.length) {
+    if (query.includes(INVENTORY_FIELD) && errors.some((error) => error.message.includes(INVENTORY_FIELD))) {
+      return { kind: 'inventory-refused' };
+    }
+    if (canRetry && errors.some((error) => error.extensions?.code === 'THROTTLED')) {
+      return { kind: 'retry', backoffMs: THROTTLE_BACKOFF_MS };
+    }
+    throw graphQLFailure(res, errors, conf);
+  }
+  if (!res.ok) throw new TetherError(statusText(res.status, conf), { status: res.status });
+  return { kind: 'data', data };
+}
+
+/**
+ * One Storefront API request, for any config: the browser's shared one (`gql`) or one the server helpers build.
+ * Queries carry a time bucket so Shopify's cache of an identical query text is at most `maxAge` seconds old, and
+ * leave out inventory for a store whose token can't read it (`INVENTORY_FIELD`).
+ *
+ * @template T The shape of the query's `data`, which the caller's query text decides.
+ * @param {StorefrontConfig} conf
+ * @param {string} query
+ * @param {Record<string, unknown>} [variables]
+ * @param {RequestOptions} [options]
+ * @returns {Promise<T>}
+ * @throws {TetherError} `NOT_CONFIGURED` without a domain or token, `NETWORK` when the store can't be reached,
+ *   `HTTP_<status>` for an HTTP or GraphQL failure.
  */
 export async function request(conf, query, variables = {}, { context = true } = {}) {
   if (!conf.domain || !conf.token) {
     throw new TetherError('Tether is not configured: domain and token are required', { code: 'NOT_CONFIGURED' });
   }
-
-  // Shopify caches the response of an identical query text (prices included, for hours after a
-  // change). A time bucket in a comment keeps answers at most maxAge seconds old (default 60).
   let text = context ? withContext(query, conf) : query;
-  const age = conf.maxAge ?? 60;
-  if (age > 0 && !/^\s*mutation\b/.test(text)) text += ` #${Math.floor(Date.now() / (age * 1000))}`;
-  const body = JSON.stringify({ query: text, variables });
-  let attempt = 0;
-
+  if (conf.maxAge > 0 && !/^\s*mutation\b/.test(text)) {
+    text += ` #${Math.floor(Date.now() / (conf.maxAge * 1000))}`;
+  }
+  const store = storeOf(conf);
+  let retries = 0;
   for (;;) {
-    let res;
-    try {
-      res = await (conf.fetch || fetch)(endpoint(conf), {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Shopify-Storefront-Access-Token': conf.token,
-        },
-        body,
-      });
-    } catch (err) {
-      if (attempt++ < conf.retries) {
-        await sleep(300 * 2 ** attempt);
-        continue;
-      }
-      throw new TetherError(`Network error: ${err.message}`, { code: 'NETWORK' });
+    const sent = storesWithoutInventory.has(store) ? text.replaceAll(INVENTORY_FIELD, '') : text;
+    const outcome = await attempt(conf, sent, variables, retries < conf.retries);
+    switch (outcome.kind) {
+      case 'data':
+        // The query text decides the shape of `data`; the caller's `T` states it.
+        return /** @type {T} */ (outcome.data);
+      case 'inventory-refused':
+        log(`the token can't read inventory: ${INVENTORY_FIELD} is left out from now on`);
+        storesWithoutInventory.add(store);
+        break;
+      case 'retry':
+        retries += 1;
+        log('retry', retries);
+        await sleep(outcome.backoffMs * 2 ** retries);
+        break;
     }
-
-    if (res.status === 430) throw new TetherError('Shopify security rejection (430)', { status: 430 });
-
-    const retryable = res.status === 429 || res.status >= 500;
-    if (retryable && attempt++ < conf.retries) {
-      log('retry', res.status, attempt);
-      await sleep(300 * 2 ** attempt);
-      continue;
-    }
-
-    let json;
-    try {
-      json = await res.json();
-    } catch {
-      throw new TetherError(res.ok ? `Invalid response (${res.status})` : statusText(res.status, conf), {
-        status: res.status,
-      });
-    }
-
-    if (json.errors?.length) {
-      // Token without unauthenticated_read_product_inventory: drop the field and retry.
-      const inventoryDenied = json.errors.some((e) => /quantityAvailable/.test(e.message || ''));
-      if (inventoryDenied && /\bquantityAvailable\b/.test(body)) {
-        log('no inventory permission, retrying without quantityAvailable');
-        return request(conf, query.replace(/\bquantityAvailable\b/g, ''), variables, { context });
-      }
-      // An older apiVersion without cart warnings (before 2024-07): retry without them.
-      if (
-        json.errors.some((e) => /'warnings'/.test(e.message || '')) &&
-        /warnings \{ code message target \}/.test(query)
-      ) {
-        return request(conf, query.replace(/ warnings \{ code message target \}/g, ''), variables, { context });
-      }
-      const throttled = json.errors.some((e) => e.extensions?.code === 'THROTTLED');
-      if (throttled && attempt++ < conf.retries) {
-        await sleep(500 * 2 ** attempt);
-        continue;
-      }
-      const message = json.errors
-        .map((e) => e.message)
-        .filter(Boolean)
-        .join(' | ');
-      throw new TetherError(
-        res.ok
-          ? message || 'Storefront API error'
-          : res.status === 401 || res.status === 403 || !message
-            ? statusText(res.status, conf)
-            : message,
-        {
-          status: res.status,
-          errors: json.errors,
-        },
-      );
-    }
-    if (!res.ok) throw new TetherError(statusText(res.status, conf), { status: res.status });
-
-    return json.data;
   }
 }
 
-export const gql = (query, variables, opts) => request(cfg, query, variables, opts);
+/**
+ * `request` with the browser's shared config.
+ *
+ * @template T
+ * @param {string} query
+ * @param {Record<string, unknown>} [variables]
+ * @param {RequestOptions} [options]
+ * @returns {Promise<T>}
+ */
+export const gql = (query, variables, options) => request(cfg, query, variables, options);
 
-/** Throws on mutation userErrors, returns the payload otherwise. */
+/**
+ * @template {{ userErrors?: readonly UserError[] | null }} Payload
+ * @param {Payload | null | undefined} payload A mutation's payload.
+ * @param {string} name The mutation, for the error message.
+ * @returns {Payload}
+ * @throws {TetherError} `ERROR` on an empty payload or on user errors (in `userErrors`).
+ */
 export function unwrap(payload, name) {
   if (!payload) throw new TetherError(`${name}: empty response`);
-  const errs = payload.userErrors || [];
-  if (errs.length) {
-    throw new TetherError(errs.map((e) => e.message).join(' | '), { userErrors: errs });
+  const userErrors = payload.userErrors ?? [];
+  if (userErrors.length) {
+    throw new TetherError(userErrors.map((error) => error.message).join(' | '), { userErrors });
   }
   return payload;
 }
