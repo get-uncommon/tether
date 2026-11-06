@@ -20,6 +20,14 @@ the secret is added. Workers without customer accounts need nothing. After 0.7.0
 update run also asks you to copy the new update workflow file in, once, by hand (see "Sync Worker
 updates" below).
 
+**Until you copy that workflow file in, a failed update looks green.** The workflow that copies got from
+0.6.x pipes the updater through `tee`, so a run whose update failed still shows a green check: it
+installs nothing, and the only sign is an error annotation titled `Tether update failed` on the run
+(Actions → the run → Annotations). Copy the new workflow file in once, right after 0.7.0 is installed,
+and a failed update fails the run from then on. Until then, look at the annotations of each update
+run, or update by hand: with the [GitHub CLI](https://cli.github.com) installed, run
+`node scripts/update-tether.mjs` in the copy and commit the result (see the Worker README).
+
 Sites that load the script from jsDelivr as `@0.6` stay on 0.6 until they change the URL; `@latest`
 gets 0.7.0 at once. The breaking changes below list each one's upgrade step.
 
