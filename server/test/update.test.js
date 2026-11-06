@@ -7,9 +7,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { listTags, pickVersion, releaseCommit } from '../scripts/update-tether.ts';
+import { parseJson, stringAt } from './mocks.js';
+import { listTags, newestPublished, releaseCommit, releasesInRange } from '../scripts/update-tether.ts';
 import {
-  FIRST_SIGNED_RELEASE,
+  GitHubError,
   fetchSignedRelease,
   releaseAssetName,
   releaseAssetUrl,
@@ -29,6 +30,12 @@ const NODE_FLAGS = process.execArgv.filter((flag) => flag === '--experimental-st
 
 const TAGS = ['v0.1.0', 'v0.2.0', 'v0.3.0', 'v0.3.1', 'v0.3.3', 'v0.3.2', 'v0.4.0', 'v1.0.0', 'not-a-version'];
 
+/**
+ * @param {string[]} tags
+ * @param {string} spec
+ */
+const pickVersion = (tags, spec) => releasesInRange(tags, spec)[0]?.join('.') ?? null;
+
 test('version ranges work like jsDelivr', () => {
   assert.equal(pickVersion(TAGS, '0.3'), '0.3.3');
   assert.equal(pickVersion(TAGS, '0.3.1'), '0.3.1');
@@ -37,6 +44,11 @@ test('version ranges work like jsDelivr', () => {
   assert.equal(pickVersion(TAGS, '0'), '0.4.0');
   assert.equal(pickVersion(TAGS, '0.9'), null);
   assert.throws(() => pickVersion(TAGS, '^0.3'), /TETHER_VERSION must be/);
+  assert.deepEqual(
+    releasesInRange(TAGS, '0.3').map((version) => version.join('.')),
+    ['0.3.3', '0.3.2', '0.3.1', '0.3.0'],
+    'newest first',
+  );
 });
 
 test('only v tags are releases: a tag without the v is never picked, since it could not be installed', () => {
@@ -74,7 +86,7 @@ test('updating a copy replaces the code and keeps config, wrangler ids and TETHE
       encoding: 'utf8',
     },
   );
-  const version = JSON.parse(await readFile(join(release, 'package.json'), 'utf8')).version;
+  const version = stringAt(parseJson(await readFile(join(release, 'package.json'), 'utf8')), 'version');
   assert.match(out, new RegExp(`updated=${version.replace(/\./g, '\\.')}`));
   assert.ok(existsSync(join(copy, 'src', 'entry.js')), 'new code in place');
   assert.ok(!existsSync(join(copy, 'src', 'old.js')), 'old code removed');
@@ -126,7 +138,7 @@ test('a failed update exits non-zero, and --from without a folder is refused', (
   assert.throws(
     () => execFileSync(process.execPath, [...NODE_FLAGS, script, '--from'], { encoding: 'utf8', stdio: 'pipe' }),
     /** @param {Error & import('node:child_process').SpawnSyncReturns<string>} error What execFileSync throws. */
-    (error) => error.status === 1 && /--from needs the folder/.test(String(error.stderr)),
+    (error) => error.status === 1 && error.stderr.includes('--from needs the folder'),
   );
 });
 
@@ -207,19 +219,44 @@ test('release asset: found by its name on the GitHub Release of the tag', async 
       ],
     },
   });
-  assert.equal(await releaseAssetUrl(get, RELEASE), 'https://x.test/server.tar.gz');
+  assert.equal(await releaseAssetUrl(get, 'o/r', '0.7.1'), 'https://x.test/server.tar.gz');
 });
 
-test('release asset: a release without one (before 0.7.0) is refused with a message saying why', async () => {
-  const noAsset = github({ '/repos/o/r/releases/tags/v0.6.8': { assets: [] } });
-  const old = { ...RELEASE, version: '0.6.8' };
-  await assert.rejects(releaseAssetUrl(noAsset, old), (error) => {
-    assert.ok(error instanceof Error);
-    assert.match(error.message, /v0\.6\.8 has no signed tether-server-0\.6\.8\.tar\.gz/);
-    assert.ok(error.message.includes(`before ${FIRST_SIGNED_RELEASE} have none`));
-    return true;
+test('release asset: none while the Release is missing or lacks it; any other GitHub error is thrown', async () => {
+  /** @type {import('../scripts/release-asset.ts').GitHubGet} */
+  const missing = async (path) => {
+    throw new GitHubError(path, 404);
+  };
+  assert.equal(await releaseAssetUrl(missing, 'o/r', '0.7.1'), null);
+  const noAsset = github({ '/repos/o/r/releases/tags/v0.7.1': { assets: [] } });
+  assert.equal(await releaseAssetUrl(noAsset, 'o/r', '0.7.1'), null);
+  /** @type {import('../scripts/release-asset.ts').GitHubGet} */
+  const limited = async (path) => {
+    throw new GitHubError(path, 403);
+  };
+  await assert.rejects(releaseAssetUrl(limited, 'o/r', '0.7.1'), /GitHub \/repos\/o\/r\/releases\/tags\/v0\.7\.1: 403/);
+});
+
+test('updater: a tag whose Release has no signed asset yet is skipped with a warning, for the newest one that has', async (context) => {
+  const log = context.mock.method(console, 'log', () => {});
+  const get = github({
+    '/repos/o/r/releases/tags/v0.7.2': { assets: [] },
+    '/repos/o/r/releases/tags/v0.7.1': {
+      assets: [{ name: releaseAssetName('0.7.1'), browser_download_url: 'https://x.test/0.7.1.tar.gz' }],
+    },
   });
-  await assert.rejects(releaseAssetUrl(github({}), old), /has no signed .*unexpected \/repos\/o\/r\/releases/);
+  const candidates = releasesInRange(['v0.7.2', 'v0.7.1'], '0.7');
+  assert.deepEqual(await newestPublished(get, 'o/r', candidates), {
+    version: '0.7.1',
+    assetUrl: 'https://x.test/0.7.1.tar.gz',
+  });
+  const warning = String(log.mock.calls[0]?.arguments[0]);
+  assert.match(
+    warning,
+    /^::warning title=[^:]+::v0\.7\.2 is tagged, but its GitHub Release has no tether-server-0\.7\.2\.tar\.gz/,
+  );
+  assert.equal(log.mock.callCount(), 1);
+  assert.equal(await newestPublished(get, 'o/r', releasesInRange(['v0.7.2'], '0.7')), null, 'nothing to install');
 });
 
 test('attestation: gh verifies the file against the upstream release workflow and the tag commit', () => {
@@ -280,11 +317,7 @@ async function releaseArchive(base) {
 test('a signed release is unpacked only after its attestation verifies', async () => {
   const base = await mkdtemp(join(tmpdir(), 'tether-signed-'));
   const archive = await releaseArchive(base);
-  const get = github({
-    '/repos/o/r/releases/tags/v0.7.1': {
-      assets: [{ name: releaseAssetName('0.7.1'), browser_download_url: 'https://x.test/a' }],
-    },
-  });
+  const release = { ...RELEASE, assetUrl: 'https://x.test/a' };
   /**
    * @param {string} url
    * @param {string} dir
@@ -297,15 +330,15 @@ test('a signed release is unpacked only after its attestation verifies', async (
   };
   const refused = join(base, 'refused');
   await mkdir(refused);
-  const failing = { get, download, run: fakeGh({ kind: 'exited', status: 1, output: 'bad' }).run };
-  await assert.rejects(fetchSignedRelease(failing, RELEASE, refused, 'require'), /attestation check/);
+  const failing = { download, run: fakeGh({ kind: 'exited', status: 1, output: 'bad' }).run };
+  await assert.rejects(fetchSignedRelease(failing, release, refused, 'require'), /attestation check/);
   assert.ok(!existsSync(join(refused, 'server')), 'nothing unpacked');
 
   const accepted = join(base, 'accepted');
   await mkdir(accepted);
-  const passing = { get, download, run: fakeGh({ kind: 'exited', status: 0, output: '' }).run };
-  const server = await fetchSignedRelease(passing, RELEASE, accepted, 'require');
-  assert.equal(JSON.parse(await readFile(join(server, 'package.json'), 'utf8')).version, '0.7.1');
+  const passing = { download, run: fakeGh({ kind: 'exited', status: 0, output: '' }).run };
+  const server = await fetchSignedRelease(passing, release, accepted, 'require');
+  assert.equal(stringAt(parseJson(await readFile(join(server, 'package.json'), 'utf8')), 'version'), '0.7.1');
 });
 
 test('workflow revision: the line in the file, 1 without it', () => {
@@ -390,7 +423,7 @@ test('an update run by its workflow warns when the copy needs the release workfl
   assert.match(out, /^::warning title=Tether workflow file outdated::/m);
   assert.match(await readFile(summary, 'utf8'), /Update the workflow file once/);
   assert.equal(await readFile(join(copy, WORKFLOW_PATH), 'utf8'), copyWorkflow, 'the workflow file is never touched');
-  const version = JSON.parse(await readFile(join(release, 'package.json'), 'utf8')).version;
+  const version = stringAt(parseJson(await readFile(join(release, 'package.json'), 'utf8')), 'version');
   assert.equal(workflowVersion(out), version);
 });
 
@@ -401,7 +434,7 @@ test('an update run with nothing to install still warns while the copy has an ol
   await cp(root, copy, { recursive: true, filter: (source) => !source.includes('node_modules') });
   await mkdir(join(copy, '.github', 'workflows'), { recursive: true });
   await writeFile(join(copy, WORKFLOW_PATH), 'name: Update Tether\n');
-  const version = JSON.parse(await readFile(join(copy, 'package.json'), 'utf8')).version;
+  const version = stringAt(parseJson(await readFile(join(copy, 'package.json'), 'utf8')), 'version');
 
   const out = execFileSync(
     process.execPath,

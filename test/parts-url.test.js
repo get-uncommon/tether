@@ -7,7 +7,7 @@ import { readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { graphqlRequest, jsonResponse, operationName } from './fixtures.js';
+import { builtTether, graphqlRequest, jsonResponse, operationName, partsOf } from './fixtures.js';
 
 const DIST = join(dirname(fileURLToPath(import.meta.url)), '..', '.test-dist');
 const PART_FILE = /^https:\/\/(?:cdn|site)\.test\/[\w/]*\/(tether\.[\w.-]+\.js)$/;
@@ -44,11 +44,11 @@ function storefront(window) {
 }
 
 /**
- * Loads the built core with `partsUrl`, asks for the diagnose part, and returns its `<script>` once it registered.
+ * Loads the built core with `partsUrl` into a page.
  *
  * @param {string} partsUrl
  */
-async function loadDiagnoseFrom(partsUrl) {
+async function pageWithCore(partsUrl) {
   const html = `<!doctype html><html><head>
     <script>window.TETHER_CONFIG = ${JSON.stringify({ domain: 'shop.test', token: 't', partsUrl })};</script>
     <script src="${pathToFileURL(join(DIST, 'tether.min.js')).href}"></script>
@@ -61,9 +61,21 @@ async function loadDiagnoseFrom(partsUrl) {
     beforeParse: storefront,
   });
   const win = dom.window;
-  await new Promise((resolve) => win.addEventListener('load', resolve));
-  const result = await win['Tether'].diagnose({ silent: true });
-  const script = [...win.document.scripts].find((element) => /tether\.diagnose\.min\.js$/.test(element.src));
+  await new Promise((resolve) => {
+    win.addEventListener('load', resolve);
+  });
+  return win;
+}
+
+/**
+ * Loads the built core with `partsUrl`, asks for the diagnose part, and returns its `<script>` once it registered.
+ *
+ * @param {string} partsUrl
+ */
+async function loadDiagnoseFrom(partsUrl) {
+  const win = await pageWithCore(partsUrl);
+  const result = await builtTether(win).diagnose({ silent: true });
+  const script = [...win.document.scripts].find((element) => element.src.endsWith('tether.diagnose.min.js'));
   assert.ok(script, 'the diagnose part has a script');
   return { win, script, result };
 }
@@ -80,8 +92,8 @@ test('a cross-origin partsUrl loads parts with the hash built into the core, ove
   assert.equal(script.src, 'https://cdn.test/tether/tether.diagnose.min.js');
   assert.equal(script.integrity, await builtHash('tether.diagnose.min.js'));
   assert.equal(script.crossOrigin, 'anonymous');
-  assert.ok(win['Tether'].__parts.diagnose, 'registered');
-  assert.equal(result.config.domain, 'shop.test');
+  assert.ok(partsOf(win)?.diagnose, 'registered');
+  assert.equal(result.config['domain'], 'shop.test');
 });
 
 test('a partsUrl on the site itself is hash-checked too, without CORS', async () => {
@@ -89,4 +101,15 @@ test('a partsUrl on the site itself is hash-checked too, without CORS', async ()
   assert.equal(script.src, 'https://site.test/assets/tether/tether.diagnose.min.js');
   assert.equal(script.integrity, await builtHash('tether.diagnose.min.js'));
   assert.equal(script.crossOrigin, null);
+});
+
+test('a part rejects its load when another script replaced window.Tether, instead of never settling', async () => {
+  const win = await pageWithCore('https://cdn.test/tether/');
+  const tether = builtTether(win);
+  win['Tether'] = { version: 'another script' };
+  await assert.rejects(tether.diagnose({ silent: true }), {
+    message: /tether\.diagnose\.min\.js can't register: window\.Tether is no longer this Tether script's/,
+  });
+  win['Tether'] = tether;
+  assert.equal((await tether.diagnose({ silent: true })).config['domain'], 'shop.test', 'the next use tries again');
 });

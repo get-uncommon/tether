@@ -17,8 +17,10 @@ import {
   sessionKeys,
   loginFrom,
 } from './account-fixtures.js';
+import { fieldOf, jsonOf, parseJson, recordAt, stringAt, urlOf } from './mocks.js';
 
 /** @typedef {typeof globalThis.fetch} Fetch */
+/** @typedef {import('../src/account/kv.ts').MemoryEntries} MemoryEntries */
 
 test('login: PKCE redirect, pending login sealed in a cookie (nothing in KV), then a session cookie only', async () => {
   const { start, authorize, back, cookie, loginCookie, memory } = await loginFlow();
@@ -40,7 +42,9 @@ test('login: PKCE redirect, pending login sealed in a cookie (nothing in KV), th
   assert.ok(!/access-1|refresh-1/.test(set), 'no token in cookies');
   const stored = [...memory.values()].map((entry) => entry.value).join(' ');
   assert.equal(memory.size, 1, 'only the session in KV');
-  assert.ok(!/access-1|refresh-1|eyJ/.test(stored), 'tokens are encrypted at rest');
+  // eyJhbGciOi is '{"alg":' in base64, the start of the id token; a shorter marker such as eyJ turns up by chance in
+  // random ciphertext.
+  assert.ok(!/access-1|refresh-1|eyJhbGciOi/.test(stored), 'tokens are encrypted at rest');
   const sessionId = cookie.split('=')[1];
   assert.ok(sessionId);
   assert.ok(![...memory.keys()].some((key) => key.includes(sessionId)), 'the session id itself is not a key');
@@ -48,6 +52,7 @@ test('login: PKCE redirect, pending login sealed in a cookie (nothing in KV), th
 
 test('login CSRF: a callback without the login cookie of this browser is refused (attacker code + state)', async () => {
   const sh = shopify();
+  /** @type {MemoryEntries} */
   const memory = new Map();
   /** @param {Request} request */
   const run = (request) => answer(request, env, { fetch: sh.fetch, memory });
@@ -96,7 +101,7 @@ test('a token answer whose id_token is not a string fails the login instead of c
    * @returns {Fetch}
    */
   const wrapFetch = (inner) => async (url, init) => {
-    if (!String(url).endsWith('/oauth/token')) return inner(url, init);
+    if (!urlOf(url).endsWith('/oauth/token')) return inner(url, init);
     return new Response(JSON.stringify({ access_token: 'access-1', id_token: 42, expires_in: 3600 }), { status: 200 });
   };
   const { back } = await loginFlow({ wrapFetch });
@@ -124,7 +129,7 @@ test('a replayed callback with the same login cookie gets no session: Shopify re
    * @returns {Fetch}
    */
   const wrapFetch = (inner) => async (url, init) => {
-    if (String(url).endsWith('/oauth/token')) {
+    if (urlOf(url).endsWith('/oauth/token')) {
       const body = init?.body;
       assert.ok(body instanceof URLSearchParams, 'a form body');
       const code = body.get('code');
@@ -143,6 +148,7 @@ test('a replayed callback with the same login cookie gets no session: Shopify re
 
 test('a returnTo on another site lands on the shop instead (no open redirect)', async () => {
   const sh = shopify();
+  /** @type {MemoryEntries} */
   const memory = new Map();
   /** @param {Request} request */
   const run = (request) => answer(request, env, { fetch: sh.fetch, memory });
@@ -180,6 +186,7 @@ test('a cookie longer than any the Worker sets reads as absent, not as its first
 });
 
 test('a new login ends the session the browser already had', async () => {
+  /** @type {MemoryEntries} */
   const memory = new Map();
   const first = await loginFlow({ memory });
   const second = await loginFlow({ memory, sessionCookie: first.cookie });
@@ -187,8 +194,8 @@ test('a new login ends the session the browser already had', async () => {
   assert.equal(sessionKeys(memory).length, 1);
   /** @param {string} cookie */
   const me = (cookie) => second.run(req('/me', { origin: SITE, cookie }));
-  assert.equal((await (await me(first.cookie)).json()).loggedIn, false);
-  assert.equal((await (await me(second.cookie)).json()).loggedIn, true);
+  assert.equal(fieldOf(await jsonOf(await me(first.cookie)), 'loggedIn'), false);
+  assert.equal(fieldOf(await jsonOf(await me(second.cookie)), 'loggedIn'), true);
 });
 
 test('the store domain refuses Workers (403 on .well-known): addresses come from the shop id instead', async () => {
@@ -198,17 +205,18 @@ test('the store domain refuses Workers (403 on .well-known): addresses come from
   const asked = [];
   /** @type {Fetch} */
   const fetch = async (url, init = {}) => {
-    const target = String(url);
+    const target = urlOf(url);
     asked.push(target);
     if (target.startsWith('https://blocked.myshopify.com/.well-known/'))
       return new Response('forbidden', { status: 403 });
     if (target.startsWith('https://blocked.myshopify.com/api/')) {
       assert.ok(typeof init.body === 'string', 'a JSON body');
-      assert.match(JSON.parse(init.body).query, /shop \{ id \}/);
+      assert.match(stringAt(parseJson(init.body), 'query'), /shop \{ id \}/);
       return new Response(JSON.stringify({ data: { shop: { id: 'gid://shopify/Shop/1' } } }), { status: 200 });
     }
     return sh.fetch(url, init);
   };
+  /** @type {MemoryEntries} */
   const memory = new Map();
   /** @param {Request} request */
   const run = (request) => answer(request, blocked, { fetch, memory });
@@ -226,7 +234,7 @@ test('the store domain refuses Workers (403 on .well-known): addresses come from
   const cookie = pick(back, '__Host-tether-account');
   assert.ok(cookie, 'logged in');
   const me = await run(req('/me', { origin: SITE, cookie }));
-  assert.equal((await me.json()).customer.firstName, 'Ada');
+  assert.equal(fieldOf(recordAt(await jsonOf(me), 'customer'), 'firstName'), 'Ada');
   assert.ok(
     asked.some((address) => address.startsWith('https://shopify.com/1/account/customer/api/')),
     'the Customer Account API by shop id',
@@ -235,6 +243,7 @@ test('the store domain refuses Workers (403 on .well-known): addresses come from
 
 test('a cancelled login lands where it started with account=error; a state mismatch is an error too', async () => {
   const sh = shopify();
+  /** @type {MemoryEntries} */
   const memory = new Map();
   /** @param {Request} request */
   const run = (request) => answer(request, env, { fetch: sh.fetch, memory });
@@ -282,7 +291,7 @@ test('discovery: when Shopify answers neither on the store domain nor on its acc
   const sh = shopify();
   /** @type {Fetch} */
   const fetch = async (url, init = {}) => {
-    const target = String(url);
+    const target = urlOf(url);
     if (target.includes('/.well-known/')) return new Response('forbidden', { status: 403 });
     if (target.startsWith('https://closed.myshopify.com/api/')) {
       return new Response(JSON.stringify({ data: { shop: { id: 'gid://shopify/Shop/9' } } }), { status: 200 });
@@ -307,7 +316,7 @@ test('discovery falls back to the shop id only for bot protection, not for a sto
   const asked = [];
   /** @type {Fetch} */
   const fetch = async (url, init = {}) => {
-    const target = String(url);
+    const target = urlOf(url);
     asked.push(target);
     if (target.startsWith('https://down.myshopify.com/.well-known/'))
       return new Response('bad gateway', { status: 502 });

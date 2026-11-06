@@ -2,21 +2,13 @@
 import { test, before, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
-import { apparel, find, graphqlRequest, jsonResponse, product } from './fixtures.js';
+import { apparel, find, graphqlRequest, jsonResponse, product, pageGlobals } from './fixtures.js';
 import { asString, waitFor } from '../server/test/mocks.js';
 
 const dom = new JSDOM('<!doctype html><body><span tether-cart-count></span><main></main></body>', {
   url: 'https://site.test/',
 });
-Object.assign(globalThis, {
-  window: dom.window,
-  document: dom.window.document,
-  localStorage: dom.window.localStorage,
-  CustomEvent: dom.window.CustomEvent,
-  MutationObserver: dom.window.MutationObserver,
-  Option: dom.window['Option'],
-  getComputedStyle: dom.window.getComputedStyle,
-});
+Object.assign(globalThis, pageGlobals(dom.window));
 
 /** @type {string[]} The handles each products request asked for. */
 const requested = [];
@@ -57,31 +49,18 @@ before(async () => {
 });
 
 /**
- * @param {(selectors: string[]) => Promise<void>} run Given the selectors queried so far.
+ * @param {(queried: () => string[]) => Promise<void>} run Given a reader of the selectors queried so far.
  * @returns {Promise<string[]>} The selectors queried on the whole document while `run` ran.
  */
 async function documentQueries(run) {
-  /** @type {string[]} */
-  const selectors = [];
-  const { querySelectorAll } = document;
-  const spy = mock.method(
-    document,
-    'querySelectorAll',
-    /**
-     * @this {Document}
-     * @param {string} selector
-     */
-    function (selector) {
-      selectors.push(selector);
-      return querySelectorAll.call(this, selector);
-    },
-  );
+  const spy = mock.method(document, 'querySelectorAll');
+  const queried = () => spy.mock.calls.map((call) => call.arguments[0]);
   try {
-    await run(selectors);
+    await run(queried);
+    return queried();
   } finally {
     spy.mock.restore();
   }
-  return selectors;
 }
 
 test('a burst of added cards mounts each card, reads only their hydrate tags and renders the cart once', async () => {
@@ -101,7 +80,7 @@ test('a burst of added cards mounts each card, reads only their hydrate tags and
     await waitFor(
       () =>
         [...main.querySelectorAll('[tether-bind="title"]')].every((title) => title.textContent !== '') &&
-        queried.includes('[tether-cart-count]'),
+        queried().includes('[tether-cart-count]'),
       'the cards and the cart to render',
     );
   });

@@ -27,11 +27,11 @@ MIT licensed · 29 KB gzipped · no dependencies · TypeScript types · [full re
 
 ## Three ways to install
 
-| | Pick it when | How |
-|---|---|---|
-| **Script tag** (jsDelivr) | a static site or Webflow, no build step, no login needed | `<script src="https://cdn.jsdelivr.net/gh/ravi-klaassens/tether@0.7/dist/tether.min.js" defer></script>` ([steps below](#2-add-the-script-to-webflow)) |
-| **npm** | Astro, Vite or another bundler or framework | `npm install @occluze/tether` ([Astro guide](docs/astro.md), [other frameworks](docs/frameworks.md)) |
-| **With the Worker** | you also want the CMS sync, rebuilds when products change, or customer accounts | either of the above, plus your own free Cloudflare Worker ([Worker](server/README.md), [accounts](docs/accounts.md)) |
+|                           | Pick it when                                                                    | How                                                                                                                                                    |
+| ------------------------- | ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Script tag** (jsDelivr) | a static site or Webflow, no build step, no login needed                        | `<script src="https://cdn.jsdelivr.net/gh/ravi-klaassens/tether@0.7/dist/tether.min.js" defer></script>` ([steps below](#2-add-the-script-to-webflow)) |
+| **npm**                   | Astro, Vite or another bundler or framework                                     | `npm install @occluze/tether` ([Astro guide](docs/astro.md), [other frameworks](docs/frameworks.md))                                                   |
+| **With the Worker**       | you also want the CMS sync, rebuilds when products change, or customer accounts | either of the above, plus your own free Cloudflare Worker ([Worker](server/README.md), [accounts](docs/accounts.md))                                   |
 
 The script tag pinned to one release: `…/tether@v0.7.0/dist/tether.min.js`. Its optional parts
 (search, accounts, markets, analytics) load from the same folder when a page uses them, each checked
@@ -73,20 +73,20 @@ Site settings → Custom code → **Head**:
 
 Element → Settings → Custom attributes. The ones you'll use most:
 
-| Attribute | Value | Does |
-|---|---|---|
-| `tether-product` | the Shopify handle (bind it to a CMS field) | Wraps everything for one product |
-| `tether-bind` | `title`, `price`, `compare-at-price`, `description`, `featured-image`, `images`, `link` | Fills text, images and links |
-| `tether-option-list` | an option name, e.g. `Size` | Size/colour buttons (first child is the template) |
-| `tether-add-to-cart` | | Add-to-cart button |
-| `tether-purchase` | `one-time` / `subscription` | Subscribe-or-buy-once toggle |
-| `tether-plan-list` | `all` | The delivery frequencies (first child is the template) |
-| `tether-show` | `in-stock`, `out-of-stock`, `on-sale`, `subscription-selected`, `error`, `not-found` | Shows an element only then |
-| `tether-cart-drawer` | | The cart panel (gets the class `is-open`) |
-| `tether-cart-open` / `tether-cart-close` | | Buttons that open/close it |
-| `tether-cart-count`, `tether-cart-subtotal` | | Cart numbers |
-| `tether-cart-lines` | | The cart lines (first child is the template, with `tether-line="title"` etc.) |
-| `tether-checkout` | | Goes to Shopify checkout |
+| Attribute                                   | Value                                                                                   | Does                                                                          |
+| ------------------------------------------- | --------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| `tether-product`                            | the Shopify handle (bind it to a CMS field)                                             | Wraps everything for one product                                              |
+| `tether-bind`                               | `title`, `price`, `compare-at-price`, `description`, `featured-image`, `images`, `link` | Fills text, images and links                                                  |
+| `tether-option-list`                        | an option name, e.g. `Size`                                                             | Size/colour buttons (first child is the template)                             |
+| `tether-add-to-cart`                        |                                                                                         | Add-to-cart button                                                            |
+| `tether-purchase`                           | `one-time` / `subscription`                                                             | Subscribe-or-buy-once toggle                                                  |
+| `tether-plan-list`                          | `all`                                                                                   | The delivery frequencies (first child is the template)                        |
+| `tether-show`                               | `in-stock`, `out-of-stock`, `on-sale`, `subscription-selected`, `error`, `not-found`    | Shows an element only then                                                    |
+| `tether-cart-drawer`                        |                                                                                         | The cart panel (gets the class `is-open`)                                     |
+| `tether-cart-open` / `tether-cart-close`    |                                                                                         | Buttons that open/close it                                                    |
+| `tether-cart-count`, `tether-cart-subtotal` |                                                                                         | Cart numbers                                                                  |
+| `tether-cart-lines`                         |                                                                                         | The cart lines (first child is the template, with `tether-line="title"` etc.) |
+| `tether-checkout`                           |                                                                                         | Goes to Shopify checkout                                                      |
 
 Everything else (bundles, collections, discount codes, metafields, swatches, recommendations…)
 is in the [attribute reference](docs/reference.md#attribute-reference).

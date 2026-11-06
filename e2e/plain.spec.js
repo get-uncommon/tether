@@ -19,7 +19,7 @@ test('script tag: optional parts load from their own files (search, extras), var
   /** @type {string[]} */
   const parts = [];
   page.on('request', (request) => {
-    const part = request.url().match(/tether\.(\w+)\.min\.js/)?.[1];
+    const part = /tether\.(\w+)\.min\.js/.exec(request.url())?.[1];
     if (part) parts.push(part);
   });
   await page.goto('/plain/?handle=the-h2-snowboard');
@@ -48,13 +48,15 @@ test('GA4: dataLayer gets view_item, add_to_cart and begin_checkout in a real br
   await page.goto('/plain/?handle=the-h2-snowboard');
   await expect(page.locator('#pdp')).toHaveAttribute('tether-state', 'ready');
   await expect
-    .poll(() => page.evaluate(() => (window.dataLayer || []).map((entry) => entry.event).filter(Boolean)))
+    .poll(() => page.evaluate(() => (window.dataLayer ?? []).map((entry) => entry.event).filter(Boolean)))
     .toContain('view_item');
   await page.locator('#pdp [tether-add-to-cart]').click();
   await expect
-    .poll(() => page.evaluate(() => window.dataLayer.map((entry) => entry.event).filter(Boolean)), { timeout: 15000 })
+    .poll(() => page.evaluate(() => (window.dataLayer ?? []).map((entry) => entry.event).filter(Boolean)), {
+      timeout: 15000,
+    })
     .toContain('add_to_cart');
-  const add = await page.evaluate(() => window.dataLayer.find((entry) => entry.event === 'add_to_cart'));
+  const add = await page.evaluate(() => window.dataLayer?.find((entry) => entry.event === 'add_to_cart'));
   assert.ok(add?.ecommerce);
   expect(add.ecommerce.currency).toBe('EUR');
   expect(add.ecommerce.items[0]?.item_name).toMatch(/H2/);
@@ -70,11 +72,11 @@ test('other market on a static page: html.tether-market-pending until the live p
     );
     window.__classes = [];
     // The init script runs before <html> exists: watch the whole document for it.
-    new MutationObserver((list) =>
+    new MutationObserver((list) => {
       list.forEach((mutation) => {
         if (mutation.target === document.documentElement) window.__classes.push(document.documentElement.className);
-      }),
-    ).observe(document, { attributes: true, subtree: true, attributeFilter: ['class'] });
+      });
+    }).observe(document, { attributes: true, subtree: true, attributeFilter: ['class'] });
   });
   await page.goto('/products/the-h2-snowboard/');
   await expect(page.locator('article[tether-product]')).toHaveAttribute('tether-state', 'ready');
@@ -115,23 +117,26 @@ test("Shopify analytics: Shopify's own scripts load, nothing is sent before cons
   test.info().annotations.push({ type: 'before consent', description: `${before} sends` });
 
   // The visitor accepts analytics (what a cookie banner does).
-  await page.evaluate(
-    () =>
-      new Promise((resolve) =>
-        window.Shopify.customerPrivacy.setTrackingConsent(
-          {
-            analytics: true,
-            marketing: false,
-            preferences: true,
-            sale_of_data: false,
-            headlessStorefront: true,
-            checkoutRootDomain: 'hydrogen-preview.myshopify.com',
-            storefrontAccessToken: window.TETHER_CONFIG.token,
-          },
-          () => resolve(undefined),
-        ),
-      ),
-  );
+  await page.evaluate(() => {
+    const privacy = window.Shopify?.customerPrivacy;
+    if (!privacy) throw new Error("Shopify's customer privacy API is not loaded");
+    return new Promise((resolve) => {
+      privacy.setTrackingConsent(
+        {
+          analytics: true,
+          marketing: false,
+          preferences: true,
+          sale_of_data: false,
+          headlessStorefront: true,
+          checkoutRootDomain: 'hydrogen-preview.myshopify.com',
+          storefrontAccessToken: window.TETHER_CONFIG.token,
+        },
+        () => {
+          resolve(undefined);
+        },
+      );
+    });
+  });
   await page.locator('#pdp [tether-add-to-cart]').click();
   await expect(page.locator('[tether-cart-count]')).toHaveText(/[1-9]/, { timeout: 15000 });
   await page.waitForTimeout(3000);
@@ -143,6 +148,6 @@ test("Shopify analytics: Shopify's own scripts load, nothing is sent before cons
     '| after:',
     sent.length,
     '|',
-    (bodies.match(/"event_name":"\w+"/g) || []).join(' '),
+    (bodies.match(/"event_name":"\w+"/g) ?? []).join(' '),
   );
 });

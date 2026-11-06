@@ -216,8 +216,9 @@ test('Tether.config shows the live config and refuses writes, which would skip v
       configView.prefix = 'x"] *';
     }, TypeError);
     assert.throws(() => {
-      // @ts-expect-error -- the write this test expects to throw
-      configView.markets.detect.push('server');
+      const detect = configView.markets?.detect;
+      assert.ok(Array.isArray(detect), 'the configured detect list');
+      detect.push('server');
     }, TypeError);
   });
   assert.equal(cfg.prefix, 'tether');

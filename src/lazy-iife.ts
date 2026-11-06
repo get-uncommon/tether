@@ -34,9 +34,11 @@ import { scopes } from './product.ts';
 import { listSelector } from './collection.ts';
 import { liveLists, liveProducts, mountedProducts, mountProduct, pruneLive, within } from './mounting.ts';
 import { toCountry, toLanguage } from './market-codes.ts';
+import { setCountry } from './page-market.ts';
 import { isHttpsUrl } from './shopify-values.ts';
 import { PART_INTEGRITY } from './part-integrity.ts';
-import type { Parts, PartName, TetherInternals } from './lazy.ts';
+import { isTetherInternals } from './part-registry.ts';
+import type { Parts, PartName } from './lazy.ts';
 
 /**
  * The core exports the parts use, shared instead of bundled twice, by the file name scripts/build.ts maps a part's
@@ -99,6 +101,9 @@ export const coreModules = {
   get 'market-codes.ts'() {
     return [toCountry, toLanguage];
   },
+  get 'page-market.ts'() {
+    return [setCountry];
+  },
   get 'shopify-values.ts'() {
     return [isHttpsUrl];
   },
@@ -149,14 +154,17 @@ function loadScript(name: PartName, folder: string, file: string, integrity: str
     script.async = true;
     applyIntegrity(script, integrity);
     script.onload = () => {
-      const { Tether } = window as { Tether?: TetherInternals };
-      const part = Tether?.__parts[name];
+      const tether: unknown = Reflect.get(window, 'Tether');
+      const part = isTetherInternals(tether) ? tether.__parts[name] : undefined;
       if (part) {
         resolve(part);
         return;
       }
       parts.delete(name);
-      reject(new Error(`${url} did not register`));
+      const problem = isTetherInternals(tether)
+        ? 'did not register'
+        : "can't register: window.Tether is no longer this Tether script's, another script replaced it";
+      reject(new Error(`${url} ${problem}`));
     };
     script.onerror = () => {
       parts.delete(name);

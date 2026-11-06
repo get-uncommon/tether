@@ -32,10 +32,14 @@ const raw = (port, text, { abortWhen } = {}) =>
     });
     let out = '';
     socket.on('data', (chunk) => {
-      out += chunk;
+      out += String(chunk);
     });
-    socket.on('end', () => resolve(out));
-    socket.on('error', () => resolve(out));
+    socket.on('end', () => {
+      resolve(out);
+    });
+    socket.on('error', () => {
+      resolve(out);
+    });
   });
 
 /**

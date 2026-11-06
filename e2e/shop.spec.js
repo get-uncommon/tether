@@ -2,6 +2,12 @@
 import assert from 'node:assert/strict';
 import { test, expect } from '@playwright/test';
 
+/**
+ * @param {unknown} value Parsed JSON.
+ * @returns {value is Record<string, unknown>}
+ */
+const isRecord = (value) => typeof value === 'object' && value !== null && !Array.isArray(value);
+
 /** @param {import('@playwright/test').Request} request */
 const shopify = (request) => /myshopify\.com\/api\/.*graphql/.test(request.url());
 
@@ -72,11 +78,10 @@ test('the cart survives a reload and View Transitions, and checkout goes to Shop
   await expect(page.locator('[tether-cart-count]')).toHaveText(count);
 
   await page.locator('[tether-cart-open]').click();
-  const [checkout] = await Promise.all([
+  await Promise.all([
     page.waitForURL(/checkout\.hydrogen\.shop|\/cart\/c\//, { timeout: 20000 }),
     page.locator('[tether-checkout]').click(),
   ]);
-  void checkout;
   expect(page.url()).toMatch(/checkout\.hydrogen\.shop|\/cart\/c\//);
 });
 
@@ -97,8 +102,13 @@ test('structured data for search engines is in the product page', async ({ page 
   await page.goto('/products/the-h2-snowboard/');
   const json = await page.locator('script[type="application/ld+json"]').textContent();
   assert.ok(json);
+  /** @type {unknown} */
   const data = JSON.parse(json);
+  assert.ok(isRecord(data), 'the structured data is an object');
   expect(['Product', 'ProductGroup']).toContain(data['@type']);
-  const offer = data.offers || data.hasVariant[0].offers;
-  expect(offer.priceCurrency).toBe('EUR');
+  const variants = data['hasVariant'];
+  const offer =
+    data['offers'] || (Array.isArray(variants) && isRecord(variants[0]) ? variants[0]['offers'] : undefined);
+  assert.ok(isRecord(offer), 'the product or its first variant has an offer');
+  expect(offer['priceCurrency']).toBe('EUR');
 });

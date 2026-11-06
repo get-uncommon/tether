@@ -64,6 +64,14 @@ export function isCartGone(error: unknown): boolean {
 }
 
 /**
+ * @returns True when a change failed without saying whether Shopify applied it: no answer came (the network), or a
+ *   server error (5xx), which can come after the change was committed. Shopify's user errors and a 4xx are clear.
+ */
+export function isUnclearFailure(error: unknown): boolean {
+  return error instanceof TetherError && (error.code === 'NETWORK' || (error.status ?? 0) >= 500);
+}
+
+/**
  * @param input A variant id, or a line.
  * @param quantity For a variant id.
  * @param options For a variant id.
@@ -111,7 +119,7 @@ async function send(
   inner: string,
   variables: Record<string, unknown>,
 ): Promise<ShopifyCart | null> {
-  const data = await gql(mutationText(name, args, inner), variables, isPayloadOf(name));
+  const data = await gql(mutationText(name, args, inner), variables, isPayloadOf(name), { operation: 'mutation' });
   const payload = unwrap(data[name], name);
   setWarnings(payload.warnings ?? []);
   return payload.cart;

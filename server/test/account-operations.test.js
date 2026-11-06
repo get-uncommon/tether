@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { BASE } from '../src/account.ts';
 import { MAX_ACCOUNT_BODY_BYTES } from '../src/account/http.ts';
 import { SITE, WORKER, req, loginFlow } from './account-fixtures.js';
-import { recordsAt } from './mocks.js';
+import { asRecord, fieldOf, jsonOf, recordAt, recordsAt, stringAt } from './mocks.js';
 
 test('me / orders: only for the allowed origin, with the cookie', async () => {
   const { run, cookie } = await loginFlow();
@@ -12,11 +12,11 @@ test('me / orders: only for the allowed origin, with the cookie', async () => {
   assert.equal(me.headers.get('access-control-allow-origin'), SITE);
   assert.equal(me.headers.get('access-control-allow-credentials'), 'true');
   assert.equal(me.headers.get('cache-control'), 'no-store');
-  const data = await me.json();
-  assert.equal(data.loggedIn, true);
-  assert.equal(data.customer.email, 'ada@x.test');
+  const data = await jsonOf(me);
+  assert.equal(fieldOf(data, 'loggedIn'), true);
+  assert.equal(fieldOf(recordAt(data, 'customer'), 'email'), 'ada@x.test');
   assert.ok(!JSON.stringify(data).includes('access-'), 'no token in answers');
-  const { orders } = await (await run(req('/orders?first=5', { origin: SITE, cookie }))).json();
+  const orders = fieldOf(await jsonOf(await run(req('/orders?first=5', { origin: SITE, cookie }))), 'orders');
   assert.deepEqual(
     orders,
     [
@@ -34,12 +34,12 @@ test('me / orders: only for the allowed origin, with the cookie', async () => {
     'the parsed order the browser reads, every field present',
   );
   const same = new Request(`${WORKER}${BASE}/me`, { headers: { Cookie: cookie, 'Sec-Fetch-Site': 'same-origin' } });
-  assert.equal((await (await run(same)).json()).loggedIn, true, 'same-origin GET without Origin');
+  assert.equal(fieldOf(await jsonOf(await run(same)), 'loggedIn'), true, 'same-origin GET without Origin');
   const cross = new Request(`${WORKER}${BASE}/me`, { headers: { Cookie: cookie, 'Sec-Fetch-Site': 'cross-site' } });
   assert.equal((await run(cross)).status, 403);
   assert.equal((await run(req('/me', { origin: 'https://evil.example', cookie }))).status, 403);
   assert.equal((await run(req('/me', { cookie }))).status, 403);
-  assert.equal((await (await run(req('/me', { origin: SITE }))).json()).loggedIn, false);
+  assert.equal(fieldOf(await jsonOf(await run(req('/me', { origin: SITE }))), 'loggedIn'), false);
 });
 
 test('a POST without the X-Tether-Account header is refused (CSRF)', async () => {
@@ -73,7 +73,8 @@ test('an account body past the limit is refused with 413 before it is read whole
   assert.equal((await post('/logout', { returnTo: `${SITE}/bye` })).status, 200, 'a small body still logs out');
 });
 
-test('account operations: fixed routes, own data only, CSRF and origin rules, validated input', async () => {
+/** A signed-in customer, with requests from the site to the account routes that carry the session cookie. */
+async function signedIn() {
   const { run, cookie, sh } = await loginFlow();
   /** @param {string} path */
   const get = (path) => run(req(path, { origin: SITE, cookie }));
@@ -83,12 +84,25 @@ test('account operations: fixed routes, own data only, CSRF and origin rules, va
    * @param {{ header?: boolean }} [opts]
    */
   const post = (path, body, opts = {}) => run(req(path, { method: 'POST', origin: SITE, cookie, body, ...opts }));
-  /** @param {Response} response */
-  const body = async (response) => ({ status: response.status, ...(await response.json()) });
+  /**
+   * @param {Response} response
+   * @returns {Promise<Record<string, unknown>>}
+   */
+  const body = async (response) => ({ status: response.status, ...asRecord(await jsonOf(response), 'the answer') });
+  return { run, cookie, sh, get, post, body };
+}
+
+/** @param {{ calls: import('./account-fixtures.js').ShopifyCall[] }} sh */
+const usedOwnToken = (sh) => {
+  assert.ok(sh.calls.filter((call) => call.op).every((call) => (call.auth ?? '').startsWith('access-')));
+};
+
+test("account operations: orders, addresses and the profile are the customer's own, with validated input", async () => {
+  const { get, post, body, sh } = await signedIn();
 
   // Order detail: own order, numeric id accepted; someone else's order is null; a wrong id type is refused.
-  assert.equal((await body(await get('/order?id=1'))).order.name, '#1001');
-  assert.equal((await body(await get('/order?id=gid://shopify/Order/2'))).order, null);
+  assert.equal(fieldOf(recordAt(await body(await get('/order?id=1')), 'order'), 'name'), '#1001');
+  assert.equal((await body(await get('/order?id=gid://shopify/Order/2')))['order'], null);
   assert.equal((await get('/order?id=gid://shopify/Customer/1')).status, 400);
   assert.equal((await get('/order?id=1%20OR%201')).status, 400);
 
@@ -104,13 +118,13 @@ test('account operations: fixed routes, own data only, CSRF and origin rules, va
       isDefault: true,
     }),
   );
-  assert.equal(created.address.city, 'Leiden');
+  assert.equal(fieldOf(recordAt(created, 'address'), 'city'), 'Leiden');
   const sent = sh.calls.findLast((call) => call.op === 'TetherAddressCreate')?.variables;
   assert.deepEqual(sent?.['address'], { address1: 'Breestraat 1', city: 'Leiden', countryCode: 'NL' });
-  assert.equal(sent?.['default'], true);
+  assert.equal(sent['default'], true);
   const invalid = await body(await post('/address', { address: { address1: 'No city' } }));
-  assert.equal(invalid.status, 400);
-  assert.match(invalid.error, /City is required/);
+  assert.equal(invalid['status'], 400);
+  assert.match(stringAt(invalid, 'error'), /City is required/);
   assert.equal((await post('/address', { address: { city: 'x'.repeat(300) } })).status, 400);
   assert.equal(
     (await post('/address', { address: { city: 'X' }, id: 'gid://shopify/Order/1' })).status,
@@ -118,7 +132,7 @@ test('account operations: fixed routes, own data only, CSRF and origin rules, va
     'wrong id type',
   );
   assert.equal(
-    (await body(await post('/address/delete', { id: 'gid://shopify/CustomerAddress/2' }))).deleted,
+    (await body(await post('/address/delete', { id: 'gid://shopify/CustomerAddress/2' })))['deleted'],
     'gid://shopify/CustomerAddress/2',
   );
 
@@ -128,17 +142,30 @@ test('account operations: fixed routes, own data only, CSRF and origin rules, va
     firstName: 'Ada',
     lastName: 'Lovelace',
   });
+  usedOwnToken(sh);
+});
 
+test("account operations: subscription actions only on the customer's own contract; returns are validated", async () => {
+  const { get, post, body, sh } = await signedIn();
   // Subscriptions: list; actions only on the customer's own contract, looked up through the customer first.
-  assert.equal((await body(await get('/subscriptions'))).subscriptions[0].status, 'ACTIVE');
-  assert.equal((await body(await post('/subscription', { id: 1, action: 'pause' }))).contract.status, 'PAUSED');
-  assert.equal((await body(await post('/subscription', { id: 1, action: 'resume' }))).contract.status, 'ACTIVE');
+  assert.equal(fieldOf(recordsAt(await body(await get('/subscriptions')), 'subscriptions')[0], 'status'), 'ACTIVE');
   assert.equal(
-    (await body(await post('/subscription', { id: 1, action: 'skip' }))).billingCycle.cycleIndex,
+    fieldOf(recordAt(await body(await post('/subscription', { id: 1, action: 'pause' })), 'contract'), 'status'),
+    'PAUSED',
+  );
+  assert.equal(
+    fieldOf(recordAt(await body(await post('/subscription', { id: 1, action: 'resume' })), 'contract'), 'status'),
+    'ACTIVE',
+  );
+  assert.equal(
+    fieldOf(recordAt(await body(await post('/subscription', { id: 1, action: 'skip' })), 'billingCycle'), 'cycleIndex'),
     3,
     'skips the next unskipped cycle',
   );
-  assert.equal((await body(await post('/subscription', { id: 1, action: 'cancel' }))).contract.status, 'CANCELLED');
+  assert.equal(
+    fieldOf(recordAt(await body(await post('/subscription', { id: 1, action: 'cancel' })), 'contract'), 'status'),
+    'CANCELLED',
+  );
   const before = sh.calls.length;
   const foreign = await post('/subscription', { id: 'gid://shopify/SubscriptionContract/2', action: 'cancel' });
   assert.equal(foreign.status, 404, "not the customer's contract");
@@ -147,17 +174,22 @@ test('account operations: fixed routes, own data only, CSRF and origin rules, va
 
   // Returns: validated lines.
   assert.equal(
-    (await body(await post('/return', { orderId: 1, lines: [{ lineItemId: 1, quantity: 1, note: 'Too big' }] }))).return
-      .status,
+    fieldOf(
+      recordAt(
+        await body(await post('/return', { orderId: 1, lines: [{ lineItemId: 1, quantity: 1, note: 'Too big' }] })),
+        'return',
+      ),
+      'status',
+    ),
     'REQUESTED',
   );
   assert.equal((await post('/return', { orderId: 1, lines: [{ lineItemId: 1, quantity: 0 }] })).status, 400);
   assert.equal((await post('/return', { orderId: 1, lines: [] })).status, 400);
+  usedOwnToken(sh);
+});
 
-  // Every call used the session's own token.
-  assert.ok(sh.calls.filter((call) => call.op).every((call) => /^access-/.test(call.auth ?? '')));
-
-  // CSRF and origin: no header -> refused; other origin -> refused; no cookie -> 401; GET-only routes refuse POST.
+test('account operations: the CSRF header, origin, cookie and method rules refuse before Shopify', async () => {
+  const { run, cookie, post, sh } = await signedIn();
   const callsBefore = sh.calls.length;
   assert.equal((await post('/subscription', { id: 1, action: 'cancel' }, { header: false })).status, 400);
   assert.equal(

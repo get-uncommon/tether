@@ -53,14 +53,14 @@ domain such as `account.your-shop.com`.
 
 Then the Worker's secrets (Settings → Variables and Secrets):
 
-| Secret | Value |
-|---|---|
-| `ACCOUNT_CLIENT_ID` | the Client ID |
-| `ACCOUNT_CLIENT_SECRET` | the client secret (Confidential client only) |
-| `ACCOUNT_ORIGINS` | your site, e.g. `https://your-shop.com` (more with commas) |
-| `STOREFRONT_TOKEN` | the public Storefront token (to link carts, so checkout knows the customer) |
-| `ACCOUNT_SECRET` | required, 24+ random characters (`openssl rand -hex 24`), not the same as `SYNC_SECRET`: the sessions' encryption keys come from it. Without it, or with the value of `SYNC_SECRET`, the account routes answer 503. Changing it logs every customer out once |
-| `ACCOUNT_SESSION_DAYS` | optional, how long a login lasts at most (default 14) |
+| Secret                  | Value                                                                                                                                                                                                                                                        |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `ACCOUNT_CLIENT_ID`     | the Client ID                                                                                                                                                                                                                                                |
+| `ACCOUNT_CLIENT_SECRET` | the client secret (Confidential client only)                                                                                                                                                                                                                 |
+| `ACCOUNT_ORIGINS`       | your site, e.g. `https://your-shop.com` (more with commas)                                                                                                                                                                                                   |
+| `STOREFRONT_TOKEN`      | the public Storefront token (to link carts, so checkout knows the customer)                                                                                                                                                                                  |
+| `ACCOUNT_SECRET`        | required, 24+ random characters (`openssl rand -hex 24`), not the same as `SYNC_SECRET`: the sessions' encryption keys come from it. Without it, or with the value of `SYNC_SECRET`, the account routes answer 503. Changing it logs every customer out once |
+| `ACCOUNT_SESSION_DAYS`  | optional, how long a login lasts at most (default 14)                                                                                                                                                                                                        |
 
 `SHOPIFY_DOMAIN` is already set. The Worker's `/check` (e.g. `https://tether-sync.your-name.workers.dev/check`,
 with `Authorization: Bearer YOUR_SYNC_SECRET`) says whether accounts are set up, what is missing,
@@ -266,13 +266,13 @@ Worker answers only these fixed operations, on purpose.
 
 Failures are `TetherError`s with a `code`:
 
-| `code` | When |
-|---|---|
-| `NOT_LOGGED_IN` | an action that needs a customer (order, profile, addresses, subscriptions, returns) while nobody is logged in |
-| `INVALID` | Shopify or the Worker refused the input; Shopify's messages (e.g. "Zip is invalid") are in `err.userErrors`. Also `orders({ first })` with a `first` that isn't a whole number from 1 to 50, before any request |
-| `NETWORK` | the Worker or Shopify couldn't be reached |
-| `HTTP_<status>` | the Worker answered with another error, e.g. `HTTP_502` when Shopify failed behind it, or `HTTP_503` while accounts aren't set up (its `/check` says what is missing) |
-| `NOT_CONFIGURED` | `account.server` isn't set |
+| `code`           | When                                                                                                                                                                                                            |
+| ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `NOT_LOGGED_IN`  | an action that needs a customer (order, profile, addresses, subscriptions, returns) while nobody is logged in                                                                                                   |
+| `INVALID`        | Shopify or the Worker refused the input; Shopify's messages (e.g. "Zip is invalid") are in `err.userErrors`. Also `orders({ first })` with a `first` that isn't a whole number from 1 to 50, before any request |
+| `NETWORK`        | the Worker or Shopify couldn't be reached                                                                                                                                                                       |
+| `HTTP_<status>`  | the Worker answered with another error, e.g. `HTTP_502` when Shopify failed behind it, or `HTTP_503` while accounts aren't set up (its `/check` says what is missing)                                           |
+| `NOT_CONFIGURED` | `account.server` isn't set                                                                                                                                                                                      |
 
 ### Events
 

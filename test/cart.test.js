@@ -1,4 +1,4 @@
-// The cart on its own: status, queue, expired carts, checkout and the drawer's focus trap.
+// The cart on its own: status, queue, expired carts, failed changes and checkout.
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
@@ -30,11 +30,10 @@ Object.assign(globalThis, {
 });
 
 const { configure } = await import('../src/config.ts');
-const { Cart, trapFocus } = await import('../src/cart.ts');
+const { Cart } = await import('../src/cart.ts');
 const { serial } = await import('../src/cart/store.ts');
 const { isCartGone } = await import('../src/cart/mutations.ts');
 const { TetherError } = await import('../src/client.ts');
-const { isGreaterAmount } = await import('../src/amounts.ts');
 
 const KEY = 'tether:cart:shop.test';
 const VARIANT = product.variants.nodes[0]?.id ?? '';
@@ -57,7 +56,7 @@ globalThis.fetch = async (_url, init) => {
   const answer = answers[op];
   if (!answer) throw new Error(`unexpected op ${op}`);
   const body = await answer(variables);
-  return jsonResponse(body);
+  return body instanceof Response ? body : jsonResponse(body);
 };
 
 /**
@@ -207,6 +206,90 @@ test('expired cart: a query answering cart: null forgets the saved cart', async 
   assert.equal(reported.length, 0, 'an expired cart is not a failure');
 });
 
+test('a saved value that is not a cart id is forgotten unsent, and the next add starts a new cart', async () => {
+  localStorage.setItem(KEY, 'gid://shopify/Cart/abc") { id } } #');
+  assert.equal(Cart.id(), null);
+  assert.equal(localStorage.getItem(KEY), null);
+  await Cart.init();
+  assert.equal(calls.length, 0);
+
+  localStorage.setItem(KEY, 'not a cart');
+  answers['Tether_cartCreate'] = () => payload('cartCreate', oneLine());
+  await Cart.add(VARIANT);
+  assert.deepEqual(
+    calls.map((call) => call.op),
+    ['Tether_cartCreate'],
+  );
+  assert.equal(Cart.id(), 'gid://shopify/Cart/abc');
+  localStorage.setItem(KEY, 'gid://shopify/Cart/c1-7a2abe82?key=2c3f9d');
+  assert.equal(Cart.id(), 'gid://shopify/Cart/c1-7a2abe82?key=2c3f9d', 'a cart id with its key is kept');
+});
+
+test('a change without a clear answer is not sent again, and the cart is loaded again to show what Shopify has', async () => {
+  const lostAnswers = [
+    { code: 'HTTP_504', lost: () => new Response('Gateway Timeout', { status: 504 }) },
+    {
+      code: 'NETWORK',
+      lost: () => {
+        throw new TypeError('Failed to fetch');
+      },
+    },
+  ];
+  for (const { code, lost } of lostAnswers) {
+    await loadSaved(oneLine());
+    calls.length = 0;
+    answers['Tether_cartLinesAdd'] = lost;
+    // Shopify made the change; only its answer was lost.
+    answers['TetherCart'] = () => ({ data: { cart: oneLine(2) } });
+    await assert.rejects(Cart.add(VARIANT), { code });
+    assert.deepEqual(
+      calls.map((call) => call.op),
+      ['Tether_cartLinesAdd', 'TetherCart'],
+      code,
+    );
+    assert.equal(Cart.count, 2, `${code}: the cart Shopify has`);
+    assert.equal(Cart.status.kind, 'error', `${code}: the change still failed`);
+  }
+  answers['TetherCart'] = () => new Response('{}', { status: 400 });
+  await assert.rejects(Cart.add(VARIANT), { code: 'NETWORK' });
+  assert.equal(Cart.count, 2, 'a failed reload keeps the cart');
+  assert.equal(reported.at(-1)?.context, 'cart reload after a failed change');
+});
+
+test('a clear refusal (user errors, a 4xx) loads nothing more: the cart stays as Shopify last sent it', async () => {
+  const refusals = [
+    () => payload('cartLinesAdd', null, [{ field: ['lines'], message: 'Sold out' }]),
+    () => new Response('{}', { status: 400 }),
+  ];
+  for (const refusal of refusals) {
+    await loadSaved(oneLine());
+    calls.length = 0;
+    answers['Tether_cartLinesAdd'] = refusal;
+    await assert.rejects(Cart.add(VARIANT));
+    assert.deepEqual(
+      calls.map((call) => call.op),
+      ['Tether_cartLinesAdd'],
+    );
+    assert.equal(Cart.count, 1);
+  }
+});
+
+test('a cart load is retried after a 5xx: it changes nothing', async () => {
+  await loadSaved(oneLine());
+  calls.length = 0;
+  let loads = 0;
+  answers['TetherCart'] = () => {
+    loads += 1;
+    return loads === 1 ? new Response('Gateway Timeout', { status: 504 }) : { data: { cart: oneLine(2) } };
+  };
+  await Cart.init();
+  assert.equal(Cart.count, 2);
+  assert.deepEqual(
+    calls.map((call) => call.op),
+    ['TetherCart', 'TetherCart'],
+  );
+});
+
 test('forgetSaved: drops the saved cart and shows an empty one, as a load of no cart does', async () => {
   localStorage.setItem(KEY, 'gid://shopify/Cart/abc');
   answers['TetherCart'] = () => ({ data: { cart: oneLine(2) } });
@@ -347,46 +430,4 @@ test('lastError is read-only: the store decides it', () => {
     // @ts-expect-error -- the assignment this test expects to throw
     Cart.lastError = new Error('x');
   }, TypeError);
-});
-
-test('trapFocus: Tab wraps inside the open drawer and goes in from outside', () => {
-  // jsdom has no layout, so no element counts as visible without this.
-  const layout = Object.getOwnPropertyDescriptor(window.HTMLElement.prototype, 'offsetParent');
-  assert.ok(layout);
-  Object.defineProperty(window.HTMLElement.prototype, 'offsetParent', {
-    configurable: true,
-    get() {
-      return document.body;
-    },
-  });
-  document.body.innerHTML = `<button id="out">x</button>
-    <div tether-cart-drawer><button id="first">a</button><button id="last">b</button></div>`;
-  Cart.open();
-  const tab = (shiftKey = false) => {
-    const event = new window.KeyboardEvent('keydown', { key: 'Tab', shiftKey, cancelable: true });
-    trapFocus(event);
-    return event.defaultPrevented;
-  };
-  find('#last').focus();
-  assert.equal(tab(), true);
-  assert.equal(document.activeElement?.id, 'first');
-  assert.equal(tab(), false, 'Tab between the two stays with the browser');
-  assert.equal(tab(true), true);
-  assert.equal(document.activeElement?.id, 'last');
-  find('#out').focus();
-  assert.equal(tab(), true);
-  assert.equal(document.activeElement?.id, 'first');
-  Cart.close();
-  find('#out').focus();
-  assert.equal(tab(), false, 'a closed cart traps nothing');
-  Object.defineProperty(window.HTMLElement.prototype, 'offsetParent', layout);
-});
-
-test('money: amounts compare as decimals, so a line is on sale only when it is', () => {
-  assert.equal(isGreaterAmount('30.0', '27'), true);
-  assert.equal(isGreaterAmount('27.50', '27.5'), false);
-  assert.equal(isGreaterAmount('0.30', '0.1'), true);
-  assert.equal(isGreaterAmount('100000000000000000.02', '100000000000000000.01'), true, 'past float precision');
-  assert.equal(isGreaterAmount(null, '1'), false);
-  assert.equal(isGreaterAmount('abc', '1'), false);
 });

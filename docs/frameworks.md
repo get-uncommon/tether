@@ -35,12 +35,12 @@ Tether.unmount();
 - A plain `<script>` tag with `window.TETHER_CONFIG` starts by itself (the [README](../README.md) setup);
   with `autoMount: false` in it, call `Tether.mount()` yourself.
 
-| Framework | Where |
-|---|---|
-| Next.js (App Router) | A client component in the root layout: `useEffect(() => { Tether.init(config) }, [])`, and an effect on `usePathname()` + search params that calls `Tether.mount(main)`, with `Tether.unmount()` as its cleanup |
-| SvelteKit | `+layout.svelte`: `onMount` → `init`; `afterNavigate` → `mount(main)`; `onNavigate` → `unmount()`. Wrap the page in `{#key $page.url}` so Svelte never patches nodes Tether changed |
-| Vite / plain JS | `init()` in your entry, `mount()` after you render a part of the page |
-| Eleventy / any static generator | The script tag from the README, or copy `node_modules/@occluze/tether/dist/tether.min.js` (and the two optional parts next to it) to your output, so the browser runs the same version as the server module |
+| Framework                       | Where                                                                                                                                                                                                           |
+| ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Next.js (App Router)            | A client component in the root layout: `useEffect(() => { Tether.init(config) }, [])`, and an effect on `usePathname()` + search params that calls `Tether.mount(main)`, with `Tether.unmount()` as its cleanup |
+| SvelteKit                       | `+layout.svelte`: `onMount` → `init`; `afterNavigate` → `mount(main)`; `onNavigate` → `unmount()`. Wrap the page in `{#key $page.url}` so Svelte never patches nodes Tether changed                             |
+| Vite / plain JS                 | `init()` in your entry, `mount()` after you render a part of the page                                                                                                                                           |
+| Eleventy / any static generator | The script tag from the README, or copy `node_modules/@occluze/tether/dist/tether.min.js` (and the two optional parts next to it) to your output, so the browser runs the same version as the server module     |
 
 **React / JSX:** value-less attributes need a value: `<button tether-add-to-cart="">`. Keep Tether's
 classes (`is-open`, `is-selected`) out of `className` you control on the same element, or React

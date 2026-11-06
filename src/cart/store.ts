@@ -8,6 +8,7 @@ import { emit } from '../dom.ts';
 import { isOpen } from './drawer.ts';
 import { renderCart, quantityOf, showSavedCount } from './render.ts';
 import { getStored, removeStored, setStored } from '../storage.ts';
+import { CART_ID } from '../../server/src/shared/cart-id.ts';
 import type { CartWarning } from '../config.ts';
 import type { Image } from '../fragments.ts';
 import type { Money } from '../shopify-values.ts';
@@ -133,8 +134,17 @@ const statusOf = (cart: ShopifyCart | null): CartStatus => (cart ? { kind: 'read
 
 const seenKey = () => `${cfg.storageKey}:seen`;
 
-/** The id of the visitor's cart, kept across pages. */
-export const savedCartId = (): string | null => getStored(cfg.storageKey) || null;
+/**
+ * The id of the visitor's cart, kept across pages. A stored value that isn't a cart id (written by another script,
+ * or edited by hand) is forgotten, so it is never sent to Shopify or the Worker and the next change starts a new cart.
+ */
+export function savedCartId(): string | null {
+  const stored = getStored(cfg.storageKey);
+  if (!stored) return null;
+  if (CART_ID.test(stored)) return stored;
+  forgetSavedCart();
+  return null;
+}
 
 /** Forgets the saved cart, which Shopify no longer has. */
 export function forgetSavedCart(): void {

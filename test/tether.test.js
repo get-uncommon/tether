@@ -13,19 +13,12 @@ import {
   PLAN_2MONTH,
   PLAN_MONTH,
   product,
+  pageGlobals,
 } from './fixtures.js';
 import { listAt, recordAt, recordsAt, stringAt, waitFor } from '../server/test/mocks.js';
 
 const dom = new JSDOM('<!doctype html><body></body>', { url: 'https://site.test/product/coffee-box' });
-Object.assign(globalThis, {
-  window: dom.window,
-  document: dom.window.document,
-  localStorage: dom.window.localStorage,
-  CustomEvent: dom.window.CustomEvent,
-  MutationObserver: dom.window.MutationObserver,
-  Option: dom.window['Option'],
-  getComputedStyle: dom.window.getComputedStyle,
-});
+Object.assign(globalThis, pageGlobals(dom.window));
 
 // ---- fake Storefront API ---------------------------------------------------
 /** @type {({ op: string } & ReturnType<typeof graphqlRequest>)[]} */
@@ -139,7 +132,7 @@ test('selling plan helpers', () => {
   const [v250, v1kg] = product.variants.nodes;
   assert.equal(plans.allPlans(product).length, 2);
   assert.equal(plans.planPrice(v250, PLAN_MONTH)?.amount, '27');
-  assert.deepEqual(plans.planSavings(v250, PLAN_MONTH)?.percentage, 10);
+  assert.deepEqual(plans.planSavings(v250, PLAN_MONTH).percentage, 10);
   assert.equal(plans.allocationFor(v1kg, PLAN_MONTH), null);
   assert.equal(plans.plansForVariant(product, v1kg).length, 1);
   assert.equal(plans.findPlan(product, 'every month')?.id, PLAN_MONTH);

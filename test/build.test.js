@@ -5,8 +5,8 @@ import { JSDOM, VirtualConsole } from 'jsdom';
 import { readFile } from 'node:fs/promises';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { find, graphqlRequest, jsonResponse, operationName, product } from './fixtures.js';
-import { waitFor } from '../server/test/mocks.js';
+import { builtTether, find, graphqlRequest, jsonResponse, operationName, partsOf, product } from './fixtures.js';
+import { fieldOf, waitFor } from '../server/test/mocks.js';
 
 const DIST = join(dirname(fileURLToPath(import.meta.url)), '..', '.test-dist');
 /** @type {import('jsdom').DOMWindow} */
@@ -63,9 +63,11 @@ before(async () => {
     },
   });
   win = dom.window;
-  await new Promise((resolve) => win.addEventListener('load', resolve));
+  await new Promise((resolve) => {
+    win.addEventListener('load', resolve);
+  });
   await waitFor(
-    () => Boolean(win['Tether']?.__parts?.markets) && (win.document.querySelector('select')?.options.length ?? 0) > 1,
+    () => Boolean(partsOf(win)?.markets) && (win.document.querySelector('select')?.options.length ?? 0) > 1,
     'the markets part (its own file) to fill the country select',
   );
 });
@@ -84,13 +86,13 @@ test('the markets part loads from its own file when the page has a country selec
     [...select.options].map((option) => option.value),
     ['DE', 'NL'],
   );
-  assert.ok([...win.document.scripts].some((script) => /tether\.markets\.min\.js$/.test(script.src)));
-  assert.ok(win['Tether'].__parts.markets, 'registered');
+  assert.ok([...win.document.scripts].some((script) => script.src.endsWith('tether.markets.min.js')));
+  assert.ok(partsOf(win)?.markets, 'registered');
 });
 
 test('a part beside the core loads with the integrity hash of the file built with it', async () => {
   const { createHash } = await import('node:crypto');
-  const script = [...win.document.scripts].find((element) => /tether\.markets\.min\.js$/.test(element.src));
+  const script = [...win.document.scripts].find((element) => element.src.endsWith('tether.markets.min.js'));
   assert.ok(script, 'the markets part has a script');
   const file = await readFile(join(DIST, 'tether.markets.min.js'));
   assert.equal(script.integrity, `sha384-${createHash('sha384').update(file).digest('base64')}`);
@@ -98,11 +100,11 @@ test('a part beside the core loads with the integrity hash of the file built wit
 });
 
 test('the diagnose part loads on first call and shares the core (same config, same cache)', async () => {
-  assert.ok(![...win.document.scripts].some((script) => /diagnose/.test(script.src)), 'not loaded up front');
-  const report = await win['Tether'].diagnose({ silent: true });
+  assert.ok(![...win.document.scripts].some((script) => script.src.includes('diagnose')), 'not loaded up front');
+  const report = await builtTether(win).diagnose({ silent: true });
   assert.equal(report.reachable, true);
-  assert.equal(report.config.domain, 'shop.test');
-  assert.equal(report.products[0].title, 'Coffee Box');
+  assert.equal(report.config['domain'], 'shop.test');
+  assert.equal(fieldOf(report.products[0], 'title'), 'Coffee Box');
   assert.ok(ops.filter((sent) => sent.op === 'TetherProducts').length === 1, 'diagnose used the cached product');
 });
 
@@ -141,10 +143,14 @@ test('e2e static server: stays inside its folders and listens on loopback only',
       );
       let out = '';
       socket.on('data', (chunk) => {
-        out += chunk;
+        out += String(chunk);
       });
-      socket.on('end', () => resolve(out));
-      socket.on('error', () => resolve('ERR'));
+      socket.on('end', () => {
+        resolve(out);
+      });
+      socket.on('error', () => {
+        resolve('ERR');
+      });
     });
   try {
     let first = 'ERR';
@@ -174,7 +180,7 @@ test('the release attests the server asset the sync Worker updater installs, by 
   assert.ok(workflow.includes('-o "tether-server-$V.tar.gz" HEAD -- server'), 'the archive of the tagged server/');
   assert.match(workflow, /uses: actions\/attest-build-provenance@[0-9a-f]{40} #/, 'attested, pinned by commit');
   assert.match(workflow, /subject-path: \$\{\{ env\.SERVER_ASSET \}\}/);
-  assert.match(workflow, /--latest "\$\{assets\[@\]\}" "\$SERVER_ASSET"/, 'uploaded to the GitHub Release');
+  assert.match(workflow, /--latest="\$LATEST" "\$\{assets\[@\]\}" "\$SERVER_ASSET"/, 'uploaded to the GitHub Release');
 });
 
 /**
@@ -197,7 +203,7 @@ test('the release installs dependencies only in a job that can read the reposito
   const workflow = await readFile(new URL('../.github/workflows/release.yml', import.meta.url), 'utf8');
   assert.match(workflow, /^permissions: \{\}$/m, 'no job gets a permission it does not name');
   const jobs = workflowJobs(workflow);
-  assert.deepEqual([...jobs.keys()], ['check', 'server-asset', 'npm', 'github-release']);
+  assert.deepEqual([...jobs.keys()], ['check', 'server-asset', 'channel', 'github-release', 'npm']);
   const check = jobs.get('check') ?? '';
   assert.match(check, /permissions:\n {6}contents: read\n {4}steps:/, 'the check job only reads');
   assert.match(check, /- run: npm ci\n/);
@@ -205,10 +211,44 @@ test('the release installs dependencies only in a job that can read the reposito
   for (const [name, job] of jobs) {
     if (name === 'check') continue;
     assert.doesNotMatch(job, /npm ci|npm run |run: npm install(?! -g npm@)/, `${name} runs no dependency's code`);
-    assert.match(job, /persist-credentials: false/, `${name} keeps no token in the checkout`);
+    if (job.includes('uses: actions/checkout@')) {
+      assert.match(job, /persist-credentials: false/, `${name} keeps no token in the checkout`);
+    }
   }
-  const signers = [...jobs].filter(([, job]) => /id-token: write/.test(job)).map(([name]) => name);
+  const signers = [...jobs].filter(([, job]) => job.includes('id-token: write')).map(([name]) => name);
   assert.deepEqual(signers, ['server-asset', 'npm']);
   assert.match(jobs.get('server-asset') ?? '', /attestations: write/);
-  assert.match(jobs.get('npm') ?? '', /npm publish --provenance --access public --ignore-scripts/);
+  assert.match(jobs.get('npm') ?? '', /npm publish --provenance --access public --ignore-scripts --tag "\$NPM_TAG"/);
+});
+
+test('the release creates the GitHub Release, which deployed copies wait for, before it publishes to npm', async () => {
+  const jobs = workflowJobs(await readFile(new URL('../.github/workflows/release.yml', import.meta.url), 'utf8'));
+  assert.match(jobs.get('github-release') ?? '', /needs: \[server-asset, channel\]/);
+  assert.match(jobs.get('npm') ?? '', /needs: \[github-release, channel\]/);
+});
+
+test("the smoke workflow's issue token is in a job that checks nothing out and runs no dependency", async () => {
+  const workflow = await readFile(new URL('../.github/workflows/smoke.yml', import.meta.url), 'utf8');
+  assert.match(workflow, /^permissions: \{\}$/m);
+  const jobs = workflowJobs(workflow);
+  assert.deepEqual([...jobs.keys()], ['smoke', 'report']);
+  const smoke = jobs.get('smoke') ?? '';
+  assert.match(smoke, /permissions:\n {6}contents: read\n {4}outputs:/, 'the smoke job only reads');
+  assert.match(smoke, /package-manager-cache: false/, 'no dependency cache from another run');
+  const report = jobs.get('report') ?? '';
+  assert.match(report, /permissions:\n {6}issues: write\n {4}steps:/);
+  assert.doesNotMatch(report, /uses: |npm |node /, 'the report job runs no code of the repository or its dependencies');
+});
+
+test('only the newest release tag is marked latest, on GitHub and on npm', async () => {
+  const jobs = workflowJobs(await readFile(new URL('../.github/workflows/release.yml', import.meta.url), 'utf8'));
+  const channel = jobs.get('channel') ?? '';
+  assert.match(channel, /permissions:\n {6}contents: read\n/);
+  assert.match(channel, /sort -V \| tail -n 1\)\n {10}if \[ "\$newest" = "\$V" \]; then\n/);
+  assert.match(
+    channel,
+    /echo "latest=true"[^]*echo "npm-tag=latest"[^]*else[^]*echo "latest=false"[^]*echo "npm-tag=latest-\$\{V%\.\*\}"/,
+  );
+  assert.match(jobs.get('github-release') ?? '', /LATEST: \$\{\{ needs\.channel\.outputs\.latest \}\}/);
+  assert.match(jobs.get('npm') ?? '', /NPM_TAG: \$\{\{ needs\.channel\.outputs\.npm-tag \}\}/);
 });

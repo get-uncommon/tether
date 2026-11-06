@@ -1,19 +1,11 @@
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
-import { detailOf, find, jsonResponse } from './fixtures.js';
+import { detailOf, find, jsonResponse, pageGlobals } from './fixtures.js';
+import { urlOf } from '../server/test/mocks.js';
 
 const dom = new JSDOM('<!doctype html><body></body>', { url: 'https://site.test/account' });
-Object.assign(globalThis, {
-  window: dom.window,
-  document: dom.window.document,
-  localStorage: dom.window.localStorage,
-  sessionStorage: dom.window.sessionStorage,
-  CustomEvent: dom.window.CustomEvent,
-  MutationObserver: dom.window.MutationObserver,
-  Option: dom.window['Option'],
-  getComputedStyle: dom.window.getComputedStyle,
-});
+Object.assign(globalThis, { ...pageGlobals(dom.window), sessionStorage: dom.window.sessionStorage });
 
 const { configure } = await import('../src/config.ts');
 const { Cart } = await import('../src/cart.ts');
@@ -47,11 +39,15 @@ async function eventsDuring(run) {
   const names = ['tether:account-login', 'tether:account-error'];
   /** @param {Event} event */
   const listener = (event) => seen.push({ name: event.type, detail: detailOf(event) });
-  names.forEach((name) => document.addEventListener(name, listener));
+  names.forEach((name) => {
+    document.addEventListener(name, listener);
+  });
   try {
     await run();
   } finally {
-    names.forEach((name) => document.removeEventListener(name, listener));
+    names.forEach((name) => {
+      document.removeEventListener(name, listener);
+    });
   }
   return seen;
 }
@@ -111,8 +107,8 @@ test('a 401 is a logout, not a failure; a failing checkout link is left to the c
     '/cart': () => jsonResponse({ error: 'Shopify is down' }, 502),
   };
   globalThis.fetch = async (url) => {
-    const answer = answers[new URL(String(url)).pathname.replace('/_tether/account', '')];
-    assert.ok(answer, `no answer for ${String(url)}`);
+    const answer = answers[new URL(urlOf(url)).pathname.replace('/_tether/account', '')];
+    assert.ok(answer, `no answer for ${urlOf(url)}`);
     return answer();
   };
   assert.deepEqual(await account.orders(), []);
@@ -199,7 +195,7 @@ test('orders({ first }) takes a whole number from 1 to 50, checked before any re
   /** @type {string[]} */
   const asked = [];
   globalThis.fetch = async (url) => {
-    asked.push(String(url));
+    asked.push(urlOf(url));
     return jsonResponse({ orders: [] });
   };
   configure({ ...testConfig(), account: SERVER });
@@ -212,8 +208,8 @@ test('orders({ first }) takes a whole number from 1 to 50, checked before any re
   await account.orders({ first: 50 });
   document.body.innerHTML = '<div tether-orders tether-limit="100"><a></a></div>';
   globalThis.fetch = async (url) => {
-    asked.push(String(url));
-    return new URL(String(url)).pathname.endsWith('/me')
+    asked.push(urlOf(url));
+    return new URL(urlOf(url)).pathname.endsWith('/me')
       ? jsonResponse({ loggedIn: true, customer: ADA })
       : jsonResponse({ orders: [] });
   };
@@ -228,7 +224,7 @@ test('orders({ first }) takes a whole number from 1 to 50, checked before any re
 test('an answer without the ids the page acts on is an error, other fields read as null', async () => {
   configure({ ...testConfig(), account: SERVER });
   globalThis.fetch = async (url) =>
-    new URL(String(url)).pathname.endsWith('/orders')
+    new URL(urlOf(url)).pathname.endsWith('/orders')
       ? jsonResponse({ orders: [{ id: 'gid://shopify/Order/1', name: 7, lineItems: { nodes: [{ title: 'Tee' }] } }] })
       : jsonResponse({ order: { name: '#1' } });
   const [first] = await account.orders();

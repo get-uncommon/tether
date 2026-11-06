@@ -33,7 +33,9 @@ test('barba preset: layout changes resize Lenis and refresh ScrollTrigger, an in
   /** @type {string[]} */
   const log = [];
   /** @param {import('../src/presets/barba.ts').BarbaPresetOptions} options */
-  const layoutChange = (options) => barbaPreset(options).onLayoutChange('x');
+  const layoutChange = (options) => {
+    barbaPreset(options).onLayoutChange('x');
+  };
   class ScrollTrigger {
     static refresh() {
       log.push('st class');

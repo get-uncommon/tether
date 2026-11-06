@@ -133,7 +133,7 @@ const state = shop.initialState(product); // what Tether will show first
   `tether-soldout-text`), `is-subscription` on the product when a plan is selected. Low stock is 5 or fewer.
 - Subscriptions: `state.plans` (`name`, `price`, `savings`, `selected`, `available`) and
   `shop.formatPercent(state.savings)` fill `tether-plan-list` and `tether-bind="subscription-savings"`
-(`30%`, or `30 %` in German and French, as Tether writes it); the
+  (`30%`, or `30 %` in German and French, as Tether writes it); the
   [starter's product page](https://github.com/ravi-klaassens/tether/blob/main/examples/astro/src/pages/products/%5Bhandle%5D.astro)
   has a complete block. A product that can only be bought on a subscription shows the one-time
   price as the compare-at price.
@@ -376,20 +376,20 @@ and the markup, and tells you what to fix.
 
 `createStorefront(options)` from `@occluze/tether/server` (Node, Workers, Deno; no browser needed):
 
-| Method | Returns |
-|---|---|
-| `getProduct(handleOrId)` | a product, or `null`. Accepts a handle, numeric id, gid or product URL |
-| `getProducts({ first, after, query, collection, sortKey, reverse })` | `{ products, pageInfo, collection }` |
-| `allProducts({ query, collection })` | every product, page by page (for `getStaticPaths`) |
-| `getCollection(handle, { first, sortKey, … })` | the collection with `products` and `pageInfo`, or `null` |
-| `allCollections()` | every collection (`handle`, `title`, `description`, `image`, `seo`) |
-| `getRecommendations(handleOrId)` | related products |
-| `initialState(product, { variant })` | what Tether shows first: `variant`, `selected`, `price`, `compareAtPrice`, `available`, `purchase`, `plan`, `plans`, `savings`, `show`, `isUnavailable()` |
-| `hydrate(products, { card, images })` | the `<script>` tag for the browser (see above); cards keep 2 images by default |
-| `jsonLd(product, { url })`, `jsonLdData(product)` | schema.org Product / ProductGroup for search engines |
-| `formatMoney(money)`, `formatPercent(n)`, `imageUrl(url, { width })` | strings, same rules as the browser |
-| `productUrl(handle)` | the product's link from `productPath`, or `null` for an empty handle |
-| `query(graphql, variables)` | any Storefront API query, in the configured market |
+| Method                                                               | Returns                                                                                                                                                   |
+| -------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `getProduct(handleOrId)`                                             | a product, or `null`. Accepts a handle, numeric id, gid or product URL                                                                                    |
+| `getProducts({ first, after, query, collection, sortKey, reverse })` | `{ products, pageInfo, collection }`                                                                                                                      |
+| `allProducts({ query, collection })`                                 | every product, page by page (for `getStaticPaths`)                                                                                                        |
+| `getCollection(handle, { first, sortKey, … })`                       | the collection with `products` and `pageInfo`, or `null`                                                                                                  |
+| `allCollections()`                                                   | every collection (`handle`, `title`, `description`, `image`, `seo`)                                                                                       |
+| `getRecommendations(handleOrId)`                                     | related products                                                                                                                                          |
+| `initialState(product, { variant })`                                 | what Tether shows first: `variant`, `selected`, `price`, `compareAtPrice`, `available`, `purchase`, `plan`, `plans`, `savings`, `show`, `isUnavailable()` |
+| `hydrate(products, { card, images })`                                | the `<script>` tag for the browser (see above); cards keep 2 images by default                                                                            |
+| `jsonLd(product, { url })`, `jsonLdData(product)`                    | schema.org Product / ProductGroup for search engines                                                                                                      |
+| `formatMoney(money)`, `formatPercent(n)`, `imageUrl(url, { width })` | strings, same rules as the browser                                                                                                                        |
+| `productUrl(handle)`                                                 | the product's link from `productPath`, or `null` for an empty handle                                                                                      |
+| `query(graphql, variables)`                                          | any Storefront API query, in the configured market                                                                                                        |
 
 A product is the Storefront API product, the same shape the browser uses: `title`, `handle`,
 `descriptionHtml`, `featuredImage`, `images.nodes`, `options[].optionValues[].name`,

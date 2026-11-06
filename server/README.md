@@ -27,6 +27,7 @@ Then go to Site settings → Apps & integrations → API access, and generate a 
 scope `read_products`, release it, and install it on your store. Copy its **client ID** and **client secret**.
 
 **3. Deploy.** Click **Deploy to Cloudflare** (above).
+
 - Connect GitHub (or GitLab) for your copy of the code, and tick **Create private Git repository**.
 - Fill in the six fields: store domain (`your-store.myshopify.com`), collection ID, Webflow token,
   client ID, client secret, and a `SYNC_SECRET`. Make the secret with `openssl rand -hex 24` and
@@ -62,11 +63,11 @@ title and level (pass, warning, error), never the store, collection or values.
 
 Your copy updates itself, like a jsDelivr version. The `TETHER_VERSION` file in your copy decides which releases it takes:
 
-| `TETHER_VERSION` | Gets |
-|---|---|
-| `X.Y` | only fixes of that minor version (`X.Y.z`). A new copy starts on the minor version it was made from |
-| `X.Y.Z` | pinned: never changes |
-| `latest` | every release, including a new 0.x minor version, which can need changes in your copy |
+| `TETHER_VERSION` | Gets                                                                                                |
+| ---------------- | --------------------------------------------------------------------------------------------------- |
+| `X.Y`            | only fixes of that minor version (`X.Y.z`). A new copy starts on the minor version it was made from |
+| `X.Y.Z`          | pinned: never changes                                                                               |
+| `latest`         | every release, including a new 0.x minor version, which can need changes in your copy               |
 
 Under `X.Y` a new minor version is never installed by itself. When you're ready for one, do its
 one-time upgrade steps from the [CHANGELOG](../CHANGELOG.md), then change the file to its `X.Y`.
@@ -74,10 +75,11 @@ Under `latest` it is installed on the next scheduled run after its release, so d
 before then.
 
 **Copies made from 0.6.1 to 0.6.8** have `latest` in `TETHER_VERSION`, unless you changed it, so
-they install 0.7.0 by themselves. Do its one-time steps before 0.7.0 is released (with customer
-accounts: add the `ACCOUNT_SECRET` secret, see [Optional settings](#optional-settings)), or write
-`0.6` in the file to stay on 0.6 until you are ready. A copy that updated without `ACCOUNT_SECRET`
-keeps syncing, answering webhooks and starting deploys; only its account routes answer 503 with
+they installed 0.7.0 by themselves, and an update never changes that file: they will install 0.8.0
+by themselves too. Write `0.7` in the file to stay on the 0.7 line, as copies made from 0.7.0 do.
+With customer accounts, 0.7.0 needs the `ACCOUNT_SECRET` secret (see
+[Optional settings](#optional-settings)). A copy that updated without it keeps syncing, answering
+webhooks and starting deploys; only its account routes answer 503 with
 `accounts need the Worker secret ACCOUNT_SECRET`, and `/check` shows the same error, until you add
 the secret.
 
@@ -87,7 +89,9 @@ A release is installed only when the commit its `v…` tag points at is on the T
 `main` branch, and only from the signed `tether-server-X.Y.Z.tar.gz` on its GitHub Release: the
 updater runs `gh attestation verify` to check that Tether's release workflow built that file from
 that commit, and refuses it otherwise. Releases before 0.7.0 have no signed file, so a copy on 0.7.0
-or newer never installs one of them. The `/check` report you get with your `SYNC_SECRET` (the `curl`
+or newer never installs one of them. A new tag gets its file a few minutes after it is pushed, when
+Tether's release workflow has passed; until then the update run skips it with a warning and installs
+the newest release that has one. The `/check` report you get with your `SYNC_SECRET` (the `curl`
 above) starts with the `version` that's running.
 
 To update by hand (`node scripts/update-tether.mjs` in your copy), install the
@@ -105,8 +109,10 @@ Until you do, a copy made before 0.7.0 keeps a workflow that can't tell when the
 fails: the run stays green and installs nothing, with an error annotation saying why (Actions → the
 run → Annotations) next to that warning. With the new file, a failed update fails the run.
 
-An update replaces `src/`, `bin/`, `scripts/`, `test/`, `docs/`, `package.json` and this README with
-the release's, so keep your own code and tests outside those folders. The new release's code runs
+An update replaces `src/`, `bin/`, `scripts/`, `test/`, `docs/`, `package.json`, this README,
+`.dev.vars.example` and `.gitignore` with the release's, so keep your own code and tests outside
+those folders, and lines you add to `.gitignore` are dropped by the next update: ignore your own
+files in a `.gitignore` inside your own folder instead. The new release's code runs
 only in a job that can read your repository, not change it; a second job commits the tested change,
 exactly as it was recorded before the tests ran.
 
@@ -120,6 +126,7 @@ your pages render the field themselves and you don't trust everyone who can edit
 ## Several stores or client sites
 
 One deploy per store: each click creates its own Worker for one store and one Webflow collection.
+
 - **Client stores:** create the Shopify app in the **client's** Dev Dashboard, because the app and
   the store must be in the same organization. Deploying on the client's own Cloudflare account
   makes handover easy.
@@ -129,17 +136,17 @@ One deploy per store: each click creates its own Worker for one store and one We
 
 Add these later as secrets, only if you need them: Cloudflare → your Worker → Settings → Variables and Secrets.
 
-| Secret | When |
-|---|---|
-| `FIELD_MAP` | Other fields or metafields: `{"material":"metafield:custom.material"}` |
-| `WEBFLOW_OWNED` | Fields Shopify fills in once, then editors own: `description,intro` |
-| `SHOPIFY_ADMIN_TOKEN` | Stores with an old admin-created custom app (`shpat_…`) instead of a Dev Dashboard app |
-| `SHOPIFY_WEBHOOK_SECRET` | Webhooks you created yourself under Shopify → Settings → Notifications |
-| `ACCOUNT_CLIENT_ID`, `ACCOUNT_ORIGINS`, `STOREFRONT_TOKEN` (+ `ACCOUNT_CLIENT_SECRET`) | Customer accounts through this Worker: the browser never holds a Shopify token. Needs the `TETHER_SYNC` KV binding, which the deploy creates, and `ACCOUNT_SECRET` ([setup](../docs/accounts.md#setup)) |
-| `ACCOUNT_SECRET` | Required with customer accounts: 24+ random characters, not the same as `SYNC_SECRET`, the sessions' own encryption key. Without it, or with the value of `SYNC_SECRET`, the account routes answer 503 and `/check` says what to set. Changing it logs every customer out once |
-| `DEPLOY_HOOK_URL` | A statically built site (Astro, …): start a build when product content changes ([how](../docs/astro.md#7-rebuild-when-products-change)). Without Webflow, set the Webflow fields to `none` |
-| `DEPLOY_HOOK_MIN_SECONDS` | At most one build per this many seconds: a whole number from 0 to 86400 (default 60) |
-| `MAX_SUBREQUESTS` | A paid Workers plan, to let each run do more: a whole number from 1 to 10000000 (default 45). `/check` reports a value it can't use, for this and `DEPLOY_HOOK_MIN_SECONDS` |
+| Secret                                                                                 | When                                                                                                                                                                                                                                                                           |
+| -------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `FIELD_MAP`                                                                            | Other fields or metafields: `{"material":"metafield:custom.material"}`                                                                                                                                                                                                         |
+| `WEBFLOW_OWNED`                                                                        | Fields Shopify fills in once, then editors own: `description,intro`                                                                                                                                                                                                            |
+| `SHOPIFY_ADMIN_TOKEN`                                                                  | Stores with an old admin-created custom app (`shpat_…`) instead of a Dev Dashboard app                                                                                                                                                                                         |
+| `SHOPIFY_WEBHOOK_SECRET`                                                               | Webhooks you created yourself under Shopify → Settings → Notifications                                                                                                                                                                                                         |
+| `ACCOUNT_CLIENT_ID`, `ACCOUNT_ORIGINS`, `STOREFRONT_TOKEN` (+ `ACCOUNT_CLIENT_SECRET`) | Customer accounts through this Worker: the browser never holds a Shopify token. Needs the `TETHER_SYNC` KV binding, which the deploy creates, and `ACCOUNT_SECRET` ([setup](../docs/accounts.md#setup))                                                                        |
+| `ACCOUNT_SECRET`                                                                       | Required with customer accounts: 24+ random characters, not the same as `SYNC_SECRET`, the sessions' own encryption key. Without it, or with the value of `SYNC_SECRET`, the account routes answer 503 and `/check` says what to set. Changing it logs every customer out once |
+| `DEPLOY_HOOK_URL`                                                                      | A statically built site (Astro, …): start a build when product content changes ([how](../docs/astro.md#7-rebuild-when-products-change)). Without Webflow, set the Webflow fields to `none`                                                                                     |
+| `DEPLOY_HOOK_MIN_SECONDS`                                                              | At most one build per this many seconds: a whole number from 0 to 86400 (default 60)                                                                                                                                                                                           |
+| `MAX_SUBREQUESTS`                                                                      | A paid Workers plan, to let each run do more: a whole number from 1 to 10000000 (default 45). `/check` reports a value it can't use, for this and `DEPLOY_HOOK_MIN_SECONDS`                                                                                                    |
 
 ## Costs
 

@@ -62,6 +62,28 @@ export const numberAt = (value, key) => asNumber(fieldOf(value, key), key);
 export const recordsAt = (value, key) => listAt(value, key).map((item, i) => asRecord(item, `${key}[${i}]`));
 
 /**
+ * @param {string} text JSON.
+ * @returns {unknown} What it holds, for the readers above to check.
+ */
+export const parseJson = (text) => JSON.parse(text);
+
+/**
+ * @param {Response} response
+ * @returns {Promise<unknown>} Its JSON body, for the readers above to check.
+ */
+export async function jsonOf(response) {
+  /** @type {unknown} */
+  const body = await response.json();
+  return body;
+}
+
+/**
+ * @param {RequestInfo | URL} input What a fake `fetch` was called with.
+ * @returns {string} The URL it asks for.
+ */
+export const urlOf = (input) => (input instanceof Request ? input.url : String(input));
+
+/**
  * @param {number} number Numbers the product's ids, handle and title.
  * @param {Record<string, unknown>} [over] Fields that replace the defaults.
  */
@@ -120,6 +142,180 @@ export function shopifyProduct(number, over = {}) {
  * @typedef {{ id: string, isArchived?: boolean | undefined, isDraft?: boolean | undefined,
  *   fieldData: Record<string, unknown> }} MockItem
  */
+/** @typedef {{ products: Map<string, MockProduct>, webhooks: { id: string, topic: string, uri: string }[] }} MockShop */
+/** @typedef {{ items: Map<string, MockItem>, live: Set<string>, nextId: number }} MockWebflow */
+
+/**
+ * @param {number} status
+ * @param {unknown} body
+ * @param {Record<string, string>} [headers]
+ */
+const json = (status, body, headers = {}) =>
+  new Response(body == null ? null : JSON.stringify(body), {
+    status,
+    headers: { 'content-type': 'application/json', ...headers },
+  });
+
+/**
+ * @param {unknown} body A request body.
+ * @param {string} key A flag the body may set.
+ */
+function flagAt(body, key) {
+  const value = fieldOf(body, key);
+  assert.ok(value === undefined || typeof value === 'boolean', `${key} is a boolean`);
+  return value;
+}
+
+/**
+ * @param {MockShop} shop
+ * @param {Record<string, unknown>} variables
+ */
+function productsPage(shop, variables) {
+  let list = [...shop.products.values()].sort((a, b) => a.updatedAt.localeCompare(b.updatedAt));
+  const search = variables['query'];
+  const updatedSince = typeof search === 'string' ? /updated_at:>='([^']+)'/.exec(search)?.[1] : undefined;
+  if (updatedSince) list = list.filter((product) => product.updatedAt >= updatedSince);
+  const start = variables['after'] ? Number(variables['after']) : 0;
+  const page = list.slice(start, start + numberAt(variables, 'first'));
+  const end = start + page.length;
+  return json(200, {
+    data: { products: { nodes: page, pageInfo: { hasNextPage: end < list.length, endCursor: String(end) } } },
+  });
+}
+
+/**
+ * The Admin GraphQL API, by operation name.
+ * @param {MockShop} shop
+ * @param {unknown} body
+ * @param {number} maxFirst
+ */
+function answerShopify(shop, body, maxFirst) {
+  const op = /(?:query|mutation)\s+(\w+)/.exec(stringAt(body, 'query'))?.[1];
+  const variables = asRecord(fieldOf(body, 'variables') ?? {}, 'variables');
+  if (op === 'TetherSyncWebhooks') return json(200, { data: { webhookSubscriptions: { nodes: shop.webhooks } } });
+  if (op === 'TetherSyncWebhookCreate') {
+    const webhook = {
+      id: `gid://shopify/WebhookSubscription/${shop.webhooks.length + 1}`,
+      topic: stringAt(variables, 'topic'),
+      uri: stringAt(recordAt(variables, 'sub'), 'uri'),
+    };
+    shop.webhooks.push(webhook);
+    return json(200, { data: { webhookSubscriptionCreate: { webhookSubscription: webhook, userErrors: [] } } });
+  }
+  if (op === 'TetherSyncGetProduct')
+    return json(200, { data: { product: shop.products.get(stringAt(variables, 'id')) ?? null } });
+  if (op === 'TetherSyncShop')
+    return json(200, { data: { shop: { name: 'Shop', myshopifyDomain: 'shop.myshopify.com' } } });
+  if (op === 'TetherSyncProducts' && numberAt(variables, 'first') > maxFirst) {
+    return json(200, {
+      errors: [
+        {
+          message: 'Query cost is 1500, which exceeds the single query max cost limit (1000).',
+          extensions: { code: 'MAX_COST_EXCEEDED' },
+        },
+      ],
+    });
+  }
+  if (op === 'TetherSyncProducts') return productsPage(shop, variables);
+  throw new Error(`unexpected Shopify op ${op}`);
+}
+
+const COLLECTION = {
+  id: 'col',
+  displayName: 'Products',
+  fields: [
+    { slug: 'name', type: 'PlainText', isRequired: true },
+    { slug: 'slug', type: 'PlainText', isRequired: true },
+    { slug: 'shopify-id', type: 'PlainText' },
+    { slug: 'price', type: 'Number' },
+    { slug: 'main-image', type: 'Image' },
+    { slug: 'description', type: 'RichText' },
+    { slug: 'material', type: 'PlainText' },
+  ],
+};
+
+/**
+ * POST /items.
+ * @param {MockWebflow} wf
+ * @param {unknown} body
+ * @param {string | null} failCreateFor The slug whose create fails validation.
+ */
+function createItem(wf, body, failCreateFor) {
+  const fieldData = recordAt(body, 'fieldData');
+  if (failCreateFor && fieldData['slug'] === failCreateFor)
+    return json(400, { message: 'Validation Error', details: [{ param: 'name' }] });
+  // Webflow slugs are unique within a collection.
+  if ([...wf.items.values()].some((item) => item.fieldData['slug'] === fieldData['slug'])) {
+    return json(409, {
+      message: 'Conflict',
+      details: [{ param: 'slug', description: 'Unique value is already in database' }],
+    });
+  }
+  const id = `item${wf.nextId++}`;
+  const item = { id, isArchived: flagAt(body, 'isArchived'), isDraft: flagAt(body, 'isDraft'), fieldData };
+  wf.items.set(id, item);
+  return json(202, item);
+}
+
+/**
+ * GET, PATCH or DELETE /items/{id}.
+ * @param {MockWebflow} wf
+ * @param {string} itemId
+ * @param {string} method
+ * @param {unknown} body
+ */
+function answerItem(wf, itemId, method, body) {
+  const item = wf.items.get(itemId);
+  if (!item) return json(404, { message: 'Item not found' });
+  if (method === 'GET') return json(200, item);
+  if (method === 'PATCH') {
+    const patch = asRecord(body, 'the PATCH body');
+    if ('isArchived' in patch) item.isArchived = flagAt(body, 'isArchived');
+    if ('isDraft' in patch) item.isDraft = flagAt(body, 'isDraft');
+    Object.assign(item.fieldData, asRecord(patch['fieldData'] ?? {}, 'fieldData'));
+    return json(200, item);
+  }
+  if (method === 'DELETE') {
+    wf.items.delete(itemId);
+    return json(204, null);
+  }
+  return null;
+}
+
+/**
+ * The Webflow Data API's collection routes.
+ * @param {{ wf: MockWebflow, failCreateFor: string | null, failPublish: boolean }} state
+ * @param {URL} target
+ * @param {string} method
+ * @param {unknown} body
+ */
+function answerWebflow({ wf, failCreateFor, failPublish }, target, method, body) {
+  const path = target.pathname.replace(/^\/v2\/collections\/[^/]+/, '');
+  if (path === '' && method === 'GET') return json(200, COLLECTION);
+  if (path === '/items' && method === 'GET') {
+    const all = [...wf.items.values()];
+    const offset = Number(target.searchParams.get('offset') || 0);
+    const limit = Number(target.searchParams.get('limit') || 100);
+    return json(200, { items: all.slice(offset, offset + limit), pagination: { limit, offset, total: all.length } });
+  }
+  if (path === '/items' && method === 'POST') return createItem(wf, body, failCreateFor);
+  if (path === '/items/publish' && method === 'POST') {
+    if (failPublish) return json(500, { message: 'publish failed' });
+    const itemIds = listAt(body, 'itemIds').map((id, i) => asString(id, `itemIds[${i}]`));
+    itemIds.forEach((id) => wf.live.add(id));
+    return json(202, { publishedItemIds: itemIds, errors: [] });
+  }
+  const liveId = /^\/items\/([^/]+)\/live$/.exec(path)?.[1];
+  if (liveId && method === 'DELETE') {
+    if (!wf.live.has(liveId)) return json(404, { message: 'not live' });
+    wf.live.delete(liveId);
+    return json(204, null);
+  }
+  const itemId = /^\/items\/([^/]+)$/.exec(path)?.[1];
+  const answer = itemId ? answerItem(wf, itemId, method, body) : null;
+  if (answer) return answer;
+  throw new Error(`unexpected Webflow ${method} ${path}`);
+}
 
 /**
  * @param {{ products?: MockProduct[], items?: MockItem[], failCreateFor?: string | null, rateLimitOnce?: boolean,
@@ -132,10 +328,9 @@ export function createMockApis({
   rateLimitOnce = false,
   maxFirst = Infinity,
 } = {}) {
-  /** @type {{ id: string, topic: string, uri: string }[]} */
-  const webhooks = [];
-  const shop = { products: new Map(products.map((product) => [product.id, product])), webhooks };
-  /** @type {{ items: Map<string, MockItem>, live: Set<string>, nextId: number }} */
+  /** @type {MockShop} */
+  const shop = { products: new Map(products.map((product) => [product.id, product])), webhooks: [] };
+  /** @type {MockWebflow} */
   const wf = { items: new Map(items.map((item) => [item.id, item])), live: new Set(), nextId: 1 };
   /** @type {{ host: string, method: string, path: string, body: unknown, headers: HeadersInit | undefined }[]} */
   const calls = [];
@@ -143,156 +338,28 @@ export function createMockApis({
   const flags = { failPublish: false };
 
   /**
-   * @param {number} status
-   * @param {unknown} body
-   * @param {Record<string, string>} [headers]
-   */
-  const json = (status, body, headers = {}) =>
-    new Response(body == null ? null : JSON.stringify(body), {
-      status,
-      headers: { 'content-type': 'application/json', ...headers },
-    });
-
-  /**
    * @param {RequestInfo | URL} url
    * @param {RequestInit} [init]
    */
   async function fetch(url, init = {}) {
-    const target = new URL(url instanceof Request ? url.url : url);
+    const target = new URL(urlOf(url));
     const method = init.method || 'GET';
     /** @type {unknown} A JSON body parsed, any other body as sent. */
     const body =
       init.body && typeof init.body === 'string' && init.body.startsWith('{') ? JSON.parse(init.body) : init.body;
-    /** @param {string} key A flag the body may set. */
-    const flag = (key) => {
-      const value = fieldOf(body, key);
-      assert.ok(value === undefined || typeof value === 'boolean', `${key} is a boolean`);
-      return value;
-    };
     calls.push({ host: target.host, method, path: target.pathname + target.search, body, headers: init.headers });
 
     if (target.pathname === '/admin/oauth/access_token')
       return json(200, { access_token: 'shpat_fresh', scope: 'read_products', expires_in: 86399 });
-
-    if (target.pathname.startsWith('/admin/api/')) {
-      const op = /(?:query|mutation)\s+(\w+)/.exec(stringAt(body, 'query'))?.[1];
-      const variables = asRecord(fieldOf(body, 'variables') ?? {}, 'variables');
-      if (op === 'TetherSyncWebhooks') return json(200, { data: { webhookSubscriptions: { nodes: shop.webhooks } } });
-      if (op === 'TetherSyncWebhookCreate') {
-        const webhook = {
-          id: `gid://shopify/WebhookSubscription/${shop.webhooks.length + 1}`,
-          topic: stringAt(variables, 'topic'),
-          uri: stringAt(recordAt(variables, 'sub'), 'uri'),
-        };
-        shop.webhooks.push(webhook);
-        return json(200, { data: { webhookSubscriptionCreate: { webhookSubscription: webhook, userErrors: [] } } });
-      }
-      if (op === 'TetherSyncGetProduct')
-        return json(200, { data: { product: shop.products.get(stringAt(variables, 'id')) || null } });
-      if (op === 'TetherSyncShop')
-        return json(200, { data: { shop: { name: 'Shop', myshopifyDomain: 'shop.myshopify.com' } } });
-      if (op === 'TetherSyncProducts' && numberAt(variables, 'first') > maxFirst) {
-        return json(200, {
-          errors: [
-            {
-              message: 'Query cost is 1500, which exceeds the single query max cost limit (1000).',
-              extensions: { code: 'MAX_COST_EXCEEDED' },
-            },
-          ],
-        });
-      }
-      if (op === 'TetherSyncProducts') {
-        let list = [...shop.products.values()].sort((a, b) => a.updatedAt.localeCompare(b.updatedAt));
-        const search = variables['query'];
-        const updatedSince = typeof search === 'string' ? /updated_at:>='([^']+)'/.exec(search)?.[1] : undefined;
-        if (updatedSince) list = list.filter((product) => product.updatedAt >= updatedSince);
-        const start = variables['after'] ? Number(variables['after']) : 0;
-        const page = list.slice(start, start + numberAt(variables, 'first'));
-        const end = start + page.length;
-        return json(200, {
-          data: { products: { nodes: page, pageInfo: { hasNextPage: end < list.length, endCursor: String(end) } } },
-        });
-      }
-      throw new Error(`unexpected Shopify op ${op}`);
-    }
-
+    if (target.pathname.startsWith('/admin/api/')) return answerShopify(shop, body, maxFirst);
     if (target.host === 'api.webflow.com') {
       if (!limited) {
         limited = true;
         return json(429, { message: 'Too Many Requests' }, { 'retry-after': '2' });
       }
-      const path = target.pathname.replace(/^\/v2\/collections\/[^/]+/, '');
-      if (path === '' && method === 'GET')
-        return json(200, {
-          id: 'col',
-          displayName: 'Products',
-          fields: [
-            { slug: 'name', type: 'PlainText', isRequired: true },
-            { slug: 'slug', type: 'PlainText', isRequired: true },
-            { slug: 'shopify-id', type: 'PlainText' },
-            { slug: 'price', type: 'Number' },
-            { slug: 'main-image', type: 'Image' },
-            { slug: 'description', type: 'RichText' },
-            { slug: 'material', type: 'PlainText' },
-          ],
-        });
-      if (path === '/items' && method === 'GET') {
-        const all = [...wf.items.values()];
-        const offset = Number(target.searchParams.get('offset') || 0);
-        const limit = Number(target.searchParams.get('limit') || 100);
-        return json(200, {
-          items: all.slice(offset, offset + limit),
-          pagination: { limit, offset, total: all.length },
-        });
-      }
-      if (path === '/items' && method === 'POST') {
-        const fieldData = recordAt(body, 'fieldData');
-        if (failCreateFor && fieldData['slug'] === failCreateFor)
-          return json(400, { message: 'Validation Error', details: [{ param: 'name' }] });
-        // Webflow slugs are unique within a collection.
-        if ([...wf.items.values()].some((item) => item.fieldData['slug'] === fieldData['slug'])) {
-          return json(409, {
-            message: 'Conflict',
-            details: [{ param: 'slug', description: 'Unique value is already in database' }],
-          });
-        }
-        const id = `item${wf.nextId++}`;
-        const item = { id, isArchived: flag('isArchived'), isDraft: flag('isDraft'), fieldData };
-        wf.items.set(id, item);
-        return json(202, item);
-      }
-      if (path === '/items/publish' && method === 'POST') {
-        if (flags.failPublish) return json(500, { message: 'publish failed' });
-        const itemIds = listAt(body, 'itemIds').map((id, i) => asString(id, `itemIds[${i}]`));
-        itemIds.forEach((id) => wf.live.add(id));
-        return json(202, { publishedItemIds: itemIds, errors: [] });
-      }
-      const liveId = path.match(/^\/items\/([^/]+)\/live$/)?.[1];
-      if (liveId && method === 'DELETE') {
-        if (!wf.live.has(liveId)) return json(404, { message: 'not live' });
-        wf.live.delete(liveId);
-        return json(204, null);
-      }
-      const itemId = path.match(/^\/items\/([^/]+)$/)?.[1];
-      if (itemId) {
-        const item = wf.items.get(itemId);
-        if (!item) return json(404, { message: 'Item not found' });
-        if (method === 'GET') return json(200, item);
-        if (method === 'PATCH') {
-          const patch = asRecord(body, 'the PATCH body');
-          if ('isArchived' in patch) item.isArchived = flag('isArchived');
-          if ('isDraft' in patch) item.isDraft = flag('isDraft');
-          Object.assign(item.fieldData, asRecord(patch['fieldData'] ?? {}, 'fieldData'));
-          return json(200, item);
-        }
-        if (method === 'DELETE') {
-          wf.items.delete(itemId);
-          return json(204, null);
-        }
-      }
-      throw new Error(`unexpected Webflow ${method} ${path}`);
+      return answerWebflow({ wf, failCreateFor, failPublish: flags.failPublish }, target, method, body);
     }
-    throw new Error(`unexpected fetch ${url}`);
+    throw new Error(`unexpected fetch ${target.href}`);
   }
 
   const webflowWrites = () => calls.filter((call) => call.host === 'api.webflow.com' && call.method !== 'GET');
@@ -330,6 +397,16 @@ export const noWaitUntil = {
  */
 export function checkStep(report, title) {
   const step = report.steps.find((candidate) => candidate.title === title);
+  assert.ok(step, `no "${title}" step`);
+  return step;
+}
+
+/**
+ * @param {unknown} report A `/check` report as the Worker answers it, in JSON.
+ * @param {string} title
+ */
+export function answeredStep(report, title) {
+  const step = recordsAt(report, 'steps').find((candidate) => candidate['title'] === title);
   assert.ok(step, `no "${title}" step`);
   return step;
 }

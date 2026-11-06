@@ -8,15 +8,17 @@
  *   X.Y.Z    pinned: never changes
  *   latest   newest release, including a new 0.x minor, which can break the copy
  *
- * It replaces the code (src/, bin/, scripts/, test/, docs/, package.json, README) and keeps what belongs to the copy:
- * tether-sync.config.js (mapping), wrangler.jsonc (Cloudflare ids), TETHER_VERSION. .github/ is never touched: GitHub
- * doesn't let an Action's token change workflow files, so all update logic lives in this script, which updates
- * itself, and a copy whose workflow is older than the release's is told how to replace it (scripts/workflow-check.ts).
+ * It replaces the code (src/, bin/, scripts/, test/, docs/, package.json, README, .dev.vars.example, .gitignore) and
+ * keeps what belongs to the copy: tether-sync.config.js (mapping), wrangler.jsonc (Cloudflare ids), TETHER_VERSION.
+ * .github/ is never touched: GitHub doesn't let an Action's token change workflow files, so all update logic lives in
+ * this script, which updates itself, and a copy whose workflow is older than the release's is told how to replace it
+ * (scripts/workflow-check.ts).
  *
  * Releases are the upstream repository's `vX.Y.Z` tags; a tag without the `v` is not a release. A release is
  * installed only when the commit its tag points at is part of the upstream default branch, and only from the signed
  * asset on its GitHub Release, after `gh attestation verify` confirms the upstream release workflow built it from that
- * commit (scripts/release-asset.ts). It is staged inside the copy first and then swapped in by renames, so a failure
+ * commit (scripts/release-asset.ts). A tag whose Release doesn't carry the asset yet is skipped with a warning, and the
+ * newest one that does is installed. It is staged inside the copy first and then swapped in by renames, so a failure
  * part-way leaves the copy as it was.
  *
  * The version rules live in `src/release-range.ts`, which every copy has next to this script.
@@ -37,10 +39,17 @@ import { existsSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { compareVersions, newestInRange, parseVersion } from '../src/release-range.ts';
+import { compareVersions, parseVersion, versionsInRange } from '../src/release-range.ts';
 import { field } from '../src/shared/json.ts';
 import { messageOf } from '../src/shared/error-message.ts';
-import { downloadAsset, fetchSignedRelease, runCommand } from './release-asset.ts';
+import {
+  downloadAsset,
+  fetchSignedRelease,
+  GitHubError,
+  releaseAssetName,
+  releaseAssetUrl,
+  runCommand,
+} from './release-asset.ts';
 import {
   reportWorkflow,
   SHIPPED_REVISION,
@@ -49,6 +58,7 @@ import {
   workflowState,
 } from './workflow-check.ts';
 import type { GitHubGet, VerifyPolicy } from './release-asset.ts';
+import type { Version } from '../src/release-range.ts';
 
 interface Tag {
   name: string;
@@ -61,7 +71,12 @@ const UPSTREAM = process.env['TETHER_UPSTREAM'] ?? 'ravi-klaassens/tether';
 /** Pages of 100 tags read at most. */
 const MAX_TAG_PAGES = 20;
 
-/** What a release replaces. Everything else in the copy is left alone. */
+/**
+ * What a release replaces. Everything else in the copy is left alone. Every top-level entry of the release's
+ * `server/` is here, in {@link KEPT}, or `.github` (a test holds it so). A copy installs a release with the list of
+ * the updater it already has, so an entry added here is skipped by every copy updating from an older release: a new
+ * top-level entry can't be one the release needs.
+ */
 export const MANAGED = [
   'src',
   'bin',
@@ -80,16 +95,16 @@ export const KEPT = ['tether-sync.config.js', 'wrangler.jsonc', 'TETHER_VERSION'
 const TAG_PREFIX = 'v';
 
 /**
- * The newest release tag in the range. Only `v` tags count, because {@link releaseCommit} installs `v<version>`.
+ * The release tags in the range, newest first. Only `v` tags count, because {@link releaseCommit} installs
+ * `v<version>`.
  *
  * @param tags Tag names.
  * @param spec `latest`, `0`, `0.3` or `0.3.3`.
- * @returns `0.3.3`, without the `v`.
  * @throws For a spec that is none of these.
  */
-export function pickVersion(tags: string[], spec: string): string | null {
+export function releasesInRange(tags: string[], spec: string): Version[] {
   const releases = tags.filter((tag) => tag.startsWith(TAG_PREFIX)).map((tag) => tag.slice(TAG_PREFIX.length));
-  return newestInRange(releases, spec);
+  return versionsInRange(releases, spec);
 }
 
 async function githubJson(path: string): Promise<unknown> {
@@ -101,7 +116,7 @@ async function githubJson(path: string): Promise<unknown> {
       ...(token ? { authorization: `Bearer ${token}` } : {}),
     },
   });
-  if (!response.ok) throw new Error(`GitHub ${path}: ${String(response.status)}`);
+  if (!response.ok) throw new GitHubError(path, response.status);
   const answer: unknown = await response.json();
   return answer;
 }
@@ -152,6 +167,14 @@ async function packageVersion(path: string): Promise<string> {
   const json: unknown = JSON.parse(await readFile(join(path, 'package.json'), 'utf8'));
   const version = field(json, 'version');
   if (typeof version !== 'string') throw new Error(`${path}/package.json has no version`);
+  return version;
+}
+
+/** @throws When `path`'s package.json has no `X.Y.Z` version. */
+async function parsedPackageVersion(path: string): Promise<Version> {
+  const text = await packageVersion(path);
+  const version = parseVersion(text);
+  if (!version) throw new Error(`${path}/package.json: version "${text}" is not X.Y.Z`);
   return version;
 }
 
@@ -242,18 +265,33 @@ export async function install(source: string, target: InstallTarget = OWN_COPY):
   }
 }
 
+/** A release whose GitHub Release carries its signed asset. */
+interface PublishedRelease {
+  version: string;
+  assetUrl: string;
+}
+
 /**
- * The release to install from GitHub: the newest in the range, or `null` when none matches.
+ * The newest of `candidates` whose GitHub Release carries the signed asset. A tag without one is skipped with a
+ * warning: its release workflow is still running or failed, and the copy stays on what it has rather than failing.
  *
- * @param effective The range.
+ * @param candidates Newest first.
  */
-async function newestRelease(effective: string): Promise<{ version: string; tags: Tag[] } | null> {
-  const tags = await listTags(githubJson, UPSTREAM);
-  const version = pickVersion(
-    tags.map((tag) => tag.name),
-    effective,
-  );
-  return version ? { version, tags } : null;
+export async function newestPublished(
+  get: GitHubGet,
+  upstream: string,
+  candidates: Version[],
+): Promise<PublishedRelease | null> {
+  for (const candidate of candidates) {
+    const version = candidate.join('.');
+    const assetUrl = await releaseAssetUrl(get, upstream, version);
+    if (assetUrl) return { version, assetUrl };
+    const why =
+      `v${version} is tagged, but its GitHub Release has no ${releaseAssetName(version)} yet: its release ` +
+      'workflow is still running, or failed. Skipped; the next run looks again.';
+    console.log(`::warning title=Tether release not published::${workflowCommandText(why)}`);
+  }
+  return null;
 }
 
 /**
@@ -272,12 +310,13 @@ async function installRelease(source: string, version: string, where: string): P
 /**
  * Downloads the release's signed asset, verifies it and installs it, removing the download afterwards.
  */
-async function installFromGitHub(version: string, tags: Tag[], policy: VerifyPolicy): Promise<void> {
+async function installFromGitHub(release: PublishedRelease, tags: Tag[], policy: VerifyPolicy): Promise<void> {
+  const { version, assetUrl } = release;
   const sha = await releaseCommit(githubJson, UPSTREAM, tags, version);
   const dir = await mkdtemp(join(tmpdir(), 'tether-release-'));
   try {
-    const source = { get: githubJson, run: runCommand, download: downloadAsset };
-    const server = await fetchSignedRelease(source, { upstream: UPSTREAM, version, sha }, dir, policy);
+    const source = { run: runCommand, download: downloadAsset };
+    const server = await fetchSignedRelease(source, { upstream: UPSTREAM, version, sha, assetUrl }, dir, policy);
     await installRelease(server, version, releaseWorkflowUrl(version));
   } finally {
     await rm(dir, { recursive: true, force: true });
@@ -331,6 +370,54 @@ async function reportFailure(error: unknown, args: string[]): Promise<void> {
   await reportOwnWorkflow(args);
 }
 
+/** Says nothing is installed, in the output every shipped workflow reads. */
+async function upToDate(args: string[]): Promise<void> {
+  console.log('up to date');
+  await reportOwnWorkflow(args);
+  console.log('updated=');
+}
+
+/**
+ * Installs the local release in `fromDir` whatever the range says: it is how a release is tried before it is tagged.
+ *
+ * @returns The version installed, or `null` when the copy is as new already.
+ */
+async function updateFromFolder(fromDir: string, current: Version, dryRun: boolean): Promise<string | null> {
+  const version = await packageVersion(fromDir);
+  console.log(`current ${current.join('.')}, local release ${version} (${fromDir})`);
+  if (compareVersions(await parsedPackageVersion(fromDir), current) <= 0) return null;
+  if (!dryRun) await installRelease(fromDir, version, join(fromDir, WORKFLOW_PATH));
+  return version;
+}
+
+/**
+ * Installs the newest published release in the range that is newer than the copy.
+ *
+ * @param spec The TETHER_VERSION file's range, empty without the file.
+ * @returns The version installed, or `null` when there is none newer.
+ */
+async function updateFromGitHub(
+  spec: string,
+  current: Version,
+  options: { dryRun: boolean; policy: VerifyPolicy },
+): Promise<string | null> {
+  // Without a TETHER_VERSION file the copy stays on its own minor version.
+  const effective = spec || current.slice(0, 2).join('.');
+  const tags = await listTags(githubJson, UPSTREAM);
+  const inRange = releasesInRange(
+    tags.map((tag) => tag.name),
+    effective,
+  );
+  const range = spec || `(none: ${effective})`;
+  console.log(`current ${current.join('.')}, TETHER_VERSION ${range}, newest match ${inRange[0]?.join('.') ?? 'none'}`);
+  if (!inRange.length) throw new Error(`no release matches "${effective}"`);
+  const newer = inRange.filter((version) => compareVersions(version, current) > 0);
+  const release = await newestPublished(githubJson, UPSTREAM, newer);
+  if (!release) return null;
+  if (!options.dryRun) await installFromGitHub(release, tags, options.policy);
+  return release.version;
+}
+
 async function main(args: string[]): Promise<void> {
   const dryRun = args.includes('--dry-run');
   const policy: VerifyPolicy = args.includes('--allow-unverified') ? 'allow-unverified' : 'require';
@@ -338,39 +425,24 @@ async function main(args: string[]): Promise<void> {
 
   const specFile = join(ROOT, 'TETHER_VERSION');
   const spec = existsSync(specFile) ? ((await readFile(specFile, 'utf8')).split('\n')[0] ?? '').trim() : '';
-  const current = await packageVersion(ROOT);
-  // Without a TETHER_VERSION file the copy stays on its own minor version.
-  const effective = spec || current.split('.').slice(0, 2).join('.');
-  let release: { version: string; tags: Tag[] } | null;
-  if (fromDir) {
-    // A local release is installed whatever the range says: it is how a release is tried before it is tagged.
-    release = { version: await packageVersion(fromDir), tags: [] };
-    console.log(`current ${current}, local release ${release.version} (${fromDir})`);
-  } else {
-    release = await newestRelease(effective);
-    const range = spec || `(none: ${effective})`;
-    console.log(`current ${current}, TETHER_VERSION ${range}, newest match ${release?.version ?? 'none'}`);
-  }
-  if (!release) throw new Error(`no release matches "${effective}"`);
-  const targetVersion = parseVersion(release.version);
-  const currentVersion = parseVersion(current);
-  if (targetVersion && currentVersion && compareVersions(targetVersion, currentVersion) <= 0) {
-    console.log('up to date');
-    await reportOwnWorkflow(args);
-    console.log('updated=');
+  const current = await parsedPackageVersion(ROOT);
+  const installed = fromDir
+    ? await updateFromFolder(fromDir, current, dryRun)
+    : await updateFromGitHub(spec, current, { dryRun, policy });
+  if (installed === null) {
+    await upToDate(args);
     return;
   }
   if (dryRun) {
-    console.log(`would update to ${release.version}`);
+    console.log(`would update to ${installed}`);
     console.log('updated=');
     return;
   }
-  if (fromDir) await installRelease(fromDir, release.version, join(fromDir, WORKFLOW_PATH));
-  else await installFromGitHub(release.version, release.tags, policy);
-  if (!spec && !existsSync(specFile)) await writeFile(specFile, `${effective}\n`);
+  // A copy without the file takes the range it updated within, its own minor version.
+  if (!spec && !existsSync(specFile)) await writeFile(specFile, `${current.slice(0, 2).join('.')}\n`);
   await stat(join(ROOT, 'src', 'entry.js'));
-  console.log(`updated to ${release.version}`);
-  console.log(`updated=${release.version}`);
+  console.log(`updated to ${installed}`);
+  console.log(`updated=${installed}`);
 }
 
 function realPath(path: string): string {

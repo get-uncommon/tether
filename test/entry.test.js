@@ -36,7 +36,7 @@ before(async () => {
 
 test('Tether.account is a plain object of the account part’s functions, not a thenable', async () => {
   assert.equal(Reflect.get(Tether.account, 'then'), undefined);
-  assert.equal(await Tether.account, Tether.account);
+  assert.equal(await Promise.resolve(Tether.account), Tether.account);
   assert.deepEqual(Object.keys(Tether.account).sort(), [
     'addresses',
     'customer',

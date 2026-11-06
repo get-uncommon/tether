@@ -3,6 +3,16 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { handleShopifyWebhook, MAX_WEBHOOK_BYTES } from '../src/webhook.ts';
 import { bearerMatches, signShopify, verifyShopifyHmac } from '../src/hmac.ts';
+import { asRecord } from './mocks.js';
+
+/**
+ * A second copy of src/webhook.ts is the same source, so its handler has the same type: what is left to check is that
+ * it is there.
+ *
+ * @param {unknown} value
+ * @returns {value is typeof handleShopifyWebhook}
+ */
+const isWebhookHandler = (value) => typeof value === 'function';
 
 /** @typedef {Parameters<typeof handleShopifyWebhook>[1]['sync']} WebhookSync */
 /** @typedef {import('../src/webhook.ts').DeliveryCache} DeliveryCache */
@@ -158,8 +168,8 @@ test("a delivery another isolate accepted is dropped through the data centre's c
   // Another isolate has its own module state and the same cache.
   // The query string makes a second copy of the module, which TypeScript can't resolve by name.
   const isolate = '../src/webhook.ts?isolate-2';
-  /** @type {typeof import('../src/webhook.ts')} */
-  const { handleShopifyWebhook: otherIsolate } = await import(isolate);
+  const otherIsolate = asRecord(await import(isolate), 'the second copy')['handleShopifyWebhook'];
+  assert.ok(isWebhookHandler(otherIsolate));
   const again = await otherIsolate(await delivery(), options);
   assert.equal(again.response.status, 200);
   assert.equal(again.task, undefined, 'not synced twice');

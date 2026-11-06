@@ -18,14 +18,14 @@ window.TETHER_CONFIG = {
 Tether pushes Google's standard ecommerce events to `window.dataLayer` (another name:
 `dataLayer: 'myLayer'`), clearing the previous ecommerce object first, as Google asks:
 
-| Event | When |
-|---|---|
-| `view_item` | the page's product has loaded (not cards in lists) |
-| `view_item_list` | a list (`tether-collection`, `tether-products`, recommendations) has loaded |
+| Event                             | When                                                                                                      |
+| --------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `view_item`                       | the page's product has loaded (not cards in lists)                                                        |
+| `view_item_list`                  | a list (`tether-collection`, `tether-products`, recommendations) has loaded                               |
 | `add_to_cart`, `remove_from_cart` | the cart changed: add-to-cart buttons, +/−, typed quantities, your own JS. The quantity is the difference |
-| `view_cart` | the cart drawer opened |
-| `begin_checkout` | the visitor goes to checkout (with the applied discount codes as `coupon`) |
-| `search` | search as you type got results (`search_term`) |
+| `view_cart`                       | the cart drawer opened                                                                                    |
+| `begin_checkout`                  | the visitor goes to checkout (with the applied discount codes as `coupon`)                                |
+| `search`                          | search as you type got results (`search_term`)                                                            |
 
 Items have `item_id` (variant SKU, or the variant's numeric id), `item_name`, `item_variant`,
 `item_brand` (vendor), `item_category` (product type), `price` and `quantity`; events have

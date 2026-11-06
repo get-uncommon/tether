@@ -45,21 +45,21 @@ Webflow derives the slug from the field name, so naming a field "Compare at pric
 `compare-at-price`. Fields you don't create are skipped (`webflow.skipMissingFields`), so a
 collection with only Name, Slug and Shopify ID works.
 
-| Field name | Slug | Type | From Shopify |
-|---|---|---|---|
-| Name, Slug | `name`, `slug` | built in | title, handle (so `productPath: '/product'` in Tether keeps working) |
-| **Shopify ID** | `shopify-id` | Plain text | product id: **required**, how items are matched |
-| Shopify handle | `shopify-handle` | Plain text | handle (bind `tether-product` to it) |
-| Description | `description` | Rich text | description HTML, **Webflow-owned**: set once, then edited in Webflow |
-| Price | `price` | Number | lowest variant price |
-| Compare at price | `compare-at-price` | Number | only when on sale |
-| Main image | `main-image` | Image | featured image |
-| Gallery | `gallery` | Multi-image | all images |
-| Vendor | `vendor` | Plain text | |
-| Product type | `product-type` | Plain text | |
-| Tags | `tags` | Plain text | comma-separated |
-| SKU | `sku` | Plain text | first variant |
-| Available | `available` | Switch | any variant in stock |
+| Field name       | Slug               | Type        | From Shopify                                                          |
+| ---------------- | ------------------ | ----------- | --------------------------------------------------------------------- |
+| Name, Slug       | `name`, `slug`     | built in    | title, handle (so `productPath: '/product'` in Tether keeps working)  |
+| **Shopify ID**   | `shopify-id`       | Plain text  | product id: **required**, how items are matched                       |
+| Shopify handle   | `shopify-handle`   | Plain text  | handle (bind `tether-product` to it)                                  |
+| Description      | `description`      | Rich text   | description HTML, **Webflow-owned**: set once, then edited in Webflow |
+| Price            | `price`            | Number      | lowest variant price                                                  |
+| Compare at price | `compare-at-price` | Number      | only when on sale                                                     |
+| Main image       | `main-image`       | Image       | featured image                                                        |
+| Gallery          | `gallery`          | Multi-image | all images                                                            |
+| Vendor           | `vendor`           | Plain text  |                                                                       |
+| Product type     | `product-type`     | Plain text  |                                                                       |
+| Tags             | `tags`             | Plain text  | comma-separated                                                       |
+| SKU              | `sku`              | Plain text  | first variant                                                         |
+| Available        | `available`        | Switch      | any variant in stock                                                  |
 
 Bind `tether-product` on the template page to the slug (or `shopify-handle`) and Tether takes care
 of variants, live prices and the cart.
@@ -69,12 +69,12 @@ Find the collection id in the collection settings, or with
 
 ### 2. Tokens
 
-| Secret | Where | Scopes |
-|---|---|---|
-| `WEBFLOW_TOKEN` | Webflow → Site settings → Apps & integrations → API access → generate a site token | **CMS: read and write** |
-| `SHOPIFY_CLIENT_ID` + `SHOPIFY_CLIENT_SECRET` | Shopify **Dev Dashboard** → create an app, install it on your store | `read_products` (+ `read_inventory` if you map inventory) |
-| or `SHOPIFY_ADMIN_TOKEN` | an existing admin-created custom app (`shpat_…`) | same |
-| `SHOPIFY_WEBHOOK_SECRET` | defaults to `SHOPIFY_CLIENT_SECRET` (app webhooks are signed with it). For webhooks created under Settings → Notifications, use the key shown there | |
+| Secret                                        | Where                                                                                                                                               | Scopes                                                    |
+| --------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
+| `WEBFLOW_TOKEN`                               | Webflow → Site settings → Apps & integrations → API access → generate a site token                                                                  | **CMS: read and write**                                   |
+| `SHOPIFY_CLIENT_ID` + `SHOPIFY_CLIENT_SECRET` | Shopify **Dev Dashboard** → create an app, install it on your store                                                                                 | `read_products` (+ `read_inventory` if you map inventory) |
+| or `SHOPIFY_ADMIN_TOKEN`                      | an existing admin-created custom app (`shpat_…`)                                                                                                    | same                                                      |
+| `SHOPIFY_WEBHOOK_SECRET`                      | defaults to `SHOPIFY_CLIENT_SECRET` (app webhooks are signed with it). For webhooks created under Settings → Notifications, use the key shown there |                                                           |
 
 With client id + secret the sync uses Shopify's **client credentials grant**: it requests an
 Admin token (valid ~24h) and refreshes it automatically. This works for apps installed on a store
@@ -205,12 +205,12 @@ product again: it writes only what changed.
 
 Check current pricing pages before relying on this; these were the published limits in late 2026.
 
-| Service | Free tier | What the sync uses |
-|---|---|---|
-| Cloudflare Workers | 100,000 requests/day, 10 ms CPU per run, 50 subrequests per run, 5 cron triggers per account | 1 request per webhook; a cron every 10 min = 144 runs/day. Waiting on APIs doesn't count as CPU. A run stops at 45 subrequests and resumes next time |
-| Cloudflare KV | 100,000 reads/day, 1,000 writes/day | 1 read per product checked; writes only when something changed: 1–2 per changed product, the cursor when it moves, the item index and the Shopify token about once a day. A quiet store writes ~0 |
-| Shopify Admin API | included in every plan | 1 query per webhook, 1 per ~19 products per reconcile |
-| Webflow Data API | included with a site plan; 60 requests/min (Starter/Basic), 120 (CMS/eCommerce/Business) | ~1–2 per changed product, publishes batched per 100 |
+| Service            | Free tier                                                                                    | What the sync uses                                                                                                                                                                                |
+| ------------------ | -------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Cloudflare Workers | 100,000 requests/day, 10 ms CPU per run, 50 subrequests per run, 5 cron triggers per account | 1 request per webhook; a cron every 10 min = 144 runs/day. Waiting on APIs doesn't count as CPU. A run stops at 45 subrequests and resumes next time                                              |
+| Cloudflare KV      | 100,000 reads/day, 1,000 writes/day                                                          | 1 read per product checked; writes only when something changed: 1–2 per changed product, the cursor when it moves, the item index and the Shopify token about once a day. A quiet store writes ~0 |
+| Shopify Admin API  | included in every plan                                                                       | 1 query per webhook, 1 per ~19 products per reconcile                                                                                                                                             |
+| Webflow Data API   | included with a site plan; 60 requests/min (Starter/Basic), 120 (CMS/eCommerce/Business)     | ~1–2 per changed product, publishes batched per 100                                                                                                                                               |
 
 The real limit is usually Webflow's **CMS item count** for your site plan, not the API.
 On the free plan a run handles roughly 15–20 changed products (each is an update plus its share of

@@ -10,7 +10,6 @@ import { existsSync } from 'node:fs';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { join, relative } from 'node:path';
 import { asList, field } from '../src/shared/json.ts';
-import { messageOf } from '../src/shared/error-message.ts';
 
 export type GitHubGet = (path: string) => Promise<unknown>;
 /** How a command ended. `missing`: the program isn't installed, which a person running the updater by hand can fix. */
@@ -27,15 +26,23 @@ interface Release {
   version: string;
   sha: string;
 }
-/** Where a release comes from: the GitHub API, a command runner for `gh`, and the download. Tests pass fakes. */
+/** Where a release comes from: a command runner for `gh`, and the download. Tests pass fakes. */
 interface ReleaseSource {
-  get: GitHubGet;
   run: RunCommand;
   download: (url: string, dir: string) => Promise<string>;
 }
 
-/** The first release whose GitHub Release carries the attested asset. */
-export const FIRST_SIGNED_RELEASE = '0.7.0';
+/** A GitHub API answer that isn't a success, with its status. */
+export class GitHubError extends Error {
+  readonly status: number;
+
+  constructor(path: string, status: number) {
+    super(`GitHub ${path}: ${String(status)}`);
+    this.status = status;
+  }
+}
+
+const NOT_FOUND = 404;
 
 /** @param version `0.7.0`. */
 export function releaseAssetName(version: string): string {
@@ -51,31 +58,25 @@ export function runCommand(command: string, args: string[]): CommandResult {
   return { kind: 'exited', status: result.status ?? 1, output: `${result.stdout}${result.stderr}`.trim() };
 }
 
-function unsignedRelease(release: Release, why: string): Error {
-  return new Error(
-    `v${release.version} has no signed ${releaseAssetName(release.version)} on its GitHub Release (${why}). ` +
-      `Releases before ${FIRST_SIGNED_RELEASE} have none, so this updater can't install them: ` +
-      `set TETHER_VERSION to ${FIRST_SIGNED_RELEASE} or newer.`,
-  );
-}
-
 /**
- * The download URL of the release's signed asset.
+ * The download URL of the release's signed asset, or `null` while its GitHub Release doesn't carry one: the tag is
+ * pushed before the release workflow creates the Release, and stays without one when that workflow fails.
  *
- * @throws When the GitHub Release or its asset is missing, naming the releases that never had one.
+ * @param version `0.7.0`.
+ * @throws When GitHub answers anything but the Release or a 404.
  */
-export async function releaseAssetUrl(get: GitHubGet, release: Release): Promise<string> {
-  const name = releaseAssetName(release.version);
+export async function releaseAssetUrl(get: GitHubGet, upstream: string, version: string): Promise<string | null> {
   let answer: unknown;
   try {
-    answer = await get(`/repos/${release.upstream}/releases/tags/v${release.version}`);
+    answer = await get(`/repos/${upstream}/releases/tags/v${version}`);
   } catch (error) {
-    throw unsignedRelease(release, messageOf(error));
+    if (error instanceof GitHubError && error.status === NOT_FOUND) return null;
+    throw error;
   }
+  const name = releaseAssetName(version);
   const asset = asList(field(answer, 'assets')).find((entry) => field(entry, 'name') === name);
   const url = field(asset, 'browser_download_url');
-  if (typeof url !== 'string') throw unsignedRelease(release, `no asset named ${name}`);
-  return url;
+  return typeof url === 'string' ? url : null;
 }
 
 /**
@@ -146,16 +147,17 @@ export function unpackRelease(archive: string, dir: string): string {
 /**
  * Downloads the release's signed asset, verifies it, and only then unpacks it.
  *
+ * @param assetUrl From {@link releaseAssetUrl}.
  * @param dir An empty folder, which the caller removes.
  * @returns The unpacked `server/` folder.
  */
 export async function fetchSignedRelease(
   source: ReleaseSource,
-  release: Release,
+  release: Release & { assetUrl: string },
   dir: string,
   policy: VerifyPolicy,
 ): Promise<string> {
-  const archive = await source.download(await releaseAssetUrl(source.get, release), dir);
+  const archive = await source.download(release.assetUrl, dir);
   const verification = verifyAttestation(source.run, archive, release, policy);
   if (verification.kind === 'unverified') {
     console.log(`::warning::v${release.version} installed without verifying its signature (--allow-unverified, no gh)`);

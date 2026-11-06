@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { withContext, request, hasData, shaped, TetherError } from '../src/client.ts';
+import { withContext, request, hasData, operationOf, shaped, TetherError } from '../src/client.ts';
 import { resolveConfig } from '../src/config.ts';
 import { createStorefront } from '../src/server.ts';
 import { graphqlRequest, jsonResponse, product } from './fixtures.js';
@@ -107,7 +107,7 @@ test('request errors are TetherErrors with a code', async () => {
   });
   const unauthorized = async () => jsonResponse({}, 401);
   const error = await request(storefront('down.test', unauthorized), '{ shop { name } }', {}, hasData).catch(
-    (failure) => failure,
+    /** @param {unknown} failure */ (failure) => failure,
   );
   assert.ok(error instanceof TetherError);
   assert.equal(error.code, 'HTTP_401');
@@ -162,4 +162,86 @@ test('the server catalog refuses a product missing fields, and reads a node of a
   await assert.rejects(answering({ product: { ...product, priceRange: null } }).getProduct('coffee-box'), invalid);
   await assert.rejects(answering({ products: { nodes: [product] } }).getProducts(), invalid, 'no pageInfo');
   await assert.rejects(answering({ productRecommendations: [{ id: gid }] }).getRecommendations(gid), invalid);
+});
+
+/**
+ * A store with one retry, whose fake answers each request with the next of `answers` and counts the requests.
+ *
+ * @param {(() => Response)[]} answers
+ */
+function answeringInTurn(answers) {
+  const sent = { count: 0 };
+  const conf = {
+    ...resolveConfig({ domain: 'retry.test', token: 't', maxAge: 0, retries: 1 }),
+    /** @type {typeof fetch} */
+    fetch: async () => {
+      const answer = answers[sent.count];
+      sent.count += 1;
+      assert.ok(answer, 'no more requests than answers');
+      return answer();
+    },
+  };
+  return { conf, sent };
+}
+
+const MUTATION = 'mutation Add($cartId: ID!) { cartLinesAdd(cartId: $cartId, lines: []) { cart { id } } }';
+const gatewayTimeout = () => new Response('Gateway Timeout', { status: 504 });
+const answered = () => jsonResponse({ data: { done: true } });
+
+test('a mutation is not sent again after a 5xx or a network error, after which Shopify may already have applied it', async () => {
+  const timedOut = answeringInTurn([gatewayTimeout, answered]);
+  await assert.rejects(request(timedOut.conf, MUTATION, {}, hasData, { operation: 'mutation' }), {
+    name: 'TetherError',
+    code: 'HTTP_504',
+    message: 'HTTP 504 from retry.test',
+  });
+  assert.equal(timedOut.sent.count, 1);
+
+  const dropped = answeringInTurn([
+    () => {
+      throw new TypeError('fetch failed');
+    },
+    answered,
+  ]);
+  await assert.rejects(request(dropped.conf, MUTATION, {}, hasData, { operation: 'mutation' }), { code: 'NETWORK' });
+  assert.equal(dropped.sent.count, 1);
+});
+
+test('a mutation is sent again after a 429 or THROTTLED, which Shopify answers without running it', async () => {
+  const limited = answeringInTurn([() => jsonResponse({}, 429), answered]);
+  assert.deepEqual(await request(limited.conf, MUTATION, {}, hasData, { operation: 'mutation' }), { done: true });
+  assert.equal(limited.sent.count, 2);
+
+  const throttled = answeringInTurn([
+    () => jsonResponse({ errors: [{ message: 'Throttled', extensions: { code: 'THROTTLED' } }] }),
+    answered,
+  ]);
+  assert.deepEqual(await request(throttled.conf, MUTATION, {}, hasData, { operation: 'mutation' }), { done: true });
+  assert.equal(throttled.sent.count, 2);
+});
+
+test('a query is sent again after a 5xx', async () => {
+  const { conf, sent } = answeringInTurn([gatewayTimeout, answered]);
+  assert.deepEqual(await request(conf, '{ shop { name } }', {}, hasData), { done: true });
+  assert.equal(sent.count, 2);
+});
+
+test("a document Tether didn't write is a mutation when it has the keyword outside strings and comments", async () => {
+  assert.equal(operationOf(MUTATION), 'mutation');
+  assert.equal(operationOf('fragment F on Cart { id }\nmutation M { cartCreate { cart { ...F } } }'), 'mutation');
+  assert.equal(operationOf('# not a mutation\nquery Q($q: String = "mutation") { search(query: $q) { id } }'), 'query');
+  assert.equal(operationOf('{ shop { name } }'), 'query');
+
+  let sent = 0;
+  const storefront = createStorefront({
+    domain: 'shop.test',
+    token: 't',
+    retries: 1,
+    fetch: async () => {
+      sent += 1;
+      return gatewayTimeout();
+    },
+  });
+  await assert.rejects(storefront.query(MUTATION), { code: 'HTTP_504' });
+  assert.equal(sent, 1, "the server's query() sends a mutation once");
 });
