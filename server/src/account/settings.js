@@ -1,5 +1,6 @@
 /** The customer-account settings of the Worker, read once from its env. */
 
+import { STOREFRONT_API_VERSION } from '../shared/api-versions.js';
 import { cleanEnv } from '../env.js';
 
 /**
@@ -13,6 +14,12 @@ import { cleanEnv } from '../env.js';
  * @property {'ACCOUNT_SECRET' | 'SYNC_SECRET' | null} secretSource Which setting `secret` came from.
  * @property {number} sessionDays How long a login lasts, 1 to 90 days.
  * @property {string} apiVersion Storefront API version for cart links.
+ */
+
+/**
+ * Settings {@link accountProblems} finds no error in: the site has a home origin.
+ *
+ * @typedef {AccountSettings & { origins: [string, ...string[]] }} ReadyAccountSettings
  */
 
 /** @typedef {{ severity: 'error' | 'warning', message: string }} AccountProblem */
@@ -44,7 +51,7 @@ export function accountSettings(rawEnv) {
     secret: (secretSource && env[secretSource]) ?? '',
     secretSource,
     sessionDays: Math.max(1, Math.min(MAX_SESSION_DAYS, sessionDays)),
-    apiVersion: env.STOREFRONT_API_VERSION ?? '2026-07',
+    apiVersion: env.STOREFRONT_API_VERSION ?? STOREFRONT_API_VERSION,
   };
 }
 
@@ -78,4 +85,18 @@ export function accountProblems(settings) {
     );
   }
   return problems;
+}
+
+/**
+ * The settings once nothing stops accounts from working, or the errors that do.
+ *
+ * @param {AccountSettings} settings
+ * @returns {{ kind: 'ready', settings: ReadyAccountSettings } | { kind: 'not-ready', errors: AccountProblem[] }}
+ */
+export function readyAccountSettings(settings) {
+  const errors = accountProblems(settings).filter((problem) => problem.severity === 'error');
+  const [home, ...others] = settings.origins;
+  // accountProblems reports an empty ACCOUNT_ORIGINS as an error, so `home` is only missing alongside one.
+  if (errors.length || home === undefined) return { kind: 'not-ready', errors };
+  return { kind: 'ready', settings: { ...settings, origins: [home, ...others] } };
 }

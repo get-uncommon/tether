@@ -23,6 +23,7 @@ import { runCheck } from './check.js';
 import { cleanEnv } from './env.js';
 import { ensureWebhooks } from './webhooks.js';
 import { VERSION } from './version.js';
+import { messageOf } from './util.js';
 import { handleAccount } from './account.js';
 
 /** @typedef {Record<string, unknown>} WorkerEnv */
@@ -72,14 +73,10 @@ function countingFetch(inner, limit) {
   };
 }
 
-/** @param {unknown} error */
-function messageOf(error) {
-  return error instanceof Error ? error.message : String(error);
-}
-
 /**
  * What anyone may see of the setup check without the bearer secret: each step's title and level, never its message,
- * fix or sample, because those name the store, the collection and the site.
+ * fix or sample, because those name the store, the collection and the site. The version and the KV binding are left
+ * out too: they tell a stranger which release to probe.
  *
  * @param {Awaited<ReturnType<typeof runCheck>>} report
  */
@@ -123,11 +120,8 @@ async function check(setup, request, env, url) {
     version: deep ? VERSION : null,
     range: cleanEnv(env).TETHER_VERSION ?? null,
   });
-  const body = deep ? report : publicReport(report);
-  return Response.json(
-    { version: VERSION, ...body, kv: Boolean(env['TETHER_SYNC']) },
-    { status: report.ok ? 200 : 503 },
-  );
+  const body = deep ? { version: VERSION, ...report, kv: Boolean(env['TETHER_SYNC']) } : publicReport(report);
+  return Response.json(body, { status: report.ok ? 200 : 503 });
 }
 
 /** @param {WorkerSetup} setup @param {Request} request @param {WorkerEnv} env @param {ExecutionContext} context */
@@ -186,9 +180,8 @@ export function createWorker(config, { fetch, sleep } = {}) {
       try {
         const account = await handleAccount(request, env, fetch ? { fetch } : {});
         if (account) return account;
-        if (url.pathname === '/health') {
-          return Response.json({ ok: true, version: VERSION, kv: Boolean(env['TETHER_SYNC']) });
-        }
+        // The version is documented here (server/README.md) for checking an update landed.
+        if (url.pathname === '/health') return Response.json({ ok: true, version: VERSION });
         if (url.pathname === '/check' || url.pathname === '/') return await check(setup, request, env, url);
         if (url.pathname === '/webhooks/shopify') return await webhook(setup, request, env, context);
         if (url.pathname === '/reconcile' && request.method === 'POST')

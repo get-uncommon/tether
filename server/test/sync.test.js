@@ -413,7 +413,7 @@ test('worker: webhook route with waitUntil, cron reconcile writes KV only on cha
     await (await import('node:fs/promises')).readFile(new URL('../package.json', import.meta.url), 'utf8'),
   );
   assert.equal(VERSION, pkg.version, 'src/version.js matches package.json');
-  assert.deepEqual(await health.json(), { ok: true, version: pkg.version, kv: true });
+  assert.deepEqual(await health.json(), { ok: true, version: pkg.version });
 
   const res = await worker.fetch(await webhook('products/update', { id: 1 }), wenv, ctx);
   assert.equal(res.status, 200);

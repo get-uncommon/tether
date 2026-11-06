@@ -8,25 +8,24 @@
  * Settings and set-up: `docs/accounts.md`.
  */
 
-/** @import { AccountSettings } from './account/settings.js' */
+/** @import { ReadyAccountSettings } from './account/settings.js' */
 /** @import { Fetch } from './account/shopify.js' */
 /** @import { Session } from './account/session.js' */
+/** @import { OperationCall } from './shared/account-ops.js' */
 
 import { CUSTOMER_QUERY, ORDERS_QUERY } from './shared/account-documents.js';
-import { InputError, ops, ROUTES as OPERATION_ROUTES } from './shared/account-ops.js';
-import { randomToken, toBase64Url } from './shared/base64url.js';
-import { open, seal, sha256 } from './crypto.js';
-import { accountProblems, accountSettings } from './account/settings.js';
+import { authorizeUrl } from './shared/account-login.js';
+import { InputError, operationCall, ops } from './shared/account-ops.js';
+import { randomToken } from './shared/base64url.js';
+import { field, isRecord } from './shared/json.js';
+import { open, seal } from './crypto.js';
+import { asRecord, responseJsonOrNull, textOrNull } from './json.js';
+import { messageOf } from './util.js';
+import { accountProblems, accountSettings, readyAccountSettings } from './account/settings.js';
 import { accountStore } from './account/kv.js';
 import { createSessionStore, sessionTokens } from './account/session.js';
-import {
-  customerQuery,
-  discover,
-  linkCart,
-  tokenRequest,
-  UnauthorizedError,
-  verifyIdToken,
-} from './account/shopify.js';
+import { verifyIdToken } from './account/id-token.js';
+import { customerQuery, discover, linkCart, tokenRequest, UnauthorizedError } from './account/shopify.js';
 import {
   corsHeaders,
   jsonResponse,
@@ -56,37 +55,27 @@ const CART_ID = /^gid:\/\/shopify\/Cart\/[\w-]+(\?key=[\w-]+)?$/;
 
 /** @param {unknown} value @returns {value is PendingLogin} */
 function isPendingLogin(value) {
-  if (value === null || typeof value !== 'object') return false;
-  const login = /** @type {Record<string, unknown>} */ (value);
-  const texts = ['state', 'nonce', 'verifier', 'returnTo'].every((key) => typeof login[key] === 'string');
-  return texts && typeof login['at'] === 'number';
+  if (!isRecord(value)) return false;
+  const texts = ['state', 'nonce', 'verifier', 'returnTo'].every((key) => typeof value[key] === 'string');
+  return texts && typeof value['at'] === 'number';
 }
 
 /** @param {unknown} value @returns {value is LogoutTicket} */
 function isLogoutTicket(value) {
-  if (value === null || typeof value !== 'object') return false;
-  const ticket = /** @type {Record<string, unknown>} */ (value);
+  if (!isRecord(value)) return false;
   return (
-    typeof ticket['idToken'] === 'string' && typeof ticket['returnTo'] === 'string' && typeof ticket['at'] === 'number'
+    typeof value['idToken'] === 'string' && typeof value['returnTo'] === 'string' && typeof value['at'] === 'number'
   );
 }
 
 /**
- * The request body as a JSON object; `{}` for anything else.
+ * The request body as a JSON object; `{}` for a body that is not one, whose fields the routes then refuse one by one.
  *
  * @param {Request} request
  * @returns {Promise<Record<string, unknown>>}
  */
 async function readJsonObject(request) {
-  /** @type {unknown} */
-  const body = await request.json().catch(() => null);
-  if (body === null || typeof body !== 'object' || Array.isArray(body)) return {};
-  return /** @type {Record<string, unknown>} */ (body);
-}
-
-/** @param {unknown} error */
-function errorMessage(error) {
-  return error instanceof Error ? error.message : String(error);
+  return asRecord(await responseJsonOrNull(request));
 }
 
 /**
@@ -96,19 +85,8 @@ function errorMessage(error) {
  */
 function logFailure(label) {
   return (/** @type {unknown} */ error) => {
-    console.error(label, errorMessage(error));
+    console.error(label, messageOf(error));
   };
-}
-
-/** @param {unknown} value @param {string} key */
-function field(value, key) {
-  if (value === null || typeof value !== 'object') return undefined;
-  return /** @type {Record<string, unknown>} */ (value)[key];
-}
-
-/** @param {unknown} value */
-function textOrNull(value) {
-  return typeof value === 'string' && value ? value : null;
 }
 
 /**
@@ -117,7 +95,7 @@ function textOrNull(value) {
  * @typedef {object} AccountRequest
  * @property {Request} request
  * @property {URL} url
- * @property {AccountSettings} settings
+ * @property {ReadyAccountSettings} settings
  * @property {ReturnType<typeof createSessionStore>} sessions
  * @property {string | null} sessionId The session cookie's value.
  * @property {Fetch} fetch
@@ -136,43 +114,48 @@ async function login({ request, url, settings, fetch: fetchImpl, callbackUrl }) 
     at: Date.now(),
     returnTo: safeReturn(url.searchParams.get('returnTo') ?? request.headers.get('referer') ?? '', settings),
   };
-  const authorize = new URL(discovery.authorization_endpoint);
   const locale = (url.searchParams.get('locale') ?? '').replace(/[^a-zA-Z-]/g, '').slice(0, 8);
   const country = (url.searchParams.get('country') ?? '')
     .replace(/[^A-Za-z]/g, '')
     .slice(0, 2)
     .toUpperCase();
-  /** @type {Record<string, string>} */
-  const params = {
-    client_id: settings.clientId,
-    scope: 'openid email customer-account-api:full',
-    response_type: 'code',
-    redirect_uri: callbackUrl,
+  const authorize = await authorizeUrl(discovery.authorization_endpoint, {
+    clientId: settings.clientId,
+    redirectUri: callbackUrl,
     state: pending.state,
     nonce: pending.nonce,
-    code_challenge: toBase64Url(await sha256(pending.verifier)),
-    code_challenge_method: 'S256',
-  };
-  if (locale) params['locale'] = locale;
-  if (country) params['region_country'] = country;
-  for (const [name, value] of Object.entries(params)) authorize.searchParams.set(name, value);
+    verifier: pending.verifier,
+    locale,
+    country,
+  });
   // Nothing is stored before the customer comes back: the pending login is sealed into a cookie in this browser,
   // which also stops another browser from completing it (login CSRF).
   const sealed = await seal(settings.secret, 'login', LOGIN_COOKIE, pending);
-  return redirectResponse(authorize.toString(), {
+  return redirectResponse(authorize, {
     'Set-Cookie': setCookie(LOGIN_COOKIE, sealed, PENDING_LOGIN_SECONDS),
   });
 }
 
-/** @param {AccountRequest} context */
-async function callback({ request, url, settings, sessions, fetch: fetchImpl, siteOrigin, callbackUrl }) {
-  const clearLogin = setCookie(LOGIN_COOKIE, '', 0);
+/**
+ * The pending login of this browser, when it is the one Shopify's answer belongs to and not older than
+ * {@link PENDING_LOGIN_SECONDS}.
+ *
+ * @param {AccountRequest} context
+ * @returns {Promise<PendingLogin | null>}
+ */
+async function pendingLoginOf({ request, url, settings }) {
   const pending = await open(settings.secret, 'login', LOGIN_COOKIE, readCookie(request, LOGIN_COOKIE, 2000));
   const state = url.searchParams.get('state') ?? '';
-  const expired = isPendingLogin(pending) && Date.now() - pending.at > PENDING_LOGIN_SECONDS * 1000;
-  if (!isPendingLogin(pending) || !state || pending.state !== state || expired) {
-    return redirectResponse(`${siteOrigin}/?account=expired`, { 'Set-Cookie': clearLogin });
-  }
+  if (!isPendingLogin(pending) || !state || pending.state !== state) return null;
+  return Date.now() - pending.at > PENDING_LOGIN_SECONDS * 1000 ? null : pending;
+}
+
+/** @param {AccountRequest} context */
+async function callback(context) {
+  const { url, settings, sessions, sessionId, fetch: fetchImpl, siteOrigin, callbackUrl } = context;
+  const clearLogin = setCookie(LOGIN_COOKIE, '', 0);
+  const pending = await pendingLoginOf(context);
+  if (!pending) return redirectResponse(`${siteOrigin}/?account=expired`, { 'Set-Cookie': clearLogin });
   const code = url.searchParams.get('code');
   if (url.searchParams.get('error') || !code) {
     return redirectResponse(safeReturn(pending.returnTo, settings), { 'Set-Cookie': clearLogin });
@@ -180,14 +163,15 @@ async function callback({ request, url, settings, sessions, fetch: fetchImpl, si
   const discovery = await discover(settings, fetchImpl);
   const grant = { grant_type: 'authorization_code', redirect_uri: callbackUrl, code, code_verifier: pending.verifier };
   const tokens = await tokenRequest(settings, discovery, grant, siteOrigin, fetchImpl);
-  await verifyIdToken(tokens.id_token, discovery, settings, pending.nonce, fetchImpl);
+  const idToken = tokens.id_token;
+  if (!idToken) throw new Error('id token missing');
+  await verifyIdToken(idToken, discovery, settings, pending.nonce, fetchImpl);
   const id = randomToken(32);
   /** @type {Session} */
-  const session = {
-    ...sessionTokens(tokens, { refresh: null, idToken: tokens.id_token ?? '' }),
-    createdAt: Date.now(),
-  };
+  const session = { ...sessionTokens(tokens, { refresh: null, idToken }), createdAt: Date.now() };
   await sessions.save(id, session);
+  // The cookie is about to point at the new session, so the old one could never be ended from this browser again.
+  if (sessionId) await sessions.end(sessionId).catch(logFailure('account login: previous session not ended'));
   const back = new URL(safeReturn(pending.returnTo, settings));
   back.searchParams.set('account', 'in');
   const headers = new Headers({ Location: back.href, ...NO_STORE });
@@ -220,6 +204,23 @@ async function logoutRedirect({ request, settings, fetch: fetchImpl, siteOrigin 
 }
 
 /**
+ * The session being logged out, for its id token. A KV failure is logged and the logout carries on without one: the
+ * session is still ended here, only Shopify's own logout is skipped.
+ *
+ * @param {AccountRequest['sessions']} sessions
+ * @param {string} sessionId
+ * @returns {Promise<Session | null>}
+ */
+async function sessionForLogout(sessions, sessionId) {
+  try {
+    return await sessions.load(sessionId);
+  } catch (error) {
+    console.error('account logout: session not read, so Shopify is not logged out', messageOf(error));
+    return null;
+  }
+}
+
+/**
  * Logout, step 1: ends the session here first, whatever Shopify does, and unlinks the cart.
  *
  * @param {AccountRequest} context
@@ -227,7 +228,7 @@ async function logoutRedirect({ request, settings, fetch: fetchImpl, siteOrigin 
  */
 async function logout({ request, url, settings, sessions, sessionId, fetch: fetchImpl, siteOrigin }, cors) {
   const body = await readJsonObject(request);
-  const session = sessionId ? await sessions.load(sessionId).catch(() => null) : null;
+  const session = sessionId ? await sessionForLogout(sessions, sessionId) : null;
   if (sessionId) await sessions.end(sessionId).catch(logFailure('account logout'));
   const headers = new Headers({ 'Content-Type': 'application/json', ...NO_STORE, ...cors });
   headers.append('Set-Cookie', setCookie(SESSION_COOKIE, '', 0));
@@ -347,15 +348,13 @@ async function cart({ request, settings, fetch: fetchImpl }, cors, customer) {
  *
  * @param {Record<string, string>} cors
  * @param {Customer} customer
- * @param {import('./shared/account-ops.js').OperationCall} call
+ * @param {OperationCall} call
  */
 async function operation(cors, customer, { name, input }) {
-  const run = ops[name];
-  if (!run) return jsonResponse({ error: 'not found' }, 404, cors);
   if (!customer) return jsonResponse({ loggedIn: false }, 401, cors);
   const { api } = customer;
   try {
-    const out = await run((query, variables) => api.ask(query, variables), input);
+    const out = await ops[name]((query, variables) => api.ask(query, variables), input);
     if (api.ended) return jsonResponse({ loggedIn: false }, 401, cors);
     return jsonResponse({ ok: true, ...out }, 200, cors);
   } catch (error) {
@@ -380,14 +379,13 @@ const CUSTOMER_ROUTES = new Map([
  * @param {string} route
  */
 async function customerRoute(context, cors, route) {
-  const key = `${context.request.method} ${route}`;
-  const handler = CUSTOMER_ROUTES.get(key);
-  const routeOperation = OPERATION_ROUTES[key];
+  const { method } = context.request;
+  const handler = CUSTOMER_ROUTES.get(`${method} ${route}`);
   if (handler) return handler(context, cors, await customerOf(context));
-  if (!routeOperation) return jsonResponse({ error: 'not found' }, 404, cors);
-  const customer = await customerOf(context);
-  const body = context.request.method === 'POST' ? await readJsonObject(context.request) : {};
-  return operation(cors, customer, routeOperation(context.url, body));
+  const body = method === 'POST' ? await readJsonObject(context.request) : {};
+  const call = operationCall(method, route, context.url, body);
+  if (!call) return jsonResponse({ error: 'not found' }, 404, cors);
+  return operation(cors, await customerOf(context), call);
 }
 
 /** Top-level navigations: no CORS; the cookies prove which browser it is. */
@@ -396,6 +394,19 @@ const NAVIGATIONS = new Map([
   ['GET /callback', callback],
   ['GET /logout/go', logoutRedirect],
 ]);
+
+/**
+ * Where a top-level navigation that failed lands: the site, with `?account=error` for the page to report, and without
+ * the login and logout cookies, so a stale pending login or ticket can't be retried.
+ *
+ * @param {string} siteOrigin
+ */
+function navigationFailed(siteOrigin) {
+  const headers = new Headers({ Location: `${siteOrigin}/?account=error`, ...NO_STORE });
+  headers.append('Set-Cookie', setCookie(LOGIN_COOKIE, '', 0));
+  headers.append('Set-Cookie', setCookie(LOGOUT_COOKIE, '', 0));
+  return new Response(null, { status: 302, headers });
+}
 
 /**
  * Handles `/_tether/account/*`.
@@ -409,13 +420,14 @@ const NAVIGATIONS = new Map([
 export async function handleAccount(request, env, { fetch: fetchImpl = globalThis.fetch, memory } = {}) {
   const url = new URL(request.url);
   if (!url.pathname.startsWith(`${BASE}/`)) return null;
-  const settings = accountSettings(env);
-  if (!settings) return jsonResponse({ error: 'accounts are not set up' }, 404);
-  const problems = accountProblems(settings).filter((problem) => problem.severity === 'error');
-  if (problems.length) {
-    console.error('account setup', problems.map((problem) => problem.message).join('; '));
+  const configured = accountSettings(env);
+  if (!configured) return jsonResponse({ error: 'accounts are not set up' }, 404);
+  const ready = readyAccountSettings(configured);
+  if (ready.kind === 'not-ready') {
+    console.error('account setup', ready.errors.map((problem) => problem.message).join('; '));
     return jsonResponse({ error: 'accounts are not set up (see /check)' }, 503);
   }
+  const { settings } = ready;
   const namespace = /** @type {import('./account/kv.js').KvNamespace | undefined} */ (env['TETHER_SYNC']);
   /** @type {AccountRequest} */
   const context = {
@@ -425,7 +437,7 @@ export async function handleAccount(request, env, { fetch: fetchImpl = globalThi
     sessions: createSessionStore({ store: accountStore(namespace, memory), settings, fetch: fetchImpl }),
     sessionId: readCookie(request, SESSION_COOKIE, 100),
     fetch: fetchImpl,
-    siteOrigin: settings.origins[0] ?? '',
+    siteOrigin: settings.origins[0],
     callbackUrl: `${url.origin}${BASE}/callback`,
   };
   const route = url.pathname.slice(BASE.length);
@@ -436,9 +448,16 @@ export async function handleAccount(request, env, { fetch: fetchImpl = globalThi
       ? new Response(null, { status: 204, headers: { ...cors, ...NO_STORE } })
       : new Response(null, { status: 403 });
   }
+  const navigation = NAVIGATIONS.get(`${request.method} ${route}`);
+  if (navigation) {
+    try {
+      return await navigation(context);
+    } catch (error) {
+      console.error('account', messageOf(error));
+      return navigationFailed(context.siteOrigin);
+    }
+  }
   try {
-    const navigation = NAVIGATIONS.get(`${request.method} ${route}`);
-    if (navigation) return await navigation(context);
     // Everything else is fetch() from the site: allowed origins only, and POSTs carry a custom header, which forces a
     // CORS preflight (CSRF).
     if (!cors) return jsonResponse({ error: 'origin not allowed' }, 403);
@@ -448,7 +467,7 @@ export async function handleAccount(request, env, { fetch: fetchImpl = globalThi
     if (route === '/logout' && request.method === 'POST') return await logout(context, cors);
     return await customerRoute(context, cors, route);
   } catch (error) {
-    console.error('account', errorMessage(error));
+    console.error('account', messageOf(error));
     return jsonResponse({ error: 'account error' }, 502, cors ?? {});
   }
 }

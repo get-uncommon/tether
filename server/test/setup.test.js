@@ -299,3 +299,18 @@ test('check says when a newer release in the range exists (a stalled updater sho
   });
   assert.match(r.steps.find((s) => s.title === 'Tether version').message, /0\.4\.0 is available/);
 });
+
+test('check refuses a TETHER_VERSION the updater would refuse, and picks releases by the same rules', async () => {
+  const apis = createMockApis({ products: [shopifyProduct(1)] });
+  const fetch = async (url, init) =>
+    String(url).startsWith('https://data.jsdelivr.com/')
+      ? new Response(JSON.stringify({ versions: [{ version: '0.3.3' }, { version: '0.3.10' }] }), { status: 200 })
+      : apis.fetch(url, init);
+  const options = { fetch, version: '0.3.3', sleep: instantSleep };
+  let r = await runCheck(defaultConfig, deployEnv, { ...options, range: '^0.3' });
+  const refused = r.steps.find((s) => s.title === 'Tether version');
+  assert.equal(refused.level, 'warn');
+  assert.match(refused.message, /TETHER_VERSION must be/);
+  r = await runCheck(defaultConfig, deployEnv, { ...options, range: '*' });
+  assert.match(r.steps.find((s) => s.title === 'Tether version').message, /0\.3\.10 is available/);
+});

@@ -1,11 +1,12 @@
 /**
- * The Worker's side of Shopify's Customer Account API: endpoint discovery, the token endpoint, the id token's signature,
- * customer queries, and linking a cart to the customer through the Storefront API.
+ * The Worker's side of Shopify's Customer Account API: endpoint discovery, the token endpoint, customer queries, and
+ * linking a cart to the customer through the Storefront API. The id token's signature is checked in `id-token.js`.
  */
 
 /** @import { AccountSettings } from './settings.js' */
 
-import { fromBase64Url } from '../shared/base64url.js';
+import { CUSTOMER_ACCOUNT_API_VERSION } from '../shared/api-versions.js';
+import { asList, asRecord, responseJsonOrNull } from '../json.js';
 
 /**
  * Shopify's endpoints for one shop.
@@ -20,31 +21,41 @@ import { fromBase64Url } from '../shared/base64url.js';
  */
 
 /**
- * What Shopify's token endpoint answers.
+ * What Shopify's token endpoint answers, parsed: a field Shopify left out or sent with the wrong type is `null`.
  *
- * @typedef {{ access_token: string, refresh_token?: string, id_token?: string, expires_in?: number | string }} TokenSet
+ * @typedef {object} TokenSet
+ * @property {string} access_token
+ * @property {string | null} refresh_token
+ * @property {string | null} id_token
+ * @property {number | null} expires_in Seconds.
  */
 
 /** @typedef {typeof fetch} Fetch */
-/** @typedef {JsonWebKey & { kid?: string }} SigningKey A JWK from Shopify's key set. */
 
-/** The token endpoint refused the grant (400/401): the login or refresh token is no longer valid. */
+/** The token endpoint refused the grant as `invalid_grant`: the login code or refresh token is no longer valid. */
 export class SessionEndedError extends Error {}
 /** The Customer Account API refused the access token (401): Shopify ended the session. */
 export class UnauthorizedError extends Error {}
 
-const encoder = new TextEncoder();
-const decoder = new TextDecoder();
+/** A request to one of Shopify's discovery documents answered with a status other than 2xx. */
+class DiscoveryStatusError extends Error {
+  /** @param {string} message @param {number} status */
+  constructor(message, status) {
+    super(message);
+    this.status = status;
+  }
+}
+
 const JSON_HEADERS = { Accept: 'application/json', 'User-Agent': 'tether-sync (Cloudflare Worker)' };
 const DISCOVERY_TTL_MS = 3600e3;
+/**
+ * The statuses with which a store domain's bot protection refuses a Worker: 403, and Shopify's own 430 ("security
+ * rejection"). Only these send discovery to Shopify's account host instead.
+ */
+const BOT_PROTECTION_STATUSES = new Set([403, 430]);
 
 /** @type {Map<string, { value: Discovery, until: number }>} */
 const discoveryCache = new Map();
-
-/** @param {unknown} value @returns {Record<string, unknown>} */
-function asRecord(value) {
-  return value !== null && typeof value === 'object' ? /** @type {Record<string, unknown>} */ (value) : {};
-}
 
 /** @param {Record<string, unknown>} record @param {string} key */
 function text(record, key) {
@@ -52,15 +63,27 @@ function text(record, key) {
   return typeof value === 'string' ? value : '';
 }
 
+/** @param {Record<string, unknown>} record @param {string} key */
+function textOrNull(record, key) {
+  const value = record[key];
+  return typeof value === 'string' && value ? value : null;
+}
+
 /**
  * @param {Fetch} fetchImpl
  * @param {string} url
  * @returns {Promise<Record<string, unknown>>}
+ * @throws {DiscoveryStatusError} When the answer isn't 2xx.
  */
 async function getJson(fetchImpl, url) {
   const response = await fetchImpl(url, { headers: JSON_HEADERS });
-  if (!response.ok) throw new Error(`${url.replace(/^https:\/\/[^/]+/, '')} answered ${response.status}`);
-  return asRecord(await response.json());
+  if (!response.ok) {
+    throw new DiscoveryStatusError(
+      `${url.replace(/^https:\/\/[^/]+/, '')} answered ${response.status}`,
+      response.status,
+    );
+  }
+  return asRecord(await responseJsonOrNull(response));
 }
 
 /**
@@ -98,18 +121,48 @@ async function shopId(settings, fetchImpl) {
     body: JSON.stringify({ query: '{ shop { id } }' }),
   });
   if (!response.ok) return null;
-  const shop = asRecord(asRecord(asRecord(await response.json())['data'])['shop']);
+  const shop = asRecord(asRecord(asRecord(await responseJsonOrNull(response))['data'])['shop']);
   return text(shop, 'id').split('/').pop() || null;
 }
 
 /**
- * The reason of the first rejected result.
+ * The reason of the first rejected result, rethrown unless it is the store domain's bot protection.
  *
  * @param {...PromiseSettledResult<unknown>} results
- * @returns {unknown}
+ * @throws {unknown} Any other failure: DNS, a 5xx, an answer that isn't JSON.
  */
-function firstRejection(...results) {
-  return results.find((result) => result.status === 'rejected')?.reason;
+function throwUnlessBotProtection(...results) {
+  for (const result of results) {
+    if (result.status === 'fulfilled') continue;
+    /** @type {unknown} */
+    const reason = result.reason;
+    if (!(reason instanceof DiscoveryStatusError && BOT_PROTECTION_STATUSES.has(reason.status))) throw reason;
+  }
+}
+
+/**
+ * The endpoints from Shopify's account host, for a store domain that refuses Workers. The store domain's own answer
+ * is used where it gave one.
+ *
+ * @param {AccountSettings} settings
+ * @param {Fetch} fetchImpl
+ * @param {PromiseSettledResult<Record<string, unknown>>} oidc
+ * @param {PromiseSettledResult<Record<string, unknown>>} api
+ * @returns {Promise<Discovery>}
+ */
+async function discoverByShopId(settings, fetchImpl, oidc, api) {
+  throwUnlessBotProtection(oidc, api);
+  const id = await shopId(settings, fetchImpl);
+  if (!id) throw new Error('the store domain refused discovery, and the shop id is unknown without STOREFRONT_TOKEN');
+  const config =
+    oidc.status === 'fulfilled'
+      ? oidc.value
+      : await getJson(fetchImpl, `https://shopify.com/authentication/${id}/.well-known/openid-configuration`);
+  const graphql =
+    api.status === 'fulfilled'
+      ? text(api.value, 'graphql_api')
+      : `https://shopify.com/${id}/account/customer/api/${CUSTOMER_ACCOUNT_API_VERSION}/graphql`;
+  return toDiscovery(config, graphql);
 }
 
 /**
@@ -126,110 +179,26 @@ export async function discover(settings, fetchImpl) {
     getJson(fetchImpl, `https://${settings.shopDomain}/.well-known/openid-configuration`),
     getJson(fetchImpl, `https://${settings.shopDomain}/.well-known/customer-account-api`),
   ]);
-  /** @type {Discovery} */
-  let value;
-  if (oidc.status === 'fulfilled' && api.status === 'fulfilled') {
-    value = toDiscovery(oidc.value, text(api.value, 'graphql_api'));
-  } else {
-    // The store domain's bot protection can refuse requests from Workers (403). Shopify's account host and the
-    // Storefront API don't: find the shop id and ask Shopify's account host instead. Its answer is the only other
-    // source: an endpoint or issuer is never guessed.
-    const storeDomainError = firstRejection(oidc, api);
-    const id = await shopId(settings, fetchImpl);
-    if (!id) throw storeDomainError;
-    const config =
-      oidc.status === 'fulfilled'
-        ? oidc.value
-        : await getJson(fetchImpl, `https://shopify.com/authentication/${id}/.well-known/openid-configuration`);
-    const graphql =
-      api.status === 'fulfilled'
-        ? text(api.value, 'graphql_api')
-        : `https://shopify.com/${id}/account/customer/api/${settings.apiVersion}/graphql`;
-    value = toDiscovery(config, graphql);
-  }
+  // The store domain's bot protection can refuse requests from Workers. Shopify's account host and the Storefront
+  // API don't: the shop id finds the endpoints there. Its answer is the only other source: an endpoint or issuer is
+  // never guessed.
+  const value =
+    oidc.status === 'fulfilled' && api.status === 'fulfilled'
+      ? toDiscovery(oidc.value, text(api.value, 'graphql_api'))
+      : await discoverByShopId(settings, fetchImpl, oidc, api);
   discoveryCache.set(settings.shopDomain, { value, until: Date.now() + DISCOVERY_TTL_MS });
   return value;
 }
 
-/** How long Shopify's signing keys are trusted before they are fetched again. */
-const JWKS_TTL_MS = 3600e3;
-/** Clock difference allowed between Shopify and the Worker for `iat` and `nbf`. */
-const CLOCK_SKEW_SECONDS = 300;
-
-/** @type {Map<string, { keys: SigningKey[], until: number }>} */
-const jwksCache = new Map();
-
 /**
- * @param {string} part
- * @returns {Record<string, unknown>}
- */
-function jwtPart(part) {
-  return asRecord(JSON.parse(decoder.decode(fromBase64Url(part))));
-}
-
-/**
- * Shopify's signing keys, fetched again after {@link JWKS_TTL_MS} or when a token names a key they don't have.
+ * Shopify's `expires_in`, which arrives as a number or a numeric string.
  *
- * @param {string} jwksUri
- * @param {string} kid
- * @param {Fetch} fetchImpl
- * @returns {Promise<SigningKey[]>}
+ * @param {unknown} value
+ * @returns {number | null}
  */
-async function signingKeys(jwksUri, kid, fetchImpl) {
-  const cached = jwksCache.get(jwksUri);
-  if (cached && cached.until > Date.now() && cached.keys.some((key) => key.kid === kid)) return cached.keys;
-  const response = await fetchImpl(jwksUri, { headers: JSON_HEADERS });
-  const body = response.ok ? asRecord(await response.json().catch(() => null)) : {};
-  const keys = /** @type {unknown} */ (body['keys']);
-  if (!Array.isArray(keys)) {
-    const type = response.headers.get('content-type') ?? 'no type';
-    throw new Error(`Shopify's signing keys answered ${response.status} (${type})`);
-  }
-  /** @type {unknown[]} */
-  const entries = keys;
-  const parsed = entries
-    .filter((key) => key !== null && typeof key === 'object')
-    .map((key) => /** @type {SigningKey} */ (key));
-  jwksCache.set(jwksUri, { keys: parsed, until: Date.now() + JWKS_TTL_MS });
-  return parsed;
-}
-
-/**
- * Checks the id token's RS256 signature against Shopify's published key with the token's `kid`, and only then its
- * claims: issuer, audience, nonce, expiry, and that it was issued and valid by now.
- *
- * @param {string | undefined} token
- * @param {Discovery} discovery
- * @param {AccountSettings} settings
- * @param {string} nonce The nonce sent with this login.
- * @param {Fetch} fetchImpl
- */
-export async function verifyIdToken(token, discovery, settings, nonce, fetchImpl) {
-  const [headerPart, payloadPart, signature] = (token ?? '').split('.');
-  if (!headerPart || !payloadPart || !signature) throw new Error('id token missing');
-  const header = jwtPart(headerPart);
-  if (header['alg'] !== 'RS256') throw new Error(`id token alg ${String(header['alg'])}`);
-  const kid = header['kid'];
-  if (typeof kid !== 'string' || !kid) throw new Error('id token has no key id');
-  const jwk = (await signingKeys(discovery.jwks_uri, kid, fetchImpl)).find((key) => key.kid === kid);
-  if (!jwk) throw new Error('id token key not found');
-  const key = await crypto.subtle.importKey('jwk', jwk, { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, false, [
-    'verify',
-  ]);
-  const signed = encoder.encode(`${headerPart}.${payloadPart}`);
-  if (!(await crypto.subtle.verify('RSASSA-PKCS1-v1_5', key, fromBase64Url(signature), signed))) {
-    throw new Error('id token signature');
-  }
-  const claims = jwtPart(payloadPart);
-  const now = Date.now() / 1000;
-  const audience = /** @type {unknown[]} */ ([]).concat(claims['aud'] ?? []);
-  if (claims['iss'] !== discovery.issuer) throw new Error('id token issuer');
-  if (!audience.includes(settings.clientId)) throw new Error('id token audience');
-  if (claims['nonce'] !== nonce) throw new Error('id token nonce');
-  if (!(Number(claims['exp']) > now)) throw new Error('id token expired');
-  if (Number(claims['iat'] ?? 0) > now + CLOCK_SKEW_SECONDS) throw new Error('id token issued in the future');
-  if (Number(claims['nbf'] ?? 0) > now + CLOCK_SKEW_SECONDS) throw new Error('id token not valid yet');
-  return claims;
+function secondsOrNull(value) {
+  const seconds = typeof value === 'string' ? Number(value) : value;
+  return typeof seconds === 'number' && Number.isFinite(seconds) && seconds > 0 ? seconds : null;
 }
 
 /**
@@ -241,7 +210,9 @@ export async function verifyIdToken(token, discovery, settings, nonce, fetchImpl
  * @param {string} origin The site's origin, which Shopify checks for a public client.
  * @param {Fetch} fetchImpl
  * @returns {Promise<TokenSet>}
- * @throws {SessionEndedError} When Shopify refuses the grant.
+ * @throws {SessionEndedError} When Shopify refuses the grant itself (`invalid_grant`).
+ * @throws {Error} For any other refusal, such as `invalid_client` or a wrong `redirect_uri`: a setup error, which
+ *   must not log the customer out.
  */
 export async function tokenRequest(settings, discovery, params, origin, fetchImpl) {
   /** @type {Record<string, string>} */
@@ -253,14 +224,29 @@ export async function tokenRequest(settings, discovery, params, origin, fetchImp
     headers,
     body: new URLSearchParams({ client_id: settings.clientId, ...params }),
   });
-  const data = asRecord(await response.json().catch(() => ({})));
-  const accessToken = text(data, 'access_token');
+  const data = asRecord(await responseJsonOrNull(response));
+  const accessToken = textOrNull(data, 'access_token');
   if (!response.ok || !accessToken) {
-    const message = `token ${response.status} ${text(data, 'error')}`.trim();
-    if (response.status === 400 || response.status === 401) throw new SessionEndedError(message);
+    const code = text(data, 'error');
+    const message = `token ${response.status} ${code}`.trim();
+    if (code === 'invalid_grant') throw new SessionEndedError(message);
     throw new Error(message);
   }
-  return { ...data, access_token: accessToken };
+  return {
+    access_token: accessToken,
+    refresh_token: textOrNull(data, 'refresh_token'),
+    id_token: textOrNull(data, 'id_token'),
+    expires_in: secondsOrNull(data['expires_in']),
+  };
+}
+
+/**
+ * The `message` of each GraphQL error or user error, joined.
+ *
+ * @param {unknown[]} problems
+ */
+function messagesOf(problems) {
+  return problems.map((problem) => text(asRecord(problem), 'message')).join(' | ');
 }
 
 /**
@@ -286,13 +272,10 @@ export async function customerQuery(discovery, accessToken, query, variables, or
     },
     body: JSON.stringify({ query, variables }),
   });
-  const body = asRecord(await response.json().catch(() => ({})));
+  const body = asRecord(await responseJsonOrNull(response));
   if (response.status === 401) throw new UnauthorizedError('unauthorized');
-  const errors = Array.isArray(body['errors']) ? /** @type {unknown[]} */ (body['errors']) : [];
-  if (!response.ok || errors.length) {
-    const messages = errors.map((error) => text(asRecord(error), 'message')).join(' | ');
-    throw new Error(messages || `customer api ${response.status}`);
-  }
+  const errors = asList(body['errors']);
+  if (!response.ok || errors.length) throw new Error(messagesOf(errors) || `customer api ${response.status}`);
   return asRecord(body['data']);
 }
 
@@ -317,14 +300,9 @@ export async function linkCart(settings, cartId, accessToken, fetchImpl) {
     headers: { 'Content-Type': 'application/json', 'X-Shopify-Storefront-Access-Token': settings.storefrontToken },
     body: JSON.stringify({ query: CART_LINK, variables: { id: cartId, b: { customerAccessToken: accessToken } } }),
   });
-  const body = asRecord(await response.json().catch(() => ({})));
+  const body = asRecord(await responseJsonOrNull(response));
   const update = asRecord(asRecord(body['data'])['cartBuyerIdentityUpdate']);
-  const problems = [body['errors'], update['userErrors']].flatMap((list) =>
-    Array.isArray(list) ? /** @type {unknown[]} */ (list) : [],
-  );
-  if (!response.ok || problems.length) {
-    const messages = problems.map((problem) => text(asRecord(problem), 'message')).join(' | ');
-    throw new Error(`cart link ${response.status} ${messages}`.trim());
-  }
+  const problems = [...asList(body['errors']), ...asList(update['userErrors'])];
+  if (!response.ok || problems.length) throw new Error(`cart link ${response.status} ${messagesOf(problems)}`.trim());
   return text(asRecord(update['cart']), 'checkoutUrl') || null;
 }

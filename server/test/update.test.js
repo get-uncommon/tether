@@ -1,7 +1,7 @@
 // The updater a deployed copy runs (scripts/update-tether.mjs).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, cp, readFile, writeFile, mkdir } from 'node:fs/promises';
+import { mkdtemp, cp, readFile, readdir, writeFile, mkdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -23,6 +23,11 @@ test('version ranges work like jsDelivr', () => {
   assert.throws(() => pickVersion(TAGS, '^0.3'), /TETHER_VERSION must be/);
 });
 
+test('only v tags are releases: a tag without the v is never picked, since it could not be installed', () => {
+  assert.equal(pickVersion(['v0.6.0', '0.7.0'], 'latest'), '0.6.0');
+  assert.equal(pickVersion(['0.7.0'], '0.7'), null);
+});
+
 test('updating a copy replaces the code and keeps config, wrangler ids and TETHER_VERSION', async () => {
   const root = fileURLToPath(new URL('..', import.meta.url));
   const base = await mkdtemp(join(tmpdir(), 'tether-update-'));
@@ -31,7 +36,7 @@ test('updating a copy replaces the code and keeps config, wrangler ids and TETHE
   // An "old" deployed copy: older version, customized mapping, Cloudflare's KV id.
   await mkdir(copy);
   await cp(join(root, 'scripts'), join(copy, 'scripts'), { recursive: true });
-  await mkdir(join(copy, 'src'));
+  await cp(join(root, 'src'), join(copy, 'src'), { recursive: true });
   await writeFile(join(copy, 'src', 'old.js'), 'old');
   await writeFile(join(copy, 'package.json'), JSON.stringify({ name: '@occluze/tether-sync', version: '0.3.1' }));
   await writeFile(
@@ -62,6 +67,11 @@ test('updating a copy replaces the code and keeps config, wrangler ids and TETHE
     'workflow files are never touched (GitHub refuses that from an Action)',
   );
   assert.ok(existsSync(join(copy, 'scripts', 'update-tether.mjs')), 'the updater script updates itself');
+  assert.deepEqual(
+    (await readdir(copy)).filter((name) => name.startsWith('.tether-update-')),
+    [],
+    'the staging folder is removed',
+  );
 
   const again = execFileSync('node', [join(copy, 'scripts', 'update-tether.mjs'), '--from', release], {
     encoding: 'utf8',
@@ -70,7 +80,8 @@ test('updating a copy replaces the code and keeps config, wrangler ids and TETHE
 });
 
 test('the shipped workflow stays identical, so copies made with any earlier version keep updating', async () => {
-  // Copies from 0.3.3/0.3.4 copied .github/ too: a changed workflow would block their next update.
+  // Some deployed copies run an updater that also copies .github/, and GitHub refuses an Action's push that changes a
+  // workflow file: a changed workflow here would stop their updates.
   const { createHash } = await import('node:crypto');
   const wf = await readFile(new URL('../.github/workflows/update-tether.yml', import.meta.url));
   assert.equal(createHash('sha256').update(wf).digest('hex').slice(0, 12), WORKFLOW_HASH);

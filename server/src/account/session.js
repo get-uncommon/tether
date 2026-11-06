@@ -7,6 +7,7 @@
 /** @import { AccountSettings } from './settings.js' */
 /** @import { Discovery, Fetch } from './shopify.js' */
 
+import { isRecord } from '../shared/json.js';
 import { open, seal, sha256, toHex } from '../crypto.js';
 import { discover, SessionEndedError, tokenRequest } from './shopify.js';
 
@@ -32,8 +33,8 @@ const REFRESH_WAIT_MS = 300;
 
 /** @param {unknown} value @returns {value is Session} */
 function isSession(value) {
-  if (value === null || typeof value !== 'object') return false;
-  const session = /** @type {Record<string, unknown>} */ (value);
+  if (!isRecord(value)) return false;
+  const session = value;
   return (
     typeof session['access'] === 'string' &&
     (session['refresh'] === null || typeof session['refresh'] === 'string') &&
@@ -54,7 +55,7 @@ export function sessionTokens(tokens, previous) {
     access: tokens.access_token,
     refresh: tokens.refresh_token ?? previous.refresh,
     idToken: tokens.id_token ?? previous.idToken,
-    expiresAt: Date.now() + (Number(tokens.expires_in) || DEFAULT_TOKEN_SECONDS) * 1000,
+    expiresAt: Date.now() + (tokens.expires_in ?? DEFAULT_TOKEN_SECONDS) * 1000,
   };
 }
 
@@ -126,13 +127,20 @@ export function createSessionStore({ store, settings, fetch: fetchImpl }) {
    * @returns {Promise<Session | null>}
    */
   async function refreshNow(id, session, origin) {
+    const { refresh } = session;
+    // Without a refresh token from Shopify, the session lasts as long as its access token.
+    if (refresh === null) {
+      if (session.expiresAt > Date.now()) return session;
+      await end(id);
+      return null;
+    }
     /** @type {Discovery} */
     const discovery = await discover(settings, fetchImpl);
     try {
       const tokens = await tokenRequest(
         settings,
         discovery,
-        { grant_type: 'refresh_token', refresh_token: session.refresh ?? '' },
+        { grant_type: 'refresh_token', refresh_token: refresh },
         origin,
         fetchImpl,
       );

@@ -14,7 +14,7 @@
  *   },
  *   webflowOwned: ['description'],        // written when the item is created, never overwritten
  */
-import { SyncError, scalarText } from './util.js';
+import { isRecord, SyncError, scalarText } from './util.js';
 import { DEFAULT_API_VERSION } from './shopify.js';
 
 /** @typedef {import('./env.js').CleanEnv} CleanEnv */
@@ -210,11 +210,11 @@ function parseFieldMap(text) {
     const reason = err instanceof Error ? err.message : String(err);
     throw new SyncError(`FIELD_MAP is not valid JSON: ${reason}`, { code: 'FIELD_MAP' });
   }
-  if (!map || typeof map !== 'object' || Array.isArray(map))
+  if (!isRecord(map))
     throw new SyncError('FIELD_MAP must be a JSON object like {"webflow-field":"shopifySource"}', {
       code: 'FIELD_MAP',
     });
-  return /** @type {Record<string, unknown>} */ (map);
+  return map;
 }
 
 /**

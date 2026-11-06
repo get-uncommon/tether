@@ -68,8 +68,14 @@ export default tseslint.config(
       'no-restricted-syntax': [
         'error',
         {
-          selector:
+          // An empty handler, one that never names the error, or one that only answers a constant
+          // (`() => null`, `(error) => ({})`, `() => undefined`) all drop the rejection unseen.
+          selector: [
             "CallExpression[callee.property.name='catch'] > ArrowFunctionExpression[body.type='BlockStatement'][body.body.length=0]",
+            "CallExpression[callee.property.name='catch'] > ArrowFunctionExpression[params.length=0]",
+            "CallExpression[callee.property.name='catch'] > ArrowFunctionExpression[body.type=/^(Literal|ObjectExpression|ArrayExpression|TemplateLiteral)$/]",
+            "CallExpression[callee.property.name='catch'] > ArrowFunctionExpression > Identifier.body[name='undefined']",
+          ].join(', '),
           message: "Don't swallow a rejection. Report it, or ignore it through a helper whose name says why.",
         },
         {

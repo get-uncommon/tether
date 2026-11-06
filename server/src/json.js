@@ -26,7 +26,10 @@ export function asRecord(value) {
  * @returns {unknown[]}
  */
 export function asList(value) {
-  return Array.isArray(value) ? /** @type {unknown[]} */ (value) : [];
+  if (!Array.isArray(value)) return [];
+  /** @type {unknown[]} */
+  const list = value;
+  return list;
 }
 
 /**
@@ -48,26 +51,26 @@ export function textOrNull(value) {
 }
 
 /**
- * A number, also from a decimal string (Shopify's `Money` and `Decimal` scalars are strings), or `null`.
+ * A finite number, also from a decimal string (Shopify's `Money` and `Decimal` scalars are strings), or `null`: an
+ * empty or non-numeric string is `null`, never `0` or `NaN`.
  *
  * @param {unknown} value
  * @returns {number | null}
  */
 export function numberOrNull(value) {
-  if (typeof value === 'number') return value;
-  if (typeof value === 'string') return Number(value);
-  return null;
+  const number = typeof value === 'string' && value.trim() !== '' ? Number(value) : value;
+  return typeof number === 'number' && Number.isFinite(number) ? number : null;
 }
 
 /**
- * The response body as JSON, or `null` when it is not JSON: an API's edge answers some failures with an HTML page,
- * and then the status says what went wrong.
+ * The body as JSON, or `null` when it is not JSON: an API's edge answers some failures with an HTML page, and then
+ * the status says what went wrong; a request body that isn't JSON is refused field by field by its reader.
  *
- * @param {Response} response
+ * @param {Pick<Body, 'text'>} message A `Response` or a `Request`.
  * @returns {Promise<unknown>}
  */
-export async function responseJsonOrNull(response) {
-  const text = await response.text();
+export async function responseJsonOrNull(message) {
+  const text = await message.text();
   try {
     /** @type {unknown} */
     const json = JSON.parse(text);

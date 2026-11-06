@@ -7,6 +7,7 @@
  *     from the client credentials grant, last ~24h and are refreshed automatically.
  * Scope needed: read_products (add read_inventory if you map inventory).
  */
+import { ADMIN_API_VERSION } from './shared/api-versions.js';
 import { SyncError, sleep as realSleep } from './util.js';
 import { asList, asRecord, responseJsonOrNull, stringOrNull } from './json.js';
 import { tokenSource } from './shopify-token.js';
@@ -18,7 +19,8 @@ export { normalizeProduct };
 /** @typedef {import('./store.js').Store} Store */
 /** @typedef {typeof fetch} Fetch */
 
-export const DEFAULT_API_VERSION = '2026-07';
+/** The Admin API version the sync reads products with, unless the config names another. */
+export const DEFAULT_API_VERSION = ADMIN_API_VERSION;
 
 const DEFAULT_VARIANTS_FIRST = 25;
 const DEFAULT_MEDIA_FIRST = 10;

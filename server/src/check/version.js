@@ -4,74 +4,30 @@
  */
 import { asList, asRecord, responseJsonOrNull, stringOrNull } from '../json.js';
 import { messageOf } from '../util.js';
+import { compareVersions, newestInRange, parseVersion } from '../release-range.js';
 
 /** @typedef {import('./steps.js').Steps} Steps */
 
 const VERSIONS_URL = 'https://data.jsdelivr.com/v1/packages/gh/ravi-klaassens/tether';
-const RELEASE_TAG = /^v?(\d+)\.(\d+)\.(\d+)$/;
-
-/** @param {string} version */
-function parts(version) {
-  return version.replace(/^v/, '').split('.').map(Number);
-}
 
 /**
  * @param {string} a
  * @param {string} b
  */
 function newerThan(a, b) {
-  const x = parts(a);
-  const y = parts(b);
-  for (let index = 0; index < 3; index++) {
-    const left = x[index] ?? 0;
-    const right = y[index] ?? 0;
-    if (left !== right) return left > right;
-  }
-  return false;
+  const left = parseVersion(a);
+  const right = parseVersion(b);
+  return Boolean(left && right && compareVersions(left, right) > 0);
 }
 
 /**
- * Which versions a jsDelivr-style range accepts: `latest` (or empty), a major (`0`), a minor (`0.3`) or one version.
- *
- * @param {string} spec
- * @returns {(version: string) => boolean}
- */
-function rangeMatcher(spec) {
-  if (spec === 'latest' || spec === '') return () => true;
-  if (/^\d+$/.test(spec)) return (version) => version.split('.')[0] === spec;
-  if (/^\d+\.\d+$/.test(spec)) return (version) => version.split('.').slice(0, 2).join('.') === spec;
-  return (version) => version === spec;
-}
-
-/**
- * Newest release tag in a range; the same rules as scripts/update-tether.mjs.
- *
- * @param {string[]} tags
- * @param {string} spec
- * @returns {string | null}
- */
-function pickVersion(tags, spec) {
-  const inRange = rangeMatcher(spec.trim().replace(/^v/, '').toLowerCase());
-  const releases = tags.flatMap((tag) => {
-    const match = RELEASE_TAG.exec(tag);
-    return match ? [[match[1], match[2], match[3]].join('.')] : [];
-  });
-  return (
-    releases
-      .filter(inRange)
-      .sort((a, b) => (newerThan(a, b) ? 1 : -1))
-      .pop() ?? null
-  );
-}
-
-/**
- * @param {unknown} json jsDelivr's package answer: `{ versions: [{ version }] }`.
+ * @param {unknown} json jsDelivr's package answer: `{ versions: [{ version }] }`, each the tag without its `v`.
  * @returns {string[]}
  */
 function parseVersions(json) {
   return asList(asRecord(json)['versions']).flatMap((entry) => {
     const version = stringOrNull(asRecord(entry)['version']);
-    return version ? [version] : [];
+    return version ? [version.replace(/^v/, '')] : [];
   });
 }
 
@@ -93,8 +49,20 @@ export async function checkTetherVersion(steps, { fetch, version, range }) {
     steps.add('info', 'Tether version', `${version}; couldn't look for a newer release (${messageOf(error)})`);
     return;
   }
-  const newest = pickVersion(tags, spec);
-  if (newest && newest !== version && newerThan(newest, version)) {
+  /** @type {string | null} */
+  let newest;
+  try {
+    newest = newestInRange(tags, spec);
+  } catch (error) {
+    steps.add(
+      'warn',
+      'Tether version',
+      `${version}; ${messageOf(error)}`,
+      'Fix TETHER_VERSION: the updater refuses it too.',
+    );
+    return;
+  }
+  if (newest && newerThan(newest, version)) {
     steps.add(
       'warn',
       'Tether version',

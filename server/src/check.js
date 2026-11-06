@@ -112,8 +112,8 @@ export async function runCheck(
   }
   const network = { ...(fetch ? { fetch } : {}), ...(sleep ? { sleep } : {}) };
   await checkConnections(steps, connection, { config, env, network, webhookUri });
-  if (version && connection.target.kind === 'webflow')
-    await checkTetherVersion(steps, { fetch: fetch ?? globalThis.fetch, version, range });
+  // Both targets are deployed copies that the weekly updater keeps current, so both show a stalled update.
+  if (version) await checkTetherVersion(steps, { fetch: fetch ?? globalThis.fetch, version, range });
   return report();
 }
 

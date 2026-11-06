@@ -50,3 +50,51 @@ test('the bearer secret must match exactly', async () => {
   assert.equal(await bearerMatches(null, secret), false);
   assert.equal(await bearerMatches(`Bearer `, ''), false, 'no secret configured never matches');
 });
+
+test('a repeated X-Shopify-Webhook-Id is answered without syncing again; a new id syncs', async () => {
+  const synced = [];
+  const sync = {
+    syncById: async (id) => {
+      synced.push(id);
+      return { action: 'unchanged' };
+    },
+    queueRetry: () => Promise.resolve(),
+  };
+  const delivery = async (webhookId) => {
+    const request = await signed('{"id":7}');
+    const headers = new Headers(request.headers);
+    headers.set('x-shopify-webhook-id', webhookId);
+    return new Request(request, { headers });
+  };
+  const options = { sync, secrets: ['whsec'], shopDomain: SHOP };
+  const first = await handleShopifyWebhook(await delivery('wh-replay-1'), options);
+  await first.task;
+  const again = await handleShopifyWebhook(await delivery('wh-replay-1'), options);
+  assert.equal(again.response.status, 200);
+  assert.equal(again.task, undefined);
+  const other = await handleShopifyWebhook(await delivery('wh-replay-2'), options);
+  await other.task;
+  assert.deepEqual(synced, ['7', '7']);
+});
+
+test('a forged repeat of a webhook id is refused by its signature before it can block the real delivery', async () => {
+  const sync = { syncById: async () => ({ action: 'unchanged' }), queueRetry: () => Promise.resolve() };
+  const forged = new Request('https://w.test/webhooks/shopify', {
+    method: 'POST',
+    body: '{"id":8}',
+    headers: { 'x-shopify-webhook-id': 'wh-forged', 'x-shopify-hmac-sha256': 'nope', 'x-shopify-shop-domain': SHOP },
+  });
+  assert.equal(
+    (await handleShopifyWebhook(forged, { sync, secrets: ['whsec'], shopDomain: SHOP })).response.status,
+    401,
+  );
+  const request = await signed('{"id":8}');
+  const headers = new Headers(request.headers);
+  headers.set('x-shopify-webhook-id', 'wh-forged');
+  const real = await handleShopifyWebhook(new Request(request, { headers }), {
+    sync,
+    secrets: ['whsec'],
+    shopDomain: SHOP,
+  });
+  assert.ok(real.task, 'the real delivery still syncs');
+});

@@ -1,6 +1,6 @@
 /** Cookies, CORS and responses for the account routes. */
 
-/** @import { AccountSettings } from './settings.js' */
+/** @import { AccountSettings, ReadyAccountSettings } from './settings.js' */
 
 /** The session cookie: an opaque random id; the session itself is sealed in KV under its hash. */
 export const SESSION_COOKIE = '__Host-tether-account';
@@ -89,7 +89,7 @@ export function redirectResponse(location, headers = {}) {
  * `raw` when it is an address on one of the site's origins, else the site's home: no open redirects.
  *
  * @param {string} raw
- * @param {AccountSettings} settings
+ * @param {ReadyAccountSettings} settings
  */
 export function safeReturn(raw, settings) {
   try {
@@ -98,5 +98,5 @@ export function safeReturn(raw, settings) {
   } catch {
     // Not an absolute URL: the site's home below.
   }
-  return `${settings.origins[0] ?? ''}/`;
+  return `${settings.origins[0]}/`;
 }

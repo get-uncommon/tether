@@ -4,6 +4,7 @@ import { existsSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { resolve } from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
+import { readCapped } from './capped-body.js';
 import { handleShopifyWebhook, MAX_WEBHOOK_BYTES } from './webhook.js';
 import { parseConfigFile } from './config-file.js';
 import { asRecord, isPlainObject } from './json.js';
@@ -212,7 +213,7 @@ export async function loadConfig(path) {
  * The request as a web Request, so the Worker's webhook handler serves Node too.
  *
  * @param {IncomingMessage} req
- * @param {Buffer} body
+ * @param {Uint8Array<ArrayBuffer>} body
  */
 function toRequest(req, body) {
   const headers = new Headers();
@@ -223,7 +224,7 @@ function toRequest(req, body) {
   return new Request(`http://localhost${req.url ?? '/'}`, {
     method,
     headers,
-    ...(method === 'GET' || method === 'HEAD' ? {} : { body: new Uint8Array(body) }),
+    ...(method === 'GET' || method === 'HEAD' ? {} : { body }),
   });
 }
 
@@ -243,26 +244,17 @@ function isClientAbort(error) {
  * @param {IncomingMessage} req
  * @param {ServerResponse} res
  * @param {number} maxBody
- * @returns {Promise<Buffer | null>}
+ * @returns {Promise<Uint8Array<ArrayBuffer> | null>}
  */
 async function readBody(req, res, maxBody) {
-  const tooLarge = () => {
-    res.writeHead(413);
-    res.end('too large');
-    req.destroy();
-    return null;
-  };
-  if (Number(req.headers['content-length'] ?? 0) > maxBody) return tooLarge();
-  /** @type {Buffer[]} */
-  const chunks = [];
-  let size = 0;
-  // A request stream without an encoding yields Buffers.
-  for await (const chunk of /** @type {AsyncIterable<Buffer>} */ (req)) {
-    size += chunk.length;
-    if (size > maxBody) return tooLarge();
-    chunks.push(chunk);
-  }
-  return Buffer.concat(chunks);
+  const declaredTooLarge = Number(req.headers['content-length'] ?? 0) > maxBody;
+  // A request stream without an encoding yields Buffers, which are Uint8Arrays.
+  const body = declaredTooLarge ? null : await readCapped(req, maxBody);
+  if (body) return body;
+  res.writeHead(413);
+  res.end('too large');
+  req.destroy();
+  return null;
 }
 
 /**
@@ -332,6 +324,23 @@ async function handle(app, req, res, { log, maxBody }) {
   await app.store?.flush?.();
 }
 
+/** The addresses Node binds when no host is given: every IPv6 and IPv4 interface. */
+const EVERY_INTERFACE = new Set(['::', '0.0.0.0']);
+
+/**
+ * Where the server really listens, for the log: the bound address, or every interface with the local URL to try.
+ *
+ * @param {ReturnType<Server['address']>} address
+ * @param {number} port The port asked for, used when Node reports no address.
+ */
+function listeningOn(address, port) {
+  if (!address || typeof address === 'string') return `port ${String(port)}`;
+  const path = `:${String(address.port)}/webhooks/shopify`;
+  if (EVERY_INTERFACE.has(address.address)) return `every interface (${address.address}), e.g. http://localhost${path}`;
+  const host = address.family === 'IPv6' ? `[${address.address}]` : address.address;
+  return `http://${host}${path}`;
+}
+
 /**
  * The webhook endpoint (`POST /webhooks/shopify`) and `GET /health`.
  *
@@ -351,9 +360,7 @@ export function serve(app, { port = 8787, host, log = console, maxBody = MAX_WEB
   });
   return new Promise((done) => {
     server.listen(port, host, () => {
-      const address = server.address();
-      const listening = address && typeof address === 'object' ? address.port : port;
-      log.info(`tether-sync listening on http://${host ?? 'localhost'}:${String(listening)}/webhooks/shopify`);
+      log.info(`tether-sync listening on ${listeningOn(server.address(), port)}`);
       done(server);
     });
   });

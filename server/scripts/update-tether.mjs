@@ -12,8 +12,12 @@
  * doesn't let an Action's token change workflow files, so the workflow stays as it is and all update logic lives in
  * this script, which updates itself.
  *
- * A release is downloaded by the commit its tag points at, and only when that commit is part of the upstream
- * repository's default branch: a tag moved to a commit outside it is refused.
+ * Releases are the upstream repository's `v0.3.3` tags; a tag without the `v` is not a release. A release is
+ * downloaded by the commit its tag points at, and only when that commit is part of the upstream repository's default
+ * branch: a tag moved to a commit outside it is refused. It is staged inside the copy first and then swapped in by
+ * renames, so a failure part-way leaves the copy as it was.
+ *
+ * The version rules live in `src/release-range.js`, which every copy has next to this script.
  *
  * Run by .github/workflows/update-tether.yml (weekly and "Run workflow"), or by hand:
  *
@@ -23,14 +27,15 @@
  *
  * Prints `updated=<version>` (or `updated=`) for the workflow.
  */
-import { readFile, writeFile, rm, cp, mkdtemp, stat } from 'node:fs/promises';
+import { readFile, writeFile, rm, cp, mkdir, mkdtemp, rename, stat } from 'node:fs/promises';
 import { existsSync, realpathSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { compareVersions, newestInRange, parseVersion } from '../src/release-range.js';
+import { field } from '../src/shared/json.js';
 
-/** @typedef {[number, number, number]} Version */
 /** @typedef {{ name: string, sha: string }} Tag */
 /** @typedef {(path: string) => Promise<unknown>} GitHubGet */
 
@@ -55,56 +60,20 @@ export const MANAGED = [
 /** What a release never replaces, though a brand-new copy takes the release's version once. */
 export const KEPT = ['tether-sync.config.js', 'wrangler.jsonc', 'TETHER_VERSION'];
 
-/**
- * @param {string} text `0.3.3` or `v0.3.3`.
- * @returns {Version | null}
- */
-export function parse(text) {
-  const match = /^v?(\d+)\.(\d+)\.(\d+)$/.exec(text.trim());
-  return match ? [Number(match[1]), Number(match[2]), Number(match[3])] : null;
-}
-
-/** @param {Version} a @param {Version} b */
-const compare = (a, b) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2];
+/** The prefix of a release tag: `v0.3.3` installs version `0.3.3`. */
+const TAG_PREFIX = 'v';
 
 /**
- * @param {string} spec `latest`, `0`, `0.3` or `0.3.3`.
- * @returns {(version: Version) => boolean}
- */
-function matcher(spec) {
-  const range = spec.trim().replace(/^v/, '').toLowerCase();
-  if (range === 'latest' || range === '*' || range === '') return () => true;
-  if (/^\d+$/.test(range)) return (version) => version[0] === Number(range);
-  if (/^\d+\.\d+$/.test(range)) {
-    const [major, minor] = range.split('.').map(Number);
-    return (version) => version[0] === major && version[1] === minor;
-  }
-  const exact = parse(range);
-  if (exact) return (version) => compare(version, exact) === 0;
-  throw new Error(`TETHER_VERSION must be latest, 0.3 or 0.3.3 (got "${spec}")`);
-}
-
-/**
- * The newest tag matching the spec.
+ * The newest release tag in the range. Only `v` tags count, because {@link releaseCommit} installs `v<version>`.
  *
- * @param {string[]} tags
- * @param {string} spec `latest`, `0.3` or `0.3.3`.
+ * @param {string[]} tags Tag names.
+ * @param {string} spec `latest`, `0`, `0.3` or `0.3.3`.
  * @returns {string | null} `0.3.3`, without the `v`.
+ * @throws {Error} For a spec that is none of these.
  */
 export function pickVersion(tags, spec) {
-  const matches = matcher(spec);
-  const versions = tags
-    .map(parse)
-    .filter((version) => version !== null)
-    .filter(matches)
-    .sort(compare);
-  return versions.at(-1)?.join('.') ?? null;
-}
-
-/** @param {unknown} value @param {string} key */
-function field(value, key) {
-  if (value === null || typeof value !== 'object') return undefined;
-  return /** @type {Record<string, unknown>} */ (value)[key];
+  const releases = tags.filter((tag) => tag.startsWith(TAG_PREFIX)).map((tag) => tag.slice(TAG_PREFIX.length));
+  return newestInRange(releases, spec);
 }
 
 /** @type {GitHubGet} */
@@ -134,7 +103,9 @@ export async function listTags(get, upstream) {
   for (let page = 1; page <= MAX_TAG_PAGES; page++) {
     const answer = await get(`/repos/${upstream}/tags?per_page=100&page=${page}`);
     if (!Array.isArray(answer) || !answer.length) break;
-    for (const entry of /** @type {unknown[]} */ (answer)) {
+    /** @type {unknown[]} */
+    const entries = answer;
+    for (const entry of entries) {
       const name = field(entry, 'name');
       const sha = field(field(entry, 'commit'), 'sha');
       if (typeof name === 'string' && typeof sha === 'string') tags.push({ name, sha });
@@ -154,7 +125,7 @@ export async function listTags(get, upstream) {
  * @throws {Error} When the tag is missing or points outside the default branch.
  */
 export async function releaseCommit(get, upstream, tags, version) {
-  const tag = tags.find((candidate) => candidate.name === `v${version}`);
+  const tag = tags.find((candidate) => candidate.name === `${TAG_PREFIX}${version}`);
   if (!tag || !/^[0-9a-f]{40}$/.test(tag.sha)) throw new Error(`v${version}: no tag with a commit`);
   const branch = field(await get(`/repos/${upstream}`), 'default_branch');
   if (typeof branch !== 'string' || !branch) throw new Error(`${upstream}: no default branch`);
@@ -169,14 +140,14 @@ export async function releaseCommit(get, upstream, tags, version) {
 }
 
 /**
- * Downloads and unpacks the release's `server/` folder.
+ * Downloads and unpacks the release's `server/` folder into `dir`.
  *
  * @param {string} upstream
  * @param {string} sha
+ * @param {string} dir An empty folder, which the caller removes.
  * @returns {Promise<string>} The unpacked `server/` folder.
  */
-async function fetchRelease(upstream, sha) {
-  const dir = await mkdtemp(join(tmpdir(), 'tether-release-'));
+async function fetchRelease(upstream, sha, dir) {
   const response = await fetch(`https://codeload.github.com/${upstream}/tar.gz/${sha}`);
   if (!response.ok) throw new Error(`download ${sha}: ${response.status}`);
   const archive = join(dir, 'release.tgz');
@@ -189,27 +160,92 @@ async function fetchRelease(upstream, sha) {
 
 /** @param {string} path @returns {Promise<string>} */
 async function packageVersion(path) {
-  const version = field(JSON.parse(await readFile(join(path, 'package.json'), 'utf8')), 'version');
+  /** @type {unknown} */
+  const json = JSON.parse(await readFile(join(path, 'package.json'), 'utf8'));
+  const version = field(json, 'version');
   if (typeof version !== 'string') throw new Error(`${path}/package.json has no version`);
   return version;
 }
 
 /**
- * Replaces the managed files with the release's, and adds the kept ones a new copy doesn't have yet.
+ * Moves each staged entry into the copy, the copy's own entry out of the way first. When a rename fails, the entries
+ * already swapped are put back, so the copy is either all old or all new.
+ *
+ * @param {string[]} names
+ * @param {string} staged The folder holding the release's entries.
+ * @param {string} previous An empty folder for the copy's current entries.
+ */
+async function swapIn(names, staged, previous) {
+  /** @type {string[]} */
+  const moved = [];
+  try {
+    for (const name of names) {
+      if (existsSync(join(ROOT, name))) await rename(join(ROOT, name), join(previous, name));
+      moved.push(name);
+      await rename(join(staged, name), join(ROOT, name));
+    }
+  } catch (error) {
+    for (const name of moved.reverse()) {
+      await rm(join(ROOT, name), { recursive: true, force: true });
+      if (existsSync(join(previous, name))) await rename(join(previous, name), join(ROOT, name));
+    }
+    throw error;
+  }
+}
+
+/**
+ * Replaces the managed files with the release's, and adds the kept ones a new copy doesn't have yet. The release is
+ * staged inside the copy, so the swap is a rename on one file system.
  *
  * @param {string} source The release's `server/` folder.
  */
 async function install(source) {
-  for (const name of MANAGED) {
-    const from = join(source, name);
-    if (!existsSync(from)) continue;
-    const to = join(ROOT, name);
-    await rm(to, { recursive: true, force: true });
-    await cp(from, to, { recursive: true });
+  const work = await mkdtemp(join(ROOT, '.tether-update-'));
+  try {
+    const staged = join(work, 'new');
+    const previous = join(work, 'old');
+    await mkdir(staged);
+    await mkdir(previous);
+    const names = MANAGED.filter((name) => existsSync(join(source, name)));
+    for (const name of names) await cp(join(source, name), join(staged, name), { recursive: true });
+    await swapIn(names, staged, previous);
+  } finally {
+    await rm(work, { recursive: true, force: true });
   }
   for (const name of KEPT) {
     const missing = !existsSync(join(ROOT, name)) && existsSync(join(source, name));
     if (missing && name !== 'TETHER_VERSION') await cp(join(source, name), join(ROOT, name));
+  }
+}
+
+/**
+ * The release to install from GitHub: the newest in the range, or `null` when none matches.
+ *
+ * @param {string} effective The range.
+ * @returns {Promise<{ version: string, tags: Tag[] } | null>}
+ */
+async function newestRelease(effective) {
+  const tags = await listTags(githubJson, UPSTREAM);
+  const version = pickVersion(
+    tags.map((tag) => tag.name),
+    effective,
+  );
+  return version ? { version, tags } : null;
+}
+
+/**
+ * Downloads the release and installs it, removing the download afterwards.
+ *
+ * @param {string} version
+ * @param {Tag[]} tags
+ */
+async function installFromGitHub(version, tags) {
+  const sha = await releaseCommit(githubJson, UPSTREAM, tags, version);
+  const dir = await mkdtemp(join(tmpdir(), 'tether-release-'));
+  try {
+    await install(await fetchRelease(UPSTREAM, sha, dir));
+  } finally {
+    await rm(dir, { recursive: true, force: true });
   }
 }
 
@@ -224,33 +260,36 @@ async function main(args) {
   const current = await packageVersion(ROOT);
   // Without a TETHER_VERSION file the copy stays on its own minor version.
   const effective = spec || current.split('.').slice(0, 2).join('.');
-  const tags = fromDir ? [] : await listTags(githubJson, UPSTREAM);
-  const target = fromDir
-    ? await packageVersion(fromDir)
-    : pickVersion(
-        tags.map((tag) => tag.name),
-        effective,
-      );
-  console.log(`current ${current}, TETHER_VERSION ${spec || `(none: ${effective})`}, newest match ${target ?? 'none'}`);
-  if (!target) throw new Error(`no release matches "${effective}"`);
-  const targetVersion = parse(target);
-  const currentVersion = parse(current);
-  if (targetVersion && currentVersion && compare(targetVersion, currentVersion) <= 0) {
+  /** @type {{ version: string, tags: Tag[] } | null} */
+  let release;
+  if (fromDir) {
+    // A local release is installed whatever the range says: it is how a release is tried before it is tagged.
+    release = { version: await packageVersion(fromDir), tags: [] };
+    console.log(`current ${current}, local release ${release.version} (${fromDir})`);
+  } else {
+    release = await newestRelease(effective);
+    const range = spec || `(none: ${effective})`;
+    console.log(`current ${current}, TETHER_VERSION ${range}, newest match ${release?.version ?? 'none'}`);
+  }
+  if (!release) throw new Error(`no release matches "${effective}"`);
+  const targetVersion = parseVersion(release.version);
+  const currentVersion = parseVersion(current);
+  if (targetVersion && currentVersion && compareVersions(targetVersion, currentVersion) <= 0) {
     console.log('up to date');
     console.log('updated=');
     return;
   }
   if (dryRun) {
-    console.log(`would update to ${target}`);
+    console.log(`would update to ${release.version}`);
     console.log('updated=');
     return;
   }
-  const source = fromDir ?? (await fetchRelease(UPSTREAM, await releaseCommit(githubJson, UPSTREAM, tags, target)));
-  await install(source);
+  if (fromDir) await install(fromDir);
+  else await installFromGitHub(release.version, release.tags);
   if (!spec && !existsSync(specFile)) await writeFile(specFile, `${effective}\n`);
   await stat(join(ROOT, 'src', 'entry.js'));
-  console.log(`updated to ${target}`);
-  console.log(`updated=${target}`);
+  console.log(`updated to ${release.version}`);
+  console.log(`updated=${release.version}`);
 }
 
 /** @param {string} path */
