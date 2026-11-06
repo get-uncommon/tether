@@ -1,5 +1,5 @@
 // The lint gate. Type-aware typescript-eslint rules run on the TypeScript sources (the shipped code in src/ and
-// server/src/, and the scripts) and on the JavaScript tests, which tsconfig.test.json and tsconfig.e2e.json type-check.
+// server/src/, and the scripts) and on the JavaScript tests, which .config/tsconfig/test.json and e2e.json type-check.
 // The JavaScript shims that old deployed copies call get the untyped rules only.
 import js from '@eslint/js';
 import prettier from 'eslint-config-prettier';
@@ -44,7 +44,7 @@ export default tseslint.config(
       'examples/**',
       'test-results/**',
       'playwright-report/**',
-      // Declarations only, outside the source's programs (tsconfig.browser.json); npm run test:types compiles them.
+      // Declarations only, outside the source's programs (.config/tsconfig/browser.json); npm run test:types compiles them.
       'src/globals.d.ts',
     ],
   },

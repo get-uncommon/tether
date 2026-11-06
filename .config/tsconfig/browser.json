@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  // The visitor's browser: the DOM, and no Node.
+  "extends": "./base.json",
+  "compilerOptions": {
+    "tsBuildInfoFile": "../../node_modules/.cache/tsc/browser.tsbuildinfo",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"]
+  },
+  "include": ["../../src/**/*.ts", "../../server/src/shared/*.ts"],
+  // astro.ts and server.ts run in Node (node.json). globals.d.ts holds the `window` globals the published
+  // declarations add for sites (declarations.json); the source reads them as unknown.
+  "exclude": ["../../src/astro.ts", "../../src/server.ts", "../../src/globals.d.ts"]
+}

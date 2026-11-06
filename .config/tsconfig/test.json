@@ -2,13 +2,13 @@
   "$schema": "https://json.schemastore.org/tsconfig",
   // The unit tests and their fakes, checked against the sources they import. They stay JavaScript: deployed Worker
   // copies run `node --test test/*.test.js` in server/. They run in Node, with jsdom for the browser modules.
-  "extends": "./tsconfig.base.json",
+  "extends": "./base.json",
   "compilerOptions": {
-    "tsBuildInfoFile": "node_modules/.cache/tsc/test.tsbuildinfo",
+    "tsBuildInfoFile": "../../node_modules/.cache/tsc/test.tsbuildinfo",
     "allowJs": true,
     "checkJs": true,
     "lib": ["ES2023", "DOM", "DOM.Iterable"],
     "types": ["node"]
   },
-  "include": ["test/*.js", "server/test/*.js"]
+  "include": ["../../test/*.js", "../../server/test/*.js"]
 }

@@ -37,7 +37,7 @@
     "lint": "eslint .",
     "typecheck": "tsc -b",
     "knip": "knip",
-    "deps": "depcruise src server/src server/bin server/scripts scripts",
+    "deps": "depcruise --config .config/dependency-cruiser.cjs src server/src server/bin server/scripts scripts",
     "check": "npm run format:check && npm run lint && npm run typecheck && npm run knip && npm run deps && npm test",
     "prepare": "lefthook install",
     "test": "node --experimental-strip-types --test test/*.test.js server/test/*.test.js && npm run test:types",
@@ -118,5 +118,54 @@
   },
   "engines": {
     "node": ">=22.18"
+  },
+  "prettier": {
+    "printWidth": 120,
+    "singleQuote": true,
+    "trailingComma": "all",
+    "overrides": [
+      {
+        "files": "*.md",
+        "options": {
+          "embeddedLanguageFormatting": "off"
+        }
+      },
+      {
+        "files": "CHANGELOG.md",
+        "options": {
+          "proseWrap": "always",
+          "printWidth": 100
+        }
+      }
+    ]
+  },
+  "knip": {
+    "entry": [
+      "src/index.ts",
+      "src/server.ts",
+      "src/astro.ts",
+      "src/presets/barba.ts",
+      "src/parts/*.ts",
+      "src/lazy-iife.ts",
+      "server/src/entry.{js,ts}",
+      "server/src/index.ts",
+      "server/bin/tether-sync.{js,ts}",
+      "server/scripts/*.{mjs,ts}",
+      "scripts/*.ts",
+      "test/**/*.js",
+      "server/test/**/*.js",
+      "e2e/*.{js,mjs}",
+      "types/check.ts"
+    ],
+    "project": [
+      "src/**/*.ts",
+      "server/src/**/*.{js,ts}",
+      "server/bin/*.{js,ts}",
+      "server/scripts/*.{mjs,ts}",
+      "scripts/*.ts"
+    ],
+    "ignoreBinaries": [
+      "tsc"
+    ]
   }
 }
