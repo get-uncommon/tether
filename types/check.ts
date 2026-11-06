@@ -191,7 +191,7 @@ const added: TetherEvents['product-added'] | null = null;
 function variantOf(scope: ProductScope, product: ShopifyProduct): ShopifyVariant | null {
   return scope.product === product ? scope.variant : null;
 }
-// Another script's event under the prefix: its detail is unknown.
+// @ts-expect-error: Tether.on listens only to the events Tether dispatches
 api.on('my-event', (detail) => console.log(detail));
 // @ts-expect-error: TetherError is a type here; the class is Tether.TetherError
 void ({} instanceof TetherError);

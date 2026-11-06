@@ -2,6 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DEFAULTS, cfg, configure, resolveConfig } from '../src/config.ts';
+import { isQuarterlyVersion } from '../src/api-version.ts';
 
 const quietly = (fn) => {
   const warned = [];
@@ -97,6 +98,10 @@ test('the domain must be a host name, and apiVersion a dated version', () => {
   assert.match(unstable.warned[0], /changes without notice/);
 });
 
+test('the default apiVersion is a dated version, as the config types it', () => {
+  assert.ok(isQuarterlyVersion(DEFAULTS.apiVersion));
+});
+
 test('country and language become Shopify codes, or nothing', () => {
   assert.equal(resolveConfig({ country: 'de', language: 'pt-BR' }).country, 'DE');
   assert.equal(resolveConfig({ country: 'de', language: 'pt-BR' }).language, 'PT_BR');
@@ -183,11 +188,12 @@ test('Tether.config shows the live config and refuses writes, which would skip v
       configView.prefix = 'x"] *';
     }, TypeError);
     assert.throws(() => {
+      // @ts-expect-error -- the write this test expects to throw
       configView.markets.detect.push('server');
     }, TypeError);
   });
   assert.equal(cfg.prefix, 'tether');
-  assert.deepEqual(cfg.markets.detect, ['saved']);
+  assert.deepEqual(cfg.markets?.detect, ['saved']);
   assert.equal(warned.length, 2);
   quietly(() => configure({ domain: 'other.test' }));
   assert.equal(configView.domain, 'other.test', 'a view, not a copy');

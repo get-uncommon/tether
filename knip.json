@@ -24,8 +24,5 @@
     "server/scripts/*.{mjs,ts}",
     "scripts/*.ts"
   ],
-  "ignoreBinaries": ["tsc"],
-  "rules": {
-    "duplicates": "off"
-  }
+  "ignoreBinaries": ["tsc"]
 }

@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import defaultConfig from './default-config.js';
 import { createWorker } from '../src/index.ts';
-import { createMockApis, shopifyProduct, instantSleep } from './mocks.js';
+import { createMockApis, shopifyProduct, instantSleep, noWaitUntil } from './mocks.js';
 
 const SECRET = 'a-long-random-sync-secret-123';
 const env = {
@@ -17,7 +17,11 @@ const env = {
 };
 const auth = { authorization: `Bearer ${SECRET}` };
 
-/** A KV namespace in memory. */
+/**
+ * A KV namespace in memory.
+ *
+ * @returns {import('../src/env.ts').KvBinding & { map: Map<string, string> }}
+ */
 function kv() {
   const map = new Map();
   return {
@@ -48,10 +52,16 @@ async function collectErrors(body) {
 test('without the TETHER_SYNC namespace, POST /reconcile refuses to run and says why', async () => {
   const apis = createMockApis({ products: [shopifyProduct(1)] });
   const worker = createWorker(defaultConfig, { fetch: apis.fetch, sleep: instantSleep });
+  /** @type {Response | undefined} */
   let response;
   const logged = await collectErrors(async () => {
-    response = await worker.fetch(new Request('https://w.test/reconcile', { method: 'POST', headers: auth }), env, {});
+    response = await worker.fetch(
+      new Request('https://w.test/reconcile', { method: 'POST', headers: auth }),
+      env,
+      noWaitUntil,
+    );
   });
+  assert.ok(response);
   assert.equal(response.status, 503);
   assert.match((await response.json()).error, /TETHER_SYNC/);
   assert.ok(logged.some((line) => /reconcile: the TETHER_SYNC KV namespace is not bound/.test(line)));
@@ -79,7 +89,9 @@ test('/check: a missing namespace is a warning for the sync and an error once ac
   const apis = createMockApis({ products: [shopifyProduct(1)] });
   const worker = createWorker(defaultConfig, { fetch: apis.fetch, sleep: instantSleep });
   const check = async (extra) =>
-    (await worker.fetch(new Request('https://w.test/check', { headers: auth }), { ...env, ...extra }, {})).json();
+    (
+      await worker.fetch(new Request('https://w.test/check', { headers: auth }), { ...env, ...extra }, noWaitUntil)
+    ).json();
 
   const sync = await check({});
   assert.equal(sync.kv, false);

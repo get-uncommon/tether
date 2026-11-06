@@ -5,12 +5,20 @@ import { connect } from 'node:net';
 import { serve } from '../src/node.ts';
 
 const quiet = { info() {}, warn() {}, error() {} };
+const neverSyncs = () => Promise.reject(new Error('no webhook here is signed'));
+/** @type {Parameters<typeof serve>[0]} */
 const app = {
-  sync: {},
+  sync: { syncById: neverSyncs, queueRetry: neverSyncs },
   webhookSecrets: ['x'.repeat(32)],
   config: { shopify: { domain: 'shop.myshopify.com' } },
   store: null,
 };
+/**
+ * @param {number} port
+ * @param {string} text
+ * @param {{ abortAfter?: number }} [options]
+ * @returns {Promise<string>}
+ */
 const raw = (port, text, { abortAfter } = {}) =>
   new Promise((resolve) => {
     const s = connect(port, '127.0.0.1', () => {
@@ -29,9 +37,16 @@ const raw = (port, text, { abortAfter } = {}) =>
     s.on('error', () => resolve(out));
   });
 
+/** @param {import('node:net').Server} server Listening on TCP, so its address is an AddressInfo. */
+function listening(server) {
+  const address = server.address();
+  assert.ok(address && typeof address === 'object');
+  return address;
+}
+
 test('serve: an aborted upload, a huge body and unknown paths do not crash or buffer', async () => {
   const server = await serve(app, { port: 0, host: '127.0.0.1', log: quiet, maxBody: 1024 });
-  const { port } = server.address();
+  const { port } = listening(server);
   try {
     // Client sends half a body and disconnects: the process keeps running.
     await raw(port, 'POST /webhooks/shopify HTTP/1.1\r\nHost: x\r\nContent-Length: 1000\r\n\r\n0123456789', {
@@ -70,7 +85,7 @@ test('serve logs the address it really listens on', async () => {
   const local = await serve(app, { port: 0, host: '127.0.0.1', log });
   const everywhere = await serve(app, { port: 0, log });
   try {
-    assert.equal(lines[0], `tether-sync listening on http://127.0.0.1:${local.address().port}/webhooks/shopify`);
+    assert.equal(lines[0], `tether-sync listening on http://127.0.0.1:${listening(local).port}/webhooks/shopify`);
     assert.match(
       lines[1],
       /^tether-sync listening on every interface \((::|0\.0\.0\.0)\), e\.g\. http:\/\/localhost:\d+\//,

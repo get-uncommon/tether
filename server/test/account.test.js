@@ -2,7 +2,8 @@
 // with a real RSA key, and the attacks the Worker has to refuse.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { handleAccount, BASE } from '../src/account.ts';
+import { handleAccount, accountSettings, BASE } from '../src/account.ts';
+import { MAX_ACCOUNT_BODY_BYTES } from '../src/account/http.ts';
 
 const SHOP = 'shop.myshopify.com';
 const SITE = 'https://shop.example';
@@ -21,6 +22,10 @@ const { privateKey, publicKey } = await crypto.subtle.generateKey(
   ['sign', 'verify'],
 );
 const jwk = { ...(await crypto.subtle.exportKey('jwk', publicKey)), kid: 'k1', alg: 'RS256', use: 'sig' };
+/**
+ * @param {Record<string, unknown>} claims
+ * @param {{ tamper?: boolean, kid?: string | null }} [options]
+ */
 async function idToken(claims, { tamper = false, kid = 'k1' } = {}) {
   const h = b64url(JSON.stringify(kid ? { alg: 'RS256', kid } : { alg: 'RS256' }));
   const p = b64url(JSON.stringify(claims));
@@ -31,6 +36,9 @@ async function idToken(claims, { tamper = false, kid = 'k1' } = {}) {
   return `${h}.${p}.${b64url(sig)}`;
 }
 
+/** @typedef {{ tamper?: boolean, wrongNonce?: boolean, kid?: string | null, claims?: Record<string, unknown> }} ShopifyOptions */
+
+/** @param {ShopifyOptions} [options] */
 function shopify({ tamper = false, wrongNonce = false, kid = 'k1', claims = {} } = {}) {
   const calls = [];
   let lastNonce = null;
@@ -203,6 +211,12 @@ function shopify({ tamper = false, wrongNonce = false, kid = 'k1', claims = {} }
   };
 }
 
+/**
+ * An account request.
+ *
+ * @param {string} path Under the account routes' base.
+ * @param {{ method?: string, origin?: string, cookie?: string, body?: unknown, header?: boolean }} [options]
+ */
 const req = (path, { method = 'GET', origin, cookie, body, header = true } = {}) =>
   new Request(`${WORKER}${BASE}${path}`, {
     method,
@@ -211,17 +225,55 @@ const req = (path, { method = 'GET', origin, cookie, body, header = true } = {})
       ...(cookie ? { Cookie: cookie } : {}),
       ...(method === 'POST' && header ? { 'X-Tether-Account': '1', 'Content-Type': 'application/json' } : {}),
     },
-    body: body ? JSON.stringify(body) : undefined,
+    ...(body ? { body: JSON.stringify(body) } : {}),
   });
+
+/** @param {Response} res A redirect. */
+function location(res) {
+  const value = res.headers.get('location');
+  assert.ok(value !== null, 'a redirect');
+  return value;
+}
+
+/**
+ * The settings of an env with an `ACCOUNT_CLIENT_ID`, without which there are none.
+ *
+ * @param {Record<string, unknown>} rawEnv
+ */
+function configured(rawEnv) {
+  const settings = accountSettings(rawEnv);
+  assert.ok(settings);
+  return settings;
+}
+
 const cookiesOf = (res) => res.headers.getSetCookie?.() || [res.headers.get('set-cookie')].filter(Boolean);
 const pick = (res, name) => (cookiesOf(res).find((c) => c.startsWith(`${name}=`)) || '').split(';')[0];
 
+/**
+ * Every request these tests send is under the account routes' base, which `handleAccount` always answers.
+ *
+ * @param {Parameters<typeof handleAccount>[0]} request
+ * @param {Parameters<typeof handleAccount>[1]} environment
+ * @param {Parameters<typeof handleAccount>[2]} [options]
+ */
+async function answer(request, environment, options) {
+  const response = await handleAccount(request, environment, options);
+  assert.ok(response, 'an account route is answered');
+  return response;
+}
+
+/** @typedef {typeof globalThis.fetch} Fetch */
+
+/**
+ * @param {ShopifyOptions & { memory?: import('../src/account/kv.ts').MemoryEntries, wrapFetch?: (inner: Fetch) => Fetch,
+ *   sessionCookie?: string }} [options]
+ */
 async function loginFlow({ memory = new Map(), wrapFetch = (inner) => inner, sessionCookie, ...opts } = {}) {
   const sh = shopify(opts);
   const fetch = wrapFetch(sh.fetch);
-  const run = (r) => handleAccount(r, env, { fetch, memory });
+  const run = (r) => answer(r, env, { fetch, memory });
   const start = await run(req(`/login?returnTo=${encodeURIComponent(`${SITE}/account`)}`));
-  const authorize = new URL(start.headers.get('location'));
+  const authorize = new URL(location(start));
   sh.setNonce(authorize.searchParams.get('nonce'));
   const loginCookie = pick(start, '__Host-tether-login');
   const callbackPath = `/callback?code=the-code&state=${authorize.searchParams.get('state')}`;
@@ -252,7 +304,7 @@ test('login: PKCE redirect, pending login sealed in a cookie (nothing in KV), th
   );
   assert.ok(!loginCookie.includes(authorize.searchParams.get('state')), 'sealed, not readable');
   assert.equal(back.status, 302);
-  assert.match(back.headers.get('location'), /^https:\/\/shop\.example\/account\?account=in$/);
+  assert.match(location(back), /^https:\/\/shop\.example\/account\?account=in$/);
   const set = cookiesOf(back).join('\n');
   assert.match(set, /__Host-tether-account=[\w-]{40,}; Path=\/; Secure; HttpOnly; SameSite=Lax/);
   assert.match(set, /__Host-tether-login=; .*Max-Age=0/, 'login cookie cleared');
@@ -266,14 +318,14 @@ test('login: PKCE redirect, pending login sealed in a cookie (nothing in KV), th
 test('login CSRF: a callback without the login cookie of this browser is refused (attacker code + state)', async () => {
   const sh = shopify();
   const memory = new Map();
-  const run = (r) => handleAccount(r, env, { fetch: sh.fetch, memory });
+  const run = (r) => answer(r, env, { fetch: sh.fetch, memory });
   const attacker = await run(req('/login'));
-  const a = new URL(attacker.headers.get('location'));
+  const a = new URL(location(attacker));
   sh.setNonce(a.searchParams.get('nonce'));
   // The attacker keeps their own code+state and sends the victim to the callback, without their cookie.
   const victim = await run(req(`/callback?code=attacker-code&state=${a.searchParams.get('state')}`));
   assert.ok(!pick(victim, '__Host-tether-account'), 'no session for the victim');
-  assert.match(victim.headers.get('location'), /account=expired/);
+  assert.match(location(victim), /account=expired/);
   // Or with a login cookie of another login (the victim's own): states differ, refused.
   const own = await run(req('/login'));
   const wrong = await run(
@@ -335,7 +387,7 @@ test('a tampered or wrong id token gets no session, and the visitor lands on the
     const { back, memory } = await loginFlow(opts);
     assert.ok(!pick(back, '__Host-tether-account'), JSON.stringify(opts));
     assert.equal(back.status, 302, JSON.stringify(opts));
-    assert.equal(back.headers.get('location'), `${SITE}/?account=error`);
+    assert.equal(location(back), `${SITE}/?account=error`);
     assert.match(cookiesOf(back).join('\n'), /__Host-tether-login=; .*Max-Age=0/, 'login cookie cleared');
     assert.equal(memory.size, 0);
   }
@@ -347,7 +399,7 @@ test('a token answer whose id_token is not a string fails the login instead of c
     return new Response(JSON.stringify({ access_token: 'access-1', id_token: 42, expires_in: 3600 }), { status: 200 });
   };
   const { back } = await loginFlow({ wrapFetch });
-  assert.equal(back.headers.get('location'), `${SITE}/?account=error`);
+  assert.equal(location(back), `${SITE}/?account=error`);
   assert.ok(!pick(back, '__Host-tether-account'));
 });
 
@@ -358,7 +410,7 @@ test('a login callback older than ten minutes is refused as expired, back where 
   try {
     const late = await flow.run(req(flow.callbackPath, { cookie: flow.loginCookie }));
     assert.ok(!pick(late, '__Host-tether-account'));
-    assert.equal(late.headers.get('location'), `${SITE}/account?account=expired`);
+    assert.equal(location(late), `${SITE}/account?account=expired`);
   } finally {
     Date.now = realNow;
   }
@@ -378,7 +430,7 @@ test('a replayed callback with the same login cookie gets no session: Shopify re
   assert.ok(flow.cookie, 'the first callback logs in');
   const replay = await flow.run(req(flow.callbackPath, { cookie: flow.loginCookie }));
   assert.ok(!pick(replay, '__Host-tether-account'));
-  assert.equal(replay.headers.get('location'), `${SITE}/?account=error`);
+  assert.equal(location(replay), `${SITE}/?account=error`);
   assert.equal(sessionKeys(flow.memory).length, 1, 'only the first session exists');
 });
 
@@ -390,17 +442,36 @@ test('a POST without the X-Tether-Account header is refused (CSRF)', async () =>
   assert.equal(res.status, 400);
 });
 
+test('an account body past the limit is refused with 413 before it is read whole', async () => {
+  const { run, cookie } = await loginFlow();
+  const cartId = 'gid://shopify/Cart/abc';
+  const padding = 'x'.repeat(MAX_ACCOUNT_BODY_BYTES);
+  const post = (path, body) => run(req(path, { method: 'POST', origin: SITE, cookie, body }));
+  for (const path of ['/cart', '/logout', '/address']) {
+    const res = await post(path, { cartId, padding });
+    assert.equal(res.status, 413, path);
+    assert.equal(res.headers.get('access-control-allow-origin'), SITE, `${path}: the site can read the answer`);
+  }
+  const declared = new Request(`${WORKER}${BASE}/logout`, {
+    method: 'POST',
+    headers: { Origin: SITE, Cookie: cookie, 'X-Tether-Account': '1', 'Content-Length': String(1024 * 1024) },
+    body: '{}',
+  });
+  assert.equal((await run(declared)).status, 413, 'a declared length past the limit is refused unread');
+  assert.equal((await post('/logout', { returnTo: `${SITE}/bye` })).status, 200, 'a small body still logs out');
+});
+
 test('a returnTo on another site lands on the shop instead (no open redirect)', async () => {
   const sh = shopify();
   const memory = new Map();
-  const run = (r) => handleAccount(r, env, { fetch: sh.fetch, memory });
+  const run = (r) => answer(r, env, { fetch: sh.fetch, memory });
   const evil = await run(req(`/login?returnTo=${encodeURIComponent('https://evil.example/steal')}`));
-  const authorize = new URL(evil.headers.get('location'));
+  const authorize = new URL(location(evil));
   sh.setNonce(authorize.searchParams.get('nonce'));
   const landed = await run(
     req(`/callback?code=c&state=${authorize.searchParams.get('state')}`, { cookie: pick(evil, '__Host-tether-login') }),
   );
-  assert.match(landed.headers.get('location'), /^https:\/\/shop\.example\//);
+  assert.match(location(landed), /^https:\/\/shop\.example\//);
 });
 
 test("one session's sealed blob copied under another session's key does not open", async () => {
@@ -457,7 +528,7 @@ test('logout never fails open: session ended and cookie cleared even when Shopif
   Date.now = () => realNow() + 2 * 3600e3; // access expired, and refresh would fail
   let res;
   try {
-    res = await handleAccount(
+    res = await answer(
       req('/logout', {
         method: 'POST',
         origin: SITE,
@@ -479,18 +550,15 @@ test('logout never fails open: session ended and cookie cleared even when Shopif
   assert.equal(body.logoutUrl, `${WORKER}${BASE}/logout/go`);
   // step 2: the one-time cookie carries the id token to Shopify's logout
   const go = await run(req('/logout/go', { cookie: pick(res, '__Host-tether-logout') }));
-  assert.match(
-    go.headers.get('location'),
-    /\/logout\?id_token_hint=.+&post_logout_redirect_uri=https%3A%2F%2Fshop\.example%2Fbye/,
-  );
+  assert.match(location(go), /\/logout\?id_token_hint=.+&post_logout_redirect_uri=https%3A%2F%2Fshop\.example%2Fbye/);
   assert.match(cookiesOf(go).join(), /__Host-tether-logout=; .*Max-Age=0/);
   assert.equal((await (await run(req('/me', { origin: SITE, cookie }))).json()).loggedIn, false);
   void run;
 });
 
 test('settings: not set up -> 404; missing pieces -> 503 without details for the public', async () => {
-  assert.equal((await handleAccount(req('/me'), {}, {})).status, 404);
-  const r = await handleAccount(req('/me'), { ACCOUNT_CLIENT_ID: 'x', SHOPIFY_DOMAIN: SHOP }, {});
+  assert.equal((await answer(req('/me'), {}, {})).status, 404);
+  const r = await answer(req('/me'), { ACCOUNT_CLIENT_ID: 'x', SHOPIFY_DOMAIN: SHOP }, {});
   assert.equal(r.status, 503);
   assert.doesNotMatch(JSON.stringify(await r.json()), /ACCOUNT_ORIGINS|SYNC_SECRET/);
   assert.equal(await handleAccount(new Request('https://x/other'), env, {}), null, 'other routes pass through');
@@ -515,7 +583,7 @@ test('refresh race: two requests refresh at once (Shopify rotates the refresh to
   const realNow = Date.now;
   Date.now = () => realNow() + 2 * 3600e3;
   try {
-    const run = (path) => handleAccount(req(path, { origin: SITE, cookie }), env, { fetch: rotating, memory });
+    const run = (path) => answer(req(path, { origin: SITE, cookie }), env, { fetch: rotating, memory });
     const [a, b] = await Promise.all([run('/me'), run('/orders')]);
     assert.equal((await a.json()).loggedIn, true);
     assert.equal((await b.json()).loggedIn, true, 'the loser uses the session the winner refreshed');
@@ -529,11 +597,11 @@ test('a 401 from Shopify (session ended there) ends it here too', async () => {
   const { memory, cookie, sh } = await loginFlow();
   const ended = async (url, init) =>
     String(url).includes('/account/customer/api/') ? new Response('{}', { status: 401 }) : sh.fetch(url, init);
-  const r = await handleAccount(req('/me', { origin: SITE, cookie }), env, { fetch: ended, memory });
+  const r = await answer(req('/me', { origin: SITE, cookie }), env, { fetch: ended, memory });
   assert.equal((await r.json()).loggedIn, false);
   assert.equal(memory.size, 0);
   assert.match(cookiesOf(r).join(), /__Host-tether-account=; .*Max-Age=0/, 'the dead session cookie is cleared');
-  const orders = await handleAccount(req('/orders', { origin: SITE, cookie }), env, { fetch: ended, memory });
+  const orders = await answer(req('/orders', { origin: SITE, cookie }), env, { fetch: ended, memory });
   assert.equal(orders.status, 401, 'data routes answer 401 without a session; /me answers 200');
   assert.deepEqual(await orders.json(), { loggedIn: false, orders: [] });
 });
@@ -553,10 +621,10 @@ test('the store domain refuses Workers (403 on .well-known): addresses come from
     return sh.fetch(url, init);
   };
   const memory = new Map();
-  const run = (r) => handleAccount(r, blocked, { fetch, memory });
+  const run = (r) => answer(r, blocked, { fetch, memory });
   const start = await run(req('/login'));
   assert.equal(start.status, 302);
-  const a = new URL(start.headers.get('location'));
+  const a = new URL(location(start));
   assert.equal(a.origin + a.pathname, 'https://shopify.com/authentication/1/oauth/authorize');
   assert.ok(asked.includes('https://shopify.com/authentication/1/.well-known/openid-configuration'));
   sh.setNonce(a.searchParams.get('nonce'));
@@ -691,21 +759,21 @@ test('address update: fields sent empty are cleared; a new address leaves them o
 });
 
 test('settings: ACCOUNT_SECRET is required, with no fallback to SYNC_SECRET; /check says what to set', async () => {
-  const { accountSettings, accountProblems } = await import('../src/account.ts');
+  const { accountProblems } = await import('../src/account.ts');
   const { ACCOUNT_SECRET, ...withoutSecret } = env;
   const syncOnly = { ...withoutSecret, SYNC_SECRET: 'a-long-sync-secret-of-24-plus-chars' };
-  assert.equal(accountSettings(syncOnly).secret, null, 'SYNC_SECRET is never a session key');
-  const [problem] = accountProblems(accountSettings(syncOnly));
+  assert.equal(configured(syncOnly).secret, null, 'SYNC_SECRET is never a session key');
+  const [problem] = accountProblems(configured(syncOnly));
   assert.equal(problem.severity, 'error');
   assert.match(problem.message, /ACCOUNT_SECRET is not set/);
-  assert.match(problem.fix, /ACCOUNT_SECRET, a random string of at least 24 characters/);
-  assert.match(problem.fix, /logs every customer out once/);
+  assert.match(problem.fix ?? '', /ACCOUNT_SECRET, a random string of at least 24 characters/);
+  assert.match(problem.fix ?? '', /logs every customer out once/);
 
   const logged = [];
   const realError = console.error;
   console.error = (...args) => logged.push(args.join(' '));
   try {
-    const r = await handleAccount(req('/me'), syncOnly, { memory: new Map() });
+    const r = await answer(req('/me'), syncOnly, { memory: new Map() });
     assert.equal(r.status, 503);
     assert.doesNotMatch(JSON.stringify(await r.json()), /SECRET/, 'what is missing is not told to the public');
   } finally {
@@ -714,27 +782,29 @@ test('settings: ACCOUNT_SECRET is required, with no fallback to SYNC_SECRET; /ch
   assert.ok(logged.some((line) => /account setup ACCOUNT_SECRET is not set/.test(line)));
 
   for (const unusable of ['your-random-secret-of-24-characters', 'a']) {
-    const settings = accountSettings({ ...env, ACCOUNT_SECRET: unusable });
+    const settings = configured({ ...env, ACCOUNT_SECRET: unusable });
     assert.equal(settings.secret, null, `${unusable}: an example or a short value is no key`);
   }
-  assert.equal(accountSettings(env).secret, ACCOUNT_SECRET);
-  assert.deepEqual(accountProblems(accountSettings(env)), []);
+  assert.equal(configured(env).secret, ACCOUNT_SECRET);
+  assert.deepEqual(accountProblems(configured(env)), []);
 });
 
 test('settings: unusable ACCOUNT_SESSION_DAYS and SHOPIFY_DOMAIN are reported, not silently replaced', async () => {
-  const { accountSettings, accountProblems } = await import('../src/account.ts');
-  const problems = (overrides) => accountProblems(accountSettings({ ...env, ...overrides }));
-  for (const [raw, days] of [
+  const { accountProblems } = await import('../src/account.ts');
+  const problems = (overrides) => accountProblems(configured({ ...env, ...overrides }));
+  /** @type {[string, number][]} */
+  const sessionDays = [
     ['0', 1],
     ['abc', 14],
     ['200', 90],
     ['7.5', 14],
-  ]) {
-    const settings = accountSettings({ ...env, ACCOUNT_SESSION_DAYS: raw });
+  ];
+  for (const [raw, days] of sessionDays) {
+    const settings = configured({ ...env, ACCOUNT_SESSION_DAYS: raw });
     assert.equal(settings.sessionDays.days, days, raw);
     assert.ok(problems({ ACCOUNT_SESSION_DAYS: raw }).some((p) => p.severity === 'warning' && p.message.includes(raw)));
   }
-  assert.deepEqual(accountSettings({ ...env, ACCOUNT_SESSION_DAYS: '30' }).sessionDays, { kind: 'as-set', days: 30 });
+  assert.deepEqual(configured({ ...env, ACCOUNT_SESSION_DAYS: '30' }).sessionDays, { kind: 'as-set', days: 30 });
   for (const domain of ['shop.myshopify.com/admin', 'shop .myshopify.com', 'shop.myshopify.com?x=1']) {
     assert.ok(
       problems({ SHOPIFY_DOMAIN: domain }).some((p) => p.severity === 'error' && /SHOPIFY_DOMAIN/.test(p.message)),
@@ -749,9 +819,9 @@ test('without the TETHER_SYNC namespace the Worker refuses accounts instead of k
   const realError = console.error;
   console.error = (...args) => logged.push(args.join(' '));
   try {
-    const r = await handleAccount(req('/login'), env, { fetch: shopify().fetch });
+    const r = await answer(req('/login'), env, { fetch: shopify().fetch });
     assert.equal(r.status, 503);
-    const notNamespace = await handleAccount(req('/login'), { ...env, TETHER_SYNC: 'a-string' }, {});
+    const notNamespace = await answer(req('/login'), { ...env, TETHER_SYNC: 'a-string' }, {});
     assert.equal(notNamespace.status, 503, 'a setting by that name that is no namespace is not one');
   } finally {
     console.error = realError;
@@ -762,18 +832,18 @@ test('without the TETHER_SYNC namespace the Worker refuses accounts instead of k
 test('a cancelled login lands where it started with account=error; a state mismatch is an error too', async () => {
   const sh = shopify();
   const memory = new Map();
-  const run = (r) => handleAccount(r, env, { fetch: sh.fetch, memory });
+  const run = (r) => answer(r, env, { fetch: sh.fetch, memory });
   const realError = console.error;
   console.error = () => {};
   try {
     const start = await run(req(`/login?returnTo=${encodeURIComponent(`${SITE}/account`)}`));
-    const state = new URL(start.headers.get('location')).searchParams.get('state');
+    const state = new URL(location(start)).searchParams.get('state');
     const loginCookie = pick(start, '__Host-tether-login');
     const cancelled = await run(req(`/callback?error=access_denied&state=${state}`, { cookie: loginCookie }));
-    assert.equal(cancelled.headers.get('location'), `${SITE}/account?account=error`);
+    assert.equal(location(cancelled), `${SITE}/account?account=error`);
     assert.match(cookiesOf(cancelled).join(), /__Host-tether-login=; .*Max-Age=0/);
     const otherTab = await run(req('/callback?code=c&state=another-tabs-state', { cookie: loginCookie }));
-    assert.equal(otherTab.headers.get('location'), `${SITE}/?account=error`);
+    assert.equal(location(otherTab), `${SITE}/?account=error`);
   } finally {
     console.error = realError;
   }
@@ -781,6 +851,7 @@ test('a cancelled login lands where it started with account=error; a state misma
 });
 
 test('id token claims: iat and sub must be there, times must be numbers, azp must name us with several audiences', async () => {
+  /** @type {[Record<string, unknown>, string][]} */
   const cases = [
     [{ iat: undefined }, 'no iat'],
     [{ sub: undefined }, 'no sub'],
@@ -793,10 +864,10 @@ test('id token claims: iat and sub must be there, times must be numbers, azp mus
   try {
     for (const [claims, label] of cases) {
       const { back } = await loginFlow({ claims });
-      assert.equal(back.headers.get('location'), `${SITE}/?account=error`, label);
+      assert.equal(location(back), `${SITE}/?account=error`, label);
     }
     const { back } = await loginFlow({ claims: { aud: ['client-1', 'someone-else'], azp: 'client-1' } });
-    assert.match(back.headers.get('location'), /account=in/, 'several audiences with our azp');
+    assert.match(location(back), /account=in/, 'several audiences with our azp');
   } finally {
     console.error = realError;
   }
@@ -812,7 +883,7 @@ test('discovery: when Shopify answers neither on the store domain nor on its acc
     }
     return sh.fetch(url, init);
   };
-  const r = await handleAccount(
+  const r = await answer(
     req('/login'),
     { ...env, SHOPIFY_DOMAIN: 'closed.myshopify.com' },
     {
@@ -820,7 +891,7 @@ test('discovery: when Shopify answers neither on the store domain nor on its acc
       memory: new Map(),
     },
   );
-  assert.equal(r.headers.get('location'), `${SITE}/?account=error`, 'no login is started against guessed endpoints');
+  assert.equal(location(r), `${SITE}/?account=error`, 'no login is started against guessed endpoints');
   assert.equal(pick(r, '__Host-tether-login'), '__Host-tether-login=', 'and no pending login');
 });
 
@@ -861,7 +932,7 @@ test('a refresh refused for a setup reason (invalid_client) keeps the session an
   const realNow = Date.now;
   Date.now = () => realNow() + 2 * 3600e3;
   try {
-    const res = await handleAccount(req('/me', { origin: SITE, cookie }), env, { fetch: misconfigured, memory });
+    const res = await answer(req('/me', { origin: SITE, cookie }), env, { fetch: misconfigured, memory });
     assert.equal(res.status, 502);
   } finally {
     Date.now = realNow;
@@ -878,12 +949,8 @@ test('discovery falls back to the shop id only for bot protection, not for a sto
     if (u.startsWith('https://down.myshopify.com/.well-known/')) return new Response('bad gateway', { status: 502 });
     return sh.fetch(url, init);
   };
-  const r = await handleAccount(
-    req('/login'),
-    { ...env, SHOPIFY_DOMAIN: 'down.myshopify.com' },
-    { fetch, memory: new Map() },
-  );
-  assert.equal(r.headers.get('location'), `${SITE}/?account=error`);
+  const r = await answer(req('/login'), { ...env, SHOPIFY_DOMAIN: 'down.myshopify.com' }, { fetch, memory: new Map() });
+  assert.equal(location(r), `${SITE}/?account=error`);
   assert.ok(!asked.some((u) => u.includes('/api/')), 'no shop id lookup');
 });
 
@@ -904,7 +971,8 @@ test('the browser and the Worker agree on every operation route', async () => {
   const { ops } = await import('../src/account/operations.ts');
   const { OPERATION_ROUTES, operationCall, operationRequest } = await import('../src/shared/account-routes.ts');
   assert.deepEqual(Object.keys(OPERATION_ROUTES).sort(), Object.keys(ops).sort());
-  for (const name of Object.keys(ops)) {
+  // Object.keys names its keys as strings.
+  for (const name of /** @type {(keyof typeof ops)[]} */ (Object.keys(ops))) {
     const { method, path } = operationRequest(name, { id: 'gid://shopify/Order/1' });
     const url = new URL(`${WORKER}${BASE}${path}`);
     const call = operationCall(method, url.pathname.slice(BASE.length), url, { id: 'gid://shopify/Order/1' });
@@ -919,12 +987,13 @@ test('the browser and the Worker agree on every operation route', async () => {
 test('logout with KV down still clears the cookie, and logs why Shopify is not logged out', async () => {
   const { cookie } = await loginFlow();
   const down = () => Promise.reject(new Error('KV unavailable'));
+  /** @type {import('../src/env.ts').KvBinding} */
   const TETHER_SYNC = { get: down, put: down, delete: down };
   const logged = [];
   const realError = console.error;
   console.error = (...args) => logged.push(args.join(' '));
   try {
-    const res = await handleAccount(req('/logout', { method: 'POST', origin: SITE, cookie, body: {} }), {
+    const res = await answer(req('/logout', { method: 'POST', origin: SITE, cookie, body: {} }), {
       ...env,
       TETHER_SYNC,
     });
@@ -947,7 +1016,7 @@ test('logout step 2 with Shopify unreachable goes back to the site and logs that
   console.error = (...args) => logged.push(args.join(' '));
   let go;
   try {
-    go = await handleAccount(
+    go = await answer(
       req('/logout/go', { cookie: `__Host-tether-logout=${sealed}` }),
       { ...env, SHOPIFY_DOMAIN: 'logout-down.myshopify.com' },
       { fetch: unreachable, memory: new Map() },
@@ -955,6 +1024,6 @@ test('logout step 2 with Shopify unreachable goes back to the site and logs that
   } finally {
     console.error = realError;
   }
-  assert.equal(go.headers.get('location'), `${SITE}/bye`);
+  assert.equal(location(go), `${SITE}/bye`);
   assert.ok(logged.some((line) => /Shopify not logged out/.test(line)));
 });

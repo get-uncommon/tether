@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  // The entry points that run in Node at a site's build time, and the repository's scripts. They import browser
+  // modules, whose types name DOM elements, so the DOM's types are here too.
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "tsBuildInfoFile": "node_modules/.cache/tsc/node.tsbuildinfo",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "types": ["node"]
+  },
+  "files": ["src/astro.ts", "src/server.ts"],
+  "include": ["scripts/*.ts"]
+}

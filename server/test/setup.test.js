@@ -6,7 +6,7 @@ import { createApp, memoryStore, createWorker } from '../src/index.ts';
 import { runCheck, formatCheck } from '../src/check.ts';
 import { cleanEnv } from '../src/env.ts';
 import { applyEnv, normalizeConfig } from '../src/mapping.ts';
-import { createMockApis, shopifyProduct, instantSleep } from './mocks.js';
+import { createMockApis, shopifyProduct, instantSleep, checkStep, noWaitUntil } from './mocks.js';
 
 const COL = '0123456789abcdef01234567';
 const deployEnv = {
@@ -28,6 +28,7 @@ test('cleanEnv treats none/-/empty as unset; applyEnv merges FIELD_MAP and WEBFL
     WEBFLOW_OWNED: 'description, intro',
     SHOPIFY_DOMAIN: 's.myshopify.com',
   });
+  assert.ok(raw.fields && raw.shopify);
   assert.equal(raw.fields.material, 'metafield:custom.material');
   assert.ok(!('gallery' in raw.fields));
   assert.deepEqual(raw.webflowOwned, ['description', 'intro']);
@@ -74,8 +75,8 @@ test('check catches a custom domain and half-set client credentials', async () =
     { SHOPIFY_DOMAIN: 'shop.example.com', SHOPIFY_CLIENT_ID: 'x' },
     { deep: false },
   );
-  assert.match(r.steps.find((s) => s.title === 'Shopify store').message, /isn't a \.myshopify\.com domain/);
-  assert.match(r.steps.find((s) => s.title === 'Shopify access').message, /Only one of/);
+  assert.match(checkStep(r, 'Shopify store').message, /isn't a \.myshopify\.com domain/);
+  assert.match(checkStep(r, 'Shopify access').message, /Only one of/);
 });
 
 test('check with everything set tests the APIs, reports mapping problems and a sample', async () => {
@@ -89,8 +90,10 @@ test('check with everything set tests the APIs, reports mapping problems and a s
   assert.equal(skippedLine.length, 1, 'missing fields folded into one line');
   assert.match(skippedLine[0].message, /gallery/);
   assert.ok(!by('Field mapping').some((s) => s.level === 'warn'), 'no warnings for expected missing fields');
-  assert.equal(by('Sample')[0].sample.slug, 'product-3');
-  assert.ok(!('gallery' in by('Sample')[0].sample));
+  const { sample } = by('Sample')[0];
+  assert.ok(sample);
+  assert.equal(sample.slug, 'product-3');
+  assert.ok(!('gallery' in sample));
   assert.ok(!JSON.stringify(r).includes('csecret'), 'no secrets in the report');
 });
 
@@ -101,9 +104,9 @@ test('check explains a wrong collection id and a rejected Webflow token', async 
       ? new Response(JSON.stringify({ message: 'nope' }), { status })
       : apis.fetch(url, init);
   let r = await runCheck(defaultConfig, deployEnv, { fetch: failing(404) });
-  assert.match(r.steps.find((s) => s.title === 'Webflow API').fix, /check WEBFLOW_COLLECTION_ID/);
+  assert.match(checkStep(r, 'Webflow API').fix ?? '', /check WEBFLOW_COLLECTION_ID/);
   r = await runCheck(defaultConfig, deployEnv, { fetch: failing(401) });
-  assert.match(r.steps.find((s) => s.title === 'Webflow API').fix, /rejected/);
+  assert.match(checkStep(r, 'Webflow API').fix ?? '', /rejected/);
   assert.equal(r.ok, false);
 });
 
@@ -165,14 +168,14 @@ test('worker: placeholder SYNC_SECRET never unlocks /reconcile or the deep check
       headers: { authorization: 'Bearer choose-a-long-random-string' },
     }),
     wenv,
-    {},
+    noWaitUntil,
   );
   assert.equal(r.status, 401);
   const c = await (
     await worker.fetch(
       new Request('https://w.test/check', { headers: { authorization: 'Bearer choose-a-long-random-string' } }),
       wenv,
-      {},
+      noWaitUntil,
     )
   ).json();
   assert.ok(!c.steps.some((s) => s.title === 'Shopify API'));
@@ -202,6 +205,7 @@ test('.dev.vars.example: only the six fields a deploy needs, all empty and descr
 test('webhooks: the first reconcile registers them through the app, once; check reports them', async () => {
   const apis = createMockApis({ products: [shopifyProduct(1)] });
   const kv = new Map();
+  /** @type {import('../src/env.ts').KvBinding} */
   const TETHER_SYNC = {
     async get(k, t) {
       const v = kv.get(k);
@@ -219,22 +223,26 @@ test('webhooks: the first reconcile registers them through the app, once; check 
   const wenv = { ...deployEnv, TETHER_SYNC };
   const auth = { authorization: `Bearer ${deployEnv.SYNC_SECRET}` };
 
-  let c = await (await worker.fetch(new Request('https://w.test/check', { headers: auth }), wenv, {})).json();
-  assert.match(c.steps.find((s) => s.title === 'Shopify webhooks').message, /not registered yet/);
+  let c = await (await worker.fetch(new Request('https://w.test/check', { headers: auth }), wenv, noWaitUntil)).json();
+  assert.match(checkStep(c, 'Shopify webhooks').message, /not registered yet/);
 
   const r = await (
-    await worker.fetch(new Request('https://w.test/reconcile?since=all', { method: 'POST', headers: auth }), wenv, {})
+    await worker.fetch(
+      new Request('https://w.test/reconcile?since=all', { method: 'POST', headers: auth }),
+      wenv,
+      noWaitUntil,
+    )
   ).json();
   assert.deepEqual(r.webhooks.created, ['PRODUCTS_CREATE', 'PRODUCTS_UPDATE', 'PRODUCTS_DELETE']);
   assert.ok(apis.shop.webhooks.every((w) => w.uri === 'https://w.test/webhooks/shopify'));
   const again = await (
-    await worker.fetch(new Request('https://w.test/reconcile', { method: 'POST', headers: auth }), wenv, {})
+    await worker.fetch(new Request('https://w.test/reconcile', { method: 'POST', headers: auth }), wenv, noWaitUntil)
   ).json();
   assert.equal(again.webhooks.cached, true);
   assert.equal(apis.shop.webhooks.length, 3, 'no duplicates');
 
-  c = await (await worker.fetch(new Request('https://w.test/check', { headers: auth }), wenv, {})).json();
-  assert.equal(c.steps.find((s) => s.title === 'Shopify webhooks').level, 'ok');
+  c = await (await worker.fetch(new Request('https://w.test/check', { headers: auth }), wenv, noWaitUntil)).json();
+  assert.equal(checkStep(c, 'Shopify webhooks').level, 'ok');
 });
 
 test('webhooks signed with either the client secret or SHOPIFY_WEBHOOK_SECRET are accepted', async () => {
@@ -282,7 +290,7 @@ test('check says when a newer release in the range exists (a stalled updater sho
     version: '0.3.3',
     sleep: instantSleep,
   });
-  const v = r.steps.find((s) => s.title === 'Tether version');
+  const v = checkStep(r, 'Tether version');
   assert.equal(v.level, 'warn');
   assert.match(v.message, /0\.3\.9 is available \(range 0\.3\)/);
   r = await runCheck(defaultConfig, deployEnv, {
@@ -290,14 +298,14 @@ test('check says when a newer release in the range exists (a stalled updater sho
     version: '0.3.3',
     sleep: instantSleep,
   });
-  assert.equal(r.steps.find((s) => s.title === 'Tether version').level, 'ok');
+  assert.equal(checkStep(r, 'Tether version').level, 'ok');
   r = await runCheck(defaultConfig, deployEnv, {
     fetch: tags(['v0.3.3', 'v0.4.0']),
     version: '0.3.3',
     range: 'latest',
     sleep: instantSleep,
   });
-  assert.match(r.steps.find((s) => s.title === 'Tether version').message, /0\.4\.0 is available/);
+  assert.match(checkStep(r, 'Tether version').message, /0\.4\.0 is available/);
 });
 
 test('check refuses a TETHER_VERSION the updater would refuse, and picks releases by the same rules', async () => {
@@ -308,9 +316,9 @@ test('check refuses a TETHER_VERSION the updater would refuse, and picks release
       : apis.fetch(url, init);
   const options = { fetch, version: '0.3.3', sleep: instantSleep };
   let r = await runCheck(defaultConfig, deployEnv, { ...options, range: '^0.3' });
-  const refused = r.steps.find((s) => s.title === 'Tether version');
+  const refused = checkStep(r, 'Tether version');
   assert.equal(refused.level, 'warn');
   assert.match(refused.message, /TETHER_VERSION must be/);
   r = await runCheck(defaultConfig, deployEnv, { ...options, range: '*' });
-  assert.match(r.steps.find((s) => s.title === 'Tether version').message, /0\.3\.10 is available/);
+  assert.match(checkStep(r, 'Tether version').message, /0\.3\.10 is available/);
 });

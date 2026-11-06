@@ -7,7 +7,8 @@
  * detection (hash per product), cursor, retries and budgets all apply. Next to Webflow it wraps the real Webflow
  * client and also triggers a build after each Webflow change.
  */
-import { isRecord, noopLogger } from './util.ts';
+import { isRecord } from './shared/json.ts';
+import { noopLogger } from './util.ts';
 
 import type { FieldSource } from './mapping.ts';
 import type { Store } from './store.ts';

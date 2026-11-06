@@ -13,7 +13,7 @@
  * Shopify's analytics are set up in analytics-shopify.ts.
  */
 import { cfg, reportError } from './config.ts';
-import { isOwnEvent, sel } from './dom.ts';
+import { ANALYTICS_EVENTS, isOwnEvent, sel } from './dom.ts';
 import { Cart } from './cart.ts';
 import { scopes } from './product.ts';
 import { startShopifyAnalytics } from './analytics-shopify.ts';
@@ -21,6 +21,7 @@ import type { Money } from './shopify-values.ts';
 import type { Product, ProductVariant } from './fragments.ts';
 import type { AnalyticsBus, EventPayload } from './analytics-shopify.ts';
 import type { ProductScope } from './product.ts';
+import type { AnalyticsEventName, TetherEvents } from './markup.ts';
 
 /** The fields of the cart's product (`fragment TetherCart`) this module reads. */
 interface LineProduct {
@@ -72,27 +73,6 @@ interface AnalyticsItem {
   price: number;
   quantity: number;
   index?: number;
-}
-
-interface ListCollection {
-  id: string;
-  handle: string;
-  title: string;
-}
-
-interface ProductReadyDetail {
-  product: Product;
-  scope: ProductScope | null;
-}
-
-interface ListReadyDetail {
-  products: Product[] | undefined;
-  collection: ListCollection | null;
-}
-
-interface CartUpdatedDetail {
-  cart: AnalyticsCart | null;
-  reason: string;
 }
 
 /** Shopify's title for the one variant of a product without options. */
@@ -211,8 +191,8 @@ function mainProduct(): ProductScope | null {
   return scopes.get(el) ?? null;
 }
 
-function onProductReady({ product, scope }: ProductReadyDetail): void {
-  if (!scope || viewed.has(scope.root) || mainProduct() !== scope) return;
+function onProductReady({ product, scope }: TetherEvents['product-ready']): void {
+  if (viewed.has(scope.root) || mainProduct() !== scope) return;
   viewed.add(scope.root);
   const variant = scope.variant ?? product.variants.nodes[0];
   const items = [itemFromVariant(product, variant)];
@@ -222,7 +202,7 @@ function onProductReady({ product, scope }: ProductReadyDetail): void {
   });
 }
 
-function onListReady({ products = [], collection }: ListReadyDetail): void {
+function onListReady({ products, collection }: TetherEvents['list-ready']): void {
   const items = products
     .slice(0, MAX_LIST_ITEMS)
     .map((product, index) => itemFromVariant(product, product.variants.nodes[0], 1, index));
@@ -258,7 +238,7 @@ function sendCartChanges(cart: AnalyticsCart | null, now: Map<string, CartLine>,
   });
 }
 
-function onCartUpdated({ cart, reason }: CartUpdatedDetail): void {
+function onCartUpdated({ cart, reason }: TetherEvents['cart-updated']): void {
   const now = new Map((cart?.lines.nodes ?? []).map((line) => [line.merchandise.id, line]));
   // Loading the saved cart and showing a pending change aren't changes the visitor made.
   if (lastLines && reason !== 'load' && reason !== 'pending') sendCartChanges(cart, now, lastLines);
@@ -271,7 +251,8 @@ function onCartOpened(): void {
   send('view_cart', { currency: Cart.state?.cost.totalAmount.currencyCode, value: totalValue(items), items });
 }
 
-function onCheckout({ cart }: { cart: AnalyticsCart }): void {
+function onCheckout({ cart }: TetherEvents['checkout']): void {
+  if (!cart) return;
   const items = cart.lines.nodes.map((line) => itemFromLine(line));
   const coupons = cart.discountCodes.filter((discount) => discount.applicable).map((discount) => discount.code);
   send('begin_checkout', {
@@ -282,45 +263,39 @@ function onCheckout({ cart }: { cart: AnalyticsCart }): void {
   });
 }
 
+/** What each event `ANALYTICS_EVENTS` names sends: one entry per name, so the list and this table can't diverge. */
+const REPORTERS: { [Name in AnalyticsEventName]: (detail: TetherEvents[Name]) => void } = {
+  'product-ready': onProductReady,
+  'list-ready': onListReady,
+  'cart-updated': onCartUpdated,
+  'cart-toggled': ({ open }) => {
+    if (open) onCartOpened();
+  },
+  checkout: onCheckout,
+  search: ({ term }) => {
+    if (term) send('search', { search_term: term }, 'search_viewed', { searchTerm: term });
+  },
+};
+
+/** @param event The event Tether created as `name`. */
+function report<Name extends AnalyticsEventName>(event: CustomEvent<TetherEvents[Name]>, name: Name): void {
+  REPORTERS[name](event.detail);
+}
+
 /**
- * Turns one Tether event into analytics events. Only events Tether created count (`isOwnEvent`): their detail is the
- * one `emit` wrote for that name, the shape typed per event here. A look-alike event from another script, whatever
- * its detail, sends nothing.
- *
- * @param event `<prefix>:<name>`.
+ * Turns one buffered event into analytics events: a Tether event from `ANALYTICS_EVENTS`, or Astro's `astro:page-load`
+ * for a client-side navigation, which starts a new page view. Only events Tether created count (`isOwnEvent`): a
+ * look-alike another script dispatches, whatever its detail, sends nothing.
  */
 function handle(event: Event): void {
-  if (!isOwnEvent(event)) return;
-  const name = event.type.slice(cfg.prefix.length + 1);
-  const detail: unknown = Reflect.get(event, 'detail');
-  switch (name) {
-    case 'product-ready':
-      onProductReady(detail as ProductReadyDetail);
-      break;
-    case 'list-ready':
-      onListReady(detail as ListReadyDetail);
-      break;
-    case 'cart-updated':
-      onCartUpdated(detail as CartUpdatedDetail);
-      break;
-    case 'cart-toggled':
-      if ((detail as { open: boolean }).open) onCartOpened();
-      break;
-    case 'checkout':
-      onCheckout(detail as { cart: AnalyticsCart });
-      break;
-    case 'search': {
-      const { term } = detail as { term: string };
-      if (term) send('search', { search_term: term }, 'search_viewed', { searchTerm: term });
-      break;
-    }
-    case 'page':
-      viewed = new WeakSet();
-      bus?.publish('page_viewed', {});
-      break;
-    default:
-      break;
+  if (event.type === 'astro:page-load') {
+    viewed = new WeakSet();
+    bus?.publish('page_viewed', {});
+    return;
   }
+  ANALYTICS_EVENTS.forEach((name) => {
+    if (isOwnEvent(event, name)) report(event, name);
+  });
 }
 
 /** Called by the core with the events it buffered while this part loaded; the queue then handles events as they come. */

@@ -174,8 +174,7 @@ async function main(): Promise<number | null> {
   }
   const { path, config } = await loadConfig(option('config'));
   const envFile = join(dirname(path), '.env');
-  // process.loadEnvFile needs Node 20.12; on older versions the environment alone is used.
-  if (existsSync(envFile) && 'loadEnvFile' in process) process.loadEnvFile(envFile);
+  if (existsSync(envFile)) process.loadEnvFile(envFile);
   log.debug?.(`config: ${path}`);
 
   if (command === 'check') {

@@ -25,6 +25,7 @@ import { verifyIdToken } from './account/id-token.ts';
 import { discover, linkCart, tokenRequest } from './account/shopify.ts';
 import { customerRoute } from './account/customer.ts';
 import {
+  BodyTooLarge,
   CART_ID,
   corsHeaders,
   jsonResponse,
@@ -350,6 +351,7 @@ export async function handleAccount(
     if (route === '/logout' && request.method === 'POST') return await logout(context, cors);
     return await customerRoute(context, cors, route);
   } catch (error) {
+    if (error instanceof BodyTooLarge) return jsonResponse({ error: 'too large' }, 413, cors ?? {});
     console.error('account', messageOf(error));
     return jsonResponse({ error: 'account error' }, 502, cors ?? {});
   }

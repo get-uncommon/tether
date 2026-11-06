@@ -4,7 +4,8 @@
  * items themselves.
  */
 import { toSlug } from './mapping.ts';
-import { isRecord, scalarText } from './util.ts';
+import { isRecord } from './shared/json.ts';
+import { scalarText } from './util.ts';
 
 import type { FieldData, MatchSettings } from './mapping.ts';
 import type { Product } from './product.ts';

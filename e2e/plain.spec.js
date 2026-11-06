@@ -1,5 +1,6 @@
 // The <script> build on a plain HTML page (the Webflow setup), its optional parts, analytics and
 // markets, in real browsers. Shopify analytics events are intercepted: nothing reaches Shopify.
+import assert from 'node:assert/strict';
 import { test, expect } from '@playwright/test';
 
 const MONORAIL = /monorail-edge\.shopifysvc\.com/;
@@ -53,6 +54,7 @@ test('GA4: dataLayer gets view_item, add_to_cart and begin_checkout in a real br
     .poll(() => page.evaluate(() => window.dataLayer.map((x) => x.event).filter(Boolean)), { timeout: 15000 })
     .toContain('add_to_cart');
   const add = await page.evaluate(() => window.dataLayer.find((x) => x.event === 'add_to_cart'));
+  assert.ok(add?.ecommerce);
   expect(add.ecommerce.currency).toBe('EUR');
   expect(add.ecommerce.items[0].item_name).toMatch(/H2/);
   await page.locator('[tether-checkout]').click();
@@ -69,7 +71,7 @@ test('other market on a static page: html.tether-market-pending until the live p
     // The init script runs before <html> exists: watch the whole document for it.
     new MutationObserver((list) =>
       list.forEach((m) => {
-        if (m.target === document.documentElement) window.__classes.push(m.target.className);
+        if (m.target === document.documentElement) window.__classes.push(document.documentElement.className);
       }),
     ).observe(document, { attributes: true, subtree: true, attributeFilter: ['class'] });
   });
@@ -124,7 +126,7 @@ test("Shopify analytics: Shopify's own scripts load, nothing is sent before cons
             checkoutRootDomain: 'hydrogen-preview.myshopify.com',
             storefrontAccessToken: window.TETHER_CONFIG.token,
           },
-          () => resolve(),
+          () => resolve(undefined),
         ),
       ),
   );

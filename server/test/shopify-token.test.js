@@ -29,7 +29,7 @@ test('the cached Shopify token is sealed: KV never holds it readable, and the ne
   await client(store, shopify.fetch).shopName();
 
   const stored = store.map.get('shopify:token');
-  assert.equal(typeof stored, 'string');
+  assert.ok(typeof stored === 'string');
   assert.ok(!stored.includes(TOKEN), 'the token is not stored in the clear');
 
   await client(store, shopify.fetch).shopName();

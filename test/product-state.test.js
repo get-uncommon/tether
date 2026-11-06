@@ -3,7 +3,7 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
-import { product, apparel, PLAN_MONTH, PLAN_2MONTH } from './fixtures.js';
+import { apparel, find, findAll, jsonResponse, PLAN_2MONTH, PLAN_MONTH, product } from './fixtures.js';
 
 const dom = new JSDOM('<!doctype html><body></body>', { url: 'https://state.test/product/coffee-box' });
 Object.assign(globalThis, {
@@ -16,7 +16,7 @@ Object.assign(globalThis, {
   getComputedStyle: dom.window.getComputedStyle,
 });
 const realFetch = globalThis.fetch;
-globalThis.fetch = async () => ({ ok: true, status: 200, json: async () => ({ data: { cart: null } }) });
+globalThis.fetch = async () => jsonResponse({ data: { cart: null } });
 
 const SHOW_KEYS = [
   'in-stock',
@@ -146,13 +146,14 @@ for (const { name, product: p, server: options, browser, expected } of CASES) {
     assert.equal(scope.isSubscription, st.plan !== null, 'bought on a plan');
     if (st.plan) assert.equal(scope.plan?.id, st.plan.id, 'plan');
 
-    assert.equal(document.getElementById('price').textContent, server.formatMoney(st.price, LOCALE), 'price');
+    assert.equal(find('#price').textContent, server.formatMoney(st.price, LOCALE), 'price');
     const compare = st.compareAtPrice ? server.formatMoney(st.compareAtPrice, LOCALE) : '';
-    assert.equal(document.getElementById('compare').textContent, compare, 'compare-at price');
-    assert.equal(document.getElementById('savings').textContent, server.formatPercent(st.savings, LOCALE), 'savings');
+    assert.equal(find('#compare').textContent, compare, 'compare-at price');
+    assert.equal(find('#savings').textContent, server.formatPercent(st.savings, LOCALE), 'savings');
 
-    for (const el of document.querySelectorAll('[data-key]')) {
+    for (const el of findAll('[data-key]')) {
       const { key } = el.dataset;
+      assert.ok(key);
       assert.equal(typeof st.show[key], 'boolean', `${key} is a boolean`);
       assert.equal(el.style.display !== 'none', st.show[key], key);
     }
@@ -169,6 +170,7 @@ for (const { name, product: p, server: options, browser, expected } of CASES) {
     assert.equal(planButtons.length, st.plans.length, 'plan list');
     for (const plan of st.plans) {
       const button = planButtons.find((el) => el.getAttribute('tether-plan-value') === plan.id);
+      assert.ok(button, `${plan.name} has a button`);
       assert.equal(button.classList.contains('is-selected'), plan.selected, `${plan.name} selected`);
       assert.equal(button.classList.contains('is-unavailable'), !plan.available, `${plan.name} unavailable`);
     }

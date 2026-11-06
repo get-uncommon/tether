@@ -1,7 +1,7 @@
 /**
  * Sealing for anything the Worker stores or hands to a browser: AES-GCM with one HKDF-derived key per purpose, bound
  * to where the value lives (a KV key or a cookie name) so a sealed value cannot be moved elsewhere. Web Crypto only,
- * so it runs in Workers and Node 20+.
+ * so it runs in Workers and Node alike.
  */
 
 import { fromBase64Url, toBase64Url } from './base64url.ts';
@@ -20,9 +20,12 @@ export function toHex(bytes: Uint8Array): string {
   return [...bytes].map((byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
-const keys = new Map<string, Promise<CryptoKey>>();
+/** Web Crypto's key, named through the `crypto` global: Node's types declare no global `CryptoKey` type. */
+type Key = Awaited<ReturnType<typeof crypto.subtle.deriveKey>>;
 
-function aesKey(secret: string, purpose: string): Promise<CryptoKey> {
+const keys = new Map<string, Promise<Key>>();
+
+function aesKey(secret: string, purpose: string): Promise<Key> {
   const id = `${purpose}:${secret}`;
   let key = keys.get(id);
   if (!key) {

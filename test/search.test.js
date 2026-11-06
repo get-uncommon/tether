@@ -2,7 +2,7 @@
 import { test, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
-import { captureTetherWarnings } from './fixtures.js';
+import { captureTetherWarnings, detailOf, find, graphqlRequest, jsonResponse, operationName } from './fixtures.js';
 
 // The failures these tests cause on purpose are checked through onError and states, not the console.
 captureTetherWarnings();
@@ -19,36 +19,32 @@ Object.assign(globalThis, {
 
 const calls = [];
 let failNext = false;
-globalThis.fetch = async (url, init) => {
-  const { query, variables } = JSON.parse(init.body);
-  calls.push({ op: query.match(/query\s+(\w+)/)[1], variables });
+globalThis.fetch = async (_url, init) => {
+  const { query, variables } = graphqlRequest(init);
+  calls.push({ op: operationName(query), variables });
   if (failNext) {
     failNext = false;
-    return { ok: false, status: 500, json: async () => ({}) };
+    return jsonResponse({}, 500);
   }
   const money = { amount: '30.0', currencyCode: 'EUR' };
-  return {
-    ok: true,
-    status: 200,
-    json: async () => ({
-      data: {
-        predictiveSearch: {
-          products: [
-            {
-              id: 'gid://shopify/Product/1',
-              handle: 'coffee-box',
-              title: 'Coffee box',
-              availableForSale: false,
-              featuredImage: null,
-              priceRange: { minVariantPrice: money },
-            },
-          ],
-          collections: [{ handle: 'coffee', title: 'Coffee', image: null }],
-          queries: [{ text: variables.q }, { text: `${variables.q} beans` }],
-        },
+  return jsonResponse({
+    data: {
+      predictiveSearch: {
+        products: [
+          {
+            id: 'gid://shopify/Product/1',
+            handle: 'coffee-box',
+            title: 'Coffee box',
+            availableForSale: false,
+            featuredImage: null,
+            priceRange: { minVariantPrice: money },
+          },
+        ],
+        collections: [{ handle: 'coffee', title: 'Coffee', image: null }],
+        queries: [{ text: variables.q }, { text: `${variables.q} beans` }],
       },
-    }),
-  };
+    },
+  });
 };
 
 const tick = (ms = 30) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -62,7 +58,7 @@ before(async () => {
     token: 't',
     searchDelay: 0,
     retries: 0,
-    onError: (error, context) => errors.push(context),
+    onError: (_error, context) => errors.push(context),
   });
   ({ mountSearch } = await import('../src/search.ts'));
 });
@@ -87,17 +83,16 @@ test('typing sends one predictive query and renders products, queries and collec
   document.body.innerHTML = markup;
   mountSearch(document);
   mountSearch(document); // a second mount of the same root does nothing
-  const root = document.querySelector('[tether-search]');
+  const root = find('[tether-search]');
   const input = root.querySelector('input');
-  const results = root.querySelector('[tether-search-results]');
+  assert.ok(input);
+  const results = find('[tether-search-results]', root);
   assert.equal(input.getAttribute('role'), 'combobox');
   assert.equal(input.getAttribute('aria-controls'), results.id);
   assert.equal(results.hidden, true);
 
-  let searched = null;
-  root.addEventListener('tether:search', (event) => {
-    searched = event.detail;
-  });
+  const searches = [];
+  root.addEventListener('tether:search', (event) => searches.push(detailOf(event)));
   type(input, 'c');
   await tick();
   assert.equal(calls.length, 0, 'below the minimum length');
@@ -110,9 +105,9 @@ test('typing sends one predictive query and renders products, queries and collec
   assert.equal(root.getAttribute('tether-search-state'), 'ready');
   assert.ok(root.classList.contains('is-open'));
   assert.equal(results.hidden, false);
-  const product = root.querySelector('[tether-search-products] a');
-  assert.equal(product.querySelector('[tether-search-bind="title"]').textContent, 'Coffee box');
-  assert.match(product.querySelector('[tether-search-bind="price"]').textContent, /30/);
+  const product = find('[tether-search-products] a', root);
+  assert.equal(find('[tether-search-bind="title"]', product).textContent, 'Coffee box');
+  assert.match(find('[tether-search-bind="price"]', product).textContent, /30/);
   assert.equal(product.getAttribute('href'), '/product/coffee-box');
   assert.ok(product.classList.contains('is-sold-out'));
   const queries = [...root.querySelectorAll('[tether-search-queries] a')];
@@ -121,9 +116,9 @@ test('typing sends one predictive query and renders products, queries and collec
     ['/search?q=cof%20beans'],
     'the typed term itself is not suggested',
   );
-  assert.equal(root.querySelector('[tether-search-collections] a').getAttribute('href'), '/collection/coffee');
-  assert.equal(root.querySelector('[tether-show="search-empty"]').style.display, 'none');
-  assert.equal(searched.term, 'cof');
+  assert.equal(find('[tether-search-collections] a', root).getAttribute('href'), '/collection/coffee');
+  assert.equal(find('[tether-show="search-empty"]', root).style.display, 'none');
+  assert.equal(searches.at(-1).term, 'cof');
 
   type(input, 'cof');
   await tick();
@@ -131,8 +126,9 @@ test('typing sends one predictive query and renders products, queries and collec
 });
 
 test('arrow keys move through the options, Escape closes', () => {
-  const root = document.querySelector('[tether-search]');
+  const root = find('[tether-search]');
   const input = root.querySelector('input');
+  assert.ok(input);
   const key = (name) => input.dispatchEvent(new window.KeyboardEvent('keydown', { key: name, bubbles: true }));
   const options = [...root.querySelectorAll('[role="option"]')];
   assert.equal(options.length, 2);
@@ -146,7 +142,7 @@ test('arrow keys move through the options, Escape closes', () => {
 });
 
 test('a failed search sets the error state and reaches onError', async () => {
-  const root = document.querySelector('[tether-search]');
+  const root = find('[tether-search]');
   failNext = true;
   type(root.querySelector('input'), 'tea');
   await tick(60);

@@ -10,10 +10,11 @@
  * writes a day: first by the ids this isolate accepted, then, in a Worker, by Cloudflare's Cache API, which every
  * isolate of the data centre shares and which costs nothing.
  */
-import { readCapped, streamChunks } from './capped-body.ts';
+import { readRequestCapped } from './capped-body.ts';
 import { verifyShopifyHmac } from './hmac.ts';
-import { isPlainObject } from './json.ts';
+import { isRecord } from './shared/json.ts';
 import { messageOf, sleep as realSleep } from './util.ts';
+import type { SyncAction } from './sync-product.ts';
 
 /** Largest webhook body read. Shopify's product webhooks are a few KB. */
 export const MAX_WEBHOOK_BYTES = 1024 * 1024;
@@ -33,12 +34,18 @@ const recentWebhookIds = new Set<string>();
  */
 const DELIVERY_TTL_SECONDS = 6 * 60 * 60;
 
-/** The Cache API, as the Worker's `caches.open()` gives it. */
-export type DeliveryCache = Pick<Cache, 'match' | 'put'>;
+/** The part of the Cache API the webhook uses, as the Worker's `caches.open()` gives it. Node has no Cache API. */
+export interface DeliveryCache {
+  match: (request: Request) => Promise<Response | undefined>;
+  put: (request: Request, response: Response) => Promise<void>;
+}
+
+/** What a webhook's sync did: the sync's action, or `failed` with the error, which the next reconcile retries. */
+type WebhookOutcome = { action: SyncAction } | { action: 'failed'; error: unknown };
 
 /** The part of the sync engine a webhook drives. */
 interface WebhookSync {
-  syncById: (id: string) => Promise<{ action: string }>;
+  syncById: (id: string) => Promise<{ action: SyncAction }>;
   queueRetry: (id: string, error: unknown) => Promise<void>;
 }
 
@@ -63,13 +70,6 @@ interface WebhookOptions {
 
 function reply(status: number, text: string): Response {
   return new Response(text, { status, headers: { 'content-type': 'text/plain' } });
-}
-
-/** The body, or `null` when it is longer than {@link MAX_WEBHOOK_BYTES}. */
-async function readCappedBody(request: Request): Promise<Uint8Array<ArrayBuffer> | null> {
-  if (Number(request.headers.get('content-length') ?? 0) > MAX_WEBHOOK_BYTES) return null;
-  if (!request.body) return new Uint8Array();
-  return readCapped(streamChunks(request.body), MAX_WEBHOOK_BYTES);
 }
 
 /** Whether this isolate already accepted the delivery with this id, remembering it otherwise. */
@@ -122,7 +122,7 @@ async function isRepeat(
 
 /** The product a webhook is about: Shopify sends its gid and, for older API versions, only the numeric id. */
 function productIdOf(payload: unknown): string | null {
-  if (!isPlainObject(payload)) return null;
+  if (!isRecord(payload)) return null;
   const { admin_graphql_api_id: gid, id } = payload;
   if (typeof gid === 'string' && gid) return gid;
   if (typeof id === 'number' || (typeof id === 'string' && id)) return String(id);
@@ -140,9 +140,9 @@ export async function handleShopifyWebhook(
     createDelayMs = CREATE_DELAY_MS,
     sleep = realSleep,
   }: WebhookOptions,
-): Promise<{ response: Response; task?: Promise<{ action: string; error?: unknown }> }> {
+): Promise<{ response: Response; task?: Promise<WebhookOutcome> }> {
   if (request.method !== 'POST') return { response: reply(405, 'POST only') };
-  const raw = await readCappedBody(request);
+  const raw = await readRequestCapped(request, MAX_WEBHOOK_BYTES);
   if (!raw) return { response: reply(413, 'too large') };
   const signature = request.headers.get('x-shopify-hmac-sha256');
   const checks = await Promise.all(secrets.filter(Boolean).map((key) => verifyShopifyHmac(raw, signature, key)));
@@ -169,7 +169,7 @@ export async function handleShopifyWebhook(
   if (!id) return { response: reply(400, 'no product id') };
   if (await isRepeat(request, deliveries, log)) return { response: reply(200, 'already received') };
 
-  const work = async (): Promise<{ action: string; error?: unknown }> => {
+  const work = async (): Promise<WebhookOutcome> => {
     try {
       if (topic === 'products/create' && createDelayMs) await sleep(createDelayMs);
       // The topic header isn't covered by the HMAC, so it never decides on its own: every topic asks Shopify for the

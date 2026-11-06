@@ -10,7 +10,7 @@ import { isRecord } from '../server/src/shared/json.ts';
 import { formatMoney as formatMoneyIn, productUrl as productUrlFor } from './shopify-values.ts';
 import type { Money } from './shopify-values.ts';
 
-export { attr, sel, get, has, qsa, scoped, emit, ownEvent, isOwnEvent } from './markup.ts';
+export { attr, sel, get, has, qsa, scoped, emit, ownEvent, isOwnEvent, ANALYTICS_EVENTS } from './markup.ts';
 export { imageUrl, cdnUrl, sameImage, setImage } from './images.ts';
 export { hasTemplate, repeat, repeatKeyed } from './repeaters.ts';
 

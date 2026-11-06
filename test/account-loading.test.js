@@ -4,6 +4,7 @@
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
+import { jsonResponse } from './fixtures.js';
 
 const dom = new JSDOM('<!doctype html><body></body>', { url: 'https://site.test/account' });
 Object.assign(globalThis, {
@@ -63,7 +64,7 @@ function partRanWithin(search, waitMs) {
     document.addEventListener('tether:account-error', onEvent);
     globalThis.fetch = async () => {
       finish(true);
-      return { ok: true, status: 200, json: async () => ({ loggedIn: false }) };
+      return jsonResponse({ loggedIn: false });
     };
     mountAccountIfUsed(document);
   });

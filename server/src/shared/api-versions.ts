@@ -4,11 +4,14 @@
  * version must pass `npm run smoke` on both the pinned version and the next one.
  */
 
+/** A dated, quarterly version such as `2026-07`. */
+export type ApiVersion = `${number}-${'01' | '04' | '07' | '10'}`;
+
 /** The Storefront API: products, carts, cart buyer identity. */
-export const STOREFRONT_API_VERSION = '2026-07';
+export const STOREFRONT_API_VERSION: ApiVersion = '2026-07';
 
 /** The Customer Account API: the logged-in customer's orders, addresses and subscriptions. */
-export const CUSTOMER_ACCOUNT_API_VERSION = '2026-07';
+export const CUSTOMER_ACCOUNT_API_VERSION: ApiVersion = '2026-07';
 
 /** The Admin API the sync reads products with. */
-export const ADMIN_API_VERSION = '2026-07';
+export const ADMIN_API_VERSION: ApiVersion = '2026-07';

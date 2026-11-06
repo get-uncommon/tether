@@ -4,7 +4,8 @@
  * have in KV.
  */
 import type { Store } from './store.ts';
-import { isRecord, numericId, scalarText } from './util.ts';
+import { isRecord } from './shared/json.ts';
+import { numericId, scalarText } from './util.ts';
 
 /** What the last write for a product was. `hash` is `null` until the item is live, so a failed publish is retried. */
 export interface ProductState {

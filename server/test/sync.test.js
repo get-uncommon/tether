@@ -140,6 +140,7 @@ test('update sends changed fields but never Webflow-owned ones', async () => {
   const r = await sync.syncById('1');
   assert.equal(r.action, 'updated');
   const patch = webflowWrites().find((c) => c.method === 'PATCH');
+  assert.ok(patch);
   assert.equal(patch.body.fieldData.name, 'Renamed');
   assert.ok(!('description' in patch.body.fieldData));
   assert.equal(item.fieldData.description, '<p>Edited in Webflow</p>');
@@ -157,8 +158,8 @@ test('matches existing items by shopify-id, adopts hand-made items by slug', asy
   const r = await sync.importAll();
   assert.equal(r.stats.updated, 2);
   assert.equal(r.stats.created || 0, 0);
-  assert.equal(wf.items.get('old1').fieldData.slug, 'new-handle', 'handle change follows to the slug');
-  assert.equal(wf.items.get('hand2').fieldData['shopify-id'], '2');
+  assert.equal(wf.items.get('old1')?.fieldData.slug, 'new-handle', 'handle change follows to the slug');
+  assert.equal(wf.items.get('hand2')?.fieldData['shopify-id'], '2');
 });
 
 test('draft/archived products are archived and unpublished; reactivation restores them', async () => {
@@ -201,7 +202,7 @@ test('import --prune archives items whose product is gone', async () => {
   });
   const r = await sync.importAll({ prune: true });
   assert.equal(r.pruned.length, 1);
-  assert.equal(wf.items.get('orphan').isArchived, true);
+  assert.equal(wf.items.get('orphan')?.isArchived, true);
 });
 
 test('an item deleted by hand in Webflow is recreated', async () => {
@@ -294,17 +295,29 @@ test('client credentials grant: token fetched once and sent to the Admin API', a
   assert.equal(tokenCalls.length, 1);
   assert.match(tokenCalls[0].body, /grant_type=client_credentials/);
   const admin = apis.calls.find((c) => c.path.startsWith('/admin/api/2026-07/'));
-  assert.equal(admin.headers['X-Shopify-Access-Token'], 'shpat_fresh');
+  assert.ok(admin);
+  assert.equal(new Headers(admin.headers).get('X-Shopify-Access-Token'), 'shpat_fresh');
   assert.deepEqual(app.webhookSecrets, ['csecret'], 'app webhooks are signed with the client secret');
 });
 
 // ---- webhooks + worker --------------------------------------------------------
 
+/**
+ * @param {string} topic
+ * @param {unknown} payload
+ * @param {{ secret?: string, shop?: string | null }} [options]
+ */
 async function webhook(topic, payload, { secret = 'whsec', shop = 'shop.myshopify.com' } = {}) {
   const body = JSON.stringify(payload);
   const headers = { 'x-shopify-topic': topic, 'x-shopify-hmac-sha256': await signShopify(body, secret) };
   if (shop) headers['x-shopify-shop-domain'] = shop;
   return new Request('https://sync.test/webhooks/shopify', { method: 'POST', body, headers });
+}
+
+/** @param {Awaited<ReturnType<typeof handleShopifyWebhook>>} handled */
+function acceptedTask(handled) {
+  assert.ok(handled.task, 'the webhook was accepted');
+  return handled.task;
 }
 
 test('webhook: verifies HMAC and shop, syncs update, archives on delete', async () => {
@@ -326,19 +339,19 @@ test('webhook: verifies HMAC and shop, syncs update, archives on delete', async 
     opts,
   );
   assert.equal(r.response.status, 200);
-  assert.equal((await r.task).action, 'created');
+  assert.equal((await acceptedTask(r)).action, 'created');
 
   // create arrives right after update for a new product: no duplicate item
   r = await handleShopifyWebhook(
     await webhook('products/create', { id: 1, admin_graphql_api_id: 'gid://shopify/Product/1' }),
     opts,
   );
-  assert.equal((await r.task).action, 'unchanged');
+  assert.equal((await acceptedTask(r)).action, 'unchanged');
   assert.equal(wf.items.size, 1);
 
   shop.products.delete('gid://shopify/Product/1');
   r = await handleShopifyWebhook(await webhook('products/delete', { id: 1 }), opts);
-  assert.equal((await r.task).action, 'archived');
+  assert.equal((await acceptedTask(r)).action, 'archived');
 });
 
 test('webhook: an unsigned topic header cannot delete a live product (Shopify is asked)', async () => {
@@ -348,14 +361,14 @@ test('webhook: an unsigned topic header cannot delete a live product (Shopify is
     await webhook('products/update', { id: 1, admin_graphql_api_id: 'gid://shopify/Product/1' }),
     opts,
   );
-  assert.equal((await r.task).action, 'created');
+  assert.equal((await acceptedTask(r)).action, 'created');
   // The same signed body, replayed with the topic header changed to products/delete.
   r = await handleShopifyWebhook(
     await webhook('products/delete', { id: 1, admin_graphql_api_id: 'gid://shopify/Product/1' }),
     opts,
   );
   assert.equal(r.response.status, 200);
-  assert.notEqual((await r.task).action, 'archived');
+  assert.notEqual((await acceptedTask(r)).action, 'archived');
   const [item] = [...wf.items.values()];
   assert.ok(item && !item.isArchived, 'the live item stays');
 });
@@ -377,6 +390,7 @@ test('concurrent create + update webhooks for a new product make one item', asyn
   assert.equal(wf.items.size, 1);
 });
 
+/** @returns {import('../src/env.ts').KvBinding & { readonly writes: number }} */
 function kv() {
   const m = new Map();
   let writes = 0;
@@ -413,7 +427,14 @@ test('worker: webhook route with waitUntil, cron reconcile writes KV only on cha
     await (await import('node:fs/promises')).readFile(new URL('../package.json', import.meta.url), 'utf8'),
   );
   assert.equal(VERSION, pkg.version, 'src/version.ts matches package.json');
-  assert.deepEqual(await health.json(), { ok: true, version: pkg.version });
+  assert.deepEqual(await health.json(), { ok: true }, 'the version is not shown to strangers');
+  const publicCheck = await (await worker.fetch(new Request('https://sync.test/check'), wenv, ctx)).json();
+  assert.equal(publicCheck.version, undefined);
+  const auth = { authorization: `Bearer ${wenv.SYNC_SECRET}` };
+  const fullCheck = await (
+    await worker.fetch(new Request('https://sync.test/check', { headers: auth }), wenv, ctx)
+  ).json();
+  assert.equal(fullCheck.version, pkg.version, 'the version needs the bearer secret');
 
   const res = await worker.fetch(await webhook('products/update', { id: 1 }), wenv, ctx);
   assert.equal(res.status, 200);

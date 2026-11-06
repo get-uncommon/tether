@@ -1,4 +1,5 @@
 // What a customer does in the Astro starter, in real browsers, against Shopify's public demo store.
+import assert from 'node:assert/strict';
 import { test, expect } from '@playwright/test';
 
 const shopify = (req) => /myshopify\.com\/api\/.*graphql/.test(req.url());
@@ -45,7 +46,7 @@ test('product: variant changes the price, add to cart opens the drawer, quick cl
 
   await page.keyboard.press('Escape');
   await expect(drawer).not.toHaveClass(/is-open/);
-  expect(await drawer.evaluate((d) => d.inert)).toBe(true);
+  expect(await drawer.evaluate((d) => d instanceof HTMLElement && d.inert)).toBe(true);
 });
 
 test('sold out: the button is disabled from the first paint', async ({ page }) => {
@@ -60,6 +61,7 @@ test('the cart survives a reload and View Transitions, and checkout goes to Shop
   await page.getByRole('button', { name: 'Add to cart' }).click();
   await expect(page.locator('[tether-cart-count]')).toHaveText(/[1-9]/);
   const count = await page.locator('[tether-cart-count]').textContent();
+  assert.ok(count);
 
   await page.reload();
   await expect(page.locator('[tether-cart-count]')).toHaveText(count);
@@ -92,7 +94,9 @@ test('search as you type: results, arrow keys, Enter opens the product', async (
 
 test('structured data for search engines is in the product page', async ({ page }) => {
   await page.goto('/products/the-h2-snowboard/');
-  const data = JSON.parse(await page.locator('script[type="application/ld+json"]').textContent());
+  const json = await page.locator('script[type="application/ld+json"]').textContent();
+  assert.ok(json);
+  const data = JSON.parse(json);
   expect(['Product', 'ProductGroup']).toContain(data['@type']);
   const offer = data.offers || data.hasVariant[0].offers;
   expect(offer.priceCurrency).toBe('EUR');

@@ -3,6 +3,7 @@
  * caller keeps its own pending login and cleans the visitor's locale and country before passing them in.
  */
 import { toBase64Url } from '../base64url.ts';
+import { sha256 } from '../crypto.ts';
 
 /** What a login asks for: the id token (`openid`), the email claim, and the whole Customer Account API. */
 const LOGIN_SCOPE = 'openid email customer-account-api:full';
@@ -26,7 +27,7 @@ interface LoginRequest {
 
 /** The PKCE S256 challenge: base64url of the verifier's SHA-256 (RFC 7636 §4.2). */
 async function codeChallenge(verifier: string): Promise<string> {
-  return toBase64Url(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier)));
+  return toBase64Url(await sha256(verifier));
 }
 
 /**

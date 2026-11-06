@@ -4,6 +4,8 @@
  * webhooks created in the admin.
  */
 
+import { sha256 } from './crypto.ts';
+
 const encoder = new TextEncoder();
 
 type Body = string | ArrayBuffer | Uint8Array<ArrayBuffer>;
@@ -13,7 +15,7 @@ function bodyBytes(body: Body): Uint8Array<ArrayBuffer> {
   return body instanceof Uint8Array ? body : new Uint8Array(body);
 }
 
-function hmacKey(secret: string, usage: KeyUsage): Promise<CryptoKey> {
+function hmacKey(secret: string, usage: 'sign' | 'verify') {
   return crypto.subtle.importKey('raw', encoder.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, [usage]);
 }
 
@@ -52,17 +54,13 @@ export async function verifyShopifyHmac(
   return crypto.subtle.verify('HMAC', await hmacKey(secret, 'verify'), signature, bodyBytes(body));
 }
 
-async function digest(text: string): Promise<Uint8Array<ArrayBuffer>> {
-  return new Uint8Array(await crypto.subtle.digest('SHA-256', encoder.encode(text)));
-}
-
 /**
  * True when the `Authorization` header is `Bearer <secret>`. Both sides are hashed first, so the comparison takes the
  * same time whatever their lengths and contents.
  */
 export async function bearerMatches(authorization: string | null, secret: string): Promise<boolean> {
   if (!authorization || !secret) return false;
-  const [given, expected] = await Promise.all([digest(authorization), digest(`Bearer ${secret}`)]);
+  const [given, expected] = await Promise.all([sha256(authorization), sha256(`Bearer ${secret}`)]);
   let difference = 0;
   given.forEach((byte, index) => {
     difference |= byte ^ (expected[index] ?? 0);

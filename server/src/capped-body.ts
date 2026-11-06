@@ -1,6 +1,7 @@
 /**
  * Reading a request body up to a size limit, for the webhook endpoint in the Worker (a web `Request`) and in the Node
- * server (an `IncomingMessage`): reading stops at the limit, so a body past it is never buffered whole.
+ * server (an `IncomingMessage`), and for the account routes: reading stops at the limit, so a body past it is never
+ * buffered whole.
  */
 
 /**
@@ -26,8 +27,18 @@ export async function readCapped(
   return body;
 }
 
+/**
+ * A web request's body, or `null` when it is longer than `maxBytes`, by its `Content-Length` (then nothing is read) or
+ * once reading passes the limit.
+ */
+export async function readRequestCapped(request: Request, maxBytes: number): Promise<Uint8Array<ArrayBuffer> | null> {
+  if (Number(request.headers.get('content-length') ?? 0) > maxBytes) return null;
+  if (!request.body) return new Uint8Array();
+  return readCapped(streamChunks(request.body), maxBytes);
+}
+
 /** A web stream's chunks. Stopping early (`readCapped` past its limit) cancels the stream. */
-export async function* streamChunks(stream: ReadableStream<Uint8Array>): AsyncGenerator<Uint8Array, void, undefined> {
+async function* streamChunks(stream: ReadableStream<Uint8Array>): AsyncGenerator<Uint8Array, void, undefined> {
   const reader = stream.getReader();
   let finished = false;
   try {

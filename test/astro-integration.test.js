@@ -20,7 +20,7 @@ test('integration: inject false adds no script; the options are not changed by a
   const options = { inject: false, country: 'NL', onError };
   try {
     await tether(options).hooks['astro:config:setup']({
-      injectScript: (stage, code) => scripts.push(code),
+      injectScript: (_stage, code) => scripts.push(code),
       command: 'build',
       config: { root: pathToFileURL(`${dir}/`) },
       logger: { warn() {} },
@@ -42,11 +42,12 @@ test('integration: server-only options stay out of the page silently, unknown on
   await tether({
     domain: 'a.myshopify.com',
     token: 't',
+    // @ts-expect-error -- a config shared with createStorefront() carries options only the server reads
     siteUrl: 'https://shop.test',
     pageSize: 50,
     opneCart: true,
   }).hooks['astro:config:setup']({
-    injectScript: (stage, code) => scripts.push(code),
+    injectScript: (_stage, code) => scripts.push(code),
     command: 'build',
     config: { root: pathToFileURL(`${dir}/`) },
     logger: { warn: (message) => warnings.push(message) },

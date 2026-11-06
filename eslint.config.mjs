@@ -16,7 +16,7 @@ export default tseslint.config(
       'examples/**',
       'test-results/**',
       'playwright-report/**',
-      // Declarations only, outside the source's program (tsconfig.json); npm run test:types compiles them.
+      // Declarations only, outside the source's programs (tsconfig.browser.json); npm run test:types compiles them.
       'src/globals.d.ts',
     ],
   },

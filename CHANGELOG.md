@@ -46,13 +46,27 @@
   read-only, and the undocumented `Tether.cart._commit()` is removed. Types: `CustomerLink` is gone.
   **Upgrade:** the account part sets the resolver itself; only code that called `setCustomer` or
   wrote those properties changes, to `setCheckoutResolver`.
+- **Breaking (events):** `Tether.on(name, fn)` calls `fn` only for events Tether dispatched itself,
+  so another script's look-alike `tether:*` event can't hand a listener a detail it didn't expect.
+  The variant link (`tether-variant-url`) ignores such events too. Types: `Tether.on` takes only
+  the names in `TetherEvents`; the `(name: string, fn: (detail: unknown) => …)` form is gone.
+  **Upgrade:** listen with `document.addEventListener` for your own events.
+- **Breaking (descriptions):** a description can't cover the page any more. It loses `class`
+  attributes (a site's modal or overlay class would apply to it), the inline styles `transform`,
+  `translate`, `rotate`, `scale` and `offset-*`, negative margins and values in viewport units.
+  Content wider than the element still isn't clipped. **Upgrade:** style descriptions from the
+  site's CSS through the element Tether fills (`[tether-bind="description"] h2 { … }`), not with
+  classes inside the description.
+- Fix: the analytics part no longer throws on a `checkout` event without a cart.
+- Types: `ResolvedTetherConfig.domain` is a `ShopDomain` (or `''`) and `apiVersion` an `ApiVersion`
+  (or `'unstable'`), branded where the config is read; `TetherOptions` still takes plain strings.
 - **Breaking (errors):** the codes `NOT_ALLOWED`, `SESSION_ENDED` and `TOKEN_FAILED`, which nothing
   raises since accounts run through the Worker, are removed, and `TetherError.code` is exactly
   `TetherErrorCode` (Shopify's own codes for refused input are on `userErrors`). **Upgrade:** drop
   checks for those codes.
 - **Breaking (sync Worker):** `GET /_tether/account/orders` answers the orders as the browser reads
   them (every selected field present, `null` when Shopify leaves it out, only the selected fields),
-  read by the same module (`server/src/shared/account-orders.js`) in the Worker and the browser. An
+  read by the same module (`server/src/shared/account-orders.ts`) in the Worker and the browser. An
   order without an id makes the route answer 502 instead of sending it on. **Upgrade:** none for
   sites using `Tether.account.orders()`; code reading `/orders` itself gets the same fields.
 - **Breaking (types):** the Shopify objects are typed exactly as Tether's queries select them:
@@ -111,11 +125,25 @@
   and adds the one-time manual step to the job summary. **Upgrade notes, for any later release that
   raises it:** copy `server/.github/workflows/update-tether.yml` from that release over the same
   file in your copy and commit it, once, by hand (GitHub doesn't let the workflow change its own
-  file; keep your own `cron` line). 0.7.0 ships revision 1, the same workflow every copy has.
+  file; keep your own `cron` line). 0.7.0 ships revision 2: separate jobs, the release's tests run
+  with a read-only token that isn't kept in the checkout, and actions pinned by commit. Copies
+  deployed before 0.7.0 have revision 1 (no revision line). Their 0.6 updater installs 0.7.0
+  without a warning; from then on every update run warns, also a run that finds nothing new, until
+  the copy has the new workflow. The warning and the job summary link to the release's workflow
+  file. **Upgrade (every copy deployed before 0.7.0):** do that one-time copy once 0.7.0 is
+  installed. Until then the copy keeps updating with its old workflow, whose test step holds a token
+  that can write to the copy's repository.
 - Releases: `release.yml` builds `tether-server-X.Y.Z.tar.gz` (a `git archive` of the tag's
   `server/`, the same bytes on every run), attests it (`actions/attest-build-provenance`, pinned)
-  and uploads it to the GitHub Release. The note below that parts from a `partsUrl`
-  load without a hash no longer holds.
+  and uploads it to the GitHub Release. The release runs the whole gate (`npm run check`);
+  dependencies are installed only in a read-only job, the server asset is built and attested in a
+  job that installs nothing, and npm publishes with `--ignore-scripts`.
+- Repository: CI runs `npm run check` on pull requests and pushes to `main`, on Node 22.18 and 24.
+- Repository: browser, Node-side, Worker and test code are type-checked as separate programs
+  (`tsc -b`), so browser code can't use Node globals and the Worker can't use the DOM; the tests are
+  type-checked too, with their fakes checked against the interfaces they stand in for.
+- Types: `ApiVersion` is the template literal `` `${number}-${'01' | '04' | '07' | '10'}` `` (it was a
+  branded string), and the API version constants are typed `ApiVersion`.
 - Security: descriptions lose `id` attributes (they could clobber `window.<id>` and the site's own
   ids), inline style declarations that position content over the page or load from elsewhere
   (`position`, `top`/`right`/`bottom`/`left`/`inset`, `z-index`, any value with `url(`,
@@ -147,15 +175,14 @@
   `lastError` is always an `Error` or `null`; `add()` rejects if Shopify answers without a cart.
 - Astro integration: `createStorefront()`'s own options in a shared `shop.config.js` (`siteUrl`,
   `pageSize`, `fetch`) are left out of the page; any other unknown option warns at build time.
-- Types: the `.d.ts` files are checked against the source's JSDoc types (`npm run test:types`).
-  Fixed drift: the `TetherError` constructor takes typed `errors`/`userErrors`/`code`; `Tether.config` is `ResolvedTetherConfig`;
+- Types (also covered by the generated declarations above): the `TetherError` constructor takes typed `errors`/`userErrors`/`code`; `Tether.config` is `ResolvedTetherConfig`;
   `query()` defaults to `unknown` and `on(name: string)` passes `unknown`
   instead of `any`; `onError` receives `unknown` (a handler may still type it narrower); cart
   changes that can answer without a cart return `ShopifyCart | null` and `checkout()` the checkout
   URL; `imageUrl()` returns `url` itself when it is empty; an `initialState` plan's price and an
   image's `width`/`height` can be `null`; `__core` and `__parts` are declared.
 - Releases: the version is set in `package.json` only; the release script writes every copy from it
-  (`scripts/versions.mjs`), and a test checks they agree.
+  (`scripts/versions.ts`), and a test checks they agree.
 - Security: descriptions (`tether-bind="description"`, `tether-collection-bind="description"`) go
   through an allow-list of content elements and attributes. **Behaviour change:** `<style>` blocks and
   form fields are removed, unknown elements are unwrapped (their text stays), iframes are kept only
@@ -165,7 +192,7 @@
 - Security: the optional parts loaded from the core script's own folder carry a sha384 `integrity`
   hash from the same build, so a core pinned with `integrity` runs only its own parts. **Behaviour
   change:** a core on another origin loads its parts with CORS (jsDelivr sends the headers; a
-  self-hosted copy on another domain must too). Parts from a `partsUrl` load without a hash.
+  self-hosted copy on another domain must too).
 - Security (sync Worker): a repeated webhook delivery (same `X-Shopify-Webhook-Id`) is dropped
   within the Worker instance and across the data centre (see above), after the signature and shop
   checks.
@@ -197,14 +224,17 @@
 - A token without inventory access gets queries without `quantityAvailable`; `Tether.query()`
   texts are sent as written.
 - Storefront answers that are malformed reject with a `TetherError` instead of a `TypeError`.
-- Sync Worker: `/health` answers `{ ok, version }`; the public `/check` answers only `{ ok, steps }`
-  with each step's title and level (version and KV binding need the bearer secret).
+- Sync Worker: `/health` answers `{ ok: true }` only; the public `/check` answers only
+  `{ ok, steps }` with each step's title and level. The running version and the KV binding need the
+  bearer secret (`Authorization: Bearer <SYNC_SECRET>` on `/check`).
+- Sync Worker: a customer account request body over 64 KiB is answered 413, and a larger declared
+  `Content-Length` is refused before the body is read.
 - Sync Worker: the Node server logs the address it really bound.
 - Types: `Tether.account` methods return their real shapes (`AccountCustomer`, `AccountOrder`,
   `OrderDetail`, `SubscriptionContract`, …), `TetherErrorCode` lists every code, `TetherEvents` has
   the account, search and list-rendered events, and `productUrl()` returns `string | null`.
 - The Storefront, Customer Account and Admin API versions live in one place
-  (`server/src/shared/api-versions.js`).
+  (`server/src/shared/api-versions.ts`).
 
 ## 0.6.8 (2026-11-06)
 

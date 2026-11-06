@@ -5,7 +5,7 @@ import { JSDOM, VirtualConsole } from 'jsdom';
 import { readFile } from 'node:fs/promises';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { product } from './fixtures.js';
+import { find, graphqlRequest, jsonResponse, operationName, product } from './fixtures.js';
 
 const DIST = join(dirname(fileURLToPath(import.meta.url)), '..', '.test-dist');
 let win;
@@ -26,9 +26,9 @@ before(async () => {
     resources: 'usable',
     virtualConsole,
     beforeParse(w) {
-      w.fetch = async (url, init) => {
-        const { query, variables } = JSON.parse(init.body);
-        const op = query.match(/(?:query|mutation)\s+(\w+)/)[1];
+      w.fetch = async (_url, init) => {
+        const { query, variables } = graphqlRequest(init);
+        const op = operationName(query);
         ops.push({ op, query });
         const data = {
           TetherProducts: () =>
@@ -55,7 +55,7 @@ before(async () => {
           }),
         }[op];
         if (!data) throw new Error(`unexpected ${op}`);
-        return { ok: true, status: 200, json: async () => ({ data: data() }) };
+        return jsonResponse({ data: data() });
       };
     },
   });
@@ -64,7 +64,7 @@ before(async () => {
   // Wait for the markets part (its own file) instead of a fixed time: CI runners can be slow.
   for (
     let i = 0;
-    i < 100 && !(win.Tether?.__parts?.markets && win.document.getElementById('cs')?.options.length > 1);
+    i < 100 && !(win.Tether?.__parts?.markets && (win.document.querySelector('select')?.options.length ?? 0) > 1);
     i++
   ) {
     await new Promise((r) => setTimeout(r, 50));
@@ -72,7 +72,7 @@ before(async () => {
 });
 
 test('the built script renders a product (and its GraphQL is minified but valid-looking)', () => {
-  assert.equal(win.document.querySelector('h1').textContent, 'Coffee Box');
+  assert.equal(find('h1', win.document).textContent, 'Coffee Box');
   const q = ops.find((o) => o.op === 'TetherProducts').query;
   assert.ok(!/\n| {2}/.test(q), 'no newlines or double spaces');
   assert.match(q, /fragment TetherProduct on Product\{id handle title/);
@@ -167,7 +167,36 @@ test('the release attests the server asset the sync Worker updater installs, by 
   assert.ok(workflow.includes('-o "tether-server-$V.tar.gz" HEAD -- server'), 'the archive of the tagged server/');
   assert.match(workflow, /uses: actions\/attest-build-provenance@[0-9a-f]{40} #/, 'attested, pinned by commit');
   assert.match(workflow, /subject-path: \$\{\{ env\.SERVER_ASSET \}\}/);
-  assert.match(workflow, /^ {2}id-token: write/m);
-  assert.match(workflow, /^ {2}attestations: write/m);
   assert.match(workflow, /--latest "\$\{assets\[@\]\}" "\$SERVER_ASSET"/, 'uploaded to the GitHub Release');
+});
+
+/** Each job of a workflow file by its name, as its text. */
+function workflowJobs(workflow) {
+  const jobs = workflow.slice(workflow.indexOf('\njobs:\n'));
+  return new Map(
+    jobs
+      .split(/^ {2}(?=[\w-]+:$)/m)
+      .slice(1)
+      .map((job) => [job.slice(0, job.indexOf(':')), job]),
+  );
+}
+
+test('the release installs dependencies only in a job that can read the repository and nothing more', async () => {
+  const workflow = await readFile(new URL('../.github/workflows/release.yml', import.meta.url), 'utf8');
+  assert.match(workflow, /^permissions: \{\}$/m, 'no job gets a permission it does not name');
+  const jobs = workflowJobs(workflow);
+  assert.deepEqual([...jobs.keys()], ['check', 'server-asset', 'npm', 'github-release']);
+  const check = jobs.get('check');
+  assert.match(check, /permissions:\n {6}contents: read\n {4}steps:/, 'the check job only reads');
+  assert.match(check, /- run: npm ci\n/);
+  assert.match(check, /- run: npm run check\n/, 'the whole gate, not only the tests');
+  for (const [name, job] of jobs) {
+    if (name === 'check') continue;
+    assert.doesNotMatch(job, /npm ci|npm run |run: npm install(?! -g npm@)/, `${name} runs no dependency's code`);
+    assert.match(job, /persist-credentials: false/, `${name} keeps no token in the checkout`);
+  }
+  const signers = [...jobs].filter(([, job]) => /id-token: write/.test(job)).map(([name]) => name);
+  assert.deepEqual(signers, ['server-asset', 'npm']);
+  assert.match(jobs.get('server-asset'), /attestations: write/);
+  assert.match(jobs.get('npm'), /npm publish --provenance --access public --ignore-scripts/);
 });

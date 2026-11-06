@@ -177,9 +177,9 @@ first deploy), the cron (every 10 minutes) and the entry point. The secrets the 
 are listed in [`.dev.vars.example`](../.dev.vars.example); for local `npx wrangler dev`, copy it to
 `.dev.vars`.
 
-Routes: `POST /webhooks/shopify`, `GET /check` (and `/`), `GET /health` (`{ ok, version }`), `POST /reconcile` (needs
+Routes: `POST /webhooks/shopify`, `GET /check` (and `/`), `GET /health` (`{ ok: true }`), `POST /reconcile` (needs
 `Authorization: Bearer $SYNC_SECRET`; `?since=all` imports everything, continued by the cron).
-`/check` with the same header gives the full report; without it, only each step's title and level. Every run counts its outgoing requests and stops in time:
+`/check` with the same header gives the full report, with the running version; without it, only each step's title and level. Every run counts its outgoing requests and stops in time:
 `MAX_SUBREQUESTS` (default 45, for the free plan's 50) can be raised on a paid plan. The Worker keeps its own state in KV: without the `TETHER_SYNC` binding, `POST /reconcile` answers 503, the cron run fails, and `/check` (with the secret) warns, or reports an error when customer accounts are on. The first import runs from the Worker
 (`POST /reconcile?since=all`), or from the Node CLI: either way items are matched by `shopify-id`, so
 nothing is duplicated.

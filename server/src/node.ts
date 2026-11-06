@@ -7,7 +7,8 @@ import { pathToFileURL, fileURLToPath } from 'node:url';
 import { readCapped } from './capped-body.ts';
 import { handleShopifyWebhook, MAX_WEBHOOK_BYTES } from './webhook.ts';
 import { parseConfigFile } from './config-file.ts';
-import { asRecord, isPlainObject } from './json.ts';
+import { asRecord } from './json.ts';
+import { isRecord } from './shared/json.ts';
 import { messageOf } from './util.ts';
 
 import type { Stats } from 'node:fs';
@@ -40,7 +41,7 @@ async function readStateFile(path: string): Promise<{ entries: Map<string, unkno
   try {
     const [text, stats] = await Promise.all([readFile(path, 'utf8'), stat(path)]);
     const json: unknown = JSON.parse(text);
-    if (!isPlainObject(json)) throw new Error(`state file ${path} does not hold a JSON object`);
+    if (!isRecord(json)) throw new Error(`state file ${path} does not hold a JSON object`);
     return { entries: new Map(Object.entries(json)), version: stamp(stats) };
   } catch (err) {
     if (!isFileMissing(err)) throw err;

@@ -38,7 +38,13 @@ import { fileURLToPath } from 'node:url';
 import { compareVersions, newestInRange, parseVersion } from '../src/release-range.ts';
 import { field } from '../src/shared/json.ts';
 import { downloadAsset, fetchSignedRelease, runCommand } from './release-asset.ts';
-import { reportWorkflow, workflowState } from './workflow-check.ts';
+import {
+  reportWorkflow,
+  SHIPPED_REVISION,
+  WORKFLOW_PATH,
+  workflowRevisionAt,
+  workflowState,
+} from './workflow-check.ts';
 import type { GitHubGet, VerifyPolicy } from './release-asset.ts';
 
 interface Tag {
@@ -247,7 +253,7 @@ async function installRelease(source: string, version: string, where: string): P
   const found = await packageVersion(source);
   if (found !== version) throw new Error(`the release says it is ${version}, its package.json says ${found}`);
   await install(source);
-  await reportWorkflow(await workflowState(ROOT, source), version, where);
+  await reportWorkflow(await workflowState(ROOT, await workflowRevisionAt(source)), version, where);
 }
 
 /**
@@ -259,10 +265,15 @@ async function installFromGitHub(version: string, tags: Tag[], policy: VerifyPol
   try {
     const source = { get: githubJson, run: runCommand, download: downloadAsset };
     const server = await fetchSignedRelease(source, { upstream: UPSTREAM, version, sha }, dir, policy);
-    await installRelease(server, version, `https://github.com/${UPSTREAM}/tree/v${version}/server`);
+    await installRelease(server, version, releaseWorkflowUrl(version));
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
+}
+
+/** Where the workflow file of an upstream release can be read on GitHub. */
+function releaseWorkflowUrl(version: string): string {
+  return `https://github.com/${UPSTREAM}/blob/v${version}/server/${WORKFLOW_PATH}`;
 }
 
 /**
@@ -302,6 +313,8 @@ async function main(args: string[]): Promise<void> {
   const currentVersion = parseVersion(current);
   if (targetVersion && currentVersion && compareVersions(targetVersion, currentVersion) <= 0) {
     console.log('up to date');
+    const where = fromDir ? join(fromDir, WORKFLOW_PATH) : releaseWorkflowUrl(current);
+    await reportWorkflow(await workflowState(ROOT, SHIPPED_REVISION), current, where);
     console.log('updated=');
     return;
   }
@@ -310,7 +323,7 @@ async function main(args: string[]): Promise<void> {
     console.log('updated=');
     return;
   }
-  if (fromDir) await installRelease(fromDir, release.version, fromDir);
+  if (fromDir) await installRelease(fromDir, release.version, join(fromDir, WORKFLOW_PATH));
   else await installFromGitHub(release.version, release.tags, policy);
   if (!spec && !existsSync(specFile)) await writeFile(specFile, `${effective}\n`);
   await stat(join(ROOT, 'src', 'entry.js'));

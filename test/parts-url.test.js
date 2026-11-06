@@ -7,31 +7,35 @@ import { readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { graphqlRequest, jsonResponse, operationName } from './fixtures.js';
 
 const DIST = join(dirname(fileURLToPath(import.meta.url)), '..', '.test-dist');
 const PART_FILE = /^https:\/\/(?:cdn|site)\.test\/[\w/]*\/(tether\.[\w.-]+\.js)$/;
 
 /** Serves the built files at the `partsUrl` folders the tests use. */
 class PartsHost extends ResourceLoader {
+  /**
+   * @override
+   * @param {string} url
+   * @param {import('jsdom').FetchOptions} options
+   */
   fetch(url, options) {
     const file = PART_FILE.exec(url)?.[1];
     if (!file) return super.fetch(url, options);
-    const loading = readFile(join(DIST, file));
-    loading.abort = () => {};
-    return loading;
+    return Object.assign(readFile(join(DIST, file)), { abort: () => {} });
   }
 }
 
 /** Answers the Storefront queries Tether.diagnose() sends. */
 function storefront(window) {
-  window.fetch = async (url, init) => {
-    const { query } = JSON.parse(init.body);
-    const op = query.match(/(?:query|mutation)\s+(\w+)/)[1];
+  window.fetch = async (_url, init) => {
+    const { query } = graphqlRequest(init);
+    const op = operationName(query);
     const data = {
       TetherDiagnose: { shop: { name: 'Shop', primaryDomain: { url: 'https://shop.test' }, paymentSettings: {} } },
       TetherProducts: {},
     }[op];
-    return { ok: true, status: 200, json: async () => ({ data }) };
+    return jsonResponse({ data });
   };
 }
 
@@ -56,6 +60,7 @@ async function loadDiagnoseFrom(partsUrl) {
   await new Promise((resolve) => win.addEventListener('load', resolve));
   const result = await win.Tether.diagnose({ silent: true });
   const script = [...win.document.scripts].find((element) => /tether\.diagnose\.min\.js$/.test(element.src));
+  assert.ok(script, 'the diagnose part has a script');
   return { win, script, result };
 }
 

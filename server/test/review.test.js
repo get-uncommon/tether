@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createApp, memoryStore, createWorker, signShopify, createShopify, pageSizeFor } from '../src/index.ts';
 import { fileStore } from '../src/node.ts';
-import { createMockApis, shopifyProduct, baseConfig, env, instantSleep } from './mocks.js';
+import { createMockApis, shopifyProduct, baseConfig, env, instantSleep, noWaitUntil } from './mocks.js';
 
 const setup = (opts = {}, config = baseConfig, extra = {}) => {
   const apis = createMockApis(opts);
@@ -86,6 +86,7 @@ test('a failed publish is not committed, so the next run publishes again', async
 test('concurrent create + update webhooks in two Worker invocations: one item (unique slug)', async () => {
   const apis = createMockApis({ products: [shopifyProduct(5)] });
   const kv = new Map();
+  /** @type {import('../src/env.ts').KvBinding} */
   const TETHER_SYNC = {
     async get(k, t) {
       const v = kv.get(k);
@@ -138,6 +139,7 @@ test('subrequest budget: a Worker reconcile stops before the limit and resumes n
   const products = Array.from({ length: 12 }, (_, i) => shopifyProduct(i + 1));
   const apis = createMockApis({ products });
   const kv = new Map();
+  /** @type {import('../src/env.ts').KvBinding} */
   const TETHER_SYNC = {
     async get(k, t) {
       const v = kv.get(k);
@@ -166,7 +168,7 @@ test('subrequest budget: a Worker reconcile stops before the limit and resumes n
     runs.every(({ used }) => used <= 15),
     `subrequests per run: ${runs.map((x) => x.used)}`,
   );
-  assert.equal(runs.at(-1).r.complete, true);
+  assert.equal(runs[runs.length - 1].r.complete, true);
   assert.equal(apis.wf.items.size, 12);
 });
 
@@ -214,6 +216,7 @@ test('webhook failure is queued for the next reconcile', async () => {
   const apis = createMockApis({ products: [shopifyProduct(1, { handle: 'bad' })], failCreateFor: 'bad' });
   const store = memoryStore();
   const worker = createWorker(baseConfig, { fetch: apis.fetch, sleep: instantSleep });
+  /** @type {import('../src/env.ts').KvBinding} */
   const kv = {
     async get(k) {
       return store.get(k);
@@ -242,7 +245,8 @@ test('webhook failure is queued for the next reconcile', async () => {
   );
   await Promise.all(tasks);
   assert.deepEqual(
-    (await store.get('tether-sync:reconcile:retry')).map((r) => r.id),
+    // The retry queue as the reconcile stores it.
+    /** @type {{ id: string }[]} */ (await store.get('tether-sync:reconcile:retry')).map((r) => r.id),
     ['1'],
   );
 });
@@ -254,10 +258,10 @@ test('SYNC_SECRET "none" does not open /reconcile; /check without it hides value
   const r = await worker.fetch(
     new Request('https://w.test/reconcile', { method: 'POST', headers: { authorization: 'Bearer none' } }),
     wenv,
-    {},
+    noWaitUntil,
   );
   assert.equal(r.status, 401);
-  const check = await (await worker.fetch(new Request('https://w.test/check'), wenv, {})).text();
+  const check = await (await worker.fetch(new Request('https://w.test/check'), wenv, noWaitUntil)).text();
   assert.ok(!check.includes('secret-shop'));
 });
 
@@ -272,7 +276,7 @@ test('file store: batched writes, merged with another process, survives a failed
   await a.flush();
   const disk = JSON.parse(await readFile(path, 'utf8'));
   assert.equal(Object.keys(disk).length, 101, "both processes' keys are kept");
-  assert.equal(await b.get('p:5').then((v) => v.i), 5, "b sees a's writes");
+  assert.deepEqual(await b.get('p:5'), { i: 5 }, "b sees a's writes");
 
   const bad = fileStore(join(dir, 'missing-dir', 'state.json'), { delayMs: 10_000 });
   await bad.put('k', 1);
@@ -286,6 +290,7 @@ test('POST /reconcile?since=all imports everything, and the cron finishes what o
   );
   const apis = createMockApis({ products });
   const kv = new Map();
+  /** @type {import('../src/env.ts').KvBinding} */
   const TETHER_SYNC = {
     async get(k, t) {
       const v = kv.get(k);
@@ -308,7 +313,7 @@ test('POST /reconcile?since=all imports everything, and the cron finishes what o
       headers: { authorization: `Bearer ${secret}` },
     }),
     wenv,
-    {},
+    noWaitUntil,
   );
   const first = await res.json();
   assert.equal(first.complete, false, 'too much for one run');
@@ -321,7 +326,7 @@ test('POST /reconcile?since=all imports everything, and the cron finishes what o
       headers: { authorization: `Bearer ${secret}` },
     }),
     wenv,
-    {},
+    noWaitUntil,
   );
   assert.equal(bad.status, 400);
 });

@@ -206,9 +206,14 @@ Markup written for an older `wfs-*` prefix keeps working with `prefix: 'wfs'`.
 
 `tether-bind` values: `title`, `description` (the HTML written in Shopify, through an allow-list:
 text formatting, lists, tables, images, links, inline `style` and video embeds stay; scripts, event
-handlers, `javascript:` links, `<style>` blocks, form fields and `id`s are removed; other elements are
-unwrapped, so their text stays; inline styles lose `position`, `top`/`right`/`bottom`/`left`/`inset`,
-`z-index` and any value with `url(`, so a description can't cover the page or load from elsewhere;
+handlers, `javascript:` links, `<style>` blocks, form fields, `id`s and `class`es (so a description
+can't borrow your overlay or modal classes) are removed; other elements are unwrapped, so their text
+stays; inline styles lose `position`, `top`/`right`/`bottom`/`left`/`inset`, `z-index`, transforms
+(`transform`, `translate`, `rotate`, `scale`), `offset-*`, negative margins, values in viewport
+units (`100vw`) and any value with `url(`, so a description can't be laid over the page or load from
+elsewhere. Content wider than the element still overflows beside it, as in any HTML (Tether doesn't
+clip it, which would cut off wide tables and embeds); add `contain: paint` to the element in your
+own CSS if you want it clipped;
 iframes must be https from another origin than the site's, run sandboxed, and may only ask for
 `autoplay`, `encrypted-media`, `picture-in-picture`, `fullscreen`, `clipboard-write`,
 `accelerometer`, `gyroscope` and `web-share`; links that open a new tab get
@@ -409,6 +414,9 @@ Events (on `document`, prefixed `tether:`): `ready`, `product-ready`, `variant-c
 `list-ready`, `list-rendered`, `discount-applied`, `discount-invalid`, `layout-changed`, `product-not-found`,
 `product-updated`, `country-changed`, `cart-error`, `cart-warning`, `search`, `error`, and with
 [accounts](accounts.md#events) `account-login`, `account-logout`, `account-error`, `account-updated`.
+`Tether.on(name, fn)` takes only these names, and calls `fn` only for the events Tether dispatched:
+another script's `tether:cart-updated`, whatever its detail, doesn't reach it. A plain
+`document.addEventListener('tether:…')` hears every event of that name, so check its detail yourself.
 
 ## Config
 
