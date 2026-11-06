@@ -21,7 +21,7 @@ An open-source, free alternative to Smootify and Storesynk (formerly Shopyflow):
 - **Astro too:** build-time product pages with live prices and cart, View Transitions included ([Astro guide](docs/astro.md)).
 - **Hand-over ready:** loading, error and not-found states, `Tether.diagnose()`, error reporting.
 
-MIT licensed · 25 KB gzipped · no dependencies · TypeScript types · [full reference](docs/reference.md) · [comparison](docs/comparison.md) · [changelog](CHANGELOG.md)
+MIT licensed · 28 KB gzipped · no dependencies · TypeScript types · [full reference](docs/reference.md) · [comparison](docs/comparison.md) · [changelog](CHANGELOG.md)
 
 ---
 

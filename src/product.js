@@ -16,11 +16,18 @@ import {
   notifyLayoutChanged,
   watchImages,
   parseJSONAttr,
-  toAttributes,
+  attributesFromJson,
 } from './dom.js';
 import { Cart } from './cart.js';
 import { allPlans, allocationFor, findPlan, GID } from './selling-plans.js';
-import { initialChoice, normalisePurchase, productView, selectionOf } from './product-state.js';
+import {
+  initialChoice,
+  linePurchase,
+  normalisePurchase,
+  productView,
+  purchasePlanId,
+  selectionOf,
+} from './product-state.js';
 import { writeProduct } from './product-render.js';
 import { writeVariant } from './variant-render.js';
 import { bindProductEvents } from './product-events.js';
@@ -170,17 +177,17 @@ export class ProductScope {
   /** @param {string} kind */
   set purchase(kind) {
     const wanted = kind === 'subscription' ? 'subscription' : 'one-time';
-    this.purchaseChoice = normalisePurchase(this.product, this.variant, { kind: wanted, planId: this.planId });
+    this.purchaseChoice = normalisePurchase(this.product, this.variant, wanted, this.planId);
   }
 
   /** @returns {string | null} The plan bought on, or offered while buying once. */
   get planId() {
-    return this.purchaseChoice.planId;
+    return purchasePlanId(this.purchaseChoice);
   }
 
   /** @param {string | null} planId */
   set planId(planId) {
-    this.purchaseChoice = normalisePurchase(this.product, this.variant, { kind: this.purchase, planId });
+    this.purchaseChoice = normalisePurchase(this.product, this.variant, this.purchase, planId);
   }
 
   /** @returns {PlanInGroup | null} */
@@ -193,8 +200,9 @@ export class ProductScope {
     return this.plans.some((plan) => allocationFor(this.variant, plan.id));
   }
 
+  /** True when the line is bought on a plan: subscribing, and the variant is on the plan. */
   get isSubscription() {
-    return this.purchase === 'subscription' && allocationFor(this.variant, this.planId) !== null;
+    return linePurchase(this.purchaseChoice, this.variant).kind === 'subscription';
   }
 
   /** @returns {CartLineInput | null} What would be added to the cart right now. */
@@ -202,7 +210,8 @@ export class ProductScope {
     if (!this.variant) return null;
     /** @type {CartLineInput} */
     const line = { merchandiseId: this.variant.id, quantity: this.quantity };
-    if (this.isSubscription && this.planId) line.sellingPlanId = this.planId;
+    const bought = linePurchase(this.purchaseChoice, this.variant);
+    if (bought.kind === 'subscription') line.sellingPlanId = bought.planId;
     const attributes = this.collectAttributes();
     if (attributes.length) line.attributes = attributes;
     return line;
@@ -210,9 +219,7 @@ export class ProductScope {
 
   /** @returns {{ key: string, value: string }[]} `tether-line-attributes` and the filled `tether-line-attribute` fields. */
   collectAttributes() {
-    // The site's own JSON: toAttributes writes every value with String(), whatever its type.
-    const json = /** @type {Parameters<typeof toAttributes>[0]} */ (parseJSONAttr(this.root, 'line-attributes'));
-    const fixed = toAttributes(json);
+    const fixed = attributesFromJson(parseJSONAttr(this.root, 'line-attributes'));
     const fields = this.$(sel('line-attribute')).flatMap((el) => {
       const value = lineAttributeValue(el);
       return value === null ? [] : [{ key: get(el, 'line-attribute') ?? '', value }];
@@ -265,7 +272,7 @@ export class ProductScope {
   /** @param {string | null} mode `subscription`, else buying once. */
   setPurchase(mode) {
     const kind = mode === 'subscription' ? 'subscription' : 'one-time';
-    const next = normalisePurchase(this.product, this.variant, { kind, planId: this.planId });
+    const next = normalisePurchase(this.product, this.variant, kind, this.planId);
     // The product decides when the wanted kind isn't possible (no plans, or a plan required).
     if (next.kind === this.purchase) return;
     this.purchaseChoice = next;
@@ -336,7 +343,7 @@ export class ProductScope {
         variant: view.variant,
         selected: { ...view.selected },
         purchase: view.purchase.kind,
-        sellingPlanId: view.isSubscription ? view.purchase.planId : null,
+        sellingPlanId: view.line.kind === 'subscription' ? view.line.planId : null,
       },
       this.root,
     );

@@ -150,6 +150,14 @@ test('server: formatMoney, productUrl, plans helpers', () => {
   assert.equal(shop.plans.allPlans(product).length, 2);
 });
 
+test('server: productUrl encodes the handle and gives no URL without the handle or id the path needs', () => {
+  assert.equal(server.productUrl('a/b', { productPath: '/products/' }), '/products/a%2Fb');
+  assert.equal(server.productUrl('', { productPath: '/products' }), null);
+  assert.equal(server.productUrl(null, { productPath: '/products' }), null);
+  assert.equal(server.productUrl('x', { productPath: '/p/{id}' }), null);
+  assert.equal(server.productUrl('', { productPath: '/p/{id}', id: 'gid://shopify/Product/7' }), '/p/7');
+});
+
 test('server: hydrate() escapes </script> and carries the market', () => {
   const shop = server.createStorefront({ domain: 'shop.test', token: 't', country: 'NL' });
   const evil = { ...product, title: '</script><script>alert(1)</script>' };

@@ -76,7 +76,8 @@ export function createCatalog(conf, pageSize) {
    * @param {Record<string, unknown>} variables
    * @returns {Promise<T>}
    */
-  const send = (operation, variables) => request(conf, `${operation}\n${productFragment(conf)}`, variables);
+  const send = (operation, variables) =>
+    request(conf, (access) => `${operation}\n${productFragment(conf, access)}`, variables);
 
   /**
    * @param {string | number | null | undefined} raw A handle, numeric id, gid or product URL.

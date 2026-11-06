@@ -52,7 +52,8 @@ const HYDRATE_VERSION = 1;
 /**
  * @param {string} handle
  * @param {{ productPath?: string, id?: string }} [options]
- * @returns {string} `productPath` `/products` → `/products/<handle>`; templates with `{handle}` and `{id}` work too.
+ * @returns {string | null} `productPath` `/products` → `/products/<handle>`; templates with `{handle}` and `{id}` work
+ *   too. `null` when the path needs a handle or an id that is empty.
  */
 export function productUrl(handle, { productPath = DEFAULTS.productPath, id } = {}) {
   return productUrlFor(productPath, handle, id);
@@ -86,8 +87,8 @@ function storefrontConfig(options) {
   const token = typeof options.token === 'string' && options.token ? options.token : '';
   /** @type {ServerConfig} */
   const conf = resolveConfig({
-    // Only config keys: `resolveConfig` checks each value.
-    .../** @type {TetherOptions} */ (known),
+    // Only config keys, each parsed by `resolveConfig`.
+    ...known,
     domain: domain || fromEnv(options, STORE_ENV_NAMES.domain),
     token: token || fromEnv(options, STORE_ENV_NAMES.token),
   });

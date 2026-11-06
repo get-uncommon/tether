@@ -2,8 +2,11 @@
  * Shopify selling plans (subscriptions): which plans a product and a variant have, and what each costs. Pure, no DOM,
  * shared by the browser script and the server helpers.
  */
+import { fromMinorUnits, toMinorUnits } from './amounts.js';
 /** @import { Money } from './shopify-values.js' */
 /** @import { SellingPlan, SellingPlanGroup, SellingPlanAllocation } from './fragments.js' */
+
+const PERCENT = 100;
 
 /** @typedef {SellingPlan & { group: SellingPlanGroup }} PlanInGroup A plan with the group it belongs to. */
 /** @typedef {{ sellingPlanGroups?: { nodes: SellingPlanGroup[] } | null }} ProductWithPlans */
@@ -100,14 +103,17 @@ export function planCheckoutCharge(variant, planId) {
  *   0% when it saves nothing.
  */
 export function planSavings(variant, planId) {
-  const oneTime = parseFloat(variant?.price.amount ?? '');
-  const onPlan = parseFloat(planPrice(variant, planId)?.amount ?? '');
-  if (!variant || !Number.isFinite(oneTime) || !Number.isFinite(onPlan) || oneTime <= 0 || onPlan >= oneTime) {
+  const onPlanPrice = planPrice(variant, planId);
+  if (!variant || !onPlanPrice) return { amount: null, percentage: 0 };
+  const oneTime = parseFloat(variant.price.amount);
+  const onPlan = parseFloat(onPlanPrice.amount);
+  if (!Number.isFinite(oneTime) || !Number.isFinite(onPlan) || oneTime <= 0 || onPlan >= oneTime) {
     return { amount: null, percentage: 0 };
   }
+  const saved = toMinorUnits(variant.price) - toMinorUnits(onPlanPrice);
   return {
-    amount: { amount: (oneTime - onPlan).toFixed(2), currencyCode: variant.price.currencyCode },
-    percentage: Math.round((1 - onPlan / oneTime) * 100),
+    amount: fromMinorUnits(saved, variant.price.currencyCode),
+    percentage: Math.round((1 - onPlan / oneTime) * PERCENT),
   };
 }
 

@@ -4,9 +4,10 @@
  * `tether-variant-url`).
  */
 import { cfg, warn, reportError } from './config.js';
-import { sel, get, has, qsa, emit, parseJSONAttr, toAttributes } from './dom.js';
+import { sel, get, has, qsa, emit, parseJSONAttr, attributesFromJson } from './dom.js';
 import { scopes } from './product.js';
 import { Cart } from './cart.js';
+import { isRecord } from '../server/src/shared/json.js';
 /** @import { ShopifyCart } from './cart/store.js' */
 
 /** @typedef {{ country: string, language: string | null, locale: string | undefined }} StoredMarket */
@@ -20,9 +21,7 @@ import { Cart } from './cart.js';
  * @param {string | null} name The group's `tether-group` value.
  */
 function groupAttributes(group, name) {
-  const extra = toAttributes(
-    /** @type {Parameters<typeof toAttributes>[0]} */ (parseJSONAttr(group, 'line-attributes')),
-  );
+  const extra = attributesFromJson(parseJSONAttr(group, 'line-attributes'));
   return name ? [{ key: '_group', value: name }, ...extra] : extra;
 }
 
@@ -72,8 +71,8 @@ function parseStoredMarket(text) {
   } catch {
     return null;
   }
-  if (typeof value !== 'object' || value === null) return null;
-  const { country, language, locale } = /** @type {Record<string, unknown>} */ (value);
+  if (!isRecord(value)) return null;
+  const { country, language, locale } = value;
   if (typeof country !== 'string' || !country) return null;
   return {
     country,

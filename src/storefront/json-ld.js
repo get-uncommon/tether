@@ -119,8 +119,9 @@ function variantProduct(product, variant, pageUrl, images) {
  */
 function pageUrlOf(product, { url }, site) {
   if (url) return url;
-  if (!site.siteUrl) return undefined;
-  return new URL(productUrl(site.productPath, product.handle, product.id), site.siteUrl).toString();
+  const path = productUrl(site.productPath, product.handle, product.id);
+  if (!site.siteUrl || !path) return undefined;
+  return new URL(path, site.siteUrl).toString();
 }
 
 /**

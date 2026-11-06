@@ -1,6 +1,7 @@
 /**
  * Shopify API versions are quarterly (YYYY-01, -04, -07, -10) and supported for 12 months. Tether pins a dated version
- * and never targets `unstable` (it changes without notice). Used by the diagnose part and the release scripts.
+ * and never targets `unstable` (it changes without notice). Used by the config, the diagnose part and the release
+ * scripts.
  */
 
 const QUARTERLY_VERSION = /^(\d{4})-(01|04|07|10)$/;
@@ -29,6 +30,12 @@ function parseVersion(version) {
   if (!match) return null;
   return { year: Number(match[1]), month: Number(match[2]) };
 }
+
+/**
+ * @param {unknown} version
+ * @returns {version is string} True for a dated version such as `2026-07`.
+ */
+export const isQuarterlyVersion = (version) => parseVersion(version) !== null;
 
 /**
  * @param {number} year

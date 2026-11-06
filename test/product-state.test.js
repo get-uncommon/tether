@@ -199,16 +199,16 @@ test('initialState() keeps its shape: plain data plus isUnavailable()', () => {
 
 test('purchase: a product without plans is bought once, whatever is wanted', () => {
   const [tee] = apparel.variants.nodes;
-  assert.deepEqual(state.normalisePurchase(apparel, tee, { kind: 'subscription', planId: PLAN_MONTH }), {
+  assert.deepEqual(state.normalisePurchase(apparel, tee, 'subscription', PLAN_MONTH), {
     kind: 'one-time',
-    planId: null,
+    offeredPlanId: null,
   });
 });
 
 test('purchase: a product that requires a plan is always a subscription', () => {
   const required = { ...product, requiresSellingPlan: true };
   const [small] = product.variants.nodes;
-  assert.deepEqual(state.normalisePurchase(required, small, { kind: 'one-time', planId: PLAN_2MONTH }), {
+  assert.deepEqual(state.normalisePurchase(required, small, 'one-time', PLAN_2MONTH), {
     kind: 'subscription',
     planId: PLAN_2MONTH,
   });
@@ -216,22 +216,38 @@ test('purchase: a product that requires a plan is always a subscription', () => 
 
 test('purchase: the plan moves to one the variant is on, and an unknown plan to the first', () => {
   const [small, large] = product.variants.nodes;
-  assert.deepEqual(state.normalisePurchase(product, large, { kind: 'subscription', planId: PLAN_MONTH }), {
+  assert.deepEqual(state.normalisePurchase(product, large, 'subscription', PLAN_MONTH), {
     kind: 'subscription',
     planId: PLAN_2MONTH,
   });
-  assert.deepEqual(
-    state.normalisePurchase(product, small, { kind: 'one-time', planId: 'gid://shopify/SellingPlan/9' }),
-    {
-      kind: 'one-time',
-      planId: PLAN_MONTH,
-    },
-  );
+  assert.deepEqual(state.normalisePurchase(product, small, 'one-time', 'gid://shopify/SellingPlan/9'), {
+    kind: 'one-time',
+    offeredPlanId: PLAN_MONTH,
+  });
   // On no plan at all: the plan stays, for the subscription binds to offer.
   const onNoPlan = { ...small, sellingPlanAllocations: { nodes: [] } };
-  assert.deepEqual(state.normalisePurchase(product, onNoPlan, { kind: 'subscription', planId: PLAN_2MONTH }), {
+  assert.deepEqual(state.normalisePurchase(product, onNoPlan, 'subscription', PLAN_2MONTH), {
     kind: 'subscription',
     planId: PLAN_2MONTH,
+  });
+});
+
+test('purchase: subscribing on a variant that is not on the plan buys the line once', () => {
+  const [small] = product.variants.nodes;
+  const onNoPlan = { ...small, sellingPlanAllocations: { nodes: [] } };
+  const withoutPlan = { ...product, variants: { nodes: [onNoPlan] } };
+  const view = state.productView(
+    withoutPlan,
+    { selected: state.selectionOf(onNoPlan), purchase: { kind: 'subscription', planId: PLAN_MONTH }, quantity: 1 },
+    5,
+  );
+  assert.equal(view.purchase.kind, 'subscription', 'the choice is kept for a variant on the plan');
+  assert.deepEqual(view.line, { kind: 'one-time' });
+  assert.equal(view.show['subscription-selected'], false);
+  assert.equal(view.show['one-time-selected'], true);
+  assert.deepEqual(state.linePurchase({ kind: 'subscription', planId: PLAN_MONTH }, small), {
+    kind: 'subscription',
+    planId: PLAN_MONTH,
   });
 });
 
@@ -259,7 +275,7 @@ test('purchase: the scope switches only to what the product allows, and keeps le
   assert.equal(coffee.planId, PLAN_2MONTH, 'an unknown plan becomes one the variant is on');
 });
 
-test('money: amounts are computed in hundredths, without float remainders', () => {
+test("money: amounts are computed in the currency's smallest unit, without float remainders", () => {
   const format = { money: (money) => money?.amount ?? '', percent: String };
   const cheap = {
     ...apparel,
@@ -282,4 +298,24 @@ test('money: amounts are computed in hundredths, without float remainders', () =
     5,
   );
   assert.equal(state.variantBindTexts(blueView, format).get('total-price')(), '59.97');
+});
+
+test('money: zero- and three-decimal currencies keep their own precision', () => {
+  const format = { money: (money) => money?.amount ?? '', percent: String };
+  const priced = (amount, compareAt, currencyCode) => {
+    const variant = {
+      ...apparel.variants.nodes[1],
+      price: { amount, currencyCode },
+      compareAtPrice: { amount: compareAt, currencyCode },
+    };
+    const item = { ...apparel, variants: { nodes: [variant] } };
+    const view = state.productView(item, { ...state.initialChoice(item, {}), quantity: 3 }, 5);
+    return state.variantBindTexts(view, format);
+  };
+  const yen = priced('1500', '2000', 'JPY');
+  assert.equal(yen.get('total-price')(), '4500');
+  assert.equal(yen.get('discount-amount')(), '500');
+  const dinar = priced('1.234', '2.001', 'KWD');
+  assert.equal(dinar.get('total-price')(), '3.702');
+  assert.equal(dinar.get('discount-amount')(), '0.767');
 });

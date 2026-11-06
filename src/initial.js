@@ -55,20 +55,20 @@ export function initialState(product, options = {}) {
   const choice = initialChoice(product, { variant, sellingPlan, defaultPurchase });
   const view = productView(product, { ...choice, quantity: 1 }, lowStock);
   if (!view) return null;
-  const { selected, isSubscription } = view;
+  const { selected, line } = view;
   const isUnavailable = (/** @type {string} */ name, /** @type {string} */ value) =>
     !isValueAvailable(product, selected, name, value);
   return {
     variant: view.variant,
     selected,
     purchase: view.purchase.kind,
-    plan: isSubscription ? view.plan : null,
+    plan: line.kind === 'subscription' ? view.plan : null,
     plans: allPlans(product).map((plan) => ({
       id: plan.id,
       name: plan.name,
       price: planPrice(view.variant, plan.id),
       savings: planSavings(view.variant, plan.id).percentage,
-      selected: isSubscription && plan.id === view.purchase.planId,
+      selected: line.kind === 'subscription' && plan.id === line.planId,
       available: Boolean(allocationFor(view.variant, plan.id)),
     })),
     savings: view.savings.percentage,

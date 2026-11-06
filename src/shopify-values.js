@@ -16,12 +16,14 @@ export const STORE_ENV_NAMES = {
  * tracking) are only used when this holds.
  *
  * @param {unknown} url
+ * @returns {url is string}
  */
 export function isHttpsUrl(url) {
   if (typeof url !== 'string') return false;
   try {
     return new URL(url).protocol === 'https:';
   } catch {
+    // Not an absolute URL, so not an https one.
     return false;
   }
 }
@@ -65,10 +67,16 @@ export function formatMoney(money, locale) {
  * @param {string} productPath
  * @param {string | null | undefined} handle
  * @param {string | null | undefined} [id] A product gid or numeric id.
+ * @returns {string | null} `null` when the path needs a handle or an id the product lacks: no link beats a wrong one.
  */
 export function productUrl(productPath, handle, id) {
-  if (!/\{(handle|id)\}/.test(productPath)) return `${productPath.replace(/\/$/, '')}/${handle ?? String(handle)}`;
-  const numericId = id ? (id.split('/').pop() ?? '') : '';
+  if (!/\{(handle|id)\}/.test(productPath)) {
+    return handle ? `${productPath.replace(/\/$/, '')}/${encodeURIComponent(handle)}` : null;
+  }
+  // `split` always returns at least one part.
+  const numericId = id ? /** @type {string} */ (id.split('/').pop()) : '';
+  if (productPath.includes('{handle}') && !handle) return null;
+  if (productPath.includes('{id}') && !numericId) return null;
   return productPath
     .replace(/\{handle\}/g, encodeURIComponent(handle ?? ''))
     .replace(/\{id\}/g, encodeURIComponent(numericId));

@@ -10,7 +10,7 @@ import { GID } from '../selling-plans.js';
 import { toAttributes } from '../dom.js';
 import { customer, savedCartId, forgetSavedCart, setWarnings } from './store.js';
 /** @import { CartWarning } from '../config.js' */
-/** @import { UserError } from '../client.js' */
+/** @import { QueryText, UserError } from '../client.js' */
 /** @import { AttributeValue } from '../dom.js' */
 /** @import { ShopifyCart, Attribute } from './store.js' */
 
@@ -81,12 +81,13 @@ export function toLineInput(input, quantity = 1, options = {}) {
  * @param {string} name The mutation, which is also its payload's field.
  * @param {string} args The operation's variable definitions.
  * @param {string} inner The mutation field's arguments.
+ * @returns {QueryText}
  */
 function mutationText(name, args, inner) {
-  return `mutation Tether_${name}(${args}) {
+  return (access) => `mutation Tether_${name}(${args}) {
   ${name}(${inner}) { cart { ...TetherCart } userErrors { field message } warnings { code message target } }
 }
-${cartFragment()}`;
+${cartFragment(access)}`;
 }
 
 /**
@@ -113,7 +114,7 @@ async function send(name, args, inner, variables) {
  */
 function createCart(input) {
   const buyerIdentity = {
-    ...(cfg.country ? { countryCode: cfg.country.toUpperCase() } : {}),
+    ...(cfg.country ? { countryCode: cfg.country } : {}),
     ...(customer.accessToken ? { customerAccessToken: customer.accessToken } : {}),
   };
   const withIdentity = Object.keys(buyerIdentity).length ? { buyerIdentity, ...input } : input;
@@ -158,7 +159,10 @@ export async function mutateCart({ name, args, inner, variables, createInput }) 
  */
 export async function fetchCart(id) {
   /** @type {{ cart: ShopifyCart | null }} */
-  const data = await gql(`query TetherCart($id: ID!) { cart(id: $id) { ...TetherCart } }\n${cartFragment()}`, { id });
+  const data = await gql(
+    (access) => `query TetherCart($id: ID!) { cart(id: $id) { ...TetherCart } }\n${cartFragment(access)}`,
+    { id },
+  );
   return data.cart;
 }
 

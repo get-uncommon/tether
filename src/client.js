@@ -5,7 +5,9 @@
  */
 import { cfg, log } from './config.js';
 import { toCountry, toLanguage } from './market-codes.js';
+import { field, isRecord } from '../server/src/shared/json.js';
 /** @import { TetherConfig } from './config.js' */
+/** @import { CountryCode, LanguageCode } from './market-codes.js' */
 
 /**
  * @typedef {'NOT_FOUND' | 'NETWORK' | 'NOT_CONFIGURED' | 'NOT_LOGGED_IN' | 'NOT_ALLOWED' | 'INVALID'
@@ -49,6 +51,13 @@ export class TetherError extends Error {
  *   & { fetch?: typeof fetch }} StorefrontConfig
  */
 /** @typedef {{ context?: boolean }} RequestOptions `context: false` sends the query without `@inContext`. */
+/** @typedef {{ inventory: boolean }} StoreAccess What the store's token may read beyond the defaults. */
+/**
+ * A query's text, or a function that writes it for what the token may read: Tether's own queries, built from
+ * `fragments.js`, leave out inventory for a token that can't read it.
+ *
+ * @typedef {string | ((access: StoreAccess) => string)} QueryText
+ */
 
 /**
  * @param {Pick<TetherConfig, 'domain' | 'apiVersion'>} [conf]
@@ -60,17 +69,14 @@ export function endpoint(conf = cfg) {
 
 /**
  * Adds @inContext(country, language) to the first operation in the document, so prices, currency and translations
- * follow the configured market. Operations are always written first, fragments after, so the first match is the
- * operation. A country or language that isn't a valid code is left out.
+ * follow the market. Operations are always written first, fragments after, so the first match is the operation.
  *
  * @param {string} query
- * @param {{ country?: string | undefined, language?: string | undefined }} [ctx]
+ * @param {{ country: CountryCode | undefined, language: LanguageCode | undefined }} market
  * @returns {string}
  */
-export function withContext(query, ctx = cfg) {
+function inContext(query, { country, language }) {
   const args = [];
-  const country = toCountry(ctx.country);
-  const language = toLanguage(ctx.language);
   if (country) args.push(`country: ${country}`);
   if (language) args.push(`language: ${language}`);
   if (!args.length || query.includes('@inContext')) return query;
@@ -81,17 +87,33 @@ export function withContext(query, ctx = cfg) {
   return query.replace(/^(\s*(?:query|mutation)(?:\s+\w+)?\s*(?:\([^)]*\))?)/, `$1 ${tag}`);
 }
 
+/**
+ * `inContext` for any country and language, as the public `Tether.withContext` takes them: one that isn't a valid
+ * code is left out, so page input never becomes query text.
+ *
+ * @param {string} query
+ * @param {{ country?: string | undefined, language?: string | undefined }} [ctx]
+ * @returns {string}
+ */
+export function withContext(query, ctx = cfg) {
+  const country = toCountry(ctx.country) ?? undefined;
+  const language = toLanguage(ctx.language) ?? undefined;
+  return inContext(query, { country, language });
+}
+
 /** Backoff after a network error or a 429/5xx: this times 2^attempt. */
 const RETRY_BACKOFF_MS = 300;
 /** Backoff after Shopify's `THROTTLED` error, which asks for a longer wait: this times 2^attempt. */
 const THROTTLE_BACKOFF_MS = 500;
 /** Shopify's status for a request its bot protection rejected; retrying doesn't help. */
 const SECURITY_REJECTION = 430;
+const MS_PER_SECOND = 1000;
 
 /**
  * `quantityAvailable` needs the token's `unauthenticated_read_product_inventory` scope; without it Shopify refuses the
- * whole query with an error naming the field. That refusal is learned once per page and store: every later query to
- * the store goes out without the field, so stock levels are unknown and everything else works for one extra request.
+ * whole query with an error naming the field. That refusal is learned once per page and store: Tether's later queries
+ * to the store are written without the field (`StoreAccess`), so stock levels are unknown and everything else works,
+ * for one extra request.
  */
 const INVENTORY_FIELD = 'quantityAvailable';
 
@@ -100,6 +122,20 @@ const storesWithoutInventory = new Set();
 
 /** @param {StorefrontConfig} conf */
 const storeOf = (conf) => `${conf.domain} ${conf.apiVersion} ${conf.token}`;
+
+/**
+ * @param {StorefrontConfig} conf
+ * @param {QueryText} query
+ * @param {StoreAccess} access
+ * @param {boolean} context
+ * @returns {string} The text sent: with the market, and the cache's time bucket for a query.
+ */
+function queryText(conf, query, access, context) {
+  const written = typeof query === 'string' ? query : query(access);
+  const text = context ? inContext(written, conf) : written;
+  if (conf.maxAge <= 0 || /^\s*mutation\b/.test(text)) return text;
+  return `${text} #${Math.floor(Date.now() / (conf.maxAge * MS_PER_SECOND))}`;
+}
 
 /** @param {number} ms */
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -122,6 +158,29 @@ function statusText(status, conf) {
 }
 
 /**
+ * @param {unknown} value One entry of a response's `errors`.
+ * @returns {GraphQLError} The error, with an empty message when it has none.
+ */
+function toGraphQLError(value) {
+  const message = field(value, 'message');
+  const code = field(field(value, 'extensions'), 'code');
+  const text = typeof message === 'string' ? message : '';
+  return typeof code === 'string' ? { message: text, extensions: { code } } : { message: text };
+}
+
+/**
+ * @param {unknown} json A response body.
+ * @returns {GraphQLResponse | null} The body in the shape the GraphQL spec sets, `null` when it has another one.
+ */
+function toGraphQLResponse(json) {
+  if (!isRecord(json)) return null;
+  const { data, errors } = json;
+  if (errors === undefined || errors === null) return { data };
+  if (!Array.isArray(errors)) return null;
+  return { data, errors: errors.map(toGraphQLError) };
+}
+
+/**
  * @param {Response} res
  * @param {GraphQLError[]} errors
  * @param {StorefrontConfig} conf
@@ -139,7 +198,7 @@ function graphQLFailure(res, errors, conf) {
 /**
  * @typedef {{ kind: 'data', data: unknown }
  *   | { kind: 'retry', backoffMs: number }
- *   | { kind: 'inventory-refused' }} Attempt
+ *   | { kind: 'inventory-refused', error: TetherError }} Attempt
  */
 
 /**
@@ -180,11 +239,15 @@ async function attempt(conf, query, variables, canRetry) {
     const text = res.ok ? `Invalid response (${res.status})` : statusText(res.status, conf);
     throw new TetherError(text, { status: res.status });
   }
-  // The Storefront API answers in the shape the GraphQL spec sets, or with an error page that isn't JSON.
-  const { data, errors = [] } = /** @type {GraphQLResponse | null} */ (json) ?? {};
+  const body = toGraphQLResponse(json);
+  if (!body) {
+    const text = res.ok ? `Invalid response (${res.status})` : statusText(res.status, conf);
+    throw new TetherError(text, { status: res.status });
+  }
+  const { data, errors = [] } = body;
   if (errors.length) {
     if (query.includes(INVENTORY_FIELD) && errors.some((error) => error.message.includes(INVENTORY_FIELD))) {
-      return { kind: 'inventory-refused' };
+      return { kind: 'inventory-refused', error: graphQLFailure(res, errors, conf) };
     }
     if (canRetry && errors.some((error) => error.extensions?.code === 'THROTTLED')) {
       return { kind: 'retry', backoffMs: THROTTLE_BACKOFF_MS };
@@ -197,12 +260,13 @@ async function attempt(conf, query, variables, canRetry) {
 
 /**
  * One Storefront API request, for any config: the browser's shared one (`gql`) or one the server helpers build.
- * Queries carry a time bucket so Shopify's cache of an identical query text is at most `maxAge` seconds old, and
- * leave out inventory for a store whose token can't read it (`INVENTORY_FIELD`).
+ * Queries carry a time bucket so Shopify's cache of an identical query text is at most `maxAge` seconds old. A query
+ * written for the store's access leaves out inventory once the token turns out not to read it (`INVENTORY_FIELD`);
+ * a fixed query text is the caller's own, and that refusal is its error.
  *
  * @template T The shape of the query's `data`, which the caller's query text decides.
  * @param {StorefrontConfig} conf
- * @param {string} query
+ * @param {QueryText} query
  * @param {Record<string, unknown>} [variables]
  * @param {RequestOptions} [options]
  * @returns {Promise<T>}
@@ -213,20 +277,17 @@ export async function request(conf, query, variables = {}, { context = true } = 
   if (!conf.domain || !conf.token) {
     throw new TetherError('Tether is not configured: domain and token are required', { code: 'NOT_CONFIGURED' });
   }
-  let text = context ? withContext(query, conf) : query;
-  if (conf.maxAge > 0 && !/^\s*mutation\b/.test(text)) {
-    text += ` #${Math.floor(Date.now() / (conf.maxAge * 1000))}`;
-  }
   const store = storeOf(conf);
   let retries = 0;
   for (;;) {
-    const sent = storesWithoutInventory.has(store) ? text.replaceAll(INVENTORY_FIELD, '') : text;
+    const sent = queryText(conf, query, { inventory: !storesWithoutInventory.has(store) }, context);
     const outcome = await attempt(conf, sent, variables, retries < conf.retries);
     switch (outcome.kind) {
       case 'data':
         // The query text decides the shape of `data`; the caller's `T` states it.
         return /** @type {T} */ (outcome.data);
       case 'inventory-refused':
+        if (typeof query === 'string') throw outcome.error;
         log(`the token can't read inventory: ${INVENTORY_FIELD} is left out from now on`);
         storesWithoutInventory.add(store);
         break;
@@ -243,7 +304,7 @@ export async function request(conf, query, variables = {}, { context = true } = 
  * `request` with the browser's shared config.
  *
  * @template T
- * @param {string} query
+ * @param {QueryText} query
  * @param {Record<string, unknown>} [variables]
  * @param {RequestOptions} [options]
  * @returns {Promise<T>}

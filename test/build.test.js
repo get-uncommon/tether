@@ -88,6 +88,14 @@ test('the markets part loads from its own file when the page has a country selec
   assert.ok(win.Tether.__parts.markets, 'registered');
 });
 
+test('a part beside the core loads with the integrity hash of the file built with it', async () => {
+  const { createHash } = await import('node:crypto');
+  const script = [...win.document.scripts].find((x) => /tether\.markets\.min\.js$/.test(x.src));
+  const file = await readFile(join(DIST, 'tether.markets.min.js'));
+  assert.equal(script.integrity, `sha384-${createHash('sha384').update(file).digest('base64')}`);
+  assert.equal(script.crossOrigin, 'anonymous', 'the core is on another origin (file:) than the page');
+});
+
 test('the diagnose part loads on first call and shares the core (same config, same cache)', async () => {
   assert.ok(![...win.document.scripts].some((x) => /diagnose/.test(x.src)), 'not loaded up front');
   const r = await win.Tether.diagnose({ silent: true });
@@ -100,12 +108,12 @@ test('the diagnose part loads on first call and shares the core (same config, sa
 test('parts are small and the core is under budget', async () => {
   const { gzipSync } = await import('node:zlib');
   const gz = async (f) => gzipSync(await readFile(join(DIST, f)), { level: 9 }).length;
-  // The README promises a core of about 25 KB gzipped. Each budget sits about half a KB above today's build, so growth
+  // The README promises a core of about 28 KB gzipped. Each budget sits about half a KB above today's build, so growth
   // is a decision; the build, not golfed source, keeps the files small.
-  assert.ok((await gz('tether.min.js')) < 25.5 * 1024, 'core gzip budget');
+  assert.ok((await gz('tether.min.js')) < 28.25 * 1024, 'core gzip budget');
   assert.ok((await gz('tether.search.min.js')) < 3 * 1024);
-  assert.ok((await gz('tether.account.min.js')) < 7 * 1024);
-  assert.ok((await gz('tether.account-pages.min.js')) < 7.5 * 1024);
+  assert.ok((await gz('tether.account.min.js')) < 7.5 * 1024, 'account part budget');
+  assert.ok((await gz('tether.account-pages.min.js')) < 9 * 1024, 'account pages part budget');
   assert.ok((await gz('tether.extras.min.js')) < 1.5 * 1024);
   assert.ok((await gz('tether.markets.min.js')) < 3 * 1024);
   assert.ok((await gz('tether.diagnose.min.js')) < 6 * 1024);

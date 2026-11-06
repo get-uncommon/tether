@@ -6,6 +6,7 @@
 import { cfg, reportError, warn } from './config.js';
 import { attr, emit, get } from './markup.js';
 import { storeHtmlFragment } from './store-html.js';
+import { isRecord } from '../server/src/shared/json.js';
 import { formatMoney as formatMoneyIn, productUrl as productUrlFor } from './shopify-values.js';
 /** @import { Money } from './shopify-values.js' */
 
@@ -29,6 +30,7 @@ const LAYOUT_DEBOUNCE_MS = 120;
  *
  * @param {string | null | undefined} handle
  * @param {string | null} [id]
+ * @returns {string | null} `null` without the handle or id the path needs.
  */
 export function productUrl(handle, id) {
   return productUrlFor(cfg.productPath || '/product', handle, id);
@@ -271,6 +273,35 @@ export function parseJSONAttr(el, name) {
 }
 
 /** @typedef {string | number | boolean | null | undefined} AttributeValue */
+
+/**
+ * @param {unknown} value
+ * @returns {string} A JSON value as attribute text: `''` for none, an object or array as its JSON.
+ */
+function attributeText(value) {
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  // What else parsed JSON holds: objects and arrays.
+  return JSON.stringify(value);
+}
+
+/**
+ * `tether-line-attributes`, JSON the site writes: `{ a: 1 }` or `[{ key, value }]`. An array entry that isn't an
+ * object is skipped.
+ *
+ * @param {unknown} json
+ * @returns {{ key: string, value: string }[]}
+ */
+export function attributesFromJson(json) {
+  if (Array.isArray(json)) {
+    return /** @type {unknown[]} */ (json)
+      .filter(isRecord)
+      .map((entry) => ({ key: attributeText(entry['key']), value: attributeText(entry['value']) }));
+  }
+  if (!isRecord(json)) return [];
+  return Object.entries(json).map(([key, value]) => ({ key, value: attributeText(value) }));
+}
 
 /**
  * `{ a: 1 }` or `[{ key, value }]` → `[{ key, value }]` as Shopify wants cart and line attributes.

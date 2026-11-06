@@ -8,6 +8,7 @@ import { gql, TetherError } from './client.js';
 import { productFragment, collectionFields } from './fragments.js';
 import { productKey } from './shopify-values.js';
 /** @import { Product, Image } from './fragments.js' */
+/** @import { QueryText } from './client.js' */
 
 /**
  * A product request that missed is remembered this long, so one page asking twice sends one request, and a product
@@ -77,8 +78,14 @@ export function getProduct(rawKey) {
 }
 
 /**
+ * @param {string} operation An operation that spreads `...TetherProduct`.
+ * @returns {QueryText} The operation with the product fragment (which starts on its own line), written for what the token may read.
+ */
+const withProductFragment = (operation) => (access) => `${operation}${productFragment(cfg, access)}`;
+
+/**
  * @param {string[]} keys Handles and gids.
- * @returns {{ query: string, variables: Record<string, unknown>, handles: string[] }} One query for all of them: gids
+ * @returns {{ query: QueryText, variables: Record<string, unknown>, handles: string[] }} One query for all of them: gids
  *   through `nodes(ids:)` as `byId`, each handle as its own alias `h<index>`.
  */
 function batchQuery(keys) {
@@ -98,7 +105,7 @@ function batchQuery(keys) {
     variables[`h${index}`] = handle;
     selections.push(`h${index}: product(handle: $h${index}) { ...TetherProduct }`);
   });
-  const query = `query TetherProducts(${definitions.join(',')}) { ${selections.join(' ')} } ${productFragment()}`;
+  const query = withProductFragment(`query TetherProducts(${definitions.join(',')}) { ${selections.join(' ')} }`);
   return { query, variables, handles };
 }
 
@@ -284,10 +291,9 @@ export async function getProducts({
   reverse = false,
   filters,
 } = {}) {
-  const fragment = productFragment();
   if (collection) {
     /** @type {{ collection: (Collection & { products: { nodes: Product[], pageInfo: PageInfo } }) | null }} */
-    const data = await gql(`${COLLECTION_QUERY}\n${fragment}`, {
+    const data = await gql(withProductFragment(COLLECTION_QUERY), {
       handle: collection,
       first,
       after,
@@ -302,7 +308,7 @@ export async function getProducts({
   }
 
   /** @type {{ products: { nodes: Product[], pageInfo: PageInfo } }} */
-  const data = await gql(`${SEARCH_QUERY}\n${fragment}`, {
+  const data = await gql(withProductFragment(SEARCH_QUERY), {
     first,
     after,
     query: query || undefined,
@@ -325,10 +331,11 @@ export async function getRecommendations(product, intent = 'RELATED') {
   const byId = key?.startsWith('gid://') ?? false;
   /** @type {{ productRecommendations: Product[] | null }} */
   const data = await gql(
-    `query TetherRecs(${byId ? '$id: ID!' : '$handle: String!'}, $intent: ProductRecommendationIntent) {
+    withProductFragment(
+      `query TetherRecs(${byId ? '$id: ID!' : '$handle: String!'}, $intent: ProductRecommendationIntent) {
   productRecommendations(${byId ? 'productId: $id' : 'productHandle: $handle'}, intent: $intent) { ...TetherProduct }
-}
-${productFragment()}`,
+}`,
+    ),
     byId ? { id: key, intent } : { handle: key, intent },
   );
   const list = data.productRecommendations ?? [];

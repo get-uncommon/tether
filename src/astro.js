@@ -66,7 +66,7 @@ function modeOf(command, argv = process.argv) {
  * @param {unknown} error
  * @returns {boolean} True for Node's "no such file" error.
  */
-const isMissingFile = (error) => error instanceof Error && Reflect.get(error, 'code') === 'ENOENT';
+const isMissingFile = (error) => error instanceof Error && 'code' in error && error.code === 'ENOENT';
 
 /**
  * @param {string} path
@@ -167,10 +167,17 @@ async function importIfInstalled(specifier) {
     const module = await import(specifier);
     return module;
   } catch (error) {
-    if (error instanceof Error && Reflect.get(error, 'code') === 'ERR_MODULE_NOT_FOUND') return null;
+    if (error instanceof Error && 'code' in error && error.code === 'ERR_MODULE_NOT_FOUND') return null;
     throw error;
   }
 }
+
+/**
+ * @param {unknown} envField `astro/config`'s `envField`, which Astro 4 doesn't have.
+ * @returns {envField is { string: EnvStringField }} True when it has the `string` field Astro 5 documents.
+ */
+const hasStringField = (envField) =>
+  typeof envField === 'object' && envField !== null && 'string' in envField && typeof envField.string === 'function';
 
 /**
  * Declares the store variables in `astro:env` (Astro 5+), so Astro checks them. Astro 4 has no `envField`.
@@ -180,14 +187,10 @@ async function importIfInstalled(specifier) {
  */
 async function declareEnvSchema(updateConfig, logger) {
   const astroConfig = await importIfInstalled(ASTRO_CONFIG_MODULE);
-  /** @type {unknown} */
   const envField =
-    typeof astroConfig === 'object' && astroConfig !== null ? Reflect.get(astroConfig, 'envField') : null;
-  if (typeof envField !== 'object' || envField === null || typeof Reflect.get(envField, 'string') !== 'function')
-    return;
-  // Checked above: Astro's `envField.string`.
-  const fields = /** @type {{ string: EnvStringField }} */ (envField);
-  const field = () => fields.string({ context: 'client', access: 'public', optional: true });
+    typeof astroConfig === 'object' && astroConfig !== null && 'envField' in astroConfig ? astroConfig.envField : null;
+  if (!hasStringField(envField)) return;
+  const field = () => envField.string({ context: 'client', access: 'public', optional: true });
   try {
     updateConfig({ env: { schema: { PUBLIC_SHOPIFY_DOMAIN: field(), PUBLIC_SHOPIFY_STOREFRONT_TOKEN: field() } } });
   } catch (error) {

@@ -20,7 +20,7 @@ function withContext(query, ctx = cfg) {
   if (ctx.country) args.push(`country: ${String(ctx.country).toUpperCase()}`);
 ```
 
-After: the market is parsed with `toCountry` / `toLanguage` where it is read, `cfg.country` is typed as a `CountryCode`, and `withContext` takes it as one.
+After: the market is parsed with `toCountry` / `toLanguage` where it arrives (`resolveConfig`, `setCountry`), `cfg.country` is typed as a `CountryCode`, and the client's `inContext` takes it as one, with no check of its own. Only the public `Tether.withContext`, which takes any string, parses its arguments.
 
 ## `!` when the type is wrong, not `?.`
 

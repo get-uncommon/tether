@@ -50,11 +50,12 @@ const numericId = (gid) => gid.split('/').pop() ?? gid;
 
 /**
  * @param {ShopifyCartLine} line
- * @returns {string} The product page, with the line's variant and plan selected.
+ * @returns {string | null} The product page, with the line's variant and plan selected.
  */
 function lineUrl(line) {
   const variant = line.merchandise;
   const base = productUrl(variant.product.handle, variant.product.id);
+  if (!base) return null;
   const query = new URLSearchParams();
   query.set('variant', numericId(variant.id));
   const planId = line.sellingPlanAllocation?.sellingPlan.id;
@@ -182,7 +183,8 @@ function renderLine(node, line, view) {
       return;
     }
     if (key === 'url') {
-      el.setAttribute('href', lineUrl(line));
+      const url = lineUrl(line);
+      if (url) el.setAttribute('href', url);
       return;
     }
     const value = lineValue(line, key, view);

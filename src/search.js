@@ -85,12 +85,12 @@ function bindValues(node, values) {
 
 /**
  * @param {Element} node
- * @param {string} href
+ * @param {string | null} href `null` for a product without a page: the option shows, without a link.
  */
 function linkOption(node, href) {
   const link = linkIn(node);
   if (!link) return;
-  link.setAttribute('href', href);
+  if (href) link.setAttribute('href', href);
   link.setAttribute('role', 'option');
 }
 

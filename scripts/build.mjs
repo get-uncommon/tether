@@ -2,7 +2,8 @@
  * Builds dist/, or the folder after `--out`, which the tests use so the committed dist/ only changes in a release:
  *
  *   tether.min.js (+ .map), tether.js     the <script> build (IIFE)
- *   tether.<part>(.min).js                the optional parts, loaded on first use (`PARTS`)
+ *   tether.<part>(.min).js                the optional parts, loaded on first use (`PARTS`); built first, so the
+ *                                         core carries their integrity hashes (src/part-integrity.js)
  *   esm/                                  ES modules for bundlers, the parts as split chunks
  *   tether.esm.js                         re-export of esm/index.js (older import path)
  *   presets/barba.esm.js
@@ -13,6 +14,7 @@
 import * as esbuild from 'esbuild';
 import { readFile, writeFile, mkdir, rm } from 'node:fs/promises';
 import { gzipSync, brotliCompressSync } from 'node:zlib';
+import { createHash } from 'node:crypto';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, join, basename } from 'node:path';
 
@@ -132,6 +134,38 @@ const graphqlPlugin = {
   },
 };
 
+/**
+ * The core's map of part file to Subresource Integrity hash (src/part-integrity.js), from the part files just built.
+ *
+ * @param {Record<string, string>} integrity
+ * @returns {esbuild.Plugin}
+ */
+function partIntegrityPlugin(integrity) {
+  return {
+    name: 'tether-part-integrity',
+    setup(build) {
+      build.onLoad({ filter: /[/\\]src[/\\]part-integrity\.js$/ }, () => ({
+        contents: `export const PART_INTEGRITY = ${JSON.stringify(integrity)};\n`,
+        loader: 'js',
+      }));
+    },
+  };
+}
+
+/**
+ * @param {boolean} minified Which files: a core loads the parts of its own kind (tether.min.js the .min ones).
+ * @returns {Promise<Record<string, string>>} The `sha384-…` hash of each built part file, by file name.
+ */
+async function partHashes(minified) {
+  /** @type {Record<string, string>} */
+  const integrity = {};
+  for (const file of PARTS.map((name) => `tether.${name}${minified ? '.min' : ''}.js`)) {
+    const bytes = await readFile(join(OUT, file));
+    integrity[file] = `sha384-${createHash('sha384').update(bytes).digest('base64')}`;
+  }
+  return integrity;
+}
+
 /** @type {esbuild.Plugin} The `<script>` build loads parts from files (src/lazy-iife.js) instead of `import()`. */
 const iifeLazyPlugin = {
   name: 'tether-iife-lazy',
@@ -195,20 +229,33 @@ const partBuild = (exportsByFile, name, minify) => ({
   plugins: [partPlugin(exportsByFile), graphqlPlugin],
 });
 
-/** @returns {Promise<esbuild.BuildOptions[]>} */
-async function builds() {
+/** @returns {Promise<esbuild.BuildOptions[]>} The optional parts, which the core's builds depend on. */
+async function partBuilds() {
   const exportsByFile = await coreExports();
+  return PARTS.flatMap((name) => [partBuild(exportsByFile, name, false), partBuild(exportsByFile, name, true)]);
+}
+
+/**
+ * @param {{ plain: Record<string, string>, minified: Record<string, string> }} integrity The parts' hashes for each
+ *   `<script>` build; `{}` leaves them unchecked.
+ * @returns {esbuild.BuildOptions[]}
+ */
+function coreBuilds(integrity) {
   /** @type {esbuild.BuildOptions} */
-  const iife = {
-    ...common,
-    entryPoints: [join(SRC, 'index.js')],
-    format: 'iife',
-    plugins: [iifeLazyPlugin, graphqlPlugin],
-  };
+  const iife = { ...common, entryPoints: [join(SRC, 'index.js')], format: 'iife' };
   return [
-    { ...iife, outfile: join(OUT, 'tether.js') },
-    { ...iife, outfile: join(OUT, 'tether.min.js'), minify: true, sourcemap: true },
-    ...PARTS.flatMap((name) => [partBuild(exportsByFile, name, false), partBuild(exportsByFile, name, true)]),
+    {
+      ...iife,
+      outfile: join(OUT, 'tether.js'),
+      plugins: [iifeLazyPlugin, partIntegrityPlugin(integrity.plain), graphqlPlugin],
+    },
+    {
+      ...iife,
+      outfile: join(OUT, 'tether.min.js'),
+      minify: true,
+      sourcemap: true,
+      plugins: [iifeLazyPlugin, partIntegrityPlugin(integrity.minified), graphqlPlugin],
+    },
     {
       ...common,
       entryPoints: [join(SRC, 'index.js'), join(SRC, 'server.js'), join(SRC, 'astro.js')],
@@ -253,10 +300,15 @@ await writeFile(
   join(OUT, 'tether.esm.js'),
   "export * from './esm/index.js';\nexport { default } from './esm/index.js';\n",
 );
-const all = await builds();
+const parts = await partBuilds();
 if (watch) {
-  for (const options of all) await (await esbuild.context(options)).watch();
+  // Parts rebuild on their own while watching, so the core can't carry their hashes: they load unchecked.
+  for (const options of [...parts, ...coreBuilds({ plain: {}, minified: {} })]) {
+    await (await esbuild.context(options)).watch();
+  }
 } else {
-  await Promise.all(all.map((options) => esbuild.build(options)));
+  await Promise.all(parts.map((options) => esbuild.build(options)));
+  const integrity = { plain: await partHashes(false), minified: await partHashes(true) };
+  await Promise.all(coreBuilds(integrity).map((options) => esbuild.build(options)));
   await report();
 }

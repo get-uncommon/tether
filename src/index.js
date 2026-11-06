@@ -195,7 +195,7 @@ function startAnalyticsQueue() {
  * @returns {Promise<ShopifyCart | null>}
  */
 async function cartInPageMarket(cart) {
-  const country = cfg.country?.toUpperCase();
+  const country = cfg.country;
   const cartCountry = cart?.buyerIdentity.countryCode;
   if (!cart || !country || !cartCountry || cartCountry === country) return cart;
   try {

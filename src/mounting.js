@@ -8,7 +8,10 @@ import { listSelector } from './collection.js';
 import { getProduct, takeStale, refreshProducts, hydrateProducts } from './loader.js';
 import { resolveProductKey, setScopeStatus, isNotFound } from './status.js';
 import { attr, get, qsa, emit } from './dom.js';
+import { toCountry, toLanguage } from './market-codes.js';
+import { field, isRecord } from '../server/src/shared/json.js';
 /** @import { Product } from './fragments.js' */
+/** @import { CountryCode, LanguageCode } from './market-codes.js' */
 
 /** @typedef {{ root: Element, load: (more?: boolean) => Promise<unknown> }} MountedList A mounted `ListScope`. */
 
@@ -221,23 +224,38 @@ export function settleMarket() {
 }
 
 /**
- * What `tether/server`'s `hydrate()` writes. The tag is the site's own markup, so its shape is trusted; a product
- * without an id or a handle is skipped.
+ * What `tether/server`'s `hydrate()` writes: the market it fetched in, and the products.
  *
- * @typedef {{ country?: string | null, language?: string | null, products?: (Product | null)[] }} HydratePayload
+ * @typedef {{ country: CountryCode | undefined, language: LanguageCode | undefined, products: Product[] }}
+ *   HydratePayload
  */
 
 /**
- * @param {Product | null} product
- * @returns {product is Product}
+ * The products are Tether's own fragment as the server fetched it, written into the site's own markup, so an entry
+ * with an id and a handle is taken as one; anything else is skipped.
+ *
+ * @param {unknown} entry
+ * @returns {entry is Product}
  */
-const isUsable = (product) => Boolean(product?.id && product.handle);
+const isUsable = (entry) => {
+  const id = field(entry, 'id');
+  const handle = field(entry, 'handle');
+  return typeof id === 'string' && typeof handle === 'string' && id !== '' && handle !== '';
+};
 
 /**
- * @param {string | null | undefined} a
- * @param {string | null | undefined} b
+ * @param {unknown} json A hydrate tag's JSON.
+ * @returns {HydratePayload}
  */
-const sameCode = (a, b) => (a ?? '').toUpperCase() === (b ?? '').toUpperCase();
+function toHydratePayload(json) {
+  if (!isRecord(json)) return { country: undefined, language: undefined, products: [] };
+  const { products } = json;
+  return {
+    country: toCountry(json['country']) ?? undefined,
+    language: toLanguage(json['language']) ?? undefined,
+    products: Array.isArray(products) ? /** @type {unknown[]} */ (products).filter(isUsable) : [],
+  };
+}
 
 /** @type {WeakSet<Element>} Hydrate tags already read. */
 const readScripts = new WeakSet();
@@ -261,11 +279,11 @@ export function hydrateFromPage(root = document) {
       warn('bad data-tether-hydrate', error);
       return;
     }
-    const { country, language, products } = /** @type {HydratePayload | null} */ (json) ?? {};
-    const usable = Array.isArray(products) ? products.filter(isUsable) : [];
-    rememberOptionNames(usable); // the build's option names, also for other languages
-    if (sameCode(country, cfg.country) && sameCode(language, cfg.language)) {
-      hydrateProducts(usable);
+    const { country, language, products } = toHydratePayload(json);
+    // The build's option names, also for other languages.
+    rememberOptionNames(products);
+    if (country === cfg.country && language === cfg.language) {
+      hydrateProducts(products);
       return;
     }
     log('hydration skipped: other market');

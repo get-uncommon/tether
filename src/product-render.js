@@ -149,10 +149,12 @@ function renderProductBind(el, key, product) {
       setImage(el, product.featuredImage?.url, product.featuredImage?.altText || product.title);
       break;
     case 'url':
-    case 'link':
-      el.setAttribute('href', productUrl(product.handle, product.id));
+    case 'link': {
+      const url = productUrl(product.handle, product.id);
+      if (url) el.setAttribute('href', url);
       if (key === 'url' && !el.firstElementChild && !el.textContent.trim()) setText(el, product.title);
       break;
+    }
     case 'images':
       renderGallery(el, product);
       break;

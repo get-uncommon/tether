@@ -5,6 +5,7 @@
  */
 import { cfg, log, reportError } from './config.js';
 import { gql } from './client.js';
+/** @import { AnalyticsConfig } from './config.js' */
 
 /** @typedef {Record<string, unknown>} EventPayload */
 /** @typedef {{ uniqueToken: string, visitToken: string }} TrackingValues */
@@ -64,14 +65,16 @@ const CONSENT_SCRIPTS = {
 };
 const ANALYTICS_SCRIPT = 'https://cdn.shopify.com/storefront/analytics/shopify.js';
 
-/** @returns {ShopifyGlobal | undefined} `window.Shopify`, whose shape Shopify's scripts define. */
-function shopifyGlobal() {
-  /** @type {unknown} */
-  const shopify = Reflect.get(window, 'Shopify');
-  return /** @type {ShopifyGlobal | undefined} */ (shopify);
-}
+/**
+ * @returns {Window & { Shopify?: ShopifyGlobal }} The page, where Shopify's scripts keep `window.Shopify` in the shape
+ *   they define.
+ */
+const page = () => window;
 
-/** @returns {{ consent?: string, proxy?: string }} The `analytics.shopify` options; `true` sets none. */
+/** @returns {ShopifyGlobal | undefined} */
+const shopifyGlobal = () => page().Shopify;
+
+/** @returns {Exclude<NonNullable<AnalyticsConfig['shopify']>, boolean>} The `analytics.shopify` options; `true` sets none. */
 function shopifyOptions() {
   const shopify = cfg.analytics?.shopify;
   return typeof shopify === 'object' ? shopify : {};
@@ -214,10 +217,10 @@ export async function startShopifyAnalytics(isProductPage) {
   /** @type {{ shop: { id: string } }} */
   const data = await gql('query TetherShopId { shop { id } }', {}, { context: false });
   const shopify = shopifyGlobal() ?? {};
-  Reflect.set(window, 'Shopify', shopify);
-  shopify.country = (cfg.country || 'US').toUpperCase();
-  // Shopify's script requires a language, not a full locale.
-  shopify.locale = (cfg.locale || 'en').split('-')[0]?.toLowerCase() ?? 'en';
+  page().Shopify = shopify;
+  shopify.country = cfg.country ?? 'US';
+  // Shopify's script requires a language, not a full locale. `split` always returns at least one part.
+  shopify.locale = /** @type {string} */ ((cfg.locale || 'en').split('-')[0]).toLowerCase();
   shopify.shop = cfg.domain;
   shopify.routes = {
     root: '/',

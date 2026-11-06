@@ -68,7 +68,7 @@ function renderOptionStates(scope, view) {
  * @param {ProductView} view
  */
 function renderPurchaseStates(scope, view) {
-  const { variant, purchase, isSubscription } = view;
+  const { variant, purchase, line } = view;
   scope.$(sel('purchase')).forEach((el) => {
     if (isSelect(el)) {
       el.value = purchase.kind;
@@ -81,7 +81,7 @@ function renderPurchaseStates(scope, view) {
   });
   scope.$(sel('plan-value')).forEach((node) => {
     const planId = get(node, 'plan-value') ?? '';
-    setSelected(node, isSubscription && planId === purchase.planId);
+    setSelected(node, line.kind === 'subscription' && planId === line.planId);
     node.classList.toggle('is-unavailable', !allocationFor(variant, planId));
     const plan = scope.plans.find((candidate) => candidate.id === planId);
     const texts = planBindTexts(variant, planId, plan, FORMAT);
@@ -91,7 +91,7 @@ function renderPurchaseStates(scope, view) {
     });
   });
   selectsIn(scope, sel('plan')).forEach((select) => {
-    select.value = isSubscription ? (purchase.planId ?? '') : '';
+    select.value = line.kind === 'subscription' ? line.planId : '';
   });
 }
 
@@ -131,7 +131,7 @@ function renderAddButtons(scope, view) {
     if (!soldOutText && !subscribeText) return;
     const { label, original } = addButtonLabel(button);
     let text = original;
-    if (view.isSubscription && subscribeText) text = subscribeText;
+    if (view.line.kind === 'subscription' && subscribeText) text = subscribeText;
     if (disabled && soldOutText) text = soldOutText;
     if (button.getAttribute('aria-busy') !== 'true') setText(label, text);
   });
@@ -159,7 +159,7 @@ export function writeVariant(scope, view) {
   renderOptionStates(scope, view);
   renderPurchaseStates(scope, view);
   renderConditions(scope, view);
-  scope.root.classList.toggle('is-subscription', view.isSubscription);
-  scope.root.setAttribute(attr('purchase-mode'), view.isSubscription ? 'subscription' : 'one-time');
+  scope.root.classList.toggle('is-subscription', view.line.kind === 'subscription');
+  scope.root.setAttribute(attr('purchase-mode'), view.line.kind);
   renderAddButtons(scope, view);
 }

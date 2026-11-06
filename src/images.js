@@ -59,11 +59,20 @@ export function cdnUrl(url, el) {
 }
 
 /**
+ * @param {string} url
+ * @returns {string} The URL without its query (the size parameters).
+ */
+const withoutQuery = (url) => url.replace(/\?.*$/, '');
+
+/**
  * @param {string | null | undefined} a
  * @param {string | null | undefined} b
  * @returns {boolean} True for the same image at any size parameters: the server-rendered one is kept.
  */
-export const sameImage = (a, b) => Boolean(a && b) && a?.split('?')[0] === b?.split('?')[0];
+export function sameImage(a, b) {
+  if (!a || !b) return false;
+  return withoutQuery(a) === withoutQuery(b);
+}
 
 /**
  * A CSS `url()` for an image URL from Shopify. Characters that would end the string are escaped, so the URL can't

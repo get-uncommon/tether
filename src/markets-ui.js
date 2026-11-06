@@ -12,7 +12,7 @@ import { within, pruneLive, liveLists, liveProducts, mountedProducts, mountProdu
 import { rememberMarket, getLocalization, clearLocalization } from './markets.js';
 import { toCountry, toLanguage } from './market-codes.js';
 /** @import { LocalizedCountry, Localization } from './markets.js' */
-/** @import { CountryCode } from './market-codes.js' */
+/** @import { CountryCode, LanguageCode } from './market-codes.js' */
 
 export { detectMarket, getLocalization } from './markets.js';
 
@@ -130,7 +130,8 @@ const localeEntryFor = (country) =>
 /**
  * @param {string | null | undefined} language The `setCountry()` option.
  * @param {{ language?: string } | undefined} entry The `markets.locales` entry for the country.
- * @returns {string | null | undefined} The option, else the entry's language (which may have none), else unchanged.
+ * @returns {LanguageCode | null | undefined} The option, else the entry's language (which may have none), else
+ *   unchanged.
  */
 function languageFor(language, entry) {
   if (language !== undefined) return toLanguage(language);
@@ -185,7 +186,7 @@ export async function setCountry(code, { language, locale, remember = true } = {
   const ownLocale = locale || entry?.locale;
   const nextLocale = ownLocale || cfg.locale;
   const nextLanguage = languageFor(language, entry);
-  const changed = country !== cfg.country?.toUpperCase() || nextLanguage !== cfg.language || nextLocale !== cfg.locale;
+  const changed = country !== cfg.country || nextLanguage !== cfg.language || nextLocale !== cfg.locale;
   cfg.country = country;
   cfg.language = nextLanguage || undefined;
   cfg.locale = nextLocale;

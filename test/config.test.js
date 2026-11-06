@@ -1,4 +1,4 @@
-// What configure() accepts: options that become query text or attribute names fall back to their default when invalid.
+// configure() parses every option where it arrives: an invalid value warns and falls back to its default.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DEFAULTS, cfg, configure, resolveConfig } from '../src/config.js';
@@ -84,4 +84,68 @@ test('configure replaces the shared config in place', () => {
   assert.equal(cfg, shared);
   assert.equal(shared.prefix, 'tether');
   assert.equal(shared.domain, '');
+});
+
+test('the domain must be a host name, and apiVersion a dated version', () => {
+  const { result, warned } = quietly(() => resolveConfig({ domain: 'a.com:1@b.com', apiVersion: '2026-07/../x' }));
+  assert.equal(result.domain, '');
+  assert.equal(result.apiVersion, DEFAULTS.apiVersion);
+  assert.equal(warned.length, 2);
+  assert.equal(resolveConfig({ apiVersion: '2025-10' }).apiVersion, '2025-10');
+  const unstable = quietly(() => resolveConfig({ apiVersion: 'unstable' }));
+  assert.equal(unstable.result.apiVersion, 'unstable');
+  assert.match(unstable.warned[0], /changes without notice/);
+});
+
+test('country and language become Shopify codes, or nothing', () => {
+  assert.equal(resolveConfig({ country: 'de', language: 'pt-BR' }).country, 'DE');
+  assert.equal(resolveConfig({ country: 'de', language: 'pt-BR' }).language, 'PT_BR');
+  const { result, warned } = quietly(() => resolveConfig({ country: 'NL) { x }', language: 'Deutsch!' }));
+  assert.equal(result.country, undefined);
+  assert.equal(result.language, undefined);
+  assert.equal(warned.length, 2);
+});
+
+test('account URLs must be on the site or https; the rest of the account options keep their types', () => {
+  const navigate = () => {};
+  const { result, warned } = quietly(() =>
+    resolveConfig({
+      account: {
+        server: 'http://evil.test/_tether',
+        tokenUrl: 'javascript:alert(1)',
+        orderUrl: '/account/order?id={id}',
+        subscriptionsUrl: 'https://shopify.com/1/account/pages/subs',
+        callbackUrl: 'ftp://evil.test/back',
+        logoutUrl: 'http://localhost:4321/',
+        clientId: 42,
+        shopDomain: 'shop.myshopify.com',
+        remember: 'yes',
+        navigate,
+      },
+    }),
+  );
+  assert.deepEqual(result.account, {
+    orderUrl: '/account/order?id={id}',
+    subscriptionsUrl: 'https://shopify.com/1/account/pages/subs',
+    logoutUrl: 'http://localhost:4321/',
+    shopDomain: 'shop.myshopify.com',
+    navigate,
+  });
+  assert.equal(warned.length, 5, warned.join('\n'));
+  assert.equal(quietly(() => resolveConfig({ account: 'yes' })).result.account, null);
+});
+
+test('markets and analytics keep the values of the right kind', () => {
+  const onEvent = () => {};
+  const { result, warned } = quietly(() =>
+    resolveConfig({
+      markets: { detect: ['saved', 'geo'], locales: { nl: { country: 'NL', locale: 7 } }, cookie: 'a b', strict: true },
+      analytics: { dataLayer: 'window.x=1', shopify: { consent: 'default-banner', proxy: '/api' }, onEvent },
+    }),
+  );
+  assert.deepEqual(result.markets, { detect: ['saved'], locales: { nl: { country: 'NL' } }, strict: true });
+  assert.deepEqual(result.analytics, { shopify: { consent: 'default-banner', proxy: true }, onEvent });
+  assert.equal(warned.length, 2, warned.join('\n'));
+  assert.equal(resolveConfig({}).markets, null);
+  assert.equal(resolveConfig({ analytics: { dataLayer: true } }).analytics?.dataLayer, true);
 });

@@ -3,9 +3,11 @@
  * from the config; the browser passes its validated `cfg`, the server helpers their own. Operations put these after
  * the operation, where `withContext` expects them.
  */
-import { cfg, toMetafieldIdentifier } from './config.js';
+import { cfg } from './config.js';
+import { toMetafieldIdentifier } from './config-sections.js';
 /** @import { TetherConfig, MetafieldIdentifier } from './config.js' */
 /** @import { Money } from './shopify-values.js' */
+/** @import { StoreAccess } from './client.js' */
 
 /** @typedef {{ url: string, altText: string | null, width: number | null, height: number | null }} Image */
 /**
@@ -92,6 +94,14 @@ import { cfg, toMetafieldIdentifier } from './config.js';
  */
 
 const MONEY = 'amount currencyCode';
+/** What a token reads unless the store turned out to refuse more (client.js). */
+const FULL_ACCESS = { inventory: true };
+
+/**
+ * @param {StoreAccess} access
+ * @returns {string} The stock field, for a token that may read inventory.
+ */
+const inventoryField = (access) => (access.inventory ? 'quantityAvailable' : '');
 const IMAGE = 'url altText width height';
 
 /**
@@ -143,9 +153,10 @@ const ALLOCATION_FIELDS = `
 
 /**
  * @param {ProductFragmentConfig} [o] The list sizes and metafields.
+ * @param {StoreAccess} [access] What the token may read.
  * @returns {string} `fragment TetherProduct on Product`.
  */
-export function productFragment(o = cfg) {
+export function productFragment(o = cfg, access = FULL_ACCESS) {
   return `
 fragment TetherProduct on Product {
   id handle title description descriptionHtml productType vendor tags
@@ -166,7 +177,7 @@ fragment TetherProduct on Product {
   }
   variants(first: ${o.variantsFirst}) {
     nodes {
-      id title availableForSale currentlyNotInStock quantityAvailable sku barcode
+      id title availableForSale currentlyNotInStock ${inventoryField(access)} sku barcode
       selectedOptions { name value }
       image { ${IMAGE} }
       price { ${MONEY} }
@@ -178,8 +189,11 @@ fragment TetherProduct on Product {
 }`;
 }
 
-/** @returns {string} `fragment TetherCart on Cart`. */
-export function cartFragment() {
+/**
+ * @param {StoreAccess} [access] What the token may read.
+ * @returns {string} `fragment TetherCart on Cart`.
+ */
+export function cartFragment(access = FULL_ACCESS) {
   return `
 fragment TetherCart on Cart {
   id checkoutUrl totalQuantity note createdAt updatedAt
@@ -209,7 +223,7 @@ fragment TetherCart on Cart {
       }
       merchandise {
         ... on ProductVariant {
-          id title sku availableForSale requiresShipping quantityAvailable
+          id title sku availableForSale requiresShipping ${inventoryField(access)}
           image { ${IMAGE} }
           price { ${MONEY} }
           compareAtPrice { ${MONEY} }

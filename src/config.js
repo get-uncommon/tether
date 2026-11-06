@@ -1,9 +1,15 @@
 /**
  * The runtime configuration. `cfg` is one shared object that every browser module imports; `configure()` replaces its
  * contents in place, so those imports see the new values, and `setCountry()` changes its market keys the same way.
- * Options that end up in query text or attribute names are validated here, once, where they arrive.
+ * Every option is validated here, once, where it arrives: values that end up in query text, URLs, attribute names or
+ * storage keys never reach the code that uses them unchecked.
  */
+import { STOREFRONT_API_VERSION } from '../server/src/shared/api-versions.js';
+import { isQuarterlyVersion } from './api-version.js';
+import { accountOption, analyticsOption, domainOption, marketsOption, metafieldsOption } from './config-sections.js';
+import { toCountry, toLanguage } from './market-codes.js';
 /** @import { Money } from './shopify-values.js' */
+/** @import { CountryCode, LanguageCode } from './market-codes.js' */
 
 /**
  * @typedef {object} MarketsConfig Where the visitor's market comes from (`markets.js`).
@@ -18,8 +24,8 @@
 /**
  * @typedef {object} AnalyticsConfig The optional analytics part.
  * @property {boolean | string} [dataLayer] GA4/GTM events, into `window.dataLayer` or the named array.
- * @property {boolean | { consent?: 'no-banner' | 'default-banner' | 'custom-banner', proxy?: string }} [shopify]
- *   Shopify's own analytics.
+ * @property {boolean | { consent?: 'no-banner' | 'default-banner' | 'custom-banner', proxy?: boolean }} [shopify]
+ *   Shopify's own analytics. `proxy`: the site serves the Storefront API on its own domain.
  * @property {(name: string, data: Record<string, unknown>) => void} [onEvent]
  */
 
@@ -49,9 +55,9 @@
  * @typedef {object} TetherConfig Every option, with its default filled in.
  * @property {string} domain The store's domain, without protocol or path.
  * @property {string} token The public Storefront API access token.
- * @property {string} apiVersion A dated Shopify API version.
- * @property {string | undefined} country An ISO country code for `@inContext(country:)`.
- * @property {string | undefined} language A language for `@inContext(language:)`.
+ * @property {string} apiVersion A dated Shopify API version (or `unstable`, with a warning).
+ * @property {CountryCode | undefined} country The market's country, for `@inContext(country:)`.
+ * @property {LanguageCode | undefined} language The market's language, for `@inContext(language:)`.
  * @property {string | undefined} locale An `Intl` locale for money and dates.
  * @property {MarketsConfig | null} markets
  * @property {string} prefix The attribute prefix: `tether` reads `tether-product`, `tether-bind`.
@@ -95,13 +101,18 @@
  * @property {boolean} debug
  */
 
-/** @typedef {{ [Key in keyof TetherConfig]?: TetherConfig[Key] }} TetherOptions */
+/**
+ * What a site passes: any option, the market as the codes people write (`'de'`, `'pt-BR'`).
+ *
+ * @typedef {{ [Key in Exclude<keyof TetherConfig, 'country' | 'language'>]?: TetherConfig[Key] }
+ *   & { country?: string | undefined, language?: string | undefined }} TetherOptions
+ */
 
 /** @type {Readonly<TetherConfig>} */
 export const DEFAULTS = {
   domain: '',
   token: '',
-  apiVersion: '2026-07',
+  apiVersion: STOREFRONT_API_VERSION,
   country: undefined,
   language: undefined,
   locale: undefined,
@@ -150,22 +161,35 @@ export const cfg = { ...DEFAULTS };
 
 /** The prefix becomes part of attribute names, CSS selectors and event names, so it is kept to those characters. */
 const PREFIX = /^[a-z][a-z0-9-]*$/;
-/**
- * Metafield identifiers are written into the product fragment's text: a GraphQL fragment can't declare variables, so
- * they can't be sent as variables. Only these characters are let through, which covers Shopify's namespaces and keys.
- */
-const METAFIELD_PART = /^[A-Za-z0-9_.-]+$/;
-/** A namespace is the same, or an app-reserved one: `$app` or `$app:<name>`. */
-const METAFIELD_NAMESPACE = /^(\$app(:[A-Za-z0-9_-]+)?|[A-Za-z0-9_.-]+)$/;
 
 /**
  * @typedef {'imagesFirst' | 'variantsFirst' | 'sellingPlanGroupsFirst' | 'sellingPlansFirst' | 'collectionFirst'
- *   | 'retries' | 'maxAge' | 'lowStock'} CountOption
+ *   | 'retries' | 'maxAge' | 'lowStock' | 'searchDelay'} CountOption
  */
 /**
  * @typedef {'warningText' | 'formatMoney' | 'onLayoutChange' | 'onCartOpen' | 'onCartClose' | 'onLineEnter'
  *   | 'onLineLeave' | 'onValueChange' | 'onError'} HookOption
  */
+
+/**
+ * @typedef {'revalidate' | 'openCartOnAdd' | 'cartFocus' | 'variantUrl' | 'autoMount' | 'observe' | 'astro' | 'debug'}
+ *   SwitchOption
+ */
+/** @typedef {'token' | 'productPath' | 'collectionPath' | 'cartDrawerOpenClass'} TextOption */
+
+/** @type {readonly SwitchOption[]} */
+const SWITCH_OPTIONS = [
+  'revalidate',
+  'openCartOnAdd',
+  'cartFocus',
+  'variantUrl',
+  'autoMount',
+  'observe',
+  'astro',
+  'debug',
+];
+/** @type {readonly TextOption[]} */
+const TEXT_OPTIONS = ['token', 'productPath', 'collectionPath', 'cartDrawerOpenClass'];
 
 /** @type {readonly CountOption[]} Options that are written into queries as list sizes or used as counts. */
 const COUNT_OPTIONS = [
@@ -177,6 +201,7 @@ const COUNT_OPTIONS = [
   'retries',
   'maxAge',
   'lowStock',
+  'searchDelay',
 ];
 /** @type {readonly HookOption[]} */
 const HOOK_OPTIONS = [
@@ -214,6 +239,48 @@ function countOption(name, value) {
 }
 
 /**
+ * @param {SwitchOption} name
+ * @param {unknown} value
+ * @returns {boolean}
+ */
+function switchOption(name, value) {
+  return typeof value === 'boolean' ? value : invalidOption(name, value, DEFAULTS[name]);
+}
+
+/**
+ * @param {TextOption} name
+ * @param {unknown} value
+ * @returns {string}
+ */
+function textOption(name, value) {
+  return typeof value === 'string' ? value : invalidOption(name, value, DEFAULTS[name]);
+}
+
+/**
+ * @param {unknown} value
+ * @returns {string | undefined} An `Intl` locale as written, `undefined` for one `Intl` doesn't accept.
+ */
+function localeOption(value) {
+  if (value === undefined || value === null || value === '') return undefined;
+  try {
+    if (typeof value === 'string' && Intl.getCanonicalLocales(value).length) return value;
+  } catch {
+    // RangeError: not a locale (falls through to the warning).
+  }
+  dropped('locale', value);
+  return undefined;
+}
+
+/**
+ * @param {unknown} value
+ * @returns {string | null} The folder of the optional parts as written; lazy-iife.js checks where it points.
+ */
+function partsUrlOption(value) {
+  if (value === undefined || value === null || value === '') return null;
+  return typeof value === 'string' ? value : invalidOption('partsUrl', value, null);
+}
+
+/**
  * @template {string} Choice
  * @param {string} name
  * @param {unknown} value
@@ -225,62 +292,53 @@ function choiceOption(name, value, choices) {
 }
 
 /**
- * @param {unknown} value
- * @returns {string} The store's domain without protocol or path: `https://shop.example/x` → `shop.example`.
- */
-function domainOption(value) {
-  if (typeof value !== 'string') return '';
-  return value.replace(/^https?:\/\//, '').replace(/\/.*$/, '');
-}
-
-/**
- * @param {unknown} ref
- * @returns {MetafieldIdentifier | null} The identifier of `'namespace.key'` or `{ namespace, key }`, when both parts are
- *   valid identifiers.
- */
-export function toMetafieldIdentifier(ref) {
-  /** @type {unknown} */
-  let namespace;
-  /** @type {unknown} */
-  let key;
-  if (typeof ref === 'string') {
-    const dot = ref.indexOf('.');
-    namespace = dot > 0 ? ref.slice(0, dot) : '';
-    key = ref.slice(dot + 1);
-  } else if (typeof ref === 'object' && ref !== null) {
-    namespace = Reflect.get(ref, 'namespace');
-    key = Reflect.get(ref, 'key');
-  }
-  if (typeof namespace !== 'string' || typeof key !== 'string') return null;
-  return METAFIELD_NAMESPACE.test(namespace) && METAFIELD_PART.test(key) ? { namespace, key } : null;
-}
-
-/**
- * @param {unknown} value
- * @returns {MetafieldRef[]} The refs that name a valid identifier, as written; each other one is skipped with a warning.
- */
-function metafieldsOption(value) {
-  if (!Array.isArray(value)) return invalidOption('metafields', value, []);
-  /** @type {MetafieldRef[]} */
-  const refs = [];
-  for (const ref of /** @type {unknown[]} */ (value)) {
-    const identifier = toMetafieldIdentifier(ref);
-    if (identifier) refs.push(typeof ref === 'string' ? ref : identifier);
-    else invalidOption('metafield', ref, null);
-  }
-  return refs;
-}
-
-/**
- * The configuration `options` describe: defaults filled in, counts, prefix, choices and metafields validated (an
- * invalid value warns and falls back to its default), hooks that aren't functions dropped so callers only check for
- * null.
+ * Warns about a nested option that was left out (`config-sections.js`).
  *
- * @param {TetherOptions} options
+ * @param {string} name
+ * @param {unknown} value
+ */
+const dropped = (name, value) => {
+  warn(`invalid ${name} ${JSON.stringify(value)}: ignored`);
+};
+
+/**
+ * @param {unknown} value
+ * @returns {string} A quarterly version, or `unstable` with a warning; the default for anything else, which would
+ *   be written into the endpoint's path.
+ */
+function apiVersionOption(value) {
+  if (value === 'unstable') {
+    warn('apiVersion "unstable" changes without notice. Pin a dated version (e.g. 2026-07).');
+    return value;
+  }
+  return isQuarterlyVersion(value) ? value : invalidOption('apiVersion', value, DEFAULTS.apiVersion);
+}
+
+/**
+ * @template Code
+ * @param {string} name
+ * @param {unknown} value
+ * @param {(value: unknown) => Code | null} parse
+ * @returns {Code | undefined}
+ */
+function codeOption(name, value, parse) {
+  if (value === undefined || value === null || value === '') return undefined;
+  const code = parse(value);
+  if (code !== null) return code;
+  dropped(name, value);
+  return undefined;
+}
+
+/**
+ * The configuration `options` describe: defaults filled in, every value validated (an invalid one warns and falls
+ * back to its default), hooks that aren't functions dropped so callers only check for null.
+ *
+ * @param {TetherOptions | Readonly<Record<string, unknown>>} options What the site set, or any object (the server
+ *   helpers take their options from code and `.env`).
  * @returns {TetherConfig}
  */
 export function resolveConfig(options) {
-  const domain = domainOption(options.domain);
+  const domain = domainOption(options.domain, dropped);
   const prefix =
     typeof options.prefix === 'string' && PREFIX.test(options.prefix)
       ? options.prefix
@@ -290,17 +348,25 @@ export function resolveConfig(options) {
     ...DEFAULTS,
     ...options,
     domain,
+    apiVersion: apiVersionOption(options.apiVersion),
+    country: codeOption('country', options.country, toCountry),
+    locale: localeOption(options.locale),
+    partsUrl: partsUrlOption(options.partsUrl),
+    language: codeOption('language', options.language, toLanguage),
+    markets: marketsOption(options.markets, dropped),
+    analytics: analyticsOption(options.analytics, dropped),
+    account: accountOption(options.account, dropped),
     prefix,
-    storageKey: options.storageKey || `${prefix}:cart:${domain}`,
-    metafields: metafieldsOption(options.metafields ?? []),
+    storageKey:
+      typeof options.storageKey === 'string' && options.storageKey ? options.storageKey : `${prefix}:cart:${domain}`,
+    metafields: metafieldsOption(options.metafields ?? [], dropped),
     checkoutTarget: choiceOption('checkoutTarget', options.checkoutTarget, ['_self', '_blank']),
     defaultPurchase: choiceOption('defaultPurchase', options.defaultPurchase, ['one-time', 'subscription']),
   };
   for (const name of COUNT_OPTIONS) resolved[name] = countOption(name, options[name]);
+  for (const name of SWITCH_OPTIONS) resolved[name] = switchOption(name, options[name]);
+  for (const name of TEXT_OPTIONS) resolved[name] = textOption(name, options[name]);
   for (const name of HOOK_OPTIONS) if (typeof resolved[name] !== 'function') resolved[name] = null;
-  if (resolved.apiVersion === 'unstable') {
-    warn('apiVersion "unstable" changes without notice. Pin a dated version (e.g. 2026-07).');
-  }
   return resolved;
 }
 
