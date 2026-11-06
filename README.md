@@ -1,6 +1,6 @@
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset=".github/header-dark.svg">
-  <img src=".github/header-light.svg" alt="Tether" width="400">
+  <source media="(prefers-color-scheme: dark)" srcset="https://cdn.jsdelivr.net/gh/ravi-klaassens/tether@main/.github/header-dark.svg">
+  <img src="https://cdn.jsdelivr.net/gh/ravi-klaassens/tether@main/.github/header-light.svg" alt="Tether" width="400">
 </picture>
 
 **Shopify products, cart and subscriptions in Webflow or Astro, with HTML attributes.**
