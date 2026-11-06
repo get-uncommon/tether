@@ -25,7 +25,8 @@
     "scripts/*.ts"
   ],
   "ignoreBinaries": ["tsc"],
-  "rules": {
-    "duplicates": "off"
+  "ignoreIssues": {
+    "src/index.ts": ["duplicates"],
+    "src/presets/barba.ts": ["duplicates"]
   }
 }

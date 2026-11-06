@@ -3,7 +3,8 @@
  * cms:read + cms:write (Site settings -> Apps & integrations -> API access).
  * Responses are parsed here, so the sync engine only sees typed items.
  */
-import { SyncError, httpStatusOf, isRecord, noopLogger, sleep as realSleep } from './util.ts';
+import { isRecord } from './shared/json.ts';
+import { SyncError, httpStatusOf, noopLogger, sleep as realSleep } from './util.ts';
 import { createThrottle } from './throttle.ts';
 
 import type { FieldData } from './mapping.ts';

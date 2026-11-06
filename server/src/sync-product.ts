@@ -5,7 +5,8 @@
  */
 import { mapProduct, withoutOwned, onlyExisting } from './mapping.ts';
 import { readProductState, readRetries, productKey, RETRY_KEY } from './sync-state.ts';
-import { SyncError, httpStatusOf, numericId, scalarText, sha256, stableStringify } from './util.ts';
+import { sha256, toHex } from './crypto.ts';
+import { SyncError, httpStatusOf, numericId, scalarText, stableStringify } from './util.ts';
 
 import type { ItemIndex } from './item-index.ts';
 import type { FieldData, SyncConfig } from './mapping.ts';
@@ -15,7 +16,7 @@ import type { ProductState } from './sync-state.ts';
 import type { Logger } from './util.ts';
 import type { CmsTarget } from './webflow.ts';
 
-type SyncAction = 'created' | 'updated' | 'unchanged' | 'archived' | 'deleted' | 'skipped';
+export type SyncAction = 'created' | 'updated' | 'unchanged' | 'archived' | 'deleted' | 'skipped';
 /** Counts for the engine's lifetime. */
 export type SyncStats = Record<SyncAction | 'failed', number>;
 
@@ -170,7 +171,8 @@ export async function syncProduct(
   const { cfg, stats } = ctx;
   const hide = Boolean(product.status) && product.status !== 'ACTIVE' && cfg.inactive !== 'keep';
   const fieldData = onlyExisting(mapProduct(product, cfg), await ctx.collectionFields());
-  const hash = await sha256(stableStringify({ fieldData, hide: hide ? cfg.inactive : false, owned: cfg.webflowOwned }));
+  const hashed = stableStringify({ fieldData, hide: hide ? cfg.inactive : false, owned: cfg.webflowOwned });
+  const hash = toHex(await sha256(hashed));
   const key = productKey(product.id);
   const state = await readProductState(ctx.store, key);
 

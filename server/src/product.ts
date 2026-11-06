@@ -3,7 +3,7 @@
  * flattened. Every key can be a source in the mapping, e.g. `fields: { price: 'price', 'main-image': 'image' }`.
  */
 import { SyncError } from './util.ts';
-import { asList, asRecord, numberOrNull, stringOrNull, textOrNull } from './json.ts';
+import { asList, asRecord, decimalOrNull, stringOrNull, textOrNull } from './json.ts';
 
 interface ProductImage {
   url: string;
@@ -71,7 +71,7 @@ function imageOf(raw: unknown): ProductImage | null {
 
 /** @param raw A `MoneyV2`. */
 function amountOf(raw: unknown): number | null {
-  return numberOrNull(asRecord(raw)['amount']);
+  return decimalOrNull(asRecord(raw)['amount']);
 }
 
 /** @param raw A `{ preview { image } }` selection. */
@@ -90,10 +90,10 @@ function variantOf(raw: unknown): ProductVariant {
     legacyId: idText(variant['legacyResourceId']),
     title: stringOrNull(variant['title']) ?? '',
     sku: textOrNull(variant['sku']),
-    price: numberOrNull(variant['price']),
-    compareAtPrice: numberOrNull(variant['compareAtPrice']),
+    price: decimalOrNull(variant['price']),
+    compareAtPrice: decimalOrNull(variant['compareAtPrice']),
     available: variant['availableForSale'] === true,
-    inventory: numberOrNull(variant['inventoryQuantity']),
+    inventory: decimalOrNull(variant['inventoryQuantity']),
   };
 }
 
@@ -174,7 +174,7 @@ export function normalizeProduct(raw: unknown, metafieldRefs: string[] = []): Pr
     image: imageOf(previewImage(product['featuredMedia'])) ?? images[0] ?? null,
     images,
     available: variants.some((variant) => variant.available),
-    totalInventory: numberOrNull(product['totalInventory']),
+    totalInventory: decimalOrNull(product['totalInventory']),
     variantCount: variants.length,
     sku: variants[0]?.sku ?? null,
     options: optionsOf(product['options']),

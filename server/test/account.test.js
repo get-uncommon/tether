@@ -3,6 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { handleAccount, BASE } from '../src/account.ts';
+import { MAX_ACCOUNT_BODY_BYTES } from '../src/account/http.ts';
 
 const SHOP = 'shop.myshopify.com';
 const SITE = 'https://shop.example';
@@ -388,6 +389,25 @@ test('a POST without the X-Tether-Account header is refused (CSRF)', async () =>
     req('/cart', { method: 'POST', origin: SITE, cookie, body: { cartId: 'gid://shopify/Cart/abc' }, header: false }),
   );
   assert.equal(res.status, 400);
+});
+
+test('an account body past the limit is refused with 413 before it is read whole', async () => {
+  const { run, cookie } = await loginFlow();
+  const cartId = 'gid://shopify/Cart/abc';
+  const padding = 'x'.repeat(MAX_ACCOUNT_BODY_BYTES);
+  const post = (path, body) => run(req(path, { method: 'POST', origin: SITE, cookie, body }));
+  for (const path of ['/cart', '/logout', '/address']) {
+    const res = await post(path, { cartId, padding });
+    assert.equal(res.status, 413, path);
+    assert.equal(res.headers.get('access-control-allow-origin'), SITE, `${path}: the site can read the answer`);
+  }
+  const declared = new Request(`${WORKER}${BASE}/logout`, {
+    method: 'POST',
+    headers: { Origin: SITE, Cookie: cookie, 'X-Tether-Account': '1', 'Content-Length': String(1024 * 1024) },
+    body: '{}',
+  });
+  assert.equal((await run(declared)).status, 413, 'a declared length past the limit is refused unread');
+  assert.equal((await post('/logout', { returnTo: `${SITE}/bye` })).status, 200, 'a small body still logs out');
 });
 
 test('a returnTo on another site lands on the shop instead (no open redirect)', async () => {

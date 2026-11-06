@@ -4,7 +4,7 @@
  * what they mean.
  */
 
-import { isPlainObject } from './json.ts';
+import { isRecord } from './shared/json.ts';
 
 import type { RawConfig } from './mapping.ts';
 
@@ -44,11 +44,11 @@ function configProblems(config: Record<string, unknown>): string[] {
   for (const [name, kinds] of Object.entries(SECTIONS)) {
     const section = config[name];
     if (section === undefined) continue;
-    if (isPlainObject(section)) problems.push(...wrongKinds(section, kinds, `${name}.`));
+    if (isRecord(section)) problems.push(...wrongKinds(section, kinds, `${name}.`));
     else problems.push(`${name} must be an object`);
   }
   const { fields } = config;
-  if (fields !== undefined && !isPlainObject(fields)) problems.push('fields must be an object');
+  if (fields !== undefined && !isRecord(fields)) problems.push('fields must be an object');
   else if (fields) {
     for (const [slug, source] of Object.entries(fields))
       if (source === null) problems.push(`fields.${slug} is null: leave the field out instead`);
@@ -62,7 +62,7 @@ function configProblems(config: Record<string, unknown>): string[] {
  * @throws {Error} Naming every key with a value of the wrong type.
  */
 export function parseConfigFile(value: unknown, path: string): RawConfig {
-  if (!isPlainObject(value)) throw new Error(`${path} must export a config object.`);
+  if (!isRecord(value)) throw new Error(`${path} must export a config object.`);
   const problems = configProblems(value);
   if (problems.length) throw new Error(`${path}: ${problems.join('; ')}.`);
   // Every key RawConfig declares was checked above; others are left for normalizeConfig to ignore.

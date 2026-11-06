@@ -413,7 +413,14 @@ test('worker: webhook route with waitUntil, cron reconcile writes KV only on cha
     await (await import('node:fs/promises')).readFile(new URL('../package.json', import.meta.url), 'utf8'),
   );
   assert.equal(VERSION, pkg.version, 'src/version.ts matches package.json');
-  assert.deepEqual(await health.json(), { ok: true, version: pkg.version });
+  assert.deepEqual(await health.json(), { ok: true }, 'the version is not shown to strangers');
+  const publicCheck = await (await worker.fetch(new Request('https://sync.test/check'), wenv, ctx)).json();
+  assert.equal(publicCheck.version, undefined);
+  const auth = { authorization: `Bearer ${wenv.SYNC_SECRET}` };
+  const fullCheck = await (
+    await worker.fetch(new Request('https://sync.test/check', { headers: auth }), wenv, ctx)
+  ).json();
+  assert.equal(fullCheck.version, pkg.version, 'the version needs the bearer secret');
 
   const res = await worker.fetch(await webhook('products/update', { id: 1 }), wenv, ctx);
   assert.equal(res.status, 200);

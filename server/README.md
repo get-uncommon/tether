@@ -70,8 +70,8 @@ A release is installed only when the commit its `v…` tag points at is on the T
 `main` branch, and only from the signed `tether-server-X.Y.Z.tar.gz` on its GitHub Release: the
 updater runs `gh attestation verify` to check that Tether's release workflow built that file from
 that commit, and refuses it otherwise. Releases before 0.7.0 have no signed file, so a copy on 0.7.0
-or newer never installs one of them. `https://YOUR-WORKER/health` answers
-`{ "ok": true, "version": "…" }` with the version that's running.
+or newer never installs one of them. The `/check` report you get with your `SYNC_SECRET` (the `curl`
+above) starts with the `version` that's running.
 
 To update by hand (`node scripts/update-tether.mjs` in your copy), install the
 [GitHub CLI](https://cli.github.com) first. Without it the updater refuses, unless you pass

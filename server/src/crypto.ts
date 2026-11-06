@@ -1,7 +1,7 @@
 /**
  * Sealing for anything the Worker stores or hands to a browser: AES-GCM with one HKDF-derived key per purpose, bound
  * to where the value lives (a KV key or a cookie name) so a sealed value cannot be moved elsewhere. Web Crypto only,
- * so it runs in Workers and Node 20+.
+ * so it runs in Workers and Node alike.
  */
 
 import { fromBase64Url, toBase64Url } from './base64url.ts';

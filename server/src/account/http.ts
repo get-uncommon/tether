@@ -1,7 +1,8 @@
 /** Cookies, CORS and responses for the account routes. */
 
 import type { ReadyAccountSettings } from './settings.ts';
-import { asRecord, responseJsonOrNull } from '../json.ts';
+import { asRecord, jsonOrNull } from '../json.ts';
+import { readRequestCapped } from '../capped-body.ts';
 
 /** The session cookie: an opaque random id; the session itself is sealed in KV under its hash. */
 export const SESSION_COOKIE = '__Host-tether-account';
@@ -87,7 +88,22 @@ export function safeReturn(raw: string, settings: ReadyAccountSettings): string 
 /** A Storefront cart id, as the browser sends it to link or unlink a cart. */
 export const CART_ID = /^gid:\/\/shopify\/Cart\/[\w-]+(\?key=[\w-]+)?$/;
 
-/** The request body as a JSON object; `{}` for a body that is not one, whose fields the routes then refuse one by one. */
+/**
+ * Largest account request body read. The largest real one is a return request: up to 50 lines, each with a note of up
+ * to 300 characters, about 50 KB in UTF-8 at most.
+ */
+export const MAX_ACCOUNT_BODY_BYTES = 64 * 1024;
+
+/** A request body past {@link MAX_ACCOUNT_BODY_BYTES}; the account handler answers it with 413. */
+export class BodyTooLarge extends Error {}
+
+/**
+ * The request body as a JSON object; `{}` for a body that is not one, whose fields the routes then refuse one by one.
+ *
+ * @throws A {@link BodyTooLarge} past {@link MAX_ACCOUNT_BODY_BYTES}, which is never read whole.
+ */
 export async function readJsonObject(request: Request): Promise<Record<string, unknown>> {
-  return asRecord(await responseJsonOrNull(request));
+  const body = await readRequestCapped(request, MAX_ACCOUNT_BODY_BYTES);
+  if (!body) throw new BodyTooLarge(`the body is longer than ${String(MAX_ACCOUNT_BODY_BYTES)} bytes`);
+  return asRecord(jsonOrNull(new TextDecoder().decode(body)));
 }

@@ -15,15 +15,14 @@ import {
   releaseAssetUrl,
   verifyAttestation,
 } from '../scripts/release-asset.ts';
-import { reportWorkflow, workflowRevision, workflowState, WORKFLOW_PATH } from '../scripts/workflow-check.ts';
-
-/**
- * The shipped workflow's hash. A copy keeps the workflow it was made with, because an Action's token can't change a
- * workflow file, so every version of the script must keep the contract that all shipped workflows rely on (see the
- * output test below). The hash makes a change to the workflow a deliberate one, checked against that contract; a
- * change that copies need also raises its `# Tether workflow revision:` line, so the updater tells them to copy it in.
- */
-const WORKFLOW_HASH = 'a96a07d6b78e';
+import {
+  reportWorkflow,
+  SHIPPED_REVISION,
+  workflowRevision,
+  workflowRevisionAt,
+  workflowState,
+  WORKFLOW_PATH,
+} from '../scripts/workflow-check.ts';
 
 /** The type-stripping flag this run was started with (Node before 22.18 needs it), passed on to the updater. */
 const NODE_FLAGS = process.execArgv.filter((flag) => flag === '--experimental-strip-types');
@@ -121,18 +120,6 @@ function workflowVersion(output) {
   return lines.at(-1).split('=')[1];
 }
 
-test('the workflow keeps to the contract: the script path, the updated= line, test/ and src/entry.js', async () => {
-  const workflow = await readFile(new URL('../.github/workflows/update-tether.yml', import.meta.url), 'utf8');
-  for (const command of [
-    'node scripts/update-tether.mjs | tee update.log',
-    `grep '^updated=' update.log | tail -1 | cut -d= -f2`,
-    'node --test test/*.test.js',
-    "import('./src/entry.js')",
-  ]) {
-    assert.ok(workflow.includes(command), command);
-  }
-});
-
 test('a failed update exits non-zero, and --from without a folder is refused', () => {
   const script = fileURLToPath(new URL('../scripts/update-tether.ts', import.meta.url));
   assert.throws(
@@ -145,14 +132,6 @@ test('the shipped TETHER_VERSION takes the fixes of the minor version it ships w
   const range = (await readFile(new URL('../TETHER_VERSION', import.meta.url), 'utf8')).trim();
   const { version } = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
   assert.equal(range, version.split('.').slice(0, 2).join('.'), 'a release bumps TETHER_VERSION with the minor');
-});
-
-test('the shipped workflow changes only on purpose: copies made with any version keep their own', async () => {
-  // Copies made with 0.3.3 to 0.3.5 run an updater that also copies .github/, and GitHub refuses an Action's push that
-  // changes a workflow file. Their range (0.3) holds no release with a changed workflow.
-  const { createHash } = await import('node:crypto');
-  const wf = await readFile(new URL('../.github/workflows/update-tether.yml', import.meta.url));
-  assert.equal(createHash('sha256').update(wf).digest('hex').slice(0, 12), WORKFLOW_HASH);
 });
 
 const SHA = 'a'.repeat(40);
@@ -325,10 +304,12 @@ test('workflow check: outdated only when the release ships a higher revision', a
   const same = await withWorkflow(base, 'same', 'name: Update Tether\n');
   const newer = await withWorkflow(base, 'newer', '# Tether workflow revision: 2\n');
   const none = await withWorkflow(base, 'none', null);
-  assert.deepEqual(await workflowState(old, newer), { kind: 'outdated', copy: 1, release: 2 });
-  assert.deepEqual(await workflowState(old, same), { kind: 'current' }, 'an edited cron is not outdated');
-  assert.deepEqual(await workflowState(newer, same), { kind: 'current' });
-  assert.deepEqual(await workflowState(none, newer), { kind: 'not-compared' });
+  const against = async (release) => workflowState(old, await workflowRevisionAt(release));
+  assert.deepEqual(await against(newer), { kind: 'outdated', copy: 1, release: 2 });
+  assert.deepEqual(await against(same), { kind: 'current' }, 'an edited cron is not outdated');
+  assert.deepEqual(await against(none), { kind: 'not-compared' }, 'a release folder without the workflow');
+  assert.deepEqual(await workflowState(newer, 1), { kind: 'current' });
+  assert.deepEqual(await workflowState(none, 2), { kind: 'not-compared' }, 'a copy without Actions');
 });
 
 test('workflow check: an outdated workflow gets a GitHub warning and the manual step in the job summary', async (t) => {
@@ -344,15 +325,16 @@ test('workflow check: an outdated workflow gets a GitHub warning and the manual 
   await reportWorkflow({ kind: 'current' }, '0.7.1', 'https://x.test');
   assert.equal(log.mock.callCount(), 0);
   assert.ok(!existsSync(summary));
-  await reportWorkflow({ kind: 'outdated', copy: 1, release: 2 }, '0.7.1', 'https://x.test/server');
+  await reportWorkflow({ kind: 'outdated', copy: 1, release: 2 }, '0.7.1', 'https://x.test/update-tether.yml');
   const warning = String(log.mock.calls[0].arguments[0]);
   assert.match(warning, /^::warning title=[^:]+::/);
   assert.match(warning, /revision 1, Tether 0\.7\.1 ships revision 2/);
-  assert.match(warning, /Copy \.github\/workflows\/update-tether\.yml from the Tether 0\.7\.1 server\/ folder/);
-  assert.match(
-    await readFile(summary, 'utf8'),
-    /^### Update the workflow file once\n\nCopy .*https:\/\/x\.test\/server/,
-  );
+  const step =
+    'Copy the Tether 0.7.1 workflow file (https://x.test/update-tether.yml) over .github/workflows/update-tether.yml ' +
+    'in this repository and commit it, once, by hand';
+  assert.ok(warning.includes(step), 'the warning gives the one-time manual step');
+  const summaryText = await readFile(summary, 'utf8');
+  assert.ok(summaryText.startsWith(`### Update the workflow file once\n\n${step}`), 'and so does the job summary');
 });
 
 test('an update run by its workflow warns when the copy needs the release workflow, and keeps the output contract', async () => {
@@ -380,4 +362,29 @@ test('an update run by its workflow warns when the copy needs the release workfl
   assert.equal(await readFile(join(copy, WORKFLOW_PATH), 'utf8'), copyWorkflow, 'the workflow file is never touched');
   const version = JSON.parse(await readFile(join(release, 'package.json'), 'utf8')).version;
   assert.equal(workflowVersion(out), version);
+});
+
+test('an update run with nothing to install still warns while the copy has an older workflow', async () => {
+  const root = fileURLToPath(new URL('..', import.meta.url));
+  const base = await mkdtemp(join(tmpdir(), 'tether-current-'));
+  const copy = join(base, 'copy');
+  await cp(root, copy, { recursive: true, filter: (p) => !p.includes('node_modules') });
+  await mkdir(join(copy, '.github', 'workflows'), { recursive: true });
+  await writeFile(join(copy, WORKFLOW_PATH), 'name: Update Tether\n');
+  const version = JSON.parse(await readFile(join(copy, 'package.json'), 'utf8')).version;
+
+  const out = execFileSync(
+    process.execPath,
+    [...NODE_FLAGS, join(copy, 'scripts', 'update-tether.mjs'), '--from', copy],
+    {
+      encoding: 'utf8',
+      env: { ...process.env, GITHUB_STEP_SUMMARY: join(base, 'summary.md') },
+    },
+  );
+  assert.match(out, /up to date/);
+  assert.ok(
+    out.includes(`revision 1, Tether ${version} ships revision ${String(SHIPPED_REVISION)}`),
+    'a copy brought to this release by an older updater is told too',
+  );
+  assert.equal(workflowVersion(out), '');
 });

@@ -10,8 +10,9 @@
  *   POST /webhooks/shopify      Shopify product webhooks
  *   POST /reconcile             a manual run (Authorization: Bearer SYNC_SECRET); ?since=all imports everything and
  *                               registers this Worker's product webhooks
- *   GET  /health
- *   GET  /check, GET /          which settings are set; with the bearer secret also the API tests and the details
+ *   GET  /health                `{ ok: true }`, for uptime checks
+ *   GET  /check, GET /          which settings are set; with the bearer secret also the version, the API tests and
+ *                               the details
  *
  * Bindings and secrets: `server/README.md`.
  */
@@ -222,8 +223,7 @@ export function createWorker(config: RawConfig, { fetch, sleep }: { fetch?: Fetc
       try {
         const account = await handleAccount(request, env, fetch ? { fetch } : {});
         if (account) return account;
-        // The version is documented here (server/README.md) for checking an update landed.
-        if (url.pathname === '/health') return Response.json({ ok: true, version: VERSION });
+        if (url.pathname === '/health') return Response.json({ ok: true });
         if (url.pathname === '/check' || url.pathname === '/') return await check(setup, request, env, url);
         if (url.pathname === '/webhooks/shopify') return await webhook(setup, request, env, context);
         if (url.pathname === '/reconcile' && request.method === 'POST')

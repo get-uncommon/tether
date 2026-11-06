@@ -14,7 +14,8 @@
  *   },
  *   webflowOwned: ['description'],        // written when the item is created, never overwritten
  */
-import { isRecord, SyncError, scalarText } from './util.ts';
+import { isRecord } from './shared/json.ts';
+import { SyncError, scalarText } from './util.ts';
 import { DEFAULT_API_VERSION } from './shopify.ts';
 
 import type { CleanEnv } from './env.ts';

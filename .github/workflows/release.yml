@@ -1,24 +1,27 @@
 # Publishes a release when a version tag is pushed (made by `npm run release -- X.Y.Z`):
-# tests, npm publish with provenance (trusted publishing: no token in the repo), GitHub Release.
+# the gate, npm publish with provenance (trusted publishing: no token in the repo), GitHub Release.
 # The Release carries tether-server-X.Y.Z.tar.gz, the sync Worker's server/ folder with a GitHub artifact
 # attestation from this workflow: deployed copies install an update only from that file, after
 # `gh attestation verify --signer-workflow <repo>/.github/workflows/release.yml` (server/scripts/release-asset.ts).
 # Renaming this file or the asset stops every copy's updates.
+#
+# Only the `check` job installs the dependencies, and it can only read the repository. The jobs that can sign
+# (`server-asset`, `npm`) or write (`github-release`) run no dependency's code: an install script can't reach their
+# tokens.
 name: release
 
 on:
   push:
     tags: ['v*.*.*']
 
-permissions:
-  contents: write # the GitHub Release
-  id-token: write # npm trusted publishing + provenance, and the attestation's signing certificate
-  attestations: write # the server asset's attestation
+permissions: {}
 
 jobs:
-  release:
+  check:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
@@ -26,9 +29,6 @@ jobs:
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: 22
-          registry-url: https://registry.npmjs.org
-      - name: npm with trusted publishing
-        run: npm install -g npm@^11.5
       - run: npm ci
       - name: Tag matches package.json
         run: |
@@ -43,10 +43,23 @@ jobs:
             echo "::error::dist/ differs from a fresh npm run build: rebuild and commit it"
             exit 1
           fi
-      - run: npm test
+      - run: npm run check
       - run: npm run smoke
-      # git archive of the tagged commit: the same bytes on every run (file times are the commit's), and only what
-      # is committed. The top folder is stripped by the updater, which reads server/ inside it.
+
+  # git archive of the tagged commit: the same bytes on every run (file times are the commit's), and only what is
+  # committed. The top folder is stripped by the updater, which reads server/ inside it.
+  server-asset:
+    needs: check
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      id-token: write # the attestation's signing certificate
+      attestations: write # the server asset's attestation
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
       - name: Server asset for the sync Worker's updates
         shell: bash
         run: |
@@ -57,14 +70,56 @@ jobs:
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: ${{ env.SERVER_ASSET }}
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        with:
+          name: server-asset
+          path: ${{ env.SERVER_ASSET }}
+          if-no-files-found: error
+          retention-days: 1
+
+  # Publishes the committed files as they are: `--ignore-scripts`, because the lifecycle scripts need the
+  # devDependencies this job never installs.
+  npm:
+    needs: server-asset
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      id-token: write # npm trusted publishing + provenance
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      - name: npm with trusted publishing
+        run: npm install -g npm@^11.5
       - name: Publish to npm
-        run: npm publish --provenance --access public
+        run: npm publish --provenance --access public --ignore-scripts
+
+  github-release:
+    needs: npm
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write # the GitHub Release
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+        with:
+          name: server-asset
+          path: ${{ runner.temp }}/server-asset
       - name: GitHub Release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           V="${GITHUB_REF_NAME#v}"
+          SERVER_ASSET="$RUNNER_TEMP/server-asset/tether-server-$V.tar.gz"
           awk -v v="$V" '$0 ~ "^## "v"( |$)" {f=1; next} /^## / && f {exit} f' CHANGELOG.md > notes.md
           {
             echo; echo '**Use it:**'; echo

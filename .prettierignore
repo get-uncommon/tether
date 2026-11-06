@@ -5,5 +5,7 @@ examples/astro/.astro/
 test-results/
 playwright-report/
 *.md
-# Deployed copies cannot update their own workflow, so this file stays byte-identical (server/test/update.test.js).
+# Deployed copies cannot update their own workflow, so it changes only on purpose (test/update-workflow.test.js), and
+# the fixture is v0.6.8's file byte for byte.
 server/.github/workflows/update-tether.yml
+test/workflows/

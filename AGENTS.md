@@ -27,7 +27,7 @@ The published `.d.ts` files are generated from the source, never hand-written: `
 5. dependency-cruiser;
 6. the tests.
 
-lefthook runs Prettier and ESLint on staged files before each commit, and `npm run check` before each push. Before calling work done, run `npm run check`. When a change sends a new query or mutation, also run `npm run smoke`.
+lefthook runs Prettier and ESLint on staged files before each commit, and `npm run check` before each push. CI (`.github/workflows/ci.yml`) runs `npm run check` on every pull request and push to main, on Node 22.18 and 24, and the release workflow runs it before it publishes. Before calling work done, run `npm run check`. When a change sends a new query or mutation, also run `npm run smoke`.
 
 There is no lint baseline: every rule holds for every file.
 

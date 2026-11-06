@@ -1,4 +1,4 @@
-/** Small shared helpers. Web-standard APIs only, so this runs in Workers and Node 20+. */
+/** Small shared helpers. Web-standard APIs only, so this runs in Workers and Node alike. */
 
 /** Where the sync reports progress. {@link noopLogger} stands in when the caller passes none. */
 export interface Logger {
@@ -40,11 +40,6 @@ export function httpStatusOf(error: unknown): number | undefined {
   return error instanceof SyncError ? error.status : undefined;
 }
 
-/** A plain object, as parsed JSON or a store value holds it. */
-export function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
-}
-
 /** A scalar as text, the way `String` writes it; `''` for an object or a function, which has no meaningful text. */
 export function scalarText(value: unknown): string {
   if (typeof value === 'string') return value;
@@ -67,11 +62,6 @@ export function stableStringify(value: unknown): string {
     .filter((key) => record[key] !== undefined)
     .map((key) => `${JSON.stringify(key)}:${stableStringify(record[key])}`)
     .join(',')}}`;
-}
-
-export async function sha256(text: string): Promise<string> {
-  const buffer = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
-  return [...new Uint8Array(buffer)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
 /** gid://shopify/Product/123 -> "123"; "123" -> "123". */
