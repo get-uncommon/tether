@@ -86,6 +86,8 @@ test('a forged tether:variant-changed loads nothing and writes no variant link',
   errors.length = 0;
   const before = window.location.href;
   find('#p').dispatchEvent(new window.CustomEvent('tether:variant-changed', { detail: {}, bubbles: true }));
+  // Nothing is meant to happen, so there is no condition to wait for: a handler that took the forged detail would have
+  // loaded and reported by now.
   await new Promise((resolve) => setTimeout(resolve, 30));
   assert.deepEqual(errors, []);
   assert.equal(window.location.href, before);

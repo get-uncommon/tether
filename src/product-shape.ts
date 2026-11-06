@@ -1,56 +1,49 @@
 /**
- * Checks that a value read from the page has the structure of Tether's product fragment, before it is used as a
- * `Product`. Rendering walks the product's lists and prices without checking each step, so a truncated or
- * hand-written entry would otherwise fail deep inside a render instead of being skipped.
+ * The structure of Tether's product fragment, checked on a value read from the page or from a Storefront answer
+ * before it is used as a `Product`. Rendering walks the product's lists and prices without checking each step, so a
+ * truncated or hand-written entry, or an answer missing fields, would otherwise fail deep inside a render instead of
+ * being skipped or refused.
  */
+import { matches } from './client.ts';
 import { field, isRecord } from '../server/src/shared/json.ts';
+import type { Shape } from './client.ts';
 import type { Product } from './fragments.ts';
+import type { PageInfo } from './loader.ts';
 
-/** @returns True for a Storefront API `MoneyV2`. */
-function isMoney(value: unknown): boolean {
-  return typeof field(value, 'amount') === 'string' && typeof field(value, 'currencyCode') === 'string';
+/** A page of a GraphQL connection of products. */
+export interface ProductConnection {
+  nodes: Product[];
+  pageInfo: PageInfo;
 }
 
-/** @returns `value[key].nodes` when it is a list (a GraphQL connection). */
-function nodesOf(value: unknown, key: string): unknown[] | null {
-  const nodes = field(field(value, key), 'nodes');
-  return Array.isArray(nodes) ? nodes : null;
-}
-
-/** @returns True when `value[key]` has a min and a max price. */
-function isPriceRange(value: unknown, key: string): boolean {
-  const range = field(value, key);
-  return isMoney(field(range, 'minVariantPrice')) && isMoney(field(range, 'maxVariantPrice'));
-}
-
-/** @returns True for a variant with what choosing and pricing it reads. */
-function isVariantShape(value: unknown): boolean {
-  return (
-    typeof field(value, 'id') === 'string' &&
-    isMoney(field(value, 'price')) &&
-    Array.isArray(field(value, 'selectedOptions'))
-  );
-}
+/** A Storefront API `MoneyV2`. */
+export const MONEY = { amount: 'string', currencyCode: 'string' } as const satisfies Shape;
 
 /**
- * True when `value` has a non-empty id and handle, a title, and every list and price a render walks without a
- * fallback: images, options, variants (each with an id, a price and its options) and the price range. Text fields are
- * written as text, and the selling plan lists are read with a fallback, so they need no check.
+ * A product's id, handle and title, and every list and price a render walks without a fallback: images, options,
+ * variants (each with an id, a price and its options) and the price range. Text fields are written as text, and the
+ * selling plan lists are read with a fallback, so they need no check.
  */
-export const isProductShape = (value: unknown): value is Product => {
-  if (!isRecord(value)) return false;
-  const id = value['id'];
-  const handle = value['handle'];
-  const variants = nodesOf(value, 'variants');
-  return (
-    typeof id === 'string' &&
-    id !== '' &&
-    typeof handle === 'string' &&
-    handle !== '' &&
-    typeof value['title'] === 'string' &&
-    Array.isArray(value['options']) &&
-    nodesOf(value, 'images') !== null &&
-    isPriceRange(value, 'priceRange') &&
-    (variants?.every(isVariantShape) ?? false)
-  );
-};
+export const PRODUCT = {
+  id: 'string',
+  handle: 'string',
+  title: 'string',
+  options: ['object'],
+  images: { nodes: ['object'] },
+  priceRange: { minVariantPrice: MONEY, maxVariantPrice: MONEY },
+  variants: { nodes: [{ id: 'string', price: MONEY, selectedOptions: ['object'] }] },
+} as const satisfies Shape;
+
+/** A page of products, with the `pageInfo` paging reads. */
+export const PRODUCT_CONNECTION = { nodes: [PRODUCT], pageInfo: { hasNextPage: 'boolean' } } as const satisfies Shape;
+
+/** True for a value with the structure of `PRODUCT` and a non-empty id and handle. */
+export const isProductShape = (value: unknown): value is Product =>
+  field(value, 'id') !== '' && field(value, 'handle') !== '' && matches(value, PRODUCT);
+
+/**
+ * A node a lookup by gid answers: a product, or a node of another type, for which `... on Product` selects no field
+ * (no `id`).
+ */
+export const PRODUCT_NODE = (node: unknown): boolean =>
+  isRecord(node) && (node['id'] === undefined || matches(node, PRODUCT));

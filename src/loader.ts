@@ -4,11 +4,14 @@
  * (`tether/server` `hydrate()`) are used at once and refreshed once in the background.
  */
 import { cfg, log } from './config.ts';
-import { gql, TetherError } from './client.ts';
+import { gql, matches, orNull, shaped, TetherError } from './client.ts';
 import { productFragment, collectionFields } from './fragments.ts';
 import { productKey } from './shopify-values.ts';
+import { isRecord } from '../server/src/shared/json.ts';
+import { PRODUCT, PRODUCT_CONNECTION, PRODUCT_NODE } from './product-shape.ts';
 import type { Product, Image } from './fragments.ts';
 import type { QueryText } from './client.ts';
+import type { ProductConnection } from './product-shape.ts';
 
 /**
  * A product request that missed is remembered this long, so one page asking twice sends one request, and a product
@@ -122,8 +125,18 @@ function forgetMissLater(key: string, batchGeneration: number): void {
   }, MISS_CACHE_MS);
 }
 
+/** A node of a type other than Product, for which `... on Product` selects no field. */
+interface OtherNode {
+  id?: undefined;
+}
 /** The answer to `batchQuery`: `byId` for the gids, `h<index>` for each handle. */
-type BatchData = Partial<Record<`h${number}`, Product | null>> & { byId?: (Product | null)[] };
+type BatchData = Partial<Record<`h${number}`, Product | null>> & { byId?: (Product | OtherNode | null)[] };
+
+function isBatchData(data: unknown): data is BatchData {
+  if (!isRecord(data)) return false;
+  const { byId = [], ...byHandle } = data;
+  return matches(byId, [orNull(PRODUCT_NODE)]) && Object.values(byHandle).every(orNull(PRODUCT));
+}
 
 async function flush() {
   flushScheduled = false;
@@ -135,7 +148,7 @@ async function flush() {
 
   let data;
   try {
-    data = await gql<BatchData>(query, variables);
+    data = await gql(query, variables, isBatchData);
   } catch (error) {
     keys.forEach((key) => {
       settleWaiting(key, (waiter) => {
@@ -147,7 +160,7 @@ async function flush() {
   }
 
   const found = new Map<string, Product>();
-  for (const product of data.byId ?? []) if (product) found.set(product.id, product);
+  for (const product of data.byId ?? []) if (product?.id) found.set(product.id, product);
   handles.forEach((handle, index) => {
     const product = data[`h${index}`];
     if (product) found.set(handle, product);
@@ -256,10 +269,14 @@ export interface ProductQuery {
   filters?: unknown[];
 }
 
-interface ProductConnection {
-  nodes: Product[];
-  pageInfo: PageInfo;
-}
+/** A collection's answer: `null` for a handle the store doesn't have. Its other fields are written as text. */
+export const isCollectionAnswer = shaped<{ collection: (Collection & { products: ProductConnection }) | null }>({
+  collection: orNull({ handle: 'string', products: PRODUCT_CONNECTION }),
+});
+export const isSearchAnswer = shaped<{ products: ProductConnection }>({ products: PRODUCT_CONNECTION });
+export const isRecommendationsAnswer = shaped<{ productRecommendations: Product[] | null }>({
+  productRecommendations: orNull([PRODUCT]),
+});
 
 const COLLECTION_QUERY = `query TetherCollection($handle: String!, $first: Int!, $after: String, $sortKey: ProductCollectionSortKeys, $reverse: Boolean, $filters: [ProductFilter!]) {
   collection(handle: $handle) {
@@ -293,7 +310,7 @@ export async function getProducts({
   filters,
 }: ProductQuery = {}): Promise<ProductPage> {
   if (collection) {
-    const data = await gql<{ collection: (Collection & { products: ProductConnection }) | null }>(
+    const data = await gql(
       withProductFragment(COLLECTION_QUERY),
       {
         handle: collection,
@@ -303,6 +320,7 @@ export async function getProducts({
         reverse,
         filters: filters ?? undefined,
       },
+      isCollectionAnswer,
     );
     if (!data.collection) throw new TetherError(`Collection not found: ${collection}`, { code: 'NOT_FOUND' });
     const { products, ...rest } = data.collection;
@@ -310,13 +328,11 @@ export async function getProducts({
     return { collection: rest, products: products.nodes, pageInfo: products.pageInfo };
   }
 
-  const data = await gql<{ products: ProductConnection }>(withProductFragment(SEARCH_QUERY), {
-    first,
-    after,
-    query: query || undefined,
-    sortKey: sortKey || undefined,
-    reverse,
-  });
+  const data = await gql(
+    withProductFragment(SEARCH_QUERY),
+    { first, after, query: query || undefined, sortKey: sortKey || undefined, reverse },
+    isSearchAnswer,
+  );
   data.products.nodes.forEach(primeProduct);
   return { collection: null, products: data.products.nodes, pageInfo: data.products.pageInfo };
 }
@@ -332,13 +348,14 @@ export async function getRecommendations(
 ): Promise<Product[]> {
   const key = normalizeProductKey(typeof product === 'object' ? product?.id : product);
   const byId = key?.startsWith('gid://') ?? false;
-  const data = await gql<{ productRecommendations: Product[] | null }>(
+  const data = await gql(
     withProductFragment(
       `query TetherRecs(${byId ? '$id: ID!' : '$handle: String!'}, $intent: ProductRecommendationIntent) {
   productRecommendations(${byId ? 'productId: $id' : 'productHandle: $handle'}, intent: $intent) { ...TetherProduct }
 }`,
     ),
     byId ? { id: key, intent } : { handle: key, intent },
+    isRecommendationsAnswer,
   );
   const list = data.productRecommendations ?? [];
   list.forEach(primeProduct);

@@ -1,11 +1,13 @@
 /**
  * The one Storefront API client: a fetch wrapper that adds the market (`@inContext`), retries what Shopify asks to be
- * retried, and turns every failure into a `TetherError`. The browser (`gql`, also `Tether.query()`) and the server
- * helpers (`request` with their own config) share it.
+ * retried, and turns every failure into a `TetherError`, an answer whose `data` lacks what its caller reads included
+ * (`DataCheck`). The browser (`gql`, and `query` for `Tether.query()`) and the server helpers (`request` with their own
+ * config) share it.
  */
 import { cfg, log } from './config.ts';
 import { toCountry, toLanguage } from './market-codes.ts';
 import { field, isRecord } from '../server/src/shared/json.ts';
+import { messageOf } from '../server/src/shared/error-message.ts';
 import type { TetherConfig } from './config.ts';
 import type { CountryCode, LanguageCode } from './market-codes.ts';
 
@@ -65,6 +67,44 @@ export type StorefrontConfig = Pick<
   TetherConfig,
   'domain' | 'token' | 'apiVersion' | 'country' | 'language' | 'maxAge' | 'retries'
 > & { fetch?: typeof fetch };
+/** Checks a query's `data` before its caller reads it as a `T`. */
+export type DataCheck<T> = (data: unknown) => data is T;
+/**
+ * The structure of JSON a check accepts: a `typeof` name, `'object'` for a plain object, `[item]` for a list of
+ * items, an object's fields, or a check of its own. Fields it doesn't name aren't checked, so a shape names only what
+ * its reader walks without a fallback.
+ */
+export type Shape =
+  | 'string'
+  | 'number'
+  | 'boolean'
+  | 'object'
+  | ((value: unknown) => boolean)
+  | readonly [Shape]
+  | { readonly [key: string]: Shape };
+
+/** @returns True when `value` has the structure `shape` describes. */
+export function matches(value: unknown, shape: Shape): boolean {
+  if (typeof shape === 'function') return shape(value);
+  if (typeof shape === 'string') return shape === 'object' ? isRecord(value) : typeof value === shape;
+  if (isShapeList(shape)) return Array.isArray(value) && value.every((item) => matches(item, shape[0]));
+  return isRecord(value) && Object.entries(shape).every(([key, inner]) => matches(value[key], inner));
+}
+
+/** `Array.isArray` doesn't narrow a readonly tuple out of a union. */
+const isShapeList = (shape: Shape): shape is readonly [Shape] => Array.isArray(shape);
+
+/** @returns The shape of `null` or a value with the structure `shape` describes. */
+export const orNull =
+  (shape: Shape) =>
+  (value: unknown): boolean =>
+    value === null || matches(value, shape);
+
+/** @returns A check that `data` has the structure `shape` describes, which `T` states. */
+export const shaped =
+  <T>(shape: Shape): DataCheck<T> =>
+  (data): data is T =>
+    matches(data, shape);
 /** `context: false` sends the query without `@inContext`. */
 interface RequestOptions {
   context?: boolean;
@@ -195,6 +235,12 @@ function toGraphQLResponse(json: unknown): GraphQLResponse | null {
   return { data, errors: errors.map(toGraphQLError) };
 }
 
+/** For a body that isn't JSON, isn't in the GraphQL shape or has `data` its caller's check refuses. */
+function invalidResponse(res: Response, conf: StorefrontConfig): TetherError {
+  const text = res.ok ? `Invalid response (${res.status})` : statusText(res.status, conf);
+  return new TetherError(text, { status: res.status });
+}
+
 function graphQLFailure(res: Response, errors: GraphQLError[], conf: StorefrontConfig): TetherError {
   const message = errors
     .map((error) => error.message)
@@ -205,22 +251,21 @@ function graphQLFailure(res: Response, errors: GraphQLError[], conf: StorefrontC
   return new TetherError(text, { status: res.status, errors });
 }
 
-type Attempt =
-  | { kind: 'data'; data: unknown }
-  | { kind: 'retry'; backoffMs: number }
-  | { kind: 'inventory-refused'; error: TetherError };
+type Attempt<T> =
+  { kind: 'data'; data: T } | { kind: 'retry'; backoffMs: number } | { kind: 'inventory-refused'; error: TetherError };
 
 /**
  * One request. Failures that retrying can't fix throw.
  *
  * @param canRetry False on the last attempt: a retryable failure then throws too.
  */
-async function attempt(
+async function attempt<T>(
   conf: StorefrontConfig,
   query: string,
   variables: Record<string, unknown>,
+  isData: DataCheck<T>,
   canRetry: boolean,
-): Promise<Attempt> {
+): Promise<Attempt<T>> {
   let res;
   try {
     res = await (conf.fetch ?? fetch)(endpoint(conf), {
@@ -230,7 +275,7 @@ async function attempt(
     });
   } catch (error) {
     if (canRetry) return { kind: 'retry', backoffMs: RETRY_BACKOFF_MS };
-    throw new TetherError(`Network error: ${error instanceof Error ? error.message : String(error)}`, {
+    throw new TetherError(`Network error: ${messageOf(error)}`, {
       code: 'NETWORK',
     });
   }
@@ -245,14 +290,10 @@ async function attempt(
   try {
     json = await res.json();
   } catch {
-    const text = res.ok ? `Invalid response (${res.status})` : statusText(res.status, conf);
-    throw new TetherError(text, { status: res.status });
+    throw invalidResponse(res, conf);
   }
   const body = toGraphQLResponse(json);
-  if (!body) {
-    const text = res.ok ? `Invalid response (${res.status})` : statusText(res.status, conf);
-    throw new TetherError(text, { status: res.status });
-  }
+  if (!body) throw invalidResponse(res, conf);
   const { data, errors = [] } = body;
   if (errors.length) {
     if (query.includes(INVENTORY_FIELD) && errors.some((error) => error.message.includes(INVENTORY_FIELD))) {
@@ -264,6 +305,7 @@ async function attempt(
     throw graphQLFailure(res, errors, conf);
   }
   if (!res.ok) throw new TetherError(statusText(res.status, conf), { status: res.status });
+  if (!isData(data)) throw invalidResponse(res, conf);
   return { kind: 'data', data };
 }
 
@@ -273,14 +315,15 @@ async function attempt(
  * written for the store's access leaves out inventory once the token turns out not to read it (`INVENTORY_FIELD`);
  * a fixed query text is the caller's own, and that refusal is its error.
  *
- * @typeParam T The shape of the query's `data`, which the caller's query text decides.
+ * @param isData Checks that `data` has what the caller then reads, so a malformed answer fails here.
  * @throws {TetherError} `NOT_CONFIGURED` without a domain or token, `NETWORK` when the store can't be reached,
- *   `HTTP_<status>` for an HTTP or GraphQL failure.
+ *   `HTTP_<status>` for an HTTP or GraphQL failure, or for `data` that `isData` refuses.
  */
 export async function request<T>(
   conf: StorefrontConfig,
   query: QueryText,
-  variables: Record<string, unknown> = {},
+  variables: Record<string, unknown>,
+  isData: DataCheck<T>,
   { context = true }: RequestOptions = {},
 ): Promise<T> {
   if (!conf.domain || !conf.token) {
@@ -290,11 +333,10 @@ export async function request<T>(
   let retries = 0;
   for (;;) {
     const sent = queryText(conf, query, { inventory: !storesWithoutInventory.has(store) }, context);
-    const outcome = await attempt(conf, sent, variables, retries < conf.retries);
+    const outcome = await attempt(conf, sent, variables, isData, retries < conf.retries);
     switch (outcome.kind) {
       case 'data':
-        // The query text decides the shape of `data`; the caller's `T` states it.
-        return outcome.data as T;
+        return outcome.data;
       case 'inventory-refused':
         if (typeof query === 'string') throw outcome.error;
         log(`the token can't read inventory: ${INVENTORY_FIELD} is left out from now on`);
@@ -310,8 +352,25 @@ export async function request<T>(
 }
 
 /** `request` with the browser's shared config. */
-export function gql<T>(query: QueryText, variables?: Record<string, unknown>, options?: RequestOptions): Promise<T> {
-  return request<T>(cfg, query, variables, options);
+export function gql<T>(
+  query: QueryText,
+  variables: Record<string, unknown>,
+  isData: DataCheck<T>,
+  options?: RequestOptions,
+): Promise<T> {
+  return request(cfg, query, variables, isData, options);
+}
+
+/** The check of `Tether.query()` and the server's `query()`, whose callers read `data` themselves. */
+export const hasData = (data: unknown): data is object => typeof data === 'object' && data !== null;
+
+/** `Tether.query()`: the caller's own query text decides the shape of `data`, and the caller's `T` states it. */
+export function query<T>(
+  text: QueryText,
+  variables: Record<string, unknown> = {},
+  options?: RequestOptions,
+): Promise<T> {
+  return gql(text, variables, hasData, options) as Promise<T>;
 }
 
 /**

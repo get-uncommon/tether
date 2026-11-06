@@ -4,7 +4,7 @@
  * Nothing is delivered before the Customer Privacy API allows analytics.
  */
 import { cfg, log, reportError } from './config.ts';
-import { gql } from './client.ts';
+import { gql, shaped } from './client.ts';
 import type { AnalyticsConfig } from './config.ts';
 
 export type EventPayload = Record<string, unknown>;
@@ -211,7 +211,12 @@ function loadScript(src: string): void {
 export async function startShopifyAnalytics(isProductPage: () => boolean): Promise<AnalyticsBus> {
   const existing = shopifyGlobal();
   if (existing?.analytics) return existing.analytics;
-  const data = await gql<{ shop: { id: string } }>('query TetherShopId { shop { id } }', {}, { context: false });
+  const data = await gql(
+    'query TetherShopId { shop { id } }',
+    {},
+    shaped<{ shop: { id: string } }>({ shop: { id: 'string' } }),
+    { context: false },
+  );
   const shopify = shopifyGlobal() ?? {};
   page().Shopify = shopify;
   shopify.country = cfg.country ?? 'US';

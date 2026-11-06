@@ -209,9 +209,16 @@ text formatting, lists, tables, images, links, inline `style` and video embeds s
 handlers, `javascript:` links, `<style>` blocks, form fields, `id`s and `class`es (so a description
 can't borrow your overlay or modal classes) are removed; other elements are unwrapped, so their text
 stays; inline styles lose `position`, `top`/`right`/`bottom`/`left`/`inset`, `z-index`, transforms
-(`transform`, `translate`, `rotate`, `scale`), `offset-*`, negative margins, values in viewport
-units (`100vw`) and any value with `url(`, so a description can't be laid over the page or load from
-elsewhere. Content wider than the element still overflows beside it, as in any HTML (Tether doesn't
+(`transform`, `translate`, `rotate`, `scale`), `offset-*`, `-webkit-box-reflect`, negative
+margins, `text-indent`, `letter-spacing` and `word-spacing`, values in viewport units (`100vw`) and
+any value with `url(`, so a description can't be laid over the page or load from elsewhere.
+Outlines, `box-shadow`, `text-shadow`, `filter`, border-image and mask-border outsets, text
+decoration (thickness and underline offset included) and `-webkit-text-stroke` paint beyond the
+element, so they are kept only while every number in them, apart from colours and colour filters (`brightness()`, `opacity()`,
+`hue-rotate()` and the like), is a `px` length of
+at most 40px or zero: one in `em`, `%`, any other unit or none (`border-image-outset: 2`), or with
+`var()`/`calc()`, removes the declaration (`box-shadow: 0 0 1em #0003` goes; write
+`0 0 16px #0003`). Content wider than the element still overflows beside it, as in any HTML (Tether doesn't
 clip it, which would cut off wide tables and embeds); add `contain: paint` to the element in your
 own CSS if you want it clipped;
 iframes are kept only from YouTube (`www.youtube.com`, `www.youtube-nocookie.com`), Vimeo

@@ -20,7 +20,7 @@
  * the visitor's IP only comes from the site's own server (see README).
  */
 import { MARKET_SOURCES, cfg, parseMarkets } from './config.ts';
-import { gql } from './client.ts';
+import { gql, shaped } from './client.ts';
 import { toCountry, toLanguage } from './market-codes.ts';
 import type { MarketsConfig } from './config.ts';
 import type { CountryCode, LanguageCode } from './market-codes.ts';
@@ -279,12 +279,18 @@ const LOCALIZATION_QUERY = `query TetherLocalization {
   }
 }`;
 
+/** A country with the code, name and currency the country select and binds read. */
+const COUNTRY = { isoCode: 'string', name: 'string', currency: 'object' } as const;
+const isLocalizationAnswer = shaped<{ localization: Localization }>({
+  localization: { country: COUNTRY, availableCountries: [COUNTRY] },
+});
+
 /**
  * The countries the store sells to (Shopify Markets), with their currency. Cached per page; a failed request is not
  * cached, so the next call tries again.
  */
 export function getLocalization(): Promise<Localization> {
-  localizationPromise ??= gql<{ localization: Localization }>(LOCALIZATION_QUERY).then(
+  localizationPromise ??= gql(LOCALIZATION_QUERY, {}, isLocalizationAnswer).then(
     (data) => data.localization,
     (error: unknown) => {
       localizationPromise = null;

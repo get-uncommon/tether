@@ -4,10 +4,11 @@
  * new one with the same input, so the visitor's click still lands.
  */
 import { cfg, log } from '../config.ts';
-import { gql, unwrap, TetherError } from '../client.ts';
+import { gql, orNull, shaped, unwrap, TetherError } from '../client.ts';
 import { cartFragment } from '../fragments.ts';
 import { GID } from '../selling-plans.ts';
 import { toAttributes } from '../dom.ts';
+import { CART } from './cart-shape.ts';
 import { savedCartId, forgetSavedCart, setWarnings } from './store.ts';
 import type { CartWarning } from '../config.ts';
 import type { QueryText, UserError } from '../client.ts';
@@ -35,10 +36,10 @@ export interface CartLineInput {
   attributes?: Attribute[];
 }
 
-/** What every cart mutation answers. */
+/** What every cart mutation answers. Its lists are read with a fallback, so `isPayloadOf` checks the cart alone. */
 interface CartPayload {
   cart: ShopifyCart | null;
-  userErrors: UserError[];
+  userErrors?: UserError[] | null;
   warnings?: CartWarning[];
 }
 
@@ -47,6 +48,10 @@ interface CartPayload {
  * this message (no `extensions.code`). A user error on the `cartId` field is recognised by its shape instead.
  */
 const UNKNOWN_CART_MESSAGE = /does not exist|not found|invalid id/i;
+
+/** @returns A check of a mutation's answer: a `null` payload (which `unwrap` refuses), or one with a cart or `null`. */
+const isPayloadOf = (name: string) =>
+  shaped<Record<string, CartPayload | null>>({ [name]: orNull({ cart: orNull(CART) }) });
 
 /**
  * @returns True when `error` says Shopify doesn't have the cart, false for any other failure (the network, the token,
@@ -106,7 +111,7 @@ async function send(
   inner: string,
   variables: Record<string, unknown>,
 ): Promise<ShopifyCart | null> {
-  const data = await gql<Record<string, CartPayload | null | undefined>>(mutationText(name, args, inner), variables);
+  const data = await gql(mutationText(name, args, inner), variables, isPayloadOf(name));
   const payload = unwrap(data[name], name);
   setWarnings(payload.warnings ?? []);
   return payload.cart;
@@ -167,18 +172,20 @@ export async function mutateCart({
 
 /** @returns The cart, `null` when Shopify doesn't have it (expired or checked out). */
 export async function fetchCart(id: string): Promise<ShopifyCart | null> {
-  const data = await gql<{ cart: ShopifyCart | null }>(
+  const data = await gql(
     (access) => `query TetherCart($id: ID!) { cart(id: $id) { ...TetherCart } }\n${cartFragment(access)}`,
     { id },
+    shaped<{ cart: ShopifyCart | null }>({ cart: orNull(CART) }),
   );
   return data.cart;
 }
 
 /** @returns The cart's current checkout URL, `null` when Shopify doesn't have the cart. */
 export async function fetchCheckoutUrl(id: string): Promise<string | null> {
-  const data = await gql<{ cart: { checkoutUrl: string } | null }>(
+  const data = await gql(
     'query TetherCheckout($id: ID!) { cart(id: $id) { checkoutUrl } }',
     { id },
+    shaped<{ cart: { checkoutUrl: string } | null }>({ cart: orNull({ checkoutUrl: 'string' }) }),
   );
   return data.cart?.checkoutUrl ?? null;
 }

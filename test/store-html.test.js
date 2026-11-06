@@ -174,7 +174,7 @@ test('an outline or shadow large enough to paint over the page is removed; the l
   );
 });
 
-test('outlines, shadows, filters, outsets and text decoration are removed past a few dozen pixels or in any unit but px', () => {
+test('outlines, shadows, filters, outsets and text decoration are removed past a few dozen pixels or in any unit but px, unitless and % included', () => {
   const declarations = [
     'outline-offset: 5000px',
     'outline: 5e3px solid red',
@@ -191,6 +191,16 @@ test('outlines, shadows, filters, outsets and text decoration are removed past a
     'text-underline-offset: 5000px',
     'text-decoration-thickness: 5000px',
     '-webkit-text-stroke: 5000px red',
+    'border-image: linear-gradient(#fff, #fff) 1 / 40px / 100',
+    'border-image-outset: 100',
+    'mask-border-outset: 50',
+    '-webkit-mask-box-image-outset: 10',
+    'text-underline-offset: 5000%',
+    'text-decoration-thickness: 3000%',
+    'text-decoration: underline 10%',
+    '-webkit-box-reflect: below 0px',
+    'text-indent: -2000px',
+    'letter-spacing: -1000px',
   ];
   const box = render(declarations.map((declaration) => `<p style="${declaration}; color: red">x</p>`).join(''));
   assert.deepEqual(
@@ -207,6 +217,9 @@ test('a modest outline, shadow or filter on an image or a callout looks as writt
     'filter: drop-shadow(0 2px 8px #0003) hue-rotate(90deg) brightness(110%);',
     'text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 2px;',
     'box-shadow: -40px 0 #000;',
+    'outline: 0 none; box-shadow: 0 0 0 0 rgb(0 0 0 / 50%);',
+    'border-image-outset: 0; text-decoration-thickness: 0%;',
+    'text-indent: 2em; letter-spacing: 0.05em;',
   ];
   const box = render(styles.map((style) => `<img src="https://cdn.shopify.com/a.png" style="${style}">`).join(''));
   assert.deepEqual(

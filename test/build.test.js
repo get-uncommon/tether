@@ -6,6 +6,7 @@ import { readFile } from 'node:fs/promises';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { find, graphqlRequest, jsonResponse, operationName, product } from './fixtures.js';
+import { waitFor } from '../server/test/mocks.js';
 
 const DIST = join(dirname(fileURLToPath(import.meta.url)), '..', '.test-dist');
 let win;
@@ -61,14 +62,10 @@ before(async () => {
   });
   win = dom.window;
   await new Promise((r) => win.addEventListener('load', r));
-  // Wait for the markets part (its own file) instead of a fixed time: CI runners can be slow.
-  for (
-    let i = 0;
-    i < 100 && !(win.Tether?.__parts?.markets && (win.document.querySelector('select')?.options.length ?? 0) > 1);
-    i++
-  ) {
-    await new Promise((r) => setTimeout(r, 50));
-  }
+  await waitFor(
+    () => Boolean(win.Tether?.__parts?.markets) && (win.document.querySelector('select')?.options.length ?? 0) > 1,
+    'the markets part (its own file) to fill the country select',
+  );
 });
 
 test('the built script renders a product (and its GraphQL is minified but valid-looking)', () => {

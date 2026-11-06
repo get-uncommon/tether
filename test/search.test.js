@@ -1,8 +1,9 @@
 // Search as you type: input → predictive query → rendered results, keyboard, errors.
-import { test, before } from 'node:test';
+import { test, before, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
 import { captureTetherWarnings, detailOf, find, graphqlRequest, jsonResponse, operationName } from './fixtures.js';
+import { waitFor } from '../server/test/mocks.js';
 
 // The failures these tests cause on purpose are checked through onError and states, not the console.
 captureTetherWarnings();
@@ -47,7 +48,19 @@ globalThis.fetch = async (_url, init) => {
   });
 };
 
-const tick = (ms = 30) => new Promise((resolve) => setTimeout(resolve, ms));
+/**
+ * Types `value` and runs the search timer at once (`searchDelay` is 0), for input that must not start a search: a
+ * search that starts sets the `loading` state before its first await.
+ */
+function typeAndRunTimer(input, value) {
+  mock.timers.enable({ apis: ['setTimeout'] });
+  try {
+    type(input, value);
+    mock.timers.runAll();
+  } finally {
+    mock.timers.reset();
+  }
+}
 const errors = [];
 let mountSearch;
 
@@ -93,13 +106,12 @@ test('typing sends one predictive query and renders products, queries and collec
 
   const searches = [];
   root.addEventListener('tether:search', (event) => searches.push(detailOf(event)));
-  type(input, 'c');
-  await tick();
+  typeAndRunTimer(input, 'c');
   assert.equal(calls.length, 0, 'below the minimum length');
   assert.equal(root.getAttribute('tether-search-state'), 'idle');
 
   type(input, 'cof');
-  await tick();
+  await waitFor(() => root.getAttribute('tether-search-state') === 'ready', 'the results');
   assert.equal(calls.length, 1);
   assert.deepEqual(calls[0].variables, { q: 'cof', limit: 4 });
   assert.equal(root.getAttribute('tether-search-state'), 'ready');
@@ -120,8 +132,8 @@ test('typing sends one predictive query and renders products, queries and collec
   assert.equal(find('[tether-show="search-empty"]', root).style.display, 'none');
   assert.equal(searches.at(-1).term, 'cof');
 
-  type(input, 'cof');
-  await tick();
+  typeAndRunTimer(input, 'cof');
+  assert.equal(root.getAttribute('tether-search-state'), 'ready');
   assert.equal(calls.length, 1, 'the same term is not searched again');
 });
 
@@ -145,7 +157,7 @@ test('a failed search sets the error state and reaches onError', async () => {
   const root = find('[tether-search]');
   failNext = true;
   type(root.querySelector('input'), 'tea');
-  await tick(60);
+  await waitFor(() => root.getAttribute('tether-search-state') === 'error', 'the error state');
   assert.equal(root.getAttribute('tether-search-state'), 'error');
   assert.deepEqual(errors, ['search']);
 });

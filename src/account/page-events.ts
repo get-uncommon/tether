@@ -43,7 +43,7 @@ function fieldsOf(form: HTMLFormElement): Record<string, string> {
 }
 
 /** @returns What to tell the customer: Shopify's own messages when it refused the input. */
-function messageOf(error: unknown): string {
+function customerMessage(error: unknown): string {
   const userErrors = error instanceof TetherError ? (error.userErrors ?? []) : [];
   const message = userErrors.map((userError) => userError.message).join(' ');
   if (message) return message;
@@ -71,7 +71,7 @@ async function act(el: HTMLElement, change: () => Promise<void>): Promise<'saved
   } catch (error) {
     el.setAttribute(attr('form-state'), 'error');
     errorBoxes.forEach((box) => {
-      setText(box, messageOf(error));
+      setText(box, customerMessage(error));
     });
     return 'error';
   } finally {

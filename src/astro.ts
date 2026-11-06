@@ -20,6 +20,7 @@ import { DEFAULTS } from './config.ts';
 import type { TetherOptions } from './config.ts';
 import type { StorefrontOptions } from './server.ts';
 import { isSecretShopifyToken, STORE_ENV_NAMES } from './shopify-values.ts';
+import { messageOf } from '../server/src/shared/error-message.ts';
 
 // Astro isn't a dependency, so the parts of its integration API this file uses are described here.
 interface AstroLogger {
@@ -202,9 +203,7 @@ async function declareEnvSchema(setup: AstroConfigSetup) {
     });
   } catch (error) {
     // Astro versions with `envField` but without a stable `env` option refuse it; the variables still work unchecked.
-    setup.logger.warn(
-      `.env variables not declared in astro:env: ${error instanceof Error ? error.message : String(error)}`,
-    );
+    setup.logger.warn(`.env variables not declared in astro:env: ${messageOf(error)}`);
   }
 }
 

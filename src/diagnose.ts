@@ -6,7 +6,7 @@
  *   await Tether.diagnose({ silent: true })   // just the object
  */
 import { cfg, isConfigured } from './config.ts';
-import { gql, endpoint } from './client.ts';
+import { gql, endpoint, shaped } from './client.ts';
 import { sel, get, qsa } from './dom.ts';
 import { getProduct } from './loader.ts';
 import { allPlans } from './selling-plans.ts';
@@ -132,15 +132,18 @@ function apiVersionProblem({ ok, monthsLeft, note }: ApiVersionStatus): Problem 
   return { level: ok ? 'warn' : 'error', message: `apiVersion ${cfg.apiVersion}: ${note}` };
 }
 
+const isShopAnswer = shaped<{
+  shop: { name: string; primaryDomain: { url: string }; paymentSettings: { currencyCode: string } };
+}>({ shop: { name: 'string', primaryDomain: { url: 'string' }, paymentSettings: { currencyCode: 'string' } } });
+
 async function checkStorefront(): Promise<StorefrontCheck> {
   if (!isConfigured()) return { kind: 'not-configured' };
   const startedAt = Date.now();
   try {
-    const data = await gql<{
-      shop: { name: string; primaryDomain: { url: string }; paymentSettings: { currencyCode: string } };
-    }>(
+    const data = await gql(
       'query TetherDiagnose { shop { name primaryDomain { url } paymentSettings { currencyCode } } }',
       {},
+      isShopAnswer,
       { context: false },
     );
     const shop = {

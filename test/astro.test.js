@@ -15,6 +15,7 @@ import {
   operationName,
   product,
 } from './fixtures.js';
+import { waitFor } from '../server/test/mocks.js';
 
 // The failures these tests cause on purpose are checked through onError, states and events, not the console.
 captureTetherWarnings();
@@ -105,7 +106,11 @@ async function seedCart(cart) {
   await Tether.cart.init();
 }
 
-const tick = (ms = 40) => new Promise((r) => setTimeout(r, ms));
+/** For a check that nothing more happens: a request that shouldn't go out leaves no condition to wait for. */
+const settle = (ms = 60) => new Promise((r) => setTimeout(r, ms));
+/** Waits until the first `selector` on the page has rendered. */
+const rendered = (selector = '[tether-product]') =>
+  waitFor(() => document.querySelector(selector)?.getAttribute('tether-state') === 'ready', `${selector} to render`);
 let Tether;
 let server;
 /** The live config: `Tether.config` is a read-only view of it. */
@@ -210,7 +215,7 @@ test('hydration: server-rendered product renders with no request, then one backg
   const root = find('[tether-product]');
   assert.equal(root.getAttribute('tether-state'), 'ready', 'rendered from the server data, no loading state');
   assert.match(find('#price').textContent, /30/);
-  await tick(60);
+  await waitFor(() => /25/.test(find('#price').textContent ?? ''), 'the background refresh');
   assert.equal(calls.filter((c) => c.op === 'TetherProducts').length, 1, 'exactly one background refresh');
   assert.match(find('#price').textContent, /25/, 'live price after the refresh');
 });
@@ -224,13 +229,13 @@ test('hydration: the next page of a View Transition visit keeps the copy loaded 
   // page 1 refreshed the product a moment ago (the test above, or here: a fresh mount)
   document.body.innerHTML = page(shop.hydrate(old));
   Tether.mount(document);
-  await tick(60);
+  await waitFor(() => /22/.test(find('#price').textContent ?? ''), "page 1's refresh");
   const before = calls.filter((c) => c.op === 'TetherProducts').length;
   // page 2 carries the same stale build data
   Tether.unmount();
   document.body.innerHTML = page(shop.hydrate(old));
   Tether.mount(document);
-  await tick(60);
+  await settle();
   assert.equal(calls.filter((c) => c.op === 'TetherProducts').length, before, 'no second refresh');
   assert.match(find('#price').textContent, /22/, 'shows the live copy, not the build');
 });
@@ -244,7 +249,7 @@ test('hydration: a server-rendered image with the same URL is not loaded again',
   document.body.innerHTML = `${shop.hydrate(p)}<div tether-product="coffee-box"><img id="im" tether-bind="image" src="${src}" alt="x"></div>`;
   const img = find('#im');
   Tether.mount(document);
-  await tick(60);
+  await settle();
   assert.equal(find('#im'), img);
   assert.equal(img.getAttribute('src'), src, 'src untouched');
 });
@@ -253,7 +258,7 @@ test('hydration: data made for another market is ignored (Tether fetches its own
   const shop = server.createStorefront({ domain: 'shop.test', token: 't', country: 'DE' });
   document.body.innerHTML = page(shop.hydrate(product));
   Tether.mount(document);
-  await tick();
+  await waitFor(() => calls.some((c) => c.op === 'TetherProducts'), 'the request for this market');
   assert.equal(calls.filter((c) => c.op === 'TetherProducts').length, 1);
 });
 
@@ -262,7 +267,7 @@ test('hydration: revalidate:false skips the background refresh', async () => {
   const shop = server.createStorefront({ domain: 'shop.test', token: 't', country: 'NL' });
   document.body.innerHTML = page(shop.hydrate(product));
   Tether.mount(document);
-  await tick(60);
+  await settle();
   assert.equal(calls.length, 0);
   await Tether.init({ domain: 'shop.test', token: 't', autoMount: false, country: 'NL', locale: 'nl-NL' });
 });
@@ -276,8 +281,7 @@ test('astro:page-load mounts the new page; astro:before-swap closes the cart', a
   assert.equal(Tether.cart.isOpen(), false);
   document.body.innerHTML = '<div tether-product="coffee-box"><h1 tether-bind="title"></h1></div>';
   document.dispatchEvent(new window.Event('astro:page-load'));
-  await tick();
-  assert.equal(find('h1').textContent, 'Coffee Box');
+  await waitFor(() => find('h1').textContent === 'Coffee Box', 'the new page to mount');
 });
 
 test('cart.subscribe gives the cart now and after every change; unsubscribe stops it', async () => {
@@ -411,7 +415,7 @@ test('tether-show: elements hidden before the script ran (class, inline style, h
       <span id="d" class="hide" tether-show="out-of-stock">D</span>
     </div>`;
   Tether.mount(document);
-  await tick(60);
+  await rendered();
   const vis = (id) => window.getComputedStyle(find(`#${id}`)).display !== 'none';
   assert.ok(vis('a'), 'class-hidden shown');
   assert.ok(vis('b'), 'inline display:none shown');
@@ -477,7 +481,7 @@ test('server initialState() matches what the browser shows first (variant, price
     document.body.innerHTML = `<div tether-product="${p.handle}"><span id="price" tether-bind="price"></span>
       ${keys.map((k) => `<i data-k="${k}" tether-show="${k}"></i>`).join('')}</div>`;
     Tether.mount(document);
-    await tick(20);
+    await rendered();
     assert.equal(
       find('#price').textContent,
       shop.formatMoney(st.price),
@@ -544,7 +548,7 @@ test('another language: translated option names (Size -> Größe) still match th
   Tether.clearProductCache();
   Tether.primeProduct(de);
   Tether.mount(document);
-  await tick(20);
+  await rendered();
   const btns = findAll('[tether-option-list] [tether-option-value]');
   assert.equal(btns.length, 2, 'values from the translated product');
   btns[1].click();
@@ -568,7 +572,7 @@ test('cart: quick +/+ clicks add up (each builds on the last one asked for), the
   plus.click();
   assert.equal(find('[tether-line="quantity"]', line).textContent, '3', 'shown at once');
   assert.ok(line.classList.contains('is-busy'));
-  await tick(150);
+  await waitFor(() => !find('[tether-cart-lines] > *').classList.contains('is-busy'), 'the update to finish');
   const updates = calls.filter((c) => c.op === 'Tether_cartLinesUpdate').map((c) => c.variables.lines[0].quantity);
   assert.deepEqual(updates, [3], 'only the latest target is sent');
   assert.equal(Tether.cart.lines[0].quantity, 3);
@@ -583,7 +587,7 @@ test('cart: + + + - while Shopify answers slowly: the count never steps past the
     const { query, variables } = graphqlRequest(init);
     if (/cartLinesUpdate/.test(query)) {
       sent.push(variables.lines[0].quantity);
-      await tick(30);
+      await new Promise((r) => setTimeout(r, 30)); // a slow network, so clicks overlap
       const c = cartFrom([{ merchandiseId: product.variants.nodes[0].id, quantity: variables.lines[0].quantity }]);
       return jsonResponse({ data: { cartLinesUpdate: { cart: c, userErrors: [], warnings: [] } } });
     }
@@ -598,12 +602,15 @@ test('cart: + + + - while Shopify answers slowly: the count never steps past the
     const off = Tether.cart.subscribe((c) => counts.push(c?.totalQuantity));
     const plus = find('[tether-line-plus]');
     plus.click();
-    await tick(5); // the first one is on its way
+    await waitFor(() => sent.length === 1, 'the first update to be sent');
     plus.click();
     plus.click();
     find('[tether-line-minus]').click();
     assert.equal(find('[tether-line="quantity"]').textContent, '3');
-    await tick(150);
+    await waitFor(
+      () => sent.length === 2 && !find('[tether-cart-lines] > *').classList.contains('is-busy'),
+      'the latest update to finish',
+    );
     off();
     assert.deepEqual(sent, [2, 3], 'the first, then only the latest');
     assert.equal(find('[tether-cart-count]').textContent, '3');
@@ -650,7 +657,7 @@ test('options: a value no variant has is ignored; an impossible combination keep
   Tether.primeProduct(two);
   document.body.innerHTML = '<div tether-product="coffee-box"></div>';
   Tether.mount(document);
-  await tick(20);
+  await rendered();
   const scope = Tether.getScope(document.querySelector('[tether-product]'));
   scope.select('Size', '1kg');
   assert.equal(scope.variant.id, 'gid://shopify/ProductVariant/92');
@@ -675,11 +682,11 @@ test('variantUrl: the choice goes into ?variant= after a change (not on first re
   Tether.primeProduct(product);
   document.body.innerHTML = '<div tether-product="coffee-box"></div>';
   Tether.mount(document);
-  await tick(30);
+  await rendered();
+  await settle(); // time for the extras part to write a URL, which it must not
   assert.equal(window.location.search, '', 'nothing on first render');
   Tether.getScope(document.querySelector('[tether-product]')).select('Size', '1kg');
-  await tick(20); // written by the extras part
-  assert.match(window.location.search, /variant=\d+/);
+  await waitFor(() => /variant=\d+/.test(window.location.search), 'the extras part to write the URL');
   await Tether.init({ domain: 'shop.test', token: 't', autoMount: false, country: 'NL', locale: 'nl-NL' });
   window.history.replaceState(null, '', '/');
 });
@@ -688,8 +695,7 @@ test('tether-show="list-empty" with a hidden attribute is shown for an empty lis
   document.body.innerHTML =
     '<div tether-products="nothing-matches"><div tether-list><div></div></div><p id="e" tether-show="list-empty" hidden>None</p></div>';
   Tether.mount(document);
-  await tick(80);
-  assert.notEqual(window.getComputedStyle(find('#e')).display, 'none');
+  await waitFor(() => window.getComputedStyle(find('#e')).display !== 'none', 'list-empty to show');
 });
 
 test('initialState has has-savings, plenty-in-stock, a plain unavailable map, and honours lowStock', () => {
@@ -791,8 +797,8 @@ test('search as you type: results while typing, arrow keys, Escape, stale answer
       <p tether-show="search-empty" hidden>Nothing</p>
     </div></form>`;
   Tether.mount(document);
-  await tick(30); // the part loads
   const input = find('[tether-search-input]');
+  await waitFor(() => input.getAttribute('role') === 'combobox', 'the search part to load');
   assert.ok(input instanceof window.HTMLInputElement);
   const type = (v) => {
     input.value = v;
@@ -801,9 +807,8 @@ test('search as you type: results while typing, arrow keys, Escape, stale answer
   type('c');
   type('co');
   type('cof');
-  await tick(250);
   const root = find('[tether-search]');
-  assert.equal(root.getAttribute('tether-search-state'), 'ready');
+  await waitFor(() => root.getAttribute('tether-search-state') === 'ready', 'the results');
   assert.equal(calls.filter((c) => c.op === 'TetherPredictive').length, 1, 'debounced: one request');
   const link = find('[tether-search-products] a');
   assert.equal(find('[tether-search-bind="title"]', link).textContent, product.title);
@@ -815,8 +820,7 @@ test('search as you type: results while typing, arrow keys, Escape, stale answer
   input.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape' }));
   assert.equal(input.getAttribute('aria-expanded'), 'false');
   type('zzz');
-  await tick(250);
-  assert.equal(root.getAttribute('tether-search-state'), 'empty');
+  await waitFor(() => root.getAttribute('tether-search-state') === 'empty', 'no results');
   assert.notEqual(window.getComputedStyle(find('[tether-show="search-empty"]')).display, 'none');
 });
 
@@ -826,8 +830,10 @@ test('a page built for another market: html.tether-market-pending until the live
   document.body.innerHTML = `${de.hydrate(product)}<div tether-product="coffee-box"><span tether-bind="price">built price</span></div>`;
   Tether.mount(document);
   assert.ok(document.documentElement.classList.contains('tether-market-pending'));
-  await tick(80);
-  assert.ok(!document.documentElement.classList.contains('tether-market-pending'));
+  await waitFor(
+    () => !document.documentElement.classList.contains('tether-market-pending'),
+    'the live prices for this market',
+  );
 });
 
 // ---- analytics, customer accounts -------------------------------------------
@@ -844,7 +850,7 @@ test("analytics: Tether's own events become GA4 dataLayer events (view_item, add
   Tether.primeProduct(product);
   document.body.innerHTML = '<div tether-product="coffee-box"></div>';
   Tether.mount(document);
-  await tick(20);
+  await rendered();
   const root = find('[tether-product]');
   const { ownEvent } = await import('../src/dom.ts');
   // Look-alike events from another script, whatever their detail, send nothing and don't throw.
@@ -997,7 +1003,7 @@ test('tether-products="url:q": a search results page on a static site', async ()
   calls.length = 0;
   document.body.innerHTML = '<div tether-products="url:q"><div tether-list><div></div></div></div>';
   Tether.mount(document);
-  await tick(60);
+  await waitFor(() => calls.some((c) => c.op === 'TetherSearch'), 'the search request');
   const search = calls.find((c) => c.op === 'TetherSearch');
   assert.equal(search?.variables.query, 'tee shirt');
   window.history.replaceState(null, '', '/');
@@ -1163,7 +1169,7 @@ test('account pages: order page with returns, subscriptions with actions, addres
     assert.ok(!visible($('#sl')) && !visible($('#se')));
     assert.equal($('#resume').disabled, true);
     $('#pause').click();
-    await tick(60);
+    await waitFor(() => $('[tether-subscription-bind="status"]').textContent === 'paused', 'the pause to finish');
     assert.deepEqual(posts.find((p) => p.path === '/subscription').body, {
       id: 'gid://shopify/SubscriptionContract/5',
       action: 'pause',
@@ -1174,7 +1180,7 @@ test('account pages: order page with returns, subscriptions with actions, addres
     // Return request: only lines with a quantity.
     $('[tether-return-quantity]').value = '1';
     $('#ret').click();
-    await tick(60);
+    await waitFor(() => visible($('#done')), 'the return request to finish');
     assert.deepEqual(posts.find((p) => p.path === '/return').body, {
       orderId: 'gid://shopify/Order/7',
       lines: [
@@ -1189,8 +1195,7 @@ test('account pages: order page with returns, subscriptions with actions, addres
     $('[tether-address-form]').dispatchEvent(new window.Event('submit', { cancelable: true, bubbles: true })); // Enter twice
     document.removeEventListener('submit', router);
     assert.equal(routerSaw, true, 'account forms are handled in the capture phase, before a router');
-    await tick(40);
-    assert.equal($('[tether-address-form]').getAttribute('tether-form-state'), 'error');
+    await waitFor(() => $('[tether-address-form]').getAttribute('tether-form-state') === 'error', "Shopify's error");
     assert.equal($('[tether-address-form] [tether-form-error]').textContent, 'City is required');
     assert.equal(posts.filter((p) => p.path === '/address').length, 1, 'a second submit while sending sends nothing');
     // Profile form prefilled.
