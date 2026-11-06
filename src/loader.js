@@ -6,6 +6,7 @@
 import { cfg, log } from './config.js';
 import { gql, TetherError } from './client.js';
 import { productFragment, collectionFields } from './fragments.js';
+import { productKey } from './shopify-values.js';
 
 const productCache = new Map(); // key -> Promise<product>
 let pending = [];
@@ -18,14 +19,7 @@ let generation = 0;
 const isGid = (v) => typeof v === 'string' && v.startsWith('gid://');
 
 /** Accepts a handle, numeric id, gid or a full product URL. */
-export function normalizeProductKey(raw) {
-  const v = String(raw ?? '').trim();
-  if (!v) return null;
-  if (isGid(v)) return v;
-  if (/^\d+$/.test(v)) return `gid://shopify/Product/${v}`;
-  const m = v.match(/\/products\/([^/?#]+)/);
-  return m ? m[1] : v;
-}
+export const normalizeProductKey = productKey;
 
 /** Put a product we already have (from a collection query) in the cache. */
 export function primeProduct(product) {

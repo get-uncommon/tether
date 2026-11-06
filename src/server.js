@@ -15,43 +15,17 @@ import { productFragment, collectionFields } from './fragments.js';
 import * as plans from './selling-plans.js';
 import { imageUrl, formatPercent } from './dom.js';
 import { initialState } from './initial.js';
+import { STORE_ENV_NAMES, formatMoney, productKey, productUrl as productUrlFor } from './shopify-values.js';
 
-export { imageUrl, initialState, formatPercent };
+export { imageUrl, initialState, formatPercent, formatMoney, productKey };
 
 export { TetherError, plans, withContext };
 
 const isGid = (v) => typeof v === 'string' && v.startsWith('gid://');
 
-/** Handle, numeric id, gid or product URL -> handle or gid. */
-export function productKey(raw) {
-  const v = String(raw ?? '').trim();
-  if (!v) return null;
-  if (isGid(v)) return v;
-  if (/^\d+$/.test(v)) return `gid://shopify/Product/${v}`;
-  const m = v.match(/\/products\/([^/?#]+)/);
-  return m ? m[1] : v;
-}
-
-/** Money as text, e.g. formatMoney({ amount: '30.0', currencyCode: 'EUR' }, 'nl-NL') -> "€ 30,00". */
-export function formatMoney(money, locale) {
-  if (!money) return '';
-  const amount = parseFloat(money.amount);
-  if (Number.isNaN(amount)) return '';
-  try {
-    return new Intl.NumberFormat(locale || undefined, { style: 'currency', currency: money.currencyCode }).format(
-      amount,
-    );
-  } catch {
-    return `${money.currencyCode} ${amount.toFixed(2)}`;
-  }
-}
-
 /** productPath '/products' -> /products/<handle>; templates '/p?handle={handle}' and '{id}' work too. */
 export function productUrl(handle, { productPath = '/product', id } = {}) {
-  if (!/\{(handle|id)\}/.test(productPath)) return `${productPath.replace(/\/$/, '')}/${handle}`;
-  return productPath
-    .replace(/\{handle\}/g, encodeURIComponent(handle || ''))
-    .replace(/\{id\}/g, encodeURIComponent(id ? String(id).split('/').pop() : ''));
+  return productUrlFor(productPath, handle, id);
 }
 
 /** JSON for a <script> tag: escapes < so product text can never close the tag. */
@@ -61,18 +35,12 @@ const safeJson = (v) =>
     .replace(/\u2028/g, '\\u2028')
     .replace(/\u2029/g, '\\u2029');
 
-// createStorefront(import.meta.env) works too: these env names map to domain and token.
-const ENV = {
-  domain: ['PUBLIC_SHOPIFY_DOMAIN', 'PUBLIC_SHOPIFY_STORE_DOMAIN', 'SHOPIFY_DOMAIN'],
-  token: ['PUBLIC_SHOPIFY_STOREFRONT_TOKEN', 'PUBLIC_SHOPIFY_STOREFRONT_ACCESS_TOKEN', 'SHOPIFY_STOREFRONT_TOKEN'],
-};
-
 export function createStorefront(options = {}) {
   const known = Object.fromEntries(
     Object.entries(options).filter(([k]) => k in DEFAULTS || k === 'fetch' || k === 'pageSize' || k === 'siteUrl'),
   );
   const conf = { ...DEFAULTS, ...known };
-  for (const [key, names] of Object.entries(ENV))
+  for (const [key, names] of Object.entries(STORE_ENV_NAMES))
     if (!conf[key]) conf[key] = names.map((n) => options[n]).find(Boolean) || '';
   conf.domain = String(conf.domain || '')
     .replace(/^https?:\/\//, '')

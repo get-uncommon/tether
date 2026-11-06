@@ -15,6 +15,7 @@ import * as product from './product.js';
 import * as collection from './collection.js';
 import * as mounting from './mounting.js';
 import * as marketCodes from './market-codes.js';
+import * as shopifyValues from './shopify-values.js';
 
 const { cfg } = config;
 
@@ -32,6 +33,7 @@ export const coreModules = {
   'collection.js': collection,
   'mounting.js': mounting,
   'market-codes.js': marketCodes,
+  'shopify-values.js': shopifyValues,
 };
 
 const self = typeof document !== 'undefined' ? document.currentScript?.src || '' : '';

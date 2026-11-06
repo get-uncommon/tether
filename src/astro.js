@@ -16,11 +16,7 @@
  * View Transitions (<ClientRouter />) work without extra code. In dev, changes to
  * src/shop.config.js restart the dev server (other files: tether({ ..., watch: ['my/config.js'] })).
  */
-
-const ENV_KEYS = {
-  domain: ['PUBLIC_SHOPIFY_DOMAIN', 'PUBLIC_SHOPIFY_STORE_DOMAIN', 'SHOPIFY_DOMAIN'],
-  token: ['PUBLIC_SHOPIFY_STOREFRONT_TOKEN', 'PUBLIC_SHOPIFY_STOREFRONT_ACCESS_TOKEN', 'SHOPIFY_STOREFRONT_TOKEN'],
-};
+import { STORE_ENV_NAMES } from './shopify-values.js';
 
 /** The mode Astro runs in: --mode, else development for dev and production for build. */
 function modeOf(command, argv = process.argv) {
@@ -103,7 +99,7 @@ export default function tether(options = {}) {
           }
         }
         const env = await readEnv(command, root);
-        for (const [key, names] of Object.entries(ENV_KEYS)) {
+        for (const [key, names] of Object.entries(STORE_ENV_NAMES)) {
           if (!config[key]) config[key] = names.map((n) => env[n]).find(Boolean);
         }
         const bad = Object.entries(config)

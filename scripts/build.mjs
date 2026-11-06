@@ -110,6 +110,7 @@ const CORE = [
   'product.js',
   'collection.js',
   'mounting.js',
+  'shopify-values.js',
   'market-codes.js',
   'lazy.js',
 ];

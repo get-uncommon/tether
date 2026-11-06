@@ -4,6 +4,7 @@
  * (e.g. prefix: 'wfs' for markup that uses wfs-* attributes).
  */
 import { cfg, warn } from './config.js';
+import { formatMoney as formatMoneyIn, productUrl as productUrlFor } from './shopify-values.js';
 
 export const attr = (name) => `${cfg.prefix}-${name}`;
 export const sel = (name, value) => (value === undefined ? `[${attr(name)}]` : `[${attr(name)}="${value}"]`);
@@ -17,10 +18,7 @@ const dataKey = () => `data-${cfg.prefix}-key`;
  * with tether-product="url:handle"), '/p/{id}' (numeric product id).
  */
 export function productUrl(handle, id) {
-  const path = cfg.productPath || '/product';
-  if (!/\{(handle|id)\}/.test(path)) return `${path.replace(/\/$/, '')}/${handle}`;
-  const numeric = id ? String(id).split('/').pop() : '';
-  return path.replace(/\{handle\}/g, encodeURIComponent(handle || '')).replace(/\{id\}/g, encodeURIComponent(numeric));
+  return productUrlFor(cfg.productPath || '/product', handle, id);
 }
 
 export const qsa = (root, s) => (root ? [...root.querySelectorAll(s)] : []);
@@ -45,16 +43,7 @@ export function formatPercent(n, locale = cfg.locale) {
 export function formatMoney(money) {
   if (!money) return '';
   if (typeof cfg.formatMoney === 'function') return cfg.formatMoney(money, cfg.locale);
-  const amount = parseFloat(money.amount);
-  if (Number.isNaN(amount)) return '';
-  try {
-    return new Intl.NumberFormat(cfg.locale || undefined, {
-      style: 'currency',
-      currency: money.currencyCode,
-    }).format(amount);
-  } catch {
-    return `${money.currencyCode} ${amount.toFixed(2)}`;
-  }
+  return formatMoneyIn(money, cfg.locale);
 }
 
 export function formatDate(iso) {
