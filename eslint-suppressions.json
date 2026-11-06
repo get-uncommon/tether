@@ -42,11 +42,6 @@
       "count": 1
     }
   },
-  "server/scripts/update-tether.mjs": {
-    "@typescript-eslint/use-unknown-in-catch-callback-variable": {
-      "count": 1
-    }
-  },
   "server/src/account.js": {
     "@typescript-eslint/no-confusing-void-expression": {
       "count": 1
