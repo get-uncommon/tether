@@ -1,20 +1,8 @@
 /** Order links and dates, shared by the account part's order list and the account pages. */
 import { cfg } from './config.js';
+import { isHttpsUrl } from './shopify-values.js';
 
-/**
- * True for an absolute https URL. Links that come from Shopify (status pages, tracking) are only written into the
- * page when this holds.
- *
- * @param {unknown} url
- */
-export function isHttpsUrl(url) {
-  if (typeof url !== 'string') return false;
-  try {
-    return new URL(url).protocol === 'https:';
-  } catch {
-    return false;
-  }
-}
+export { isHttpsUrl };
 
 /**
  * An ISO date in the configured locale; the input itself when it can't be formatted.

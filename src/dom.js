@@ -88,6 +88,17 @@ export function cdnUrl(url, el) {
 /** Same image, whatever size parameters: the server-rendered one is kept (no second download). */
 export const sameImage = (a, b) => Boolean(a && b) && a.split('?')[0] === b.split('?')[0];
 
+/**
+ * A CSS `url()` for an image URL from Shopify. Characters that would end the string are escaped, so the URL can't
+ * add declarations; only http(s), relative and data:image URLs are used.
+ */
+function cssUrl(url) {
+  const hasScheme = /^\s*[a-z][a-z0-9+.-]*:/i.test(url);
+  if (hasScheme && !/^\s*(https?:|data:image\/)/i.test(url)) return 'none';
+  const escaped = url.replace(/["\\\n\r\f]/g, (char) => `\\${char.charCodeAt(0).toString(16)} `);
+  return `url("${escaped}")`;
+}
+
 export function setImage(el, url, alt) {
   if (!url) return;
   const src = cdnUrl(url, el);
@@ -102,7 +113,7 @@ export function setImage(el, url, alt) {
     if (alt != null) el.setAttribute('alt', alt);
     if (!el.getAttribute('loading')) el.setAttribute('loading', 'lazy');
   } else {
-    el.style.backgroundImage = `url("${src}")`;
+    el.style.backgroundImage = cssUrl(src);
   }
 }
 

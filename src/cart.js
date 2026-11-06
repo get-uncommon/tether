@@ -6,6 +6,7 @@
  * return the updated cart.
  */
 import { cfg, log, reportError } from './config.js';
+import { isHttpsUrl } from './shopify-values.js';
 import { gql, unwrap, TetherError } from './client.js';
 import { cartFragment } from './fragments.js';
 import { getProduct } from './loader.js';
@@ -455,6 +456,7 @@ export const Cart = {
       let url = (this.beforeCheckout && (await this.beforeCheckout().catch(() => null))) || (await fresh);
       if (url && this.customerAccessToken) url += `${url.includes('?') ? '&' : '?'}logged_in=true`;
       if (!url) throw new TetherError('No checkoutUrl (cart empty or expired)');
+      if (!isHttpsUrl(url)) throw new TetherError('The checkout URL is not https: not opened');
       emit('checkout', { url, cart: this.state });
       if (tab && !tab.closed) tab.location.href = url;
       else window.location.href = url;

@@ -12,6 +12,21 @@ export const STORE_ENV_NAMES = {
 };
 
 /**
+ * True for an absolute https URL. Links and redirects that come from Shopify (checkout, status pages,
+ * tracking) are only used when this holds.
+ *
+ * @param {unknown} url
+ */
+export function isHttpsUrl(url) {
+  if (typeof url !== 'string') return false;
+  try {
+    return new URL(url).protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
+/**
  * True for a token Shopify issues as a secret (`shpat_` Admin, `shpss_` shared secret, `shpca_` client credentials,
  * `shppa_` private app, `shpua_` user). The public Storefront token has no such prefix. A secret token must never
  * reach a page.
