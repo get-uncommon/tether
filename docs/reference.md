@@ -462,9 +462,11 @@ missing the lists and prices a render walks (a truncated or hand-written tag) is
 product loads from Shopify instead. `Tether.mount()` reads every tag in the document; with `observe`,
 the elements added later are read and mounted on their own, once per burst of additions.
 
-**Pinning a release.** `@0.6` takes every 0.6.x fix automatically, which is what most sites want.
-To pin exactly what runs, load a fixed release (`@v0.6.8`) and add the file's
-[`integrity`](https://www.srihash.org/) hash to the script tag (an `integrity` hash on `@0.6` breaks
+**Pinning a release.** A minor line in the URL, like the README's
+[script tag](../README.md#2-add-the-script-to-webflow) (`@X.Y`), takes every X.Y.Z fix automatically,
+which is what most sites want. To pin exactly what runs, load a fixed release (`@vX.Y.Z`, a tag from
+the [Releases](https://github.com/ravi-klaassens/tether/releases)) and add the file's
+[`integrity`](https://www.srihash.org/) hash to the script tag (an `integrity` hash on `@X.Y` breaks
 with the next fix). The optional parts load from the same folder as the core, or from `partsUrl`,
 and are always checked against hashes built into the core, so a core runs only the parts of its own
 release. A `partsUrl` therefore has to serve the files of the same release as the core: upload the
@@ -559,7 +561,7 @@ node scripts/api-version.ts --next                             # the next quarte
 **Releases:** write the `## X.Y.Z` section in `CHANGELOG.md`, then
 
 ```bash
-npm run release -- 0.4.1 --push
+npm run release -- X.Y.Z --push
 ```
 
 It bumps the version everywhere (packages, `VERSION`, the sync, README pins, `server/TETHER_VERSION`

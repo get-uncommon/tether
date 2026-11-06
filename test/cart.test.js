@@ -57,7 +57,7 @@ globalThis.fetch = async (_url, init) => {
   const answer = answers[op];
   if (!answer) throw new Error(`unexpected op ${op}`);
   const body = await answer(variables);
-  return jsonResponse(body);
+  return body instanceof Response ? body : jsonResponse(body);
 };
 
 /**
@@ -205,6 +205,49 @@ test('expired cart: a query answering cart: null forgets the saved cart', async 
   assert.deepEqual(Cart.status, { kind: 'empty' });
   assert.equal(Cart.id(), null);
   assert.equal(reported.length, 0, 'an expired cart is not a failure');
+});
+
+test('a saved value that is not a cart id is forgotten unsent, and the next add starts a new cart', async () => {
+  localStorage.setItem(KEY, 'gid://shopify/Cart/abc") { id } } #');
+  assert.equal(Cart.id(), null);
+  assert.equal(localStorage.getItem(KEY), null);
+  await Cart.init();
+  assert.equal(calls.length, 0);
+
+  localStorage.setItem(KEY, 'not a cart');
+  answers['Tether_cartCreate'] = () => payload('cartCreate', oneLine());
+  await Cart.add(VARIANT);
+  assert.deepEqual(
+    calls.map((call) => call.op),
+    ['Tether_cartCreate'],
+  );
+  assert.equal(Cart.id(), 'gid://shopify/Cart/abc');
+  localStorage.setItem(KEY, 'gid://shopify/Cart/c1-7a2abe82?key=2c3f9d');
+  assert.equal(Cart.id(), 'gid://shopify/Cart/c1-7a2abe82?key=2c3f9d', 'a cart id with its key is kept');
+});
+
+test('a cart change that timed out is not sent again, since Shopify may have made it; a cart load is', async () => {
+  await loadSaved(oneLine());
+  calls.length = 0;
+  answers['Tether_cartLinesAdd'] = () => new Response('Gateway Timeout', { status: 504 });
+  await assert.rejects(Cart.add(VARIANT), { code: 'HTTP_504' });
+  assert.deepEqual(
+    calls.map((call) => call.op),
+    ['Tether_cartLinesAdd'],
+  );
+
+  calls.length = 0;
+  let loads = 0;
+  answers['TetherCart'] = () => {
+    loads += 1;
+    return loads === 1 ? new Response('Gateway Timeout', { status: 504 }) : { data: { cart: oneLine(2) } };
+  };
+  await Cart.init();
+  assert.equal(Cart.count, 2);
+  assert.deepEqual(
+    calls.map((call) => call.op),
+    ['TetherCart', 'TetherCart'],
+  );
 });
 
 test('forgetSaved: drops the saved cart and shows an empty one, as a load of no cart does', async () => {

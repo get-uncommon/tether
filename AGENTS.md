@@ -61,4 +61,6 @@ A refactor keeps all of them. A change to one is a behaviour change, with a CHAN
 
 ## Releases
 
+Deployed Worker copies install the next release with the updater they already have, and `test/upgrade-from-released.test.js` runs each released updater against this tree. So `server/`'s top-level entries stay the ones the updater's `MANAGED` and `KEPT` lists name: every older updater skips an entry a release adds, so new code goes inside an existing folder. When a release changes the updater (`server/scripts/`), add its tag to that test's `OLD_UPDATERS` and to the `git fetch` lines of `ci.yml`, `release.yml` and `smoke.yml`.
+
 `dist/` changes only in a release commit. `npm test` builds into `.test-dist/`. Never run `npm run release`, tag, publish to npm or change the repository's settings: the owner does those.

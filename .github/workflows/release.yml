@@ -1,9 +1,13 @@
 # Publishes a release when a version tag is pushed (made by `npm run release -- X.Y.Z`):
-# the gate, npm publish with provenance (trusted publishing: no token in the repo), GitHub Release.
+# the gate, the GitHub Release, then npm publish with provenance (trusted publishing: no token in the repo).
 # The Release carries tether-server-X.Y.Z.tar.gz, the sync Worker's server/ folder with a GitHub artifact
 # attestation from this workflow: deployed copies install an update only from that file, after
 # `gh attestation verify --signer-workflow <repo>/.github/workflows/release.yml` (server/scripts/release-asset.ts).
-# Renaming this file or the asset stops every copy's updates.
+# Renaming this file or the asset stops every copy's updates. Copies skip a tag until its Release carries the file,
+# so the Release comes before npm: a failed npm publish doesn't hold back the Worker copies, and is run again alone.
+#
+# A maintenance release (a version below the newest tag, from a `release/X.Y` branch) is not marked as GitHub's latest
+# release, and goes to npm under the `latest-X.Y` dist-tag instead of `latest`.
 #
 # Only the `check` job installs the dependencies, and it can only read the repository. The jobs that can sign
 # (`server-asset`, `npm`) or write (`github-release`) run no dependency's code: an install script can't reach their
@@ -31,8 +35,8 @@ jobs:
         with:
           node-version: 22
           package-manager-cache: false
-      # test/upgrade-from-0.6.test.js installs this tree into copies made from these tags, one per 0.6 updater.
-      - run: git fetch --depth=1 --no-tags origin tag v0.6.7 tag v0.6.8
+      # test/upgrade-from-released.test.js installs this tree into copies made from these tags, one per updater.
+      - run: git fetch --depth=1 --no-tags origin tag v0.6.7 tag v0.6.8 tag v0.7.0
       - run: npm ci
       - name: Tag matches package.json
         run: |
@@ -81,10 +85,75 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+  # Whether this tag is the newest release: only then is it GitHub's latest release and npm's `latest`.
+  channel:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      latest: ${{ steps.channel.outputs.latest }}
+      npm-tag: ${{ steps.channel.outputs.npm-tag }}
+    steps:
+      - name: Newest release tag
+        id: channel
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          V="${GITHUB_REF_NAME#v}"
+          newest=$(gh api --paginate "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/v" --jq '.[].ref | ltrimstr("refs/tags/v")' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1)
+          if [ "$newest" = "$V" ]; then
+            echo "latest=true" >> "$GITHUB_OUTPUT"
+            echo "npm-tag=latest" >> "$GITHUB_OUTPUT"
+          else
+            echo "v$V is a maintenance release: v$newest is newer"
+            echo "latest=false" >> "$GITHUB_OUTPUT"
+            echo "npm-tag=latest-${V%.*}" >> "$GITHUB_OUTPUT"
+          fi
+
+  github-release:
+    needs: [server-asset, channel]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write # the GitHub Release
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+        with:
+          name: server-asset
+          path: ${{ runner.temp }}/server-asset
+      # gh uploads the assets to a draft and publishes it after the last one, so the Release never shows without
+      # the server asset.
+      - name: GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LATEST: ${{ needs.channel.outputs.latest }}
+          NPM_TAG: ${{ needs.channel.outputs.npm-tag }}
+        run: |
+          V="${GITHUB_REF_NAME#v}"
+          SERVER_ASSET="$RUNNER_TEMP/server-asset/tether-server-$V.tar.gz"
+          PACKAGE="@occluze/tether"
+          if [ "$NPM_TAG" != latest ]; then PACKAGE="@occluze/tether@$NPM_TAG"; fi
+          awk -v v="$V" '$0 ~ "^## "v"( |$)" {f=1; next} /^## / && f {exit} f' CHANGELOG.md > notes.md
+          {
+            echo; echo '**Use it:**'; echo
+            echo '```html'; echo "<script src=\"https://cdn.jsdelivr.net/gh/${GITHUB_REPOSITORY}@${V%.*}/dist/tether.min.js\" defer></script>"; echo '```'; echo
+            echo '```bash'; echo "npm install $PACKAGE"; echo '```'
+          } >> notes.md
+          # Every script next to the core, so a site can self-host the folder: the core loads its parts from beside it.
+          # dist/esm/ is left out: its chunks import each other by path, which flat Release assets don't keep.
+          mapfile -t assets < <(find dist -maxdepth 1 -type f | sort)
+          gh release create "$GITHUB_REF_NAME" --title "Tether $V" --notes-file notes.md --latest="$LATEST" "${assets[@]}" "$SERVER_ASSET"
+
   # Publishes the committed files as they are: `--ignore-scripts`, because the lifecycle scripts need the
   # devDependencies this job never installs.
   npm:
-    needs: server-asset
+    needs: [github-release, channel]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -103,36 +172,6 @@ jobs:
       - name: npm with trusted publishing
         run: npm install -g npm@11.21.1 # zizmor: ignore[adhoc-packages] npm itself, at an exact version
       - name: Publish to npm
-        run: npm publish --provenance --access public --ignore-scripts
-
-  github-release:
-    needs: npm
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      contents: write # the GitHub Release
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
-        with:
-          persist-credentials: false
-      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
-        with:
-          name: server-asset
-          path: ${{ runner.temp }}/server-asset
-      - name: GitHub Release
-        shell: bash
         env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          V="${GITHUB_REF_NAME#v}"
-          SERVER_ASSET="$RUNNER_TEMP/server-asset/tether-server-$V.tar.gz"
-          awk -v v="$V" '$0 ~ "^## "v"( |$)" {f=1; next} /^## / && f {exit} f' CHANGELOG.md > notes.md
-          {
-            echo; echo '**Use it:**'; echo
-            echo '```html'; echo "<script src=\"https://cdn.jsdelivr.net/gh/${GITHUB_REPOSITORY}@${V%.*}/dist/tether.min.js\" defer></script>"; echo '```'; echo
-            echo '```bash'; echo 'npm install @occluze/tether'; echo '```'
-          } >> notes.md
-          # Every script next to the core, so a site can self-host the folder: the core loads its parts from beside it.
-          # dist/esm/ is left out: its chunks import each other by path, which flat Release assets don't keep.
-          mapfile -t assets < <(find dist -maxdepth 1 -type f | sort)
-          gh release create "$GITHUB_REF_NAME" --title "Tether $V" --notes-file notes.md --latest "${assets[@]}" "$SERVER_ASSET"
+          NPM_TAG: ${{ needs.channel.outputs.npm-tag }}
+        run: npm publish --provenance --access public --ignore-scripts --tag "$NPM_TAG"

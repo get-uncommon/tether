@@ -1,5 +1,37 @@
 # Changelog
 
+## 0.7.1 (unreleased)
+
+- Fix: cart changes and other Storefront mutations are no longer sent again after a network error
+  or a 5xx, when Shopify may already have applied them, so a timed-out "Add to cart" can't add the
+  line twice. They are still retried on 429 and `THROTTLED`, which Shopify answers without running
+  them; queries keep their retries. `Tether.query()` and the server's `query()` treat a document
+  with a `mutation` the same way.
+- Fix: a saved cart id that isn't a Shopify cart id (written by another script, or edited by hand)
+  is forgotten instead of sent; the next change starts a new cart.
+- Fix: when another script replaces `window.Tether` after the Tether script, an optional part
+  (search, markets, accounts and the others) rejects its load with a clear error instead of staying
+  pending.
+- Sync Worker updates: a tag whose GitHub Release doesn't carry its signed
+  `tether-server-X.Y.Z.tar.gz` yet (its release workflow is still running, or failed) is skipped
+  with a warning; the update installs the newest release that has its file, or reports up to date,
+  instead of failing the run. The misleading "set TETHER_VERSION to 0.7.0 or newer" message is
+  gone. Copies get this from 0.7.1 on: until a copy has installed 0.7.1, its 0.7.0 updater still
+  fails the run while a new tag's release workflow runs, and the next run after the Release is
+  published installs it. Nothing needs doing.
+- Sync Worker copies made from 0.6.1 to 0.6.8 still have `latest` in `TETHER_VERSION` (updates
+  never change that file), so they will install 0.8.0 by themselves, and a 0.x minor can need
+  one-time steps. **To stay on the 0.7 line:** write `0.7` in the file, as copies made from 0.7.0
+  have.
+- Sync Worker README: an update also replaces `.dev.vars.example` and `.gitignore`. Lines added to
+  the copy's `.gitignore` are dropped by the next update, so ignore your own files from a
+  `.gitignore` in your own folder.
+- Releases: the GitHub Release, with the Worker's signed file, is created before the npm publish. A
+  maintenance release of an older minor line (cut from `release/X.Y`) is no longer marked as
+  GitHub's latest release and goes to npm under the `latest-X.Y` dist-tag. `npm run release` tags
+  only after the whole gate passes.
+- Docs: the reference no longer tells sites to load `@0.6` / `@v0.6.8`; pinning is described as
+  `@X.Y` / `@vX.Y.Z`, and a test keeps release numbers out of `docs/`.
 ## 0.7.0 (2026-11-06)
 
 **Before you update: one step for every deployed sync Worker.** Copies made from 0.6.1 to 0.6.8

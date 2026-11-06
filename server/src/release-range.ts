@@ -2,10 +2,10 @@
  * Tether release versions and the ranges a deployed copy updates within (its TETHER_VERSION file), the way jsDelivr
  * ranges work: `latest` (or `*`, or empty) for any release, a major (`0`), a minor (`0.3`) or one version (`0.3.3`).
  * Shared by the updater (`scripts/update-tether.mjs`, which a deployed copy runs with plain Node) and the Worker's
- * `/check`, so both pick the same release.
+ * `/check`, so both pick the same release, and by the release script.
  */
 
-type Version = [major: number, minor: number, patch: number];
+export type Version = [major: number, minor: number, patch: number];
 
 const VERSION = /^(\d+)\.(\d+)\.(\d+)$/;
 
@@ -39,6 +39,22 @@ function rangeMatcher(spec: string): (version: Version) => boolean {
 }
 
 /**
+ * The versions in the range, newest first.
+ *
+ * @param versions `0.3.3`, without a `v`; anything else is skipped.
+ * @param spec See {@link rangeMatcher}.
+ * @throws {Error} For a spec {@link rangeMatcher} refuses.
+ */
+export function versionsInRange(versions: string[], spec: string): Version[] {
+  const inRange = rangeMatcher(spec);
+  return versions
+    .map(parseVersion)
+    .filter((version) => version !== null)
+    .filter(inRange)
+    .sort((a, b) => compareVersions(b, a));
+}
+
+/**
  * The newest of `versions` in the range, as `0.3.3`.
  *
  * @param versions `0.3.3`, without a `v`; anything else is skipped.
@@ -46,12 +62,5 @@ function rangeMatcher(spec: string): (version: Version) => boolean {
  * @throws {Error} For a spec {@link rangeMatcher} refuses.
  */
 export function newestInRange(versions: string[], spec: string): string | null {
-  const inRange = rangeMatcher(spec);
-  const newest = versions
-    .map(parseVersion)
-    .filter((version) => version !== null)
-    .filter(inRange)
-    .sort(compareVersions)
-    .at(-1);
-  return newest ? newest.join('.') : null;
+  return versionsInRange(versions, spec)[0]?.join('.') ?? null;
 }

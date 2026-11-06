@@ -92,8 +92,7 @@ export function safeReturn(raw: string, settings: ReadyAccountSettings): string 
   return `${settings.origins[0]}/`;
 }
 
-/** A Storefront cart id, as the browser sends it to link or unlink a cart. */
-export const CART_ID = /^gid:\/\/shopify\/Cart\/[\w-]+(\?key=[\w-]+)?$/;
+export { CART_ID } from '../shared/cart-id.ts';
 
 /**
  * Largest account request body read. The largest real one is a return request: up to 50 lines, each with a note of up

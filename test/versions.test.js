@@ -1,7 +1,7 @@
 // The package version has one source, the root package.json; the release script writes every copy from it.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { cp, mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { cp, mkdtemp, readdir, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -24,4 +24,12 @@ test('the release writes the package.json version into every copy', async () => 
   assert.equal(await syncVersions(copy), '9.8.7');
   assert.deepEqual(await versionMismatches(copy), []);
   assert.match(await readFile(join(copy, 'src/index.ts'), 'utf8'), /export const VERSION = '9\.8\.7';/);
+});
+
+test('the docs pin no release: the README, which the release rewrites, is the one place that names one', async () => {
+  const docs = join(ROOT, 'docs');
+  for (const file of await readdir(docs)) {
+    const text = await readFile(join(docs, file), 'utf8');
+    assert.doesNotMatch(text, /@v?\d+\.\d+\b/, `docs/${file} names a release in a URL; write @X.Y or @vX.Y.Z`);
+  }
 });

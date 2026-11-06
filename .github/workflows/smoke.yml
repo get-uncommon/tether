@@ -4,6 +4,10 @@
 #   TETHER_DOMAIN, TETHER_TOKEN   a public Storefront token of your test store
 #                                 (without them it runs against Shopify's public demo store)
 # Cost: ~1-2 minutes a run, weekly plus per push to main. Free on public repositories.
+#
+# The `smoke` job installs the dependencies and runs their code, so it can only read the repository, and gets no
+# dependency cache another run wrote. The `report` job, which can write issues, checks nothing out and installs
+# nothing: it reads only the smoke job's outputs.
 name: smoke
 
 on:
@@ -13,9 +17,7 @@ on:
     branches: [main]
   workflow_dispatch:
 
-permissions:
-  contents: read
-  issues: write
+permissions: {}
 
 concurrency:
   group: weekly-smoke
@@ -25,6 +27,13 @@ jobs:
   smoke:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      pinned: ${{ steps.versions.outputs.pinned }}
+      next: ${{ steps.versions.outputs.next }}
+      pinned-outcome: ${{ steps.pinned.outcome }}
+      next-outcome: ${{ steps.next.outcome }}
     env:
       TETHER_DOMAIN: ${{ secrets.TETHER_DOMAIN }}
       TETHER_TOKEN: ${{ secrets.TETHER_TOKEN }}
@@ -35,9 +44,9 @@ jobs:
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: 22
-          cache: npm
-      # test/upgrade-from-0.6.test.js installs this tree into copies made from these tags, one per 0.6 updater.
-      - run: git fetch --depth=1 --no-tags origin tag v0.6.7 tag v0.6.8
+          package-manager-cache: false
+      # test/upgrade-from-released.test.js installs this tree into copies made from these tags, one per updater.
+      - run: git fetch --depth=1 --no-tags origin tag v0.6.7 tag v0.6.8 tag v0.7.0
       - run: npm ci
       - name: Unit tests
         run: npm test
@@ -56,15 +65,24 @@ jobs:
           TETHER_API_VERSION: ${{ steps.versions.outputs.next }}
         run: npm run smoke
 
+  report:
+    needs: smoke
+    if: always() && (needs.smoke.result == 'success' || needs.smoke.result == 'failure')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    steps:
       - name: Open or update an issue
-        if: failure()
+        if: needs.smoke.result == 'failure'
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          PINNED: ${{ steps.versions.outputs.pinned }}
-          NEXT: ${{ steps.versions.outputs.next }}
-          PINNED_OUTCOME: ${{ steps.pinned.outcome }}
-          NEXT_OUTCOME: ${{ steps.next.outcome }}
+          PINNED: ${{ needs.smoke.outputs.pinned }}
+          NEXT: ${{ needs.smoke.outputs.next }}
+          PINNED_OUTCOME: ${{ needs.smoke.outputs.pinned-outcome }}
+          NEXT_OUTCOME: ${{ needs.smoke.outputs.next-outcome }}
         run: |
           title="Smoke test failing"
           body="Run: $RUN_URL
@@ -72,7 +90,7 @@ jobs:
           - pinned API $PINNED: $PINNED_OUTCOME
           - next API $NEXT: $NEXT_OUTCOME
 
-          If only the next version fails, read the Storefront API release notes and fix Tether before bumping apiVersion. If the pinned version fails, the store, token or Shopify changed: run Tether.diagnose() on the site."
+          If only the next version fails, read the Storefront API release notes and fix Tether before bumping apiVersion. If the pinned version fails, the store, token or Shopify changed: run Tether.diagnose() on the site. If neither ran, the unit tests failed: see the run."
           gh label create smoke-failure --color B60205 --force >/dev/null 2>&1 || true
           num=$(gh issue list --state open --label smoke-failure --json number --jq '.[0].number')
           if [ -n "$num" ]; then
@@ -82,9 +100,10 @@ jobs:
           fi
 
       - name: Close the issue once it passes again
-        if: success()
+        if: needs.smoke.result == 'success'
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           gh issue list --state open --label smoke-failure --json number --jq '.[].number' | while read -r num; do

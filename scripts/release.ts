@@ -2,26 +2,36 @@
 /**
  * One-step release, run by the owner:
  *
- *   npm run release -- 0.4.0            set the version, build, test, commit, tag
- *   npm run release -- 0.4.0 --push     ...and push (GitHub Actions then publishes to npm
- *                                       with provenance and creates the GitHub Release)
+ *   npm run release -- 0.4.0            set the version, build, run the gate, commit, tag
+ *   npm run release -- 0.4.0 --push     ...and push (GitHub Actions then creates the GitHub Release and publishes
+ *                                       to npm with provenance)
  *
  * Needs a "## 0.4.0" or "## 0.4.0 (unreleased)" section in CHANGELOG.md first (the release notes come from it; the
- * heading is dated), a clean working tree, and HEAD at origin/main (a detached checkout works, so a worktree can
- * release). The version is set in package.json and written from there into every copy (`versions.ts`); dist/ is
- * rebuilt from it.
+ * heading is dated), a clean working tree, and HEAD at the branch the release goes on (a detached checkout works, so a
+ * worktree can release). The version is set in package.json and written from there into every copy (`versions.ts`);
+ * dist/ is rebuilt from it.
+ *
+ * A version on main's minor line or a newer one is released from main. An older minor line gets a maintenance release
+ * from its branch `release/X.Y`, made once from that line's last tag (`git push origin vX.Y.Z:refs/heads/release/X.Y`);
+ * the branch needs this script and `.github/workflows/release.yml` from main first, since a tag runs the workflow at
+ * its own commit. Deployed Worker copies install only a tag whose commit is on main, so the script also records the
+ * maintenance commit in main's history, by a merge commit that keeps main's files as they are.
  */
 import { readFile, writeFile } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { compareVersions, parseVersion } from '../server/src/release-range.ts';
+import { field } from '../server/src/shared/json.ts';
 import { packageVersion, syncVersions } from './versions.ts';
-
-type Version = [major: number, minor: number, patch: number];
+import type { Version } from '../server/src/release-range.ts';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const VERSION_PATTERN = /^\d+\.\d+\.\d+$/;
 const PACKAGE_VERSION = /"version": "\d+\.\d+\.\d+"/;
+const MAIN = 'main';
+
+/** The branch a release goes on, and whether it is main. */
+type Line = { kind: 'main' } | { kind: 'maintenance'; branch: string };
 
 function run(command: string, args: string[]): void {
   execFileSync(...spawnable(command, args), { cwd: ROOT, stdio: 'inherit', shell: needsShell(command) });
@@ -49,16 +59,15 @@ function fail(message: string): never {
   process.exit(1);
 }
 
-/** @param text `X.Y.Z` */
-function parseVersion(text: string): Version {
-  const [major = 0, minor = 0, patch = 0] = text.split('.').map(Number);
-  return [major, minor, patch];
+/** @param text `X.Y.Z`, exactly as a tag names it. */
+function versionOrFail(text: string, what: string): Version {
+  const version = parseVersion(text);
+  if (version?.join('.') !== text) fail(`${what} "${text}" is not X.Y.Z`);
+  return version;
 }
 
-/** @returns True when `a` comes after `b`. */
-function isNewer(a: Version, b: Version): boolean {
-  const index = a.findIndex((part, position) => part !== b[position]);
-  return index !== -1 && (a[index] ?? 0) > (b[index] ?? 0);
+function branchOf(line: Line): string {
+  return line.kind === 'main' ? MAIN : line.branch;
 }
 
 /**
@@ -72,65 +81,121 @@ async function edit(file: string, change: (text: string) => string, { optional =
   await writeFile(path, after);
 }
 
-/** Exits when the version, the working tree, the branch or CHANGELOG.md isn't ready for `version`. */
-async function checkReady(version: string): Promise<void> {
-  if (!VERSION_PATTERN.test(version)) fail('usage: npm run release -- X.Y.Z [--push]');
-  if (output('git', ['status', '--porcelain'])) fail('working tree not clean: commit or stash first');
-  // The release commit goes on top of what main is on GitHub now, from any checkout (a worktree can't check out a
-  // branch another one holds), so HEAD must be exactly origin/main.
-  run('git', ['fetch', '--quiet', 'origin', 'main']);
-  if (output('git', ['rev-parse', 'HEAD']) !== output('git', ['rev-parse', 'origin/main'])) {
-    fail('HEAD is not origin/main: check out origin/main (git switch --detach origin/main)');
-  }
-  const current = await packageVersion(ROOT);
-  if (!isNewer(parseVersion(version), parseVersion(current))) fail(`${version} is not newer than ${current}`);
-  const changelog = await readFile(join(ROOT, 'CHANGELOG.md'), 'utf8');
-  if (!new RegExp(`^## ${version.replace(/\./g, '\\.')}\\b`, 'm').test(changelog)) {
-    fail(`add a "## ${version}" section to CHANGELOG.md first`);
-  }
+/**
+ * Main for a version on main's minor line or newer, `release/X.Y` for an older line.
+ *
+ * @param mainVersion The version main is on.
+ */
+function lineOf(version: Version, mainVersion: Version): Line {
+  const [major, minor] = version;
+  if (compareVersions([major, minor, 0], [mainVersion[0], mainVersion[1], 0]) >= 0) return { kind: 'main' };
+  return { kind: 'maintenance', branch: `release/${String(major)}.${String(minor)}` };
 }
 
-async function bump(version: string): Promise<void> {
-  const [major, minor] = parseVersion(version);
-  const packageJson = (text: string): string => text.replace(PACKAGE_VERSION, `"version": "${version}"`);
+/**
+ * Exits when the version, the working tree, the branch or CHANGELOG.md isn't ready for `version`.
+ *
+ * @returns The branch the release goes on.
+ */
+async function checkReady(text: string): Promise<Line> {
+  if (!text) fail('usage: npm run release -- X.Y.Z [--push]');
+  const version = versionOrFail(text, 'the version');
+  if (output('git', ['status', '--porcelain'])) fail('working tree not clean: commit or stash first');
+  run('git', ['fetch', '--quiet', 'origin', MAIN]);
+  const mainPackage: unknown = JSON.parse(output('git', ['show', `origin/${MAIN}:package.json`]));
+  const mainVersion = versionOrFail(String(field(mainPackage, 'version')), "main's version");
+  const line = lineOf(version, mainVersion);
+  const branch = branchOf(line);
+  if (line.kind === 'maintenance') run('git', ['fetch', '--quiet', 'origin', branch]);
+  // The release commit goes on top of what the branch is on GitHub now, from any checkout (a worktree can't check out
+  // a branch another one holds), so HEAD must be exactly that branch.
+  if (output('git', ['rev-parse', 'HEAD']) !== output('git', ['rev-parse', `origin/${branch}`])) {
+    fail(`HEAD is not origin/${branch}: check it out (git switch --detach origin/${branch})`);
+  }
+  const current = versionOrFail(await packageVersion(ROOT), `${branch}'s version`);
+  if (compareVersions(version, current) <= 0) fail(`${text} is not newer than ${current.join('.')}`);
+  if (line.kind === 'maintenance' && (current[0] !== version[0] || current[1] !== version[1])) {
+    fail(`${branch} is on ${current.join('.')}, not on the ${version[0]}.${version[1]} line`);
+  }
+  const changelog = await readFile(join(ROOT, 'CHANGELOG.md'), 'utf8');
+  if (!new RegExp(`^## ${text.replace(/\./g, '\\.')}\\b`, 'm').test(changelog)) {
+    fail(`add a "## ${text}" section to CHANGELOG.md first`);
+  }
+  return line;
+}
+
+async function bump(text: string): Promise<void> {
+  const [major, minor] = versionOrFail(text, 'the version');
+  const packageJson = (json: string): string => json.replace(PACKAGE_VERSION, `"version": "${text}"`);
   await edit('package.json', packageJson);
   await syncVersions(ROOT);
   // The heading the notes were written under becomes the release's, dated in UTC.
   const date = new Date().toISOString().slice(0, 10);
-  await edit('CHANGELOG.md', (text) => text.replace(`\n## ${version} (unreleased)\n`, `\n## ${version} (${date})\n`), {
-    optional: true,
-  });
+  await edit(
+    'CHANGELOG.md',
+    (changelog) => changelog.replace(`\n## ${text} (unreleased)\n`, `\n## ${text} (${date})\n`),
+    {
+      optional: true,
+    },
+  );
   // Pinned examples in the README; ranges like @0.3 follow the minor version.
   await edit(
     'README.md',
-    (text) =>
-      text
-        .replace(/@v\d+\.\d+\.\d+/g, `@v${version}`)
+    (readme) =>
+      readme
+        .replace(/@v\d+\.\d+\.\d+/g, `@v${text}`)
         .replace(/@\d+\.\d+\/dist/g, `@${major}.${minor}/dist`)
         .replace(/`@\d+\.\d+` gets every \d+\.\d+\.x fix/, `\`@${major}.${minor}\` gets every ${major}.${minor}.x fix`),
     { optional: true },
   );
 }
 
+/**
+ * A merge commit on top of origin/main with main's files and the maintenance release commit as second parent, so the
+ * release's commit is in main's history without changing main.
+ *
+ * @returns Its SHA.
+ */
+function mainHistoryCommit(version: string): string {
+  return output('git', [
+    'commit-tree',
+    `origin/${MAIN}^{tree}`,
+    '-p',
+    `origin/${MAIN}`,
+    '-p',
+    'HEAD',
+    '-m',
+    `Record Tether ${version} in main's history`,
+  ]);
+}
+
+/** The pushes that publish the release: the branch first, then the tag, which starts the release workflow. */
+function pushes(line: Line, version: string): string[][] {
+  const tag = ['push', 'origin', `v${version}`];
+  if (line.kind === 'main') return [['push', 'origin', `HEAD:${MAIN}`], tag];
+  return [['push', 'origin', `HEAD:${line.branch}`], ['push', 'origin', `${mainHistoryCommit(version)}:${MAIN}`], tag];
+}
+
 const [version = ''] = process.argv.slice(2).filter((arg) => !arg.startsWith('--'));
 const push = process.argv.includes('--push');
 
-await checkReady(version);
+const line = await checkReady(version);
 await bump(version);
 run('npm', ['install', '--package-lock-only', '--no-audit', '--no-fund', '--silent']);
 // npm and the Release ship the committed dist/, which carries the version: release.yml refuses a tag whose dist/
 // differs from a fresh build.
 run('npm', ['run', 'build']);
-run('npm', ['test']);
+// The whole gate, as release.yml runs it on the tag: a tag the workflow refuses would stay without its Release.
+run('npm', ['run', 'check']);
 run('npm', ['run', 'smoke']);
 run('git', ['add', '-A']);
 run('git', ['commit', '-q', '-m', `Tether ${version}`]);
 run('git', ['tag', `v${version}`]);
-console.log(`\nTagged v${version}.`);
+console.log(`\nTagged v${version} on ${branchOf(line)}.`);
+const commands = pushes(line, version);
 if (push) {
-  run('git', ['push', 'origin', 'HEAD:main']);
-  run('git', ['push', 'origin', `v${version}`]);
-  console.log('Pushed. GitHub Actions publishes to npm and creates the release.');
+  for (const command of commands) run('git', command);
+  console.log('Pushed. GitHub Actions creates the release and publishes to npm.');
 } else {
-  console.log(`Push when ready: git push origin HEAD:main && git push origin v${version}`);
+  console.log(`Push when ready: ${commands.map((command) => `git ${command.join(' ')}`).join(' && ')}`);
 }

@@ -111,7 +111,7 @@ async function send(
   inner: string,
   variables: Record<string, unknown>,
 ): Promise<ShopifyCart | null> {
-  const data = await gql(mutationText(name, args, inner), variables, isPayloadOf(name));
+  const data = await gql(mutationText(name, args, inner), variables, isPayloadOf(name), { operation: 'mutation' });
   const payload = unwrap(data[name], name);
   setWarnings(payload.warnings ?? []);
   return payload.cart;

@@ -1,6 +1,6 @@
 /**
- * The one Storefront API client: a fetch wrapper that adds the market (`@inContext`), retries what Shopify asks to be
- * retried, and turns every failure into a `TetherError`, an answer whose `data` lacks what its caller reads included
+ * The one Storefront API client: a fetch wrapper that adds the market (`@inContext`), retries what is safe to send
+ * again (`Operation`), and turns every failure into a `TetherError`, an answer whose `data` lacks what its caller reads included
  * (`DataCheck`). The browser (`gql`, and `query` for `Tether.query()`) and the server helpers (`request` with their own
  * config) share it.
  */
@@ -105,9 +105,18 @@ export const shaped =
   <T>(shape: Shape): DataCheck<T> =>
   (data): data is T =>
     matches(data, shape);
-/** `context: false` sends the query without `@inContext`. */
+/**
+ * What an operation does to the store, which decides what is safe to retry. A query only reads, so any failure is
+ * retried. Shopify may have applied a mutation before a 5xx or a dropped connection, so a mutation is retried only
+ * when Shopify answers that it didn't run it (429 or `THROTTLED`): sending it again could add a line twice.
+ */
+export type Operation = 'query' | 'mutation';
+
 interface RequestOptions {
+  /** `false` sends the query without `@inContext`. */
   context?: boolean;
+  /** Default `'query'`. */
+  operation?: Operation;
 }
 /** What the store's token may read beyond the defaults. */
 export interface StoreAccess {
@@ -128,6 +137,15 @@ export function endpoint(conf: Pick<TetherConfig, 'domain' | 'apiVersion'> = cfg
 const STRINGS_AND_COMMENTS = /"(?:\\.|[^"\\\n])*"|#[^\n]*/g;
 /** An operation's keyword, name and variable definitions: named (query Name($x: T)) and anonymous (query { … }). */
 const OPERATION_START = /^\s*(?:query|mutation)(?:\s+\w+)?\s*(?:\([^)]*\))?/;
+
+/**
+ * The operation of a document Tether didn't write (`Tether.query()`, the server's `query()`). Outside strings and
+ * comments, any `mutation` keyword makes it a mutation: a document that starts with a fragment still has its
+ * operation found, and a misread errs on the side that is never sent twice.
+ */
+export function operationOf(document: string): Operation {
+  return /\bmutation\b/.test(document.replace(STRINGS_AND_COMMENTS, '')) ? 'mutation' : 'query';
+}
 
 /**
  * Adds @inContext(country, language) to the first operation in the document, so prices, currency and translations
@@ -169,7 +187,7 @@ export function withContext(
   return inContext(query, { country, language });
 }
 
-/** Backoff after a network error or a 429/5xx: this times 2^attempt. */
+/** Backoff after a network error, a 429 or a 5xx: this times 2^attempt. */
 const RETRY_BACKOFF_MS = 300;
 /** Backoff after Shopify's `THROTTLED` error, which asks for a longer wait: this times 2^attempt. */
 const THROTTLE_BACKOFF_MS = 500;
@@ -191,10 +209,15 @@ const storesWithoutInventory = new Set<string>();
 const storeOf = (conf: StorefrontConfig) => `${conf.domain} ${conf.apiVersion} ${conf.token}`;
 
 /** @returns The text sent: with the market, and the cache's time bucket for a query. */
-function queryText(conf: StorefrontConfig, query: QueryText, access: StoreAccess, context: boolean): string {
+function queryText(
+  conf: StorefrontConfig,
+  query: QueryText,
+  access: StoreAccess,
+  { context, operation }: Required<RequestOptions>,
+): string {
   const written = typeof query === 'string' ? query : query(access);
   const text = context ? inContext(written, conf) : written;
-  if (conf.maxAge <= 0 || /^\s*mutation\b/.test(text)) return text;
+  if (conf.maxAge <= 0 || operation === 'mutation') return text;
   return `${text} #${Math.floor(Date.now() / (conf.maxAge * MS_PER_SECOND))}`;
 }
 
@@ -255,16 +278,18 @@ type Attempt<T> =
   { kind: 'data'; data: T } | { kind: 'retry'; backoffMs: number } | { kind: 'inventory-refused'; error: TetherError };
 
 /**
- * One request. Failures that retrying can't fix throw.
- *
- * @param canRetry False on the last attempt: a retryable failure then throws too.
+ * Which failures an attempt may answer with a retry instead of throwing: none on the last attempt, only Shopify's
+ * "not run" answers for a mutation (`Operation`).
  */
+type RetryPolicy = 'none' | 'not-run' | 'any';
+
+/** One request. Failures that retrying can't fix, or that `retry` doesn't allow retrying, throw. */
 async function attempt<T>(
   conf: StorefrontConfig,
   query: string,
   variables: Record<string, unknown>,
   isData: DataCheck<T>,
-  canRetry: boolean,
+  retry: RetryPolicy,
 ): Promise<Attempt<T>> {
   let res;
   try {
@@ -274,7 +299,7 @@ async function attempt<T>(
       body: JSON.stringify({ query, variables }),
     });
   } catch (error) {
-    if (canRetry) return { kind: 'retry', backoffMs: RETRY_BACKOFF_MS };
+    if (retry === 'any') return { kind: 'retry', backoffMs: RETRY_BACKOFF_MS };
     throw new TetherError(`Network error: ${messageOf(error)}`, {
       code: 'NETWORK',
     });
@@ -282,7 +307,7 @@ async function attempt<T>(
   if (res.status === SECURITY_REJECTION) {
     throw new TetherError('Shopify security rejection (430)', { status: SECURITY_REJECTION });
   }
-  if (canRetry && (res.status === 429 || res.status >= 500)) {
+  if ((retry !== 'none' && res.status === 429) || (retry === 'any' && res.status >= 500)) {
     return { kind: 'retry', backoffMs: RETRY_BACKOFF_MS };
   }
 
@@ -299,7 +324,7 @@ async function attempt<T>(
     if (query.includes(INVENTORY_FIELD) && errors.some((error) => error.message.includes(INVENTORY_FIELD))) {
       return { kind: 'inventory-refused', error: graphQLFailure(res, errors, conf) };
     }
-    if (canRetry && errors.some((error) => error.extensions?.code === 'THROTTLED')) {
+    if (retry !== 'none' && errors.some((error) => error.extensions?.code === 'THROTTLED')) {
       return { kind: 'retry', backoffMs: THROTTLE_BACKOFF_MS };
     }
     throw graphQLFailure(res, errors, conf);
@@ -313,7 +338,8 @@ async function attempt<T>(
  * One Storefront API request, for any config: the browser's shared one (`gql`) or one the server helpers build.
  * Queries carry a time bucket so Shopify's cache of an identical query text is at most `maxAge` seconds old. A query
  * written for the store's access leaves out inventory once the token turns out not to read it (`INVENTORY_FIELD`);
- * a fixed query text is the caller's own, and that refusal is its error.
+ * a fixed query text is the caller's own, and that refusal is its error. How often a failure is retried is
+ * `conf.retries`; which failures are retried is the operation's (`Operation`).
  *
  * @param isData Checks that `data` has what the caller then reads, so a malformed answer fails here.
  * @throws {TetherError} `NOT_CONFIGURED` without a domain or token, `NETWORK` when the store can't be reached,
@@ -324,16 +350,18 @@ export async function request<T>(
   query: QueryText,
   variables: Record<string, unknown>,
   isData: DataCheck<T>,
-  { context = true }: RequestOptions = {},
+  { context = true, operation = 'query' }: RequestOptions = {},
 ): Promise<T> {
   if (!conf.domain || !conf.token) {
     throw new TetherError('Tether is not configured: domain and token are required', { code: 'NOT_CONFIGURED' });
   }
   const store = storeOf(conf);
+  const retryWhileLeft: RetryPolicy = operation === 'mutation' ? 'not-run' : 'any';
   let retries = 0;
   for (;;) {
-    const sent = queryText(conf, query, { inventory: !storesWithoutInventory.has(store) }, context);
-    const outcome = await attempt(conf, sent, variables, isData, retries < conf.retries);
+    const sent = queryText(conf, query, { inventory: !storesWithoutInventory.has(store) }, { context, operation });
+    const retry = retries < conf.retries ? retryWhileLeft : 'none';
+    const outcome = await attempt(conf, sent, variables, isData, retry);
     switch (outcome.kind) {
       case 'data':
         return outcome.data;
@@ -368,9 +396,11 @@ export const hasData = (data: unknown): data is object => typeof data === 'objec
 export function query<T>(
   text: QueryText,
   variables: Record<string, unknown> = {},
-  options?: RequestOptions,
+  options?: Omit<RequestOptions, 'operation'>,
 ): Promise<T> {
-  return gql(text, variables, hasData, options) as Promise<T>;
+  // What the token may read changes the selection, never the operation.
+  const operation = operationOf(typeof text === 'string' ? text : text({ inventory: true }));
+  return gql(text, variables, hasData, { ...options, operation }) as Promise<T>;
 }
 
 /**
