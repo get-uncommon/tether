@@ -1,6 +1,8 @@
 // The lint gate. Type-aware typescript-eslint rules run on the shipped code (src/, server/src/) and the build and
 // release scripts, through tsconfig.json's checkJs. Tests get the untyped rules only. Existing violations are counted
 // in eslint-suppressions.json; a new one fails.
+import { readdirSync, readFileSync } from 'node:fs';
+import { sep } from 'node:path';
 import js from '@eslint/js';
 import prettier from 'eslint-config-prettier';
 import globals from 'globals';
@@ -13,6 +15,20 @@ const TYPED_FILES = [
   'server/bin/*.js',
   'server/scripts/*.mjs',
   'scripts/{build,release,api-version}.mjs',
+];
+
+// In a file still marked `// @ts-nocheck` every value is `any`, so these rules would only count accesses. They turn
+// on when the marker goes.
+const UNTYPED_MARKER = /^(#!.*\r?\n)?\/\/ @ts-nocheck\b/;
+const UNTYPED_FILES = ['src', 'server/src', 'server/bin', 'server/scripts', 'scripts']
+  .flatMap((dir) => readdirSync(dir, { recursive: true }).map((file) => `${dir}/${file.split(sep).join('/')}`))
+  .filter((file) => /\.m?js$/.test(file) && UNTYPED_MARKER.test(readFileSync(file, 'utf8')));
+const ANY_RULES = [
+  'no-unsafe-member-access',
+  'no-unsafe-assignment',
+  'no-unsafe-call',
+  'no-unsafe-return',
+  'no-unsafe-argument',
 ];
 
 export default tseslint.config(
@@ -33,6 +49,10 @@ export default tseslint.config(
       // `// @ts-nocheck` marks a file whose JSDoc types are still missing (AGENTS.md); the count only goes down.
       '@typescript-eslint/ban-ts-comment': ['error', { 'ts-nocheck': false }],
     },
+  },
+  {
+    files: UNTYPED_FILES,
+    rules: Object.fromEntries(ANY_RULES.map((rule) => [`@typescript-eslint/${rule}`, 'off'])),
   },
   {
     files: ['src/**/*.js'],

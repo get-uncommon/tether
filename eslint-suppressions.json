@@ -13,41 +13,11 @@
     "@typescript-eslint/no-floating-promises": {
       "count": 1
     },
-    "@typescript-eslint/no-unsafe-argument": {
-      "count": 6
-    },
-    "@typescript-eslint/no-unsafe-assignment": {
-      "count": 3
-    },
-    "@typescript-eslint/no-unsafe-call": {
-      "count": 7
-    },
-    "@typescript-eslint/no-unsafe-member-access": {
-      "count": 25
-    },
-    "@typescript-eslint/no-unsafe-return": {
-      "count": 3
-    },
     "@typescript-eslint/restrict-plus-operands": {
       "count": 4
     }
   },
   "scripts/release.mjs": {
-    "@typescript-eslint/no-unsafe-argument": {
-      "count": 6
-    },
-    "@typescript-eslint/no-unsafe-assignment": {
-      "count": 3
-    },
-    "@typescript-eslint/no-unsafe-call": {
-      "count": 9
-    },
-    "@typescript-eslint/no-unsafe-member-access": {
-      "count": 9
-    },
-    "@typescript-eslint/no-unsafe-return": {
-      "count": 4
-    },
     "@typescript-eslint/prefer-nullish-coalescing": {
       "count": 1
     },
@@ -67,21 +37,6 @@
     "@typescript-eslint/no-misused-promises": {
       "count": 1
     },
-    "@typescript-eslint/no-unsafe-argument": {
-      "count": 8
-    },
-    "@typescript-eslint/no-unsafe-assignment": {
-      "count": 9
-    },
-    "@typescript-eslint/no-unsafe-call": {
-      "count": 4
-    },
-    "@typescript-eslint/no-unsafe-member-access": {
-      "count": 29
-    },
-    "@typescript-eslint/no-unsafe-return": {
-      "count": 2
-    },
     "@typescript-eslint/prefer-nullish-coalescing": {
       "count": 4
     },
@@ -99,21 +54,6 @@
     }
   },
   "server/scripts/update-tether.mjs": {
-    "@typescript-eslint/no-unsafe-argument": {
-      "count": 1
-    },
-    "@typescript-eslint/no-unsafe-assignment": {
-      "count": 7
-    },
-    "@typescript-eslint/no-unsafe-call": {
-      "count": 10
-    },
-    "@typescript-eslint/no-unsafe-member-access": {
-      "count": 24
-    },
-    "@typescript-eslint/no-unsafe-return": {
-      "count": 4
-    },
     "@typescript-eslint/prefer-nullish-coalescing": {
       "count": 4
     },
@@ -125,21 +65,6 @@
     "@typescript-eslint/no-unnecessary-condition": {
       "count": 1
     },
-    "@typescript-eslint/no-unsafe-argument": {
-      "count": 3
-    },
-    "@typescript-eslint/no-unsafe-assignment": {
-      "count": 36
-    },
-    "@typescript-eslint/no-unsafe-call": {
-      "count": 18
-    },
-    "@typescript-eslint/no-unsafe-member-access": {
-      "count": 54
-    },
-    "@typescript-eslint/no-unsafe-return": {
-      "count": 4
-    },
     "@typescript-eslint/prefer-nullish-coalescing": {
       "count": 7
     },
@@ -150,21 +75,6 @@
   "server/src/account.js": {
     "@typescript-eslint/no-confusing-void-expression": {
       "count": 2
-    },
-    "@typescript-eslint/no-unsafe-argument": {
-      "count": 24
-    },
-    "@typescript-eslint/no-unsafe-assignment": {
-      "count": 82
-    },
-    "@typescript-eslint/no-unsafe-call": {
-      "count": 52
-    },
-    "@typescript-eslint/no-unsafe-member-access": {
-      "count": 180
-    },
-    "@typescript-eslint/no-unsafe-return": {
-      "count": 21
     },
     "@typescript-eslint/prefer-includes": {
       "count": 1
@@ -195,21 +105,6 @@
     }
   },
   "server/src/app.js": {
-    "@typescript-eslint/no-unsafe-argument": {
-      "count": 2
-    },
-    "@typescript-eslint/no-unsafe-assignment": {
-      "count": 34
-    },
-    "@typescript-eslint/no-unsafe-call": {
-      "count": 2
-    },
-    "@typescript-eslint/no-unsafe-member-access": {
-      "count": 13
-    },
-    "@typescript-eslint/no-unsafe-return": {
-      "count": 1
-    },
     "@typescript-eslint/prefer-nullish-coalescing": {
       "count": 1
     },
@@ -222,21 +117,6 @@
   },
   "server/src/check.js": {
     "@typescript-eslint/no-unnecessary-condition": {
-      "count": 4
-    },
-    "@typescript-eslint/no-unsafe-argument": {
-      "count": 17
-    },
-    "@typescript-eslint/no-unsafe-assignment": {
-      "count": 36
-    },
-    "@typescript-eslint/no-unsafe-call": {
-      "count": 20
-    },
-    "@typescript-eslint/no-unsafe-member-access": {
-      "count": 70
-    },
-    "@typescript-eslint/no-unsafe-return": {
       "count": 4
     },
     "@typescript-eslint/prefer-includes": {
@@ -262,21 +142,6 @@
     }
   },
   "server/src/deploy.js": {
-    "@typescript-eslint/no-unsafe-argument": {
-      "count": 1
-    },
-    "@typescript-eslint/no-unsafe-assignment": {
-      "count": 13
-    },
-    "@typescript-eslint/no-unsafe-call": {
-      "count": 14
-    },
-    "@typescript-eslint/no-unsafe-member-access": {
-      "count": 27
-    },
-    "@typescript-eslint/no-unsafe-return": {
-      "count": 3
-    },
     "@typescript-eslint/prefer-nullish-coalescing": {
       "count": 3
     },
@@ -287,35 +152,9 @@
       "count": 1
     }
   },
-  "server/src/hmac.js": {
-    "@typescript-eslint/no-unsafe-argument": {
-      "count": 2
-    },
-    "@typescript-eslint/no-unsafe-call": {
-      "count": 2
-    },
-    "@typescript-eslint/no-unsafe-member-access": {
-      "count": 2
-    }
-  },
   "server/src/mapping.js": {
     "@typescript-eslint/no-dynamic-delete": {
       "count": 2
-    },
-    "@typescript-eslint/no-unsafe-argument": {
-      "count": 12
-    },
-    "@typescript-eslint/no-unsafe-assignment": {
-      "count": 33
-    },
-    "@typescript-eslint/no-unsafe-call": {
-      "count": 12
-    },
-    "@typescript-eslint/no-unsafe-member-access": {
-      "count": 46
-    },
-    "@typescript-eslint/no-unsafe-return": {
-      "count": 11
     },
     "@typescript-eslint/prefer-nullish-coalescing": {
       "count": 17
@@ -333,21 +172,6 @@
     },
     "@typescript-eslint/no-misused-promises": {
       "count": 1
-    },
-    "@typescript-eslint/no-unsafe-argument": {
-      "count": 14
-    },
-    "@typescript-eslint/no-unsafe-assignment": {
-      "count": 23
-    },
-    "@typescript-eslint/no-unsafe-call": {
-      "count": 2
-    },
-    "@typescript-eslint/no-unsafe-member-access": {
-      "count": 30
-    },
-    "@typescript-eslint/no-unsafe-return": {
-      "count": 2
     },
     "@typescript-eslint/prefer-nullish-coalescing": {
       "count": 4
@@ -369,18 +193,6 @@
     "@typescript-eslint/no-unnecessary-condition": {
       "count": 2
     },
-    "@typescript-eslint/no-unsafe-assignment": {
-      "count": 67
-    },
-    "@typescript-eslint/no-unsafe-call": {
-      "count": 21
-    },
-    "@typescript-eslint/no-unsafe-member-access": {
-      "count": 92
-    },
-    "@typescript-eslint/no-unsafe-return": {
-      "count": 13
-    },
     "@typescript-eslint/prefer-nullish-coalescing": {
       "count": 22
     },
@@ -395,18 +207,6 @@
     }
   },
   "server/src/store.js": {
-    "@typescript-eslint/no-unsafe-argument": {
-      "count": 4
-    },
-    "@typescript-eslint/no-unsafe-call": {
-      "count": 3
-    },
-    "@typescript-eslint/no-unsafe-member-access": {
-      "count": 3
-    },
-    "@typescript-eslint/no-unsafe-return": {
-      "count": 2
-    },
     "@typescript-eslint/require-await": {
       "count": 4
     },
@@ -423,21 +223,6 @@
     },
     "@typescript-eslint/no-unnecessary-condition": {
       "count": 2
-    },
-    "@typescript-eslint/no-unsafe-argument": {
-      "count": 14
-    },
-    "@typescript-eslint/no-unsafe-assignment": {
-      "count": 95
-    },
-    "@typescript-eslint/no-unsafe-call": {
-      "count": 54
-    },
-    "@typescript-eslint/no-unsafe-member-access": {
-      "count": 168
-    },
-    "@typescript-eslint/no-unsafe-return": {
-      "count": 9
     },
     "@typescript-eslint/prefer-nullish-coalescing": {
       "count": 19
@@ -465,9 +250,6 @@
     "@typescript-eslint/no-empty-function": {
       "count": 1
     },
-    "@typescript-eslint/no-unsafe-argument": {
-      "count": 1
-    },
     "@typescript-eslint/restrict-plus-operands": {
       "count": 1
     },
@@ -479,35 +261,11 @@
     "@typescript-eslint/no-empty-function": {
       "count": 4
     },
-    "@typescript-eslint/no-unsafe-argument": {
-      "count": 4
-    },
-    "@typescript-eslint/no-unsafe-assignment": {
-      "count": 3
-    },
-    "@typescript-eslint/no-unsafe-member-access": {
-      "count": 2
-    },
     "@typescript-eslint/prefer-nullish-coalescing": {
       "count": 1
     }
   },
   "server/src/webflow.js": {
-    "@typescript-eslint/no-unsafe-argument": {
-      "count": 2
-    },
-    "@typescript-eslint/no-unsafe-assignment": {
-      "count": 10
-    },
-    "@typescript-eslint/no-unsafe-call": {
-      "count": 3
-    },
-    "@typescript-eslint/no-unsafe-member-access": {
-      "count": 10
-    },
-    "@typescript-eslint/no-unsafe-return": {
-      "count": 5
-    },
     "@typescript-eslint/prefer-nullish-coalescing": {
       "count": 5
     },
@@ -519,43 +277,11 @@
     }
   },
   "server/src/webhook.js": {
-    "@typescript-eslint/no-unsafe-argument": {
-      "count": 3
-    },
-    "@typescript-eslint/no-unsafe-assignment": {
-      "count": 9
-    },
-    "@typescript-eslint/no-unsafe-call": {
-      "count": 12
-    },
-    "@typescript-eslint/no-unsafe-member-access": {
-      "count": 17
-    },
-    "@typescript-eslint/no-unsafe-return": {
-      "count": 1
-    },
     "@typescript-eslint/prefer-nullish-coalescing": {
       "count": 1
     },
     "@typescript-eslint/prefer-optional-chain": {
       "count": 1
-    }
-  },
-  "server/src/webhooks.js": {
-    "@typescript-eslint/no-unsafe-argument": {
-      "count": 4
-    },
-    "@typescript-eslint/no-unsafe-assignment": {
-      "count": 6
-    },
-    "@typescript-eslint/no-unsafe-call": {
-      "count": 11
-    },
-    "@typescript-eslint/no-unsafe-member-access": {
-      "count": 18
-    },
-    "@typescript-eslint/no-unsafe-return": {
-      "count": 3
     }
   },
   "server/src/worker.js": {
@@ -564,21 +290,6 @@
     },
     "@typescript-eslint/no-empty-function": {
       "count": 1
-    },
-    "@typescript-eslint/no-unsafe-argument": {
-      "count": 8
-    },
-    "@typescript-eslint/no-unsafe-assignment": {
-      "count": 12
-    },
-    "@typescript-eslint/no-unsafe-call": {
-      "count": 4
-    },
-    "@typescript-eslint/no-unsafe-member-access": {
-      "count": 16
-    },
-    "@typescript-eslint/no-unsafe-return": {
-      "count": 4
     },
     "@typescript-eslint/prefer-nullish-coalescing": {
       "count": 4
@@ -622,21 +333,6 @@
     "@typescript-eslint/no-unnecessary-condition": {
       "count": 3
     },
-    "@typescript-eslint/no-unsafe-argument": {
-      "count": 12
-    },
-    "@typescript-eslint/no-unsafe-assignment": {
-      "count": 119
-    },
-    "@typescript-eslint/no-unsafe-call": {
-      "count": 63
-    },
-    "@typescript-eslint/no-unsafe-member-access": {
-      "count": 228
-    },
-    "@typescript-eslint/no-unsafe-return": {
-      "count": 22
-    },
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     },
@@ -675,21 +371,6 @@
     "@typescript-eslint/no-unnecessary-condition": {
       "count": 7
     },
-    "@typescript-eslint/no-unsafe-argument": {
-      "count": 18
-    },
-    "@typescript-eslint/no-unsafe-assignment": {
-      "count": 80
-    },
-    "@typescript-eslint/no-unsafe-call": {
-      "count": 28
-    },
-    "@typescript-eslint/no-unsafe-member-access": {
-      "count": 140
-    },
-    "@typescript-eslint/no-unsafe-return": {
-      "count": 26
-    },
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     },
@@ -719,21 +400,6 @@
     "@typescript-eslint/no-unnecessary-type-conversion": {
       "count": 1
     },
-    "@typescript-eslint/no-unsafe-argument": {
-      "count": 5
-    },
-    "@typescript-eslint/no-unsafe-assignment": {
-      "count": 75
-    },
-    "@typescript-eslint/no-unsafe-call": {
-      "count": 33
-    },
-    "@typescript-eslint/no-unsafe-member-access": {
-      "count": 130
-    },
-    "@typescript-eslint/no-unsafe-return": {
-      "count": 7
-    },
     "@typescript-eslint/prefer-nullish-coalescing": {
       "count": 34
     },
@@ -751,9 +417,6 @@
     }
   },
   "src/api-version.js": {
-    "@typescript-eslint/no-unsafe-assignment": {
-      "count": 3
-    },
     "@typescript-eslint/prefer-nullish-coalescing": {
       "count": 1
     }
@@ -761,21 +424,6 @@
   "src/astro.js": {
     "@typescript-eslint/no-dynamic-delete": {
       "count": 1
-    },
-    "@typescript-eslint/no-unsafe-argument": {
-      "count": 3
-    },
-    "@typescript-eslint/no-unsafe-assignment": {
-      "count": 4
-    },
-    "@typescript-eslint/no-unsafe-call": {
-      "count": 7
-    },
-    "@typescript-eslint/no-unsafe-member-access": {
-      "count": 5
-    },
-    "@typescript-eslint/no-unsafe-return": {
-      "count": 3
     },
     "@typescript-eslint/prefer-nullish-coalescing": {
       "count": 2
@@ -796,21 +444,6 @@
     },
     "@typescript-eslint/no-unnecessary-condition": {
       "count": 10
-    },
-    "@typescript-eslint/no-unsafe-argument": {
-      "count": 13
-    },
-    "@typescript-eslint/no-unsafe-assignment": {
-      "count": 68
-    },
-    "@typescript-eslint/no-unsafe-call": {
-      "count": 66
-    },
-    "@typescript-eslint/no-unsafe-member-access": {
-      "count": 189
-    },
-    "@typescript-eslint/no-unsafe-return": {
-      "count": 53
     },
     "@typescript-eslint/prefer-nullish-coalescing": {
       "count": 37
@@ -835,24 +468,6 @@
     }
   },
   "src/client.js": {
-    "@typescript-eslint/no-unnecessary-condition": {
-      "count": 2
-    },
-    "@typescript-eslint/no-unsafe-argument": {
-      "count": 13
-    },
-    "@typescript-eslint/no-unsafe-assignment": {
-      "count": 19
-    },
-    "@typescript-eslint/no-unsafe-call": {
-      "count": 14
-    },
-    "@typescript-eslint/no-unsafe-member-access": {
-      "count": 52
-    },
-    "@typescript-eslint/no-unsafe-return": {
-      "count": 8
-    },
     "@typescript-eslint/prefer-nullish-coalescing": {
       "count": 6
     },
@@ -876,21 +491,6 @@
     "@typescript-eslint/no-floating-promises": {
       "count": 1
     },
-    "@typescript-eslint/no-unsafe-argument": {
-      "count": 7
-    },
-    "@typescript-eslint/no-unsafe-assignment": {
-      "count": 25
-    },
-    "@typescript-eslint/no-unsafe-call": {
-      "count": 10
-    },
-    "@typescript-eslint/no-unsafe-member-access": {
-      "count": 19
-    },
-    "@typescript-eslint/no-unsafe-return": {
-      "count": 1
-    },
     "@typescript-eslint/prefer-nullish-coalescing": {
       "count": 10
     },
@@ -911,12 +511,6 @@
     "@typescript-eslint/no-unnecessary-type-conversion": {
       "count": 1
     },
-    "@typescript-eslint/no-unsafe-argument": {
-      "count": 2
-    },
-    "@typescript-eslint/no-unsafe-member-access": {
-      "count": 4
-    },
     "@typescript-eslint/prefer-nullish-coalescing": {
       "count": 2
     }
@@ -927,21 +521,6 @@
     },
     "@typescript-eslint/no-unnecessary-condition": {
       "count": 10
-    },
-    "@typescript-eslint/no-unsafe-argument": {
-      "count": 8
-    },
-    "@typescript-eslint/no-unsafe-assignment": {
-      "count": 35
-    },
-    "@typescript-eslint/no-unsafe-call": {
-      "count": 25
-    },
-    "@typescript-eslint/no-unsafe-member-access": {
-      "count": 89
-    },
-    "@typescript-eslint/no-unsafe-return": {
-      "count": 7
     },
     "@typescript-eslint/prefer-nullish-coalescing": {
       "count": 16
@@ -963,21 +542,6 @@
     "@typescript-eslint/no-unnecessary-condition": {
       "count": 3
     },
-    "@typescript-eslint/no-unsafe-argument": {
-      "count": 14
-    },
-    "@typescript-eslint/no-unsafe-assignment": {
-      "count": 25
-    },
-    "@typescript-eslint/no-unsafe-call": {
-      "count": 51
-    },
-    "@typescript-eslint/no-unsafe-member-access": {
-      "count": 95
-    },
-    "@typescript-eslint/no-unsafe-return": {
-      "count": 18
-    },
     "@typescript-eslint/prefer-nullish-coalescing": {
       "count": 6
     }
@@ -992,21 +556,6 @@
     "@typescript-eslint/no-floating-promises": {
       "count": 1
     },
-    "@typescript-eslint/no-unsafe-argument": {
-      "count": 7
-    },
-    "@typescript-eslint/no-unsafe-assignment": {
-      "count": 10
-    },
-    "@typescript-eslint/no-unsafe-call": {
-      "count": 8
-    },
-    "@typescript-eslint/no-unsafe-member-access": {
-      "count": 22
-    },
-    "@typescript-eslint/no-unsafe-return": {
-      "count": 2
-    },
     "@typescript-eslint/prefer-nullish-coalescing": {
       "count": 2
     },
@@ -1020,12 +569,6 @@
   "src/fragments.js": {
     "@typescript-eslint/no-unnecessary-condition": {
       "count": 1
-    },
-    "@typescript-eslint/no-unsafe-assignment": {
-      "count": 3
-    },
-    "@typescript-eslint/no-unsafe-call": {
-      "count": 3
     },
     "@typescript-eslint/restrict-plus-operands": {
       "count": 1
@@ -1048,28 +591,13 @@
       "count": 5
     },
     "@typescript-eslint/no-unnecessary-type-conversion": {
-      "count": 4
-    },
-    "@typescript-eslint/no-unsafe-argument": {
-      "count": 11
-    },
-    "@typescript-eslint/no-unsafe-assignment": {
-      "count": 30
-    },
-    "@typescript-eslint/no-unsafe-call": {
-      "count": 83
-    },
-    "@typescript-eslint/no-unsafe-member-access": {
-      "count": 80
-    },
-    "@typescript-eslint/no-unsafe-return": {
-      "count": 27
+      "count": 2
     },
     "@typescript-eslint/no-unused-vars": {
       "count": 4
     },
     "@typescript-eslint/prefer-nullish-coalescing": {
-      "count": 17
+      "count": 16
     },
     "@typescript-eslint/prefer-optional-chain": {
       "count": 1
@@ -1088,21 +616,6 @@
     }
   },
   "src/initial.js": {
-    "@typescript-eslint/no-unsafe-argument": {
-      "count": 4
-    },
-    "@typescript-eslint/no-unsafe-assignment": {
-      "count": 26
-    },
-    "@typescript-eslint/no-unsafe-call": {
-      "count": 11
-    },
-    "@typescript-eslint/no-unsafe-member-access": {
-      "count": 63
-    },
-    "@typescript-eslint/no-unsafe-return": {
-      "count": 7
-    },
     "@typescript-eslint/prefer-nullish-coalescing": {
       "count": 11
     },
@@ -1120,34 +633,8 @@
     "@typescript-eslint/no-unnecessary-condition": {
       "count": 1
     },
-    "@typescript-eslint/no-unsafe-argument": {
-      "count": 1
-    },
-    "@typescript-eslint/no-unsafe-assignment": {
-      "count": 2
-    },
-    "@typescript-eslint/no-unsafe-call": {
-      "count": 2
-    },
-    "@typescript-eslint/no-unsafe-member-access": {
-      "count": 11
-    },
-    "@typescript-eslint/no-unsafe-return": {
-      "count": 2
-    },
     "@typescript-eslint/prefer-nullish-coalescing": {
       "count": 2
-    }
-  },
-  "src/lazy.js": {
-    "@typescript-eslint/no-unsafe-call": {
-      "count": 1
-    },
-    "@typescript-eslint/no-unsafe-member-access": {
-      "count": 1
-    },
-    "@typescript-eslint/no-unsafe-return": {
-      "count": 1
     }
   },
   "src/loader.js": {
@@ -1156,18 +643,6 @@
     },
     "@typescript-eslint/no-misused-promises": {
       "count": 1
-    },
-    "@typescript-eslint/no-unsafe-assignment": {
-      "count": 21
-    },
-    "@typescript-eslint/no-unsafe-call": {
-      "count": 12
-    },
-    "@typescript-eslint/no-unsafe-member-access": {
-      "count": 35
-    },
-    "@typescript-eslint/no-unsafe-return": {
-      "count": 4
     },
     "@typescript-eslint/prefer-nullish-coalescing": {
       "count": 8
@@ -1189,21 +664,6 @@
     "@typescript-eslint/no-unnecessary-type-conversion": {
       "count": 1
     },
-    "@typescript-eslint/no-unsafe-argument": {
-      "count": 4
-    },
-    "@typescript-eslint/no-unsafe-assignment": {
-      "count": 19
-    },
-    "@typescript-eslint/no-unsafe-call": {
-      "count": 20
-    },
-    "@typescript-eslint/no-unsafe-member-access": {
-      "count": 48
-    },
-    "@typescript-eslint/no-unsafe-return": {
-      "count": 5
-    },
     "@typescript-eslint/prefer-nullish-coalescing": {
       "count": 16
     },
@@ -1218,23 +678,8 @@
     "@typescript-eslint/no-unnecessary-condition": {
       "count": 1
     },
-    "@typescript-eslint/no-unsafe-argument": {
-      "count": 4
-    },
-    "@typescript-eslint/no-unsafe-assignment": {
-      "count": 19
-    },
-    "@typescript-eslint/no-unsafe-call": {
-      "count": 9
-    },
-    "@typescript-eslint/no-unsafe-member-access": {
-      "count": 34
-    },
-    "@typescript-eslint/no-unsafe-return": {
-      "count": 7
-    },
     "@typescript-eslint/prefer-nullish-coalescing": {
-      "count": 15
+      "count": 13
     },
     "@typescript-eslint/prefer-optional-chain": {
       "count": 1
@@ -1262,74 +707,7 @@
     "@typescript-eslint/no-unnecessary-condition": {
       "count": 1
     },
-    "@typescript-eslint/no-unsafe-argument": {
-      "count": 15
-    },
-    "@typescript-eslint/no-unsafe-assignment": {
-      "count": 17
-    },
-    "@typescript-eslint/no-unsafe-call": {
-      "count": 18
-    },
-    "@typescript-eslint/no-unsafe-member-access": {
-      "count": 35
-    },
-    "@typescript-eslint/no-unsafe-return": {
-      "count": 3
-    },
     "@typescript-eslint/prefer-nullish-coalescing": {
-      "count": 5
-    }
-  },
-  "src/parts/account-pages.js": {
-    "@typescript-eslint/no-unsafe-member-access": {
-      "count": 1
-    }
-  },
-  "src/parts/account.js": {
-    "@typescript-eslint/no-unsafe-member-access": {
-      "count": 1
-    }
-  },
-  "src/parts/analytics.js": {
-    "@typescript-eslint/no-unsafe-member-access": {
-      "count": 1
-    }
-  },
-  "src/parts/diagnose.js": {
-    "@typescript-eslint/no-unsafe-member-access": {
-      "count": 1
-    }
-  },
-  "src/parts/extras.js": {
-    "@typescript-eslint/no-unsafe-member-access": {
-      "count": 1
-    }
-  },
-  "src/parts/markets.js": {
-    "@typescript-eslint/no-unsafe-member-access": {
-      "count": 1
-    }
-  },
-  "src/parts/search.js": {
-    "@typescript-eslint/no-unsafe-member-access": {
-      "count": 1
-    }
-  },
-  "src/presets/barba.js": {
-    "@typescript-eslint/no-unsafe-argument": {
-      "count": 1
-    },
-    "@typescript-eslint/no-unsafe-assignment": {
-      "count": 6
-    },
-    "@typescript-eslint/no-unsafe-call": {
-      "count": 11
-    },
-    "@typescript-eslint/no-unsafe-member-access": {
-      "count": 8
-    },
-    "@typescript-eslint/no-unsafe-return": {
       "count": 5
     }
   },
@@ -1342,21 +720,6 @@
     },
     "@typescript-eslint/no-unnecessary-condition": {
       "count": 1
-    },
-    "@typescript-eslint/no-unsafe-argument": {
-      "count": 27
-    },
-    "@typescript-eslint/no-unsafe-assignment": {
-      "count": 123
-    },
-    "@typescript-eslint/no-unsafe-call": {
-      "count": 110
-    },
-    "@typescript-eslint/no-unsafe-member-access": {
-      "count": 346
-    },
-    "@typescript-eslint/no-unsafe-return": {
-      "count": 48
     },
     "@typescript-eslint/prefer-nullish-coalescing": {
       "count": 33
@@ -1384,21 +747,6 @@
     "@typescript-eslint/no-misused-promises": {
       "count": 1
     },
-    "@typescript-eslint/no-unsafe-argument": {
-      "count": 8
-    },
-    "@typescript-eslint/no-unsafe-assignment": {
-      "count": 27
-    },
-    "@typescript-eslint/no-unsafe-call": {
-      "count": 41
-    },
-    "@typescript-eslint/no-unsafe-member-access": {
-      "count": 84
-    },
-    "@typescript-eslint/no-unsafe-return": {
-      "count": 3
-    },
     "@typescript-eslint/prefer-nullish-coalescing": {
       "count": 12
     },
@@ -1410,21 +758,6 @@
     }
   },
   "src/selling-plans.js": {
-    "@typescript-eslint/no-unsafe-argument": {
-      "count": 2
-    },
-    "@typescript-eslint/no-unsafe-assignment": {
-      "count": 11
-    },
-    "@typescript-eslint/no-unsafe-call": {
-      "count": 9
-    },
-    "@typescript-eslint/no-unsafe-member-access": {
-      "count": 33
-    },
-    "@typescript-eslint/no-unsafe-return": {
-      "count": 10
-    },
     "@typescript-eslint/prefer-nullish-coalescing": {
       "count": 14
     }
@@ -1435,21 +768,6 @@
     },
     "@typescript-eslint/no-unnecessary-type-conversion": {
       "count": 1
-    },
-    "@typescript-eslint/no-unsafe-argument": {
-      "count": 11
-    },
-    "@typescript-eslint/no-unsafe-assignment": {
-      "count": 57
-    },
-    "@typescript-eslint/no-unsafe-call": {
-      "count": 17
-    },
-    "@typescript-eslint/no-unsafe-member-access": {
-      "count": 72
-    },
-    "@typescript-eslint/no-unsafe-return": {
-      "count": 19
     },
     "@typescript-eslint/prefer-nullish-coalescing": {
       "count": 25
@@ -1468,21 +786,6 @@
     }
   },
   "src/status.js": {
-    "@typescript-eslint/no-unsafe-argument": {
-      "count": 3
-    },
-    "@typescript-eslint/no-unsafe-assignment": {
-      "count": 9
-    },
-    "@typescript-eslint/no-unsafe-call": {
-      "count": 14
-    },
-    "@typescript-eslint/no-unsafe-member-access": {
-      "count": 17
-    },
-    "@typescript-eslint/no-unsafe-return": {
-      "count": 1
-    },
     "@typescript-eslint/prefer-nullish-coalescing": {
       "count": 4
     },
