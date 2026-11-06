@@ -1,5 +1,60 @@
 # Changelog
 
+## Unreleased
+
+- Security: descriptions (`tether-bind="description"`, `tether-collection-bind="description"`) go
+  through an allow-list of content elements and attributes. **Behaviour change:** `<style>` blocks and
+  form fields are removed, unknown elements are unwrapped (their text stays), iframes are kept only
+  with an https `src` and run sandboxed with a strict referrer policy, and links that open a new tab
+  get `rel="noopener noreferrer"`. Text formatting, inline styles, images, links, tables and video
+  embeds render as before.
+- Security: the optional parts loaded from the core script's own folder carry a sha384 `integrity`
+  hash from the same build, so a core pinned with `integrity` runs only its own parts. **Behaviour
+  change:** a core on another origin loads its parts with CORS (jsDelivr sends the headers; a
+  self-hosted copy on another domain must too). Parts from a `partsUrl` load without a hash.
+- Security (sync Worker): a repeated webhook delivery (same `X-Shopify-Webhook-Id`) is dropped
+  within the Worker instance, after the signature and shop checks.
+- Security (sync Worker): a new login ends the session the browser already had. A failed login,
+  callback or logout step sends the visitor back to the site with `?account=error` (and clears the
+  login cookies) instead of a raw 502 answer.
+- Security (sync Worker updates): only `v`-prefixed tags are releases; an update is staged and
+  swapped in, and rolled back when it fails part-way.
+- Config: every `TETHER_CONFIG` option is validated once. **Behaviour change:** an invalid value
+  warns in the console and falls back to its default: `apiVersion` must be quarterly (or
+  `unstable`), `domain` a host name, `locale` a locale `Intl` accepts; `country` and `language` are
+  normalised to Shopify's codes (`'de'` → `DE`); the `account` URLs must be a site path or https
+  (http on localhost); invalid fields of `markets`, `analytics` and `account` are dropped.
+- Analytics: `shopify: { proxy: true }` is the documented form; any value still turns it on.
+- Customer accounts: a failed login fires `tether:account-error` with `{ error }`: `'error'` or
+  `'expired'` (`?account=error` / `?account=expired`) in server mode, Shopify's OAuth error code in
+  browser mode.
+- Customer accounts: both modes answer the same shapes and codes. `customer()` has one shape
+  (`id`, `firstName`, `lastName`, `displayName`, `emailAddress`, `defaultAddress`; missing fields are
+  `null`, and server mode now includes `id`); logged out, `customer()` is `null` and `orders()` `[]`.
+  Refused input is `INVALID` (with `userErrors`) in both modes, an unreachable endpoint `NETWORK`.
+- Customer accounts (browser mode): a token Shopify refuses is refreshed once, else the session
+  ends; `isLoggedIn()` sees a stored session before any request. When the cart can't be unlinked at
+  logout, it is forgotten on this device and the page shows an empty cart.
+- Customer accounts (sync Worker): a refresh refused for any reason but `invalid_grant` answers 502
+  and keeps the session; a session without a refresh token no longer asks Shopify; discovery falls
+  back to the shop id only on a 403/430 from the store domain.
+- `Tether.cart.forgetSaved()`: forgets this device's cart and shows an empty one.
+- Amounts Tether adds up or subtracts (totals, savings) are taken in each currency's own smallest
+  unit (JPY whole, KWD three decimals) instead of hundredths.
+- `productUrl()` (browser links and `@occluze/tether/server`) gives no link (`null`) for a missing
+  handle or id instead of `/product/null`, and encodes the handle.
+- A token without inventory access gets queries without `quantityAvailable`; `Tether.query()`
+  texts are sent as written.
+- Storefront answers that are malformed reject with a `TetherError` instead of a `TypeError`.
+- Sync Worker: `/health` answers `{ ok, version }`; the public `/check` answers only `{ ok, steps }`
+  with each step's title and level (version and KV binding need the bearer secret).
+- Sync Worker: the Node server logs the address it really bound.
+- Types: `Tether.account` methods return their real shapes (`AccountCustomer`, `AccountOrder`,
+  `OrderDetail`, `SubscriptionContract`, …), `TetherErrorCode` lists every code, `TetherEvents` has
+  the account, search and list-rendered events, and `productUrl()` returns `string | null`.
+- The Storefront, Customer Account and Admin API versions live in one place
+  (`server/src/shared/api-versions.js`).
+
 ## 0.6.8 (2026-11-06)
 
 - Security: the market's country and language are checked before they go into a query's

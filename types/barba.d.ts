@@ -14,3 +14,4 @@ export interface BarbaPresetOptions {
 
 /** Hooks for sites with page transitions, smooth scroll and GSAP: spread into Tether.init(). */
 export declare function barbaPreset(options?: BarbaPresetOptions): Partial<TetherConfig>;
+export default barbaPreset;

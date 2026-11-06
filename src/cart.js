@@ -198,6 +198,15 @@ export const Cart = {
     if (link.beforeCheckout !== undefined) customer.beforeCheckout = link.beforeCheckout;
   },
 
+  /**
+   * Forgets the saved cart on this device, as if there were none: the page shows an empty cart and
+   * `tether:cart-updated` fires with reason `load`. The next add starts a new cart.
+   */
+  forgetSaved() {
+    forgetSavedCart();
+    settleLoad({ kind: 'loaded', cart: null });
+  },
+
   /** Keeps a cart and shows it, as a change does; tests seed the cart with it. */
   _commit: commit,
   render,

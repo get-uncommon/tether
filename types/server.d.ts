@@ -85,7 +85,7 @@ export interface Storefront {
   allCollections(): Promise<ShopifyCollection[]>;
   /** By handle, id or product (runs in parallel with getProduct when you pass the handle). */
   getRecommendations(
-    product: string | number | Pick<ShopifyProduct, 'id'>,
+    product: string | number | Pick<ShopifyProduct, 'id'> | null | undefined,
     intent?: 'RELATED' | 'COMPLEMENTARY',
   ): Promise<ShopifyProduct[]>;
   /**
@@ -94,7 +94,7 @@ export interface Storefront {
    * Astro: <Fragment set:html={shop.hydrate(product)} />
    */
   hydrate(
-    products: ShopifyProduct | ShopifyProduct[],
+    products: ShopifyProduct | null | undefined | (ShopifyProduct | null | undefined)[],
     opts?: {
       /** For lists: without descriptions and variant images, about 40% smaller. */
       card?: boolean;
@@ -104,8 +104,9 @@ export interface Storefront {
   ): string;
   formatMoney(money: Money | null | undefined, locale?: string): string;
   /** 30 -> '30%' (nl, en) / '30 %' (de, fr), the way Tether shows savings. '' for 0. */
-  formatPercent(n: number, locale?: string): string;
-  productUrl(handle: string, opts?: { productPath?: string; id?: string }): string;
+  formatPercent(n: number | null | undefined, locale?: string): string;
+  /** null when the path needs a handle or an id that is empty. */
+  productUrl(handle: string, opts?: { productPath?: string; id?: string }): string | null;
   /** Shopify CDN image at a size. Use the element's max-width value, so the browser keeps the image. */
   imageUrl(url: string | null | undefined, size?: ImageSize): string;
   /**
@@ -115,8 +116,11 @@ export interface Storefront {
   initialState(product: ShopifyProduct, opts?: InitialOptions): InitialState;
   initialState(product: ShopifyProduct | null | undefined, opts?: InitialOptions): InitialState | null;
   /** schema.org Product / ProductGroup data for search engines, as a <script type="application/ld+json"> tag. */
-  jsonLd(product: ShopifyProduct | null, opts?: { url?: string; brand?: string }): string;
-  jsonLdData(product: ShopifyProduct | null, opts?: { url?: string; brand?: string }): Record<string, unknown> | null;
+  jsonLd(product: ShopifyProduct | null | undefined, opts?: { url?: string; brand?: string }): string;
+  jsonLdData(
+    product: ShopifyProduct | null | undefined,
+    opts?: { url?: string; brand?: string },
+  ): Record<string, unknown> | null;
   plans: SellingPlanHelpers;
 }
 
@@ -160,6 +164,8 @@ export interface InitialOptions {
   variant?: string | null;
   sellingPlan?: string | null;
   defaultPurchase?: 'one-time' | 'subscription';
+  /** low-stock at this many or fewer (default 5). */
+  lowStock?: number;
 }
 export declare function initialState(product: ShopifyProduct, opts?: InitialOptions): InitialState;
 export declare function initialState(
@@ -175,8 +181,10 @@ export interface ImageSize {
 export declare function imageUrl(url: string | null | undefined, size?: ImageSize): string;
 export declare function createStorefront(options?: StorefrontOptions): Storefront;
 export declare function formatMoney(money: Money | null | undefined, locale?: string): string;
-export declare function productUrl(handle: string, opts?: { productPath?: string; id?: string }): string;
-export declare function productKey(raw: string | number): string | null;
+export declare function formatPercent(n: number | null | undefined, locale?: string): string;
+/** null when the path needs a handle or an id that is empty. */
+export declare function productUrl(handle: string, opts?: { productPath?: string; id?: string }): string | null;
+export declare function productKey(raw: string | number | null | undefined): string | null;
 export declare function withContext(query: string, ctx?: { country?: string; language?: string }): string;
 export declare const plans: SellingPlanHelpers;
 export { TetherError };

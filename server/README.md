@@ -47,7 +47,8 @@ curl -H "Authorization: Bearer YOUR_SYNC_SECRET" https://tether-sync.YOUR-NAME.w
 ```
 
 It tests both connections, the field mapping and the webhooks, and shows how a product will be
-written. Anything wrong comes with the fix.
+written. Anything wrong comes with the fix. Without the secret, `/check` answers only each step's
+title and level (pass, warning, error), never the store, collection or values.
 
 ---
 
@@ -63,7 +64,9 @@ Your copy updates itself, like a jsDelivr version. The `TETHER_VERSION` file in 
 
 It checks every Monday (want daily? change the `cron` line in your copy's `.github/workflows/update-tether.yml` to `'23 5 * * *'`), and only updates when the new version's tests pass. To update right away: your copy on GitHub → **Actions** → **Update Tether**
 → **Run workflow**. It tests the new version, then Cloudflare redeploys. Your settings stay as they are.
-`https://YOUR-WORKER/health` shows the version that's running.
+A release is installed by the commit its `v…` tag points at, and only when that commit is on the
+Tether repository's `main` branch. `https://YOUR-WORKER/health` answers `{ "ok": true, "version": "…" }`
+with the version that's running.
 
 ## Several stores or client sites
 
@@ -84,6 +87,7 @@ Add these later as secrets, only if you need them: Cloudflare → your Worker �
 | `SHOPIFY_ADMIN_TOKEN` | Stores with an old admin-created custom app (`shpat_…`) instead of a Dev Dashboard app |
 | `SHOPIFY_WEBHOOK_SECRET` | Webhooks you created yourself under Shopify → Settings → Notifications |
 | `ACCOUNT_CLIENT_ID`, `ACCOUNT_ORIGINS`, `STOREFRONT_TOKEN` (+ `ACCOUNT_CLIENT_SECRET`) | Customer accounts through this Worker, the safe mode: the browser never holds a Shopify token ([setup](../docs/accounts.md#server-mode)) |
+| `ACCOUNT_SECRET` | Recommended with customer accounts: 24+ random characters, the sessions' own encryption key (else it comes from `SYNC_SECRET`) |
 | `DEPLOY_HOOK_URL` | A statically built site (Astro, …): start a build when product content changes ([how](../docs/astro.md#7-rebuild-when-products-change)). Without Webflow, set the Webflow fields to `none` |
 | `DEPLOY_HOOK_MIN_SECONDS` | At most one build per this many seconds (default 60) |
 | `MAX_SUBREQUESTS` | A paid Workers plan, to let each run do more (default 45) |

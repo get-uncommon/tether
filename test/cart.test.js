@@ -165,6 +165,25 @@ test('expired cart: a query answering cart: null forgets the saved cart', async 
   assert.equal(reported.length, 0, 'an expired cart is not a failure');
 });
 
+test('forgetSaved: drops the saved cart and shows an empty one, as a load of no cart does', async () => {
+  localStorage.setItem(KEY, 'gid://shopify/Cart/abc');
+  answers.TetherCart = () => ({ data: { cart: oneLine(2) } });
+  await Cart.init();
+  assert.equal(Cart.count, 2);
+  const updates = [];
+  const listener = (event) => updates.push(event.detail);
+  document.addEventListener('tether:cart-updated', listener);
+  Cart.forgetSaved();
+  document.removeEventListener('tether:cart-updated', listener);
+  assert.equal(Cart.id(), null);
+  assert.equal(localStorage.getItem(KEY), null);
+  assert.deepEqual(Cart.status, { kind: 'empty' });
+  assert.equal(Cart.state, null);
+  assert.equal(Cart.count, 0);
+  assert.deepEqual(updates, [{ cart: null, reason: 'load' }]);
+  assert.equal(calls.length, 1, 'Shopify is not asked');
+});
+
 test('expired cart: a cartId user error creates a new cart with the same lines', async () => {
   localStorage.setItem(KEY, 'gid://shopify/Cart/old');
   answers.Tether_cartLinesAdd = () =>

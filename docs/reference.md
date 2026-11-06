@@ -204,8 +204,11 @@ Markup written for an older `wfs-*` prefix keeps working with `prefix: 'wfs'`.
 | `tether-variant-url` | | On a scope: `?variant=` follows the choice (shareable links). Global: `variantUrl: true` for the page's main product |
 | `tether-show` | condition | Shows/hides, see conditions |
 
-`tether-bind` values: `title`, `description` (the HTML written in Shopify, with
-scripts, event handlers and script links removed), `description-text`, `vendor`, `type`,
+`tether-bind` values: `title`, `description` (the HTML written in Shopify, through an allow-list:
+text formatting, lists, tables, images, links, inline `style` and video embeds stay; scripts, event
+handlers, `javascript:` links, `<style>` blocks and form fields are removed; other elements are
+unwrapped, so their text stays; iframes must be https and run sandboxed; links that open a new tab
+get `rel="noopener noreferrer"`), `description-text`, `vendor`, `type`,
 `handle`, `published-at`, `price`, `total-price`, `compare-at-price`, `unit-price`, `min-price`,
 `max-price`, `discount-percentage`, `discount-amount`, `variant-title`, `variant-id`, `sku`,
 `barcode`, `stock`, `quantity`, `featured-image`, `variant-image`, `image:N` (nth image), `images` (repeater), `tags`
@@ -306,7 +309,7 @@ Using Webflow CMS lists instead? Put `tether-product` on each CMS item, bound to
 </form>
 ```
 
-Shopify's predictive search, in its own optional part (2 KB) that loads only on pages with
+Shopify's predictive search, in its own optional part (3 KB) that loads only on pages with
 `tether-search`. Each list's first child is the template; lists without results are hidden. The
 root gets `is-open` and `tether-search-state` (`loading`, `ready`, `empty`, `error`); the input is
 a combobox (arrow keys, Enter, Escape) for screen readers. `tether-search-limit` (default 6),
@@ -390,12 +393,14 @@ Tether.plans.planSavings(variant, planId);        // selling plan helpers
 Tether.on('cart-updated', ({ cart }) => {});
 await Tether.diagnose();                          // what's wrong on this page (see Troubleshooting)
 await Tether.setCountry('DE');                    // switch market (see Markets)
+Tether.cart.forgetSaved();                       // forget this device's cart: the page shows an empty one
 ```
 
 Events (on `document`, prefixed `tether:`): `ready`, `product-ready`, `variant-changed`,
 `product-added`, `added`, `group-added`, `cart-updated`, `cart-toggled`, `checkout`,
-`list-ready`, `discount-applied`, `discount-invalid`, `layout-changed`, `product-not-found`,
-`product-updated`, `country-changed`, `cart-error`, `cart-warning`, `error`.
+`list-ready`, `list-rendered`, `discount-applied`, `discount-invalid`, `layout-changed`, `product-not-found`,
+`product-updated`, `country-changed`, `cart-error`, `cart-warning`, `search`, `error`, and with
+[accounts](accounts.md#events) `account-login`, `account-logout`, `account-error`, `account-updated`.
 
 ## Config
 
@@ -408,9 +413,20 @@ translated by `code`), `prefix`, and the hooks `onLayoutChange`, `onCartOpen`,
 `onCartClose`, `onLineEnter`, `onLineLeave`, `onValueChange`, `onError`, `cartFocus` (keyboard focus
 in the cart drawer, on by default) and `partsUrl` (folder of the optional parts when self-hosting: https or on your own site).
 
-To pin exactly what runs, load a fixed release (`@v0.6.8`, never `@0.6` or `@latest`) and add the file's
-[`integrity`](https://www.srihash.org/) hash to the script tag. The optional parts load from the same release folder,
-whose files never change.
+**Validation.** Every option is checked once, when Tether starts. A value it can't use logs a
+warning in the console and falls back to the default (or is left out): `apiVersion` must be a
+quarterly version (`2026-07`; `unstable` works, with a warning), `domain` a host name (`https://` and
+a path are stripped), `locale` a locale `Intl` accepts, `country` and `language` codes Shopify
+knows (written as you like: `'de'` becomes `DE`, `'pt-br'` becomes `PT_BR`), and the `account` URLs
+a path on your site or an https URL (http only on localhost).
+
+**Pinning a release.** `@0.6` takes every 0.6.x fix automatically, which is what most sites want.
+To pin exactly what runs, load a fixed release (`@v0.6.8`) and add the file's
+[`integrity`](https://www.srihash.org/) hash to the script tag (an `integrity` hash on `@0.6` breaks
+with the next fix). The optional parts load from the same folder as the core and are checked against
+hashes built into it, so a pinned core runs only the parts of its own release. A core on another
+origin than the page loads them with CORS (jsDelivr sends the headers; your own host must too). Parts
+loaded from a `partsUrl` are not hash-checked; it has to be https or on your own site.
 
 **Optional parts.** `Tether.diagnose()` and markets (`markets.detect`, `tether-country-select`,
 `Tether.setCountry()`) live in separate files that load on first use: `tether.diagnose.min.js` and
@@ -439,7 +455,8 @@ metafield binds missing from `config.metafields`. It returns the same report as 
 
 **Error reporting (`onError`)**: every failure that reaches the visitor (product or list that
 didn't load, add to cart, cart actions, discount codes) goes through `onError(error, context)`.
-Errors are `TetherError`s with `code` (`NOT_FOUND`, `NETWORK`, `HTTP_401`, `NOT_CONFIGURED`, …),
+Errors are `TetherError`s with `code` (`NOT_FOUND`, `NETWORK`, `HTTP_401`, `NOT_CONFIGURED`,
+`INVALID_COUNTRY`, `INVALID_DISCOUNT`; accounts add [their own](accounts.md#errors)),
 `status`, `errors` (GraphQL) and `userErrors` (cart). For Sentry:
 
 ```js
@@ -465,8 +482,9 @@ is still supported, and warns from 3 months before retirement with the version t
 1. Read the Storefront API release notes for the versions in between (shopify.dev → API versioning).
 2. `TETHER_API_VERSION=$(node scripts/api-version.mjs --next) npm run smoke` (and against your dev
    store with `TETHER_DOMAIN`/`TETHER_TOKEN`) to check every Tether query against the next version.
-3. Bump `apiVersion` in `src/config.js` (and `DEFAULT_API_VERSION` in `server/src/shopify.js` for the
-   sync), run `npm test`, release. Sites can also set `apiVersion` in `TETHER_CONFIG` themselves.
+3. Bump the versions in `server/src/shared/api-versions.js` (the browser script's default and the
+   Worker's both come from there), run `npm test`, release. Sites can also set `apiVersion` in
+   `TETHER_CONFIG` themselves.
 
 **Weekly check.** [`.github/workflows/smoke.yml`](../.github/workflows/smoke.yml) runs `npm test` and the
 smoke test against the pinned *and* the next quarterly API version, every Monday and on every push

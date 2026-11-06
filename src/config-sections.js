@@ -227,8 +227,8 @@ const MARKETS = {
 };
 
 /**
- * `proxy` says the site serves the Storefront API on its own domain. It was documented with a path (`'/api'`) that
- * Shopify's script never reads, so any value turns it on.
+ * `proxy` says the site serves the Storefront API on its own domain. Shopify's script only needs to know that it
+ * does, not where, so any truthy value (including a path such as `'/api'`) turns it on.
  *
  * @type {Schema<ShopifyAnalyticsOptions>}
  */

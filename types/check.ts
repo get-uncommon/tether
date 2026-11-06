@@ -113,3 +113,25 @@ async function accountAndMarkets() {
   void [loggedIn, finished, inUse, source, detected.country];
 }
 void accountAndMarkets;
+
+// The account answers are typed: nullable fields stay nullable, logged out is null / [].
+async function accountShapes() {
+  const me = await Tether.account.customer();
+  const name: string | null = me?.displayName ?? null;
+  const orders = await Tether.account.orders({ first: 5 });
+  const firstLine: string | null | undefined = orders[0]?.lineItems.nodes[0]?.title;
+  const detail = await Tether.account.order('1');
+  const tracking = detail?.fulfillments.nodes[0]?.trackingInformation[0]?.url;
+  const contracts = await Tether.account.subscriptions();
+  const change = await Tether.account.subscriptionAction(contracts[0]?.id ?? '', 'skip');
+  const skipped = 'billingCycle' in change ? change.billingCycle.skipped : change.contract.status;
+  const opened: string | null = (await Tether.account.requestReturn('1', [])).status;
+  const failure = Tether.on('account-error', ({ error }) => console.log(error));
+  failure();
+  Tether.cart.forgetSaved();
+  const url: string | null = shop.productUrl('coffee');
+  void [name, firstLine, tracking, skipped, opened, url];
+}
+void accountShapes;
+const loggedOutCode: TetherError['code'] = 'NOT_LOGGED_IN';
+void loggedOutCode;

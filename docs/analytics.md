@@ -51,7 +51,8 @@ Shopify's script builds and sends them, so the data format stays Shopify's.
   or `'default-banner'` for Shopify's banner.
 - **Exact visitor counts** need the Storefront API on your own domain (a small proxy route, e.g. a
   Cloudflare Worker for `/api/*/graphql.json` → your store). Without it, Shopify may count a new
-  visitor more often than it should. Set `shopify: { proxy: '/api' }` when you have one.
+  visitor more often than it should. Set `shopify: { proxy: true }` when you have one: Shopify's
+  consent script then works with your own domain instead of the store's token.
 - **Experimental:** Tether's browser tests run Shopify's real scripts: nothing goes out before
   consent, and after it Shopify's script sends `product_page_rendered` and `product_added_to_cart`.
   What these tests can't show is the result in Shopify's reports: check a real store under

@@ -139,7 +139,8 @@ export interface TetherConfig {
   /** Analytics (optional part): GA4/GTM dataLayer events, Shopify's analytics (experimental), or your own handler. */
   analytics?: {
     dataLayer?: boolean | string;
-    shopify?: boolean | { consent?: 'no-banner' | 'default-banner' | 'custom-banner'; proxy?: string };
+    /** proxy: true when the site serves the Storefront API on its own domain. */
+    shopify?: boolean | { consent?: 'no-banner' | 'default-banner' | 'custom-banner'; proxy?: boolean };
     onEvent?: (name: string, data: Record<string, unknown>) => void;
   } | null;
   /** Customer accounts (optional part): the Headless channel's Customer Account API client id, and options. */
@@ -204,14 +205,26 @@ export interface TetherConfig {
 }
 
 export type TetherErrorCode =
-  'NOT_FOUND' | 'NETWORK' | 'NOT_CONFIGURED' | 'INVALID_COUNTRY' | 'ERROR' | `HTTP_${number}`;
+  | 'NOT_FOUND'
+  | 'NETWORK'
+  | 'NOT_CONFIGURED'
+  | 'NOT_LOGGED_IN'
+  | 'NOT_ALLOWED'
+  | 'INVALID'
+  | 'INVALID_COUNTRY'
+  | 'INVALID_DISCOUNT'
+  | 'SESSION_ENDED'
+  | 'TOKEN_FAILED'
+  | 'ERROR'
+  | `HTTP_${number}`;
 
 export declare class TetherError extends Error {
   name: 'TetherError';
   code: TetherErrorCode | string;
   status?: number;
   errors?: { message: string; extensions?: Record<string, unknown> }[];
-  userErrors?: { field?: string[]; message: string }[];
+  /** A mutation's user errors (code INVALID for refused account input). */
+  userErrors?: readonly { field?: string[] | null; message: string; code?: string | null }[];
   constructor(message: string, opts?: { status?: number; errors?: unknown[]; userErrors?: unknown[]; code?: string });
 }
 
@@ -264,6 +277,8 @@ export interface Cart {
   setCustomer(link: Partial<CustomerLink>): void;
   id(): string | null;
   init(): Promise<ShopifyCart | null>;
+  /** Forgets the saved cart on this device: the page shows an empty cart (`tether:cart-updated`, reason `load`). */
+  forgetSaved(): void;
   /** add(variantId, qty) · add({ variantId, quantity, sellingPlanId, attributes }) · add([line, line]) */
   add(
     input: string | LineInput | LineInput[],
@@ -416,11 +431,32 @@ export interface TetherEvents {
   'cart-error': { error: Error };
   checkout: { url: string; cart: ShopifyCart };
   'list-ready': { products: ShopifyProduct[]; collection: Record<string, unknown> | null };
+  /** A list's cards were drawn (again): container holds them. */
+  'list-rendered': { container: HTMLElement };
+  /** The search part's suggestions for term. */
+  search: {
+    term: string;
+    products: {
+      id: string;
+      handle: string;
+      title: string;
+      availableForSale: boolean;
+      featuredImage: ImageRef | null;
+      priceRange: { minVariantPrice: Money };
+    }[];
+    collections: { handle: string; title: string; image: ImageRef | null }[];
+    queries: { text: string }[];
+  };
   'country-changed': { country: string; language?: string };
   'discount-applied': { code: string };
   'discount-invalid': { code: string };
   'layout-changed': { reason: string };
   error: { error: Error; context: string; key?: string };
+  'account-login': Record<string, never>;
+  'account-logout': Record<string, never>;
+  /** A login that failed: 'expired' or 'error' in server mode, Shopify's OAuth error code in browser mode. */
+  'account-error': { error: string };
+  'account-updated': { what: 'profile' | 'addresses' | 'subscriptions' | 'orders' };
 }
 
 export interface Tether {
@@ -437,7 +473,8 @@ export interface Tether {
   query<T = any>(query: string, variables?: Record<string, unknown>, opts?: { context?: boolean }): Promise<T>;
   withContext(query: string, ctx?: { country?: string; language?: string }): string;
   cart: Cart;
-  getProduct(handleOrId: string): Promise<ShopifyProduct>;
+  /** By handle, numeric id, gid or product URL; rejects with NOT_FOUND when the store has no such product. */
+  getProduct(handleOrId: string | number | null | undefined): Promise<ShopifyProduct>;
   getProducts(opts?: {
     collection?: string;
     query?: string;
@@ -448,7 +485,7 @@ export interface Tether {
     filters?: unknown[];
   }): Promise<ProductPage>;
   getRecommendations(
-    product: string | Pick<ShopifyProduct, 'id'>,
+    product: string | number | Pick<ShopifyProduct, 'id'> | null | undefined,
     intent?: 'RELATED' | 'COMPLEMENTARY',
   ): Promise<ShopifyProduct[]>;
   getScope(el: Element | null | undefined): ProductScope | null;
@@ -457,24 +494,11 @@ export interface Tether {
   account: {
     login(opts?: { returnTo?: string; locale?: string }): Promise<void>;
     logout(opts?: { returnTo?: string }): Promise<void>;
-    customer(): Promise<{
-      id: string;
-      firstName?: string | null;
-      lastName?: string | null;
-      displayName?: string;
-      emailAddress?: { emailAddress: string } | null;
-    } | null>;
-    orders(opts?: { first?: number }): Promise<
-      Array<{
-        id: string;
-        name: string;
-        processedAt: string;
-        financialStatus?: string;
-        fulfillmentStatus?: string;
-        statusPageUrl: string;
-        totalPrice: Money;
-      }>
-    >;
+    /** The logged-in customer; null when nobody is (both modes). */
+    customer(): Promise<AccountCustomer | null>;
+    /** The customer's most recent orders, newest first; [] when nobody is logged in (both modes). */
+    orders(opts?: { first?: number }): Promise<AccountOrder[]>;
+    /** Browser mode only (NOT_ALLOWED in server mode). */
     query<T = any>(query: string, variables?: Record<string, unknown>): Promise<T>;
     getToken(): Promise<string | null>;
     /** True while a customer is logged in, as far as this page knows without asking. */
@@ -486,42 +510,53 @@ export interface Tether {
     /** What mount() runs: finishes a login coming back on the first call, then renders root. */
     mountAccount(root?: ParentNode): Promise<void>;
     /** One order in full (lines, totals, addresses, fulfillments with tracking, returnable lines); null if not the customer's. */
-    order(id: string | number): Promise<Record<string, any> | null>;
-    updateProfile(fields: {
+    order(id: string | number): Promise<OrderDetail | null>;
+    updateProfile(fields?: {
       firstName?: string;
       lastName?: string;
-    }): Promise<{ firstName?: string | null; lastName?: string | null }>;
+    }): Promise<{ firstName: string | null; lastName: string | null }>;
     addresses(): Promise<Array<CustomerAddress & { isDefault: boolean }>>;
     saveAddress(
       address: Partial<CustomerAddressInput> | null,
       opts?: { id?: string; isDefault?: boolean },
     ): Promise<CustomerAddress>;
     deleteAddress(id: string): Promise<string>;
-    subscriptions(): Promise<Array<Record<string, any>>>;
+    subscriptions(): Promise<SubscriptionContract[]>;
+    /** The changed contract (pause, resume, cancel) or next billing cycle (skip, unskip). */
     subscriptionAction(
       id: string | number,
       action: 'pause' | 'resume' | 'skip' | 'unskip' | 'cancel',
-    ): Promise<Record<string, any>>;
+    ): Promise<
+      | { contract: { id: string | null; status: string | null } }
+      | { billingCycle: { cycleIndex: number | null; skipped: boolean } }
+    >;
     requestReturn(
       orderId: string | number,
       lines: Array<{ lineItemId: string; quantity: number; reasonId?: string; note?: string }>,
-    ): Promise<{ id: string; status: string }>;
+    ): Promise<{ id: string; status: string | null }>;
   };
-  primeProduct(product: ShopifyProduct): void;
-  normalizeProductKey(raw: string | number): string | null;
+  primeProduct(product: ShopifyProduct | null | undefined): void;
+  normalizeProductKey(raw: string | number | null | undefined): string | null;
   clearProductCache(): void;
   formatMoney(money: Money | null | undefined): string;
   /** Shopify CDN image at a size: imageUrl(line.merchandise.image?.url, { width: 160 }). */
-  imageUrl(url: string | null | undefined, size?: { width?: number; height?: number; crop?: string }): string;
+  imageUrl(
+    url: string | null | undefined,
+    size?: { width?: number | string | null; height?: number | string | null; crop?: string | null },
+  ): string;
   plans: SellingPlanHelpers;
   TetherError: typeof TetherError;
-  resolveProductKey(el: Element, location?: Location | URL): { key: string | null; fromUrl: boolean; raw: string };
+  resolveProductKey(
+    el: Element,
+    location?: Pick<Location, 'pathname' | 'search'>,
+    name?: string,
+  ): { key: string | null; fromUrl: boolean; raw: string };
   /** Switch market: prices, currency, cart and every product on the page follow. */
   setCountry(code: string, opts?: SetCountryOptions): Promise<ShopifyCart | null>;
   detectMarket(markets?: MarketsConfig | null): Promise<DetectedMarket>;
   getLocalization(): Promise<Localization>;
   /** Logs and returns what's wrong on this page (config, token, API version, plans, markup). */
-  diagnose(opts?: { root?: ParentNode; silent?: boolean }): Promise<DiagnoseReport>;
+  diagnose(opts?: { root?: ParentNode; silent?: boolean; now?: Date }): Promise<DiagnoseReport>;
   /** Listen to a Tether event; returns a function that stops listening. */
   on<K extends keyof TetherEvents>(
     name: K,
@@ -569,9 +604,118 @@ export interface CustomerAddressInput {
   countryCode: string;
   phoneNumber: string;
 }
-export interface CustomerAddress extends Partial<CustomerAddressInput> {
-  id: string;
-  province?: string | null;
-  country?: string | null;
+/** An address as Shopify sends it: fields it leaves out are null. */
+export interface MailingAddress {
+  id: string | null;
+  firstName: string | null;
+  lastName: string | null;
+  company: string | null;
+  address1: string | null;
+  address2: string | null;
+  city: string | null;
+  province: string | null;
+  zoneCode: string | null;
+  zip: string | null;
+  country: string | null;
+  countryCode: string | null;
+  phoneNumber: string | null;
+  /** One line per entry. */
   formatted: string[];
+}
+/** One of the customer's saved addresses. */
+export interface CustomerAddress extends MailingAddress {
+  id: string;
+}
+
+/** An image as the account and search answers carry it. */
+export interface ImageRef {
+  url: string;
+  altText: string | null;
+}
+/** The logged-in customer, the same in server and browser mode. */
+export interface AccountCustomer {
+  id?: string;
+  firstName: string | null;
+  lastName: string | null;
+  displayName: string | null;
+  emailAddress: { emailAddress: string } | null;
+  defaultAddress: { formatted: string[] } | null;
+}
+export interface AccountOrderLine {
+  title: string | null;
+  variantTitle: string | null;
+  quantity: number;
+  image: ImageRef | null;
+}
+export interface AccountOrder {
+  id: string;
+  name: string | null;
+  processedAt: string | null;
+  financialStatus: string | null;
+  fulfillmentStatus: string | null;
+  statusPageUrl: string | null;
+  totalPrice: Money | null;
+  lineItems: { nodes: AccountOrderLine[] };
+}
+export interface OrderDetailLine extends AccountOrderLine {
+  id: string;
+  name: string | null;
+  sku: string | null;
+  price: Money | null;
+  totalPrice: Money | null;
+  suggestedReturnReasonDefinitions: { nodes: { id: string; name: string | null; handle: string | null }[] };
+}
+export interface Fulfillment {
+  id: string | null;
+  status: string | null;
+  createdAt: string | null;
+  estimatedDeliveryAt: string | null;
+  latestShipmentStatus: string | null;
+  trackingInformation: { company: string | null; number: string | null; url: string | null }[];
+}
+/** One order in full, as Tether.account.order() answers it. */
+export interface OrderDetail {
+  id: string;
+  name: string | null;
+  number: number | null;
+  processedAt: string | null;
+  cancelledAt: string | null;
+  financialStatus: string | null;
+  fulfillmentStatus: string | null;
+  statusPageUrl: string | null;
+  requiresShipping: boolean | null;
+  totalPrice: Money | null;
+  subtotal: Money | null;
+  totalShipping: Money | null;
+  totalTax: Money | null;
+  shippingAddress: MailingAddress | null;
+  billingAddress: MailingAddress | null;
+  lineItems: { nodes: OrderDetailLine[] };
+  fulfillments: { nodes: Fulfillment[] };
+  returnInformation: { returnableLineItems: { nodes: { quantity: number; lineItem: { id: string } | null }[] } } | null;
+  returns: { nodes: { id: string; status: string | null }[] };
+}
+export interface SubscriptionLine {
+  id: string | null;
+  name: string | null;
+  title: string | null;
+  variantTitle: string | null;
+  quantity: number;
+  sku: string | null;
+  currentPrice: Money | null;
+  lineDiscountedPrice: Money | null;
+  image: ImageRef | null;
+}
+export interface SubscriptionContract {
+  id: string;
+  /** ACTIVE, PAUSED, CANCELLED, EXPIRED or FAILED. */
+  status: string | null;
+  nextBillingDate: string | null;
+  currencyCode: string | null;
+  deliveryPrice: Money | null;
+  deliveryPolicy: { interval: string | null; intervalCount: { count: number } | null } | null;
+  lines: { nodes: SubscriptionLine[] };
+  upcomingBillingCycles: {
+    nodes: { cycleIndex: number | null; skipped: boolean; billingAttemptExpectedDate: string | null }[];
+  };
 }

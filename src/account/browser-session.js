@@ -209,9 +209,7 @@ async function unlinkCart() {
     await Cart.setBuyerIdentity({ customerAccessToken: null }, { create: false });
   } catch (error) {
     reportError(error, 'account cart unlink');
-    // The cart id is kept under the `storageKey` option. The cart's own module isn't shared with the parts of the
-    // `<script>` build, so the id is removed here.
-    writeJsonIfAllowed('local', cfg.storageKey, null);
+    Cart.forgetSaved();
   }
 }
 
