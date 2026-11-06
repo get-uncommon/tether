@@ -107,13 +107,14 @@ test('parts are small and the core is under budget', async () => {
   const gz = async (f) => gzipSync(await readFile(join(DIST, f)), { level: 9 }).length;
   // The README promises a core of about 29 KB gzipped. Each budget sits about half a KB above today's build, so growth
   // is a decision; the build, not golfed source, keeps the files small.
-  assert.ok((await gz('tether.min.js')) < 30 * 1024, 'core gzip budget');
+  assert.ok((await gz('tether.min.js')) < 29.5 * 1024, 'core gzip budget');
   assert.ok((await gz('tether.search.min.js')) < 3 * 1024);
-  assert.ok((await gz('tether.account.min.js')) < 8.25 * 1024, 'account part budget');
-  assert.ok((await gz('tether.account-pages.min.js')) < 9 * 1024, 'account pages part budget');
+  assert.ok((await gz('tether.account.min.js')) < 4.75 * 1024, 'account part budget');
+  assert.ok((await gz('tether.account-pages.min.js')) < 6.75 * 1024, 'account pages part budget');
   assert.ok((await gz('tether.extras.min.js')) < 1.5 * 1024);
   assert.ok((await gz('tether.markets.min.js')) < 3 * 1024);
-  assert.ok((await gz('tether.diagnose.min.js')) < 6 * 1024);
+  assert.ok((await gz('tether.diagnose.min.js')) < 5.75 * 1024);
+  assert.ok((await gz('tether.analytics.min.js')) < 3.5 * 1024);
 });
 
 test('e2e static server: stays inside its folders and listens on loopback only', async () => {

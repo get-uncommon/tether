@@ -10,7 +10,8 @@
  * shop's own origin). Removed for that: `id` (it would clobber `window.<id>` and the site's own ids); `class`, which
  * would let a description borrow the site's own overlay or modal classes; and every style that takes content out of
  * the flow (`position`, `inset`, `z-index`), moves it from where the flow put it (transforms, motion paths, negative
- * margins, indents and spacing), copies it elsewhere (reflections) or sizes it to the window (viewport units).
+ * margins, and negative indents and spacing beyond the small values that tighten text, `NEGATIVE_LIMITS`), copies it
+ * elsewhere (reflections) or sizes it to the window (viewport units).
  * Outlines, shadows, filters, border-image and mask-border outsets, text decoration and text stroke paint beyond their
  * element, so they are kept only while every number they give is a pixel length of a few dozen pixels at most
  * (`MAX_PAINT_PX`): enough to set off an image or a callout, too little to cover the page.
@@ -82,8 +83,6 @@ const OUT_OF_PLACE_PROPERTIES = new Set([
   '-webkit-box-reflect',
 ]);
 const OUT_OF_PLACE_PREFIXES = ['inset', 'transform', 'translate', 'rotate', 'scale', 'offset'];
-/** Properties where a negative length moves content back past where the flow put it, over what comes before. */
-const MOVES_BACK_WHEN_NEGATIVE = /^(?:margin|text-indent|letter-spacing|word-spacing)/;
 /** A length in viewport units (`100vw`, `50dvh`, `10vmax`), which sizes content to the window, not the description. */
 const VIEWPORT_LENGTH = /\d(?:[sld]?v(?:w|h|i|b|min|max))\b/i;
 /**
@@ -97,6 +96,17 @@ const PAINTS_BEYOND =
   /^(?:outline|box-shadow|text-shadow|filter|text-decoration|text-underline-offset|text-stroke)|^(?:border-image|mask-border|mask-box-image)(?:-outset)?$/;
 /** The longest length, in pixels, those properties may give. */
 const MAX_PAINT_PX = 40;
+/**
+ * Properties on which a small negative value only tightens text, with the most a negative value may be in each unit;
+ * one in another unit, or beyond the limit, is removed. Spacing stops at -0.25em (-4px at a 16px font), less than the
+ * advance of a letter or a space, so text tightens without running back over what precedes it. An indent stops at
+ * `MAX_PAINT_PX`, the reach allowed to anything that paints beyond its element.
+ */
+const NEGATIVE_LIMITS = new Map<string, Partial<Record<string, number>>>([
+  ['letter-spacing', { px: 4, em: 0.25 }],
+  ['word-spacing', { px: 4, em: 0.25 }],
+  ['text-indent', { px: MAX_PAINT_PX }],
+]);
 /**
  * A number with its unit, if any, captured (`5000px`, `1.5em`, `5e3px`, `100`, `5000%`). Digits inside a word or a
  * hex colour (`#5000ff`) are not one.
@@ -217,8 +227,22 @@ function isOutOfPlace(property: string, value: string): boolean {
   if (OUT_OF_PLACE_PROPERTIES.has(property) || OUT_OF_PLACE_PREFIXES.some((prefix) => property.startsWith(prefix))) {
     return true;
   }
-  // A minus sign is a negative length, or a `calc()` that can be one.
-  return (MOVES_BACK_WHEN_NEGATIVE.test(property) && value.includes('-')) || VIEWPORT_LENGTH.test(value);
+  if (VIEWPORT_LENGTH.test(value)) return true;
+  const limits = NEGATIVE_LIMITS.get(property);
+  if (limits) return COMPUTED_VALUE.test(value) || movesBackTooFar(value, limits);
+  // A negative margin moves content back over what comes before. A minus sign is a negative length, or a `calc()`
+  // that can be one.
+  return property.startsWith('margin') && value.includes('-');
+}
+
+/** @param limits The most a negative number may be, by its unit (`NEGATIVE_LIMITS`). */
+function movesBackTooFar(value: string, limits: Partial<Record<string, number>>): boolean {
+  return [...value.matchAll(NUMBER)].some(([number = '', unit = '']) => {
+    const amount = parseFloat(number);
+    if (amount >= 0) return false;
+    const limit = limits[unit.toLowerCase()];
+    return limit === undefined || -amount > limit;
+  });
 }
 
 /**

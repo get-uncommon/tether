@@ -200,7 +200,14 @@ test('outlines, shadows, filters, outsets and text decoration are removed past a
     'text-decoration: underline 10%',
     '-webkit-box-reflect: below 0px',
     'text-indent: -2000px',
+    'text-indent: -41px',
+    'text-indent: -1em',
     'letter-spacing: -1000px',
+    'letter-spacing: -0.3em',
+    'letter-spacing: -1rem',
+    'word-spacing: -5px',
+    'letter-spacing: var(--tracking)',
+    'word-spacing: calc(1px - 10px)',
   ];
   const box = render(declarations.map((declaration) => `<p style="${declaration}; color: red">x</p>`).join(''));
   assert.deepEqual(
@@ -220,6 +227,8 @@ test('a modest outline, shadow or filter on an image or a callout looks as writt
     'outline: 0 none; box-shadow: 0 0 0 0 rgb(0 0 0 / 50%);',
     'border-image-outset: 0; text-decoration-thickness: 0%;',
     'text-indent: 2em; letter-spacing: 0.05em;',
+    'letter-spacing: -0.5px; word-spacing: -4px;',
+    'letter-spacing: -0.02em; word-spacing: -0.25em; text-indent: -40px;',
   ];
   const box = render(styles.map((style) => `<img src="https://cdn.shopify.com/a.png" style="${style}">`).join(''));
   assert.deepEqual(

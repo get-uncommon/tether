@@ -82,11 +82,24 @@ gets 0.7.0 at once. The breaking changes below list each one's upgrade step.
   site's CSS through the element Tether fills (`[tether-bind="description"] h2 { … }`), not with
   classes inside the description.
 - Fix: the analytics part no longer throws on a `checkout` event without a cart.
-- Security (descriptions): an outline, shadow, filter, border-image or mask-border outset,
-  reflection, text decoration or text stroke is kept only when every length it gives is in px and
-  at most 40px, so a description can't paint over the page with one (`outline: 5000px solid #fff`
-  around a link); values in other units or built with `var()` or `calc()` are removed. Ordinary
-  shadows and outlines look as before.
+- Security (descriptions): in an outline, shadow, filter, border-image or mask-border outset, text
+  decoration or text stroke, every number but a colour must be a px length of at most 40px, so a
+  description can't paint over the page with one (`outline: 5000px solid #fff` around a link, a
+  unitless `border-image-outset: 100`, a `%` underline offset); values in other units or built with
+  `var()` or `calc()` are removed, and so is `-webkit-box-reflect`. Negative `letter-spacing` and
+  `word-spacing` are kept down to `-4px` or `-0.25em` and a negative `text-indent` down to `-40px`,
+  so tight tracking in headings stays; anything beyond is removed. Ordinary shadows and outlines
+  look as before.
+- Size: the `<script>` core is about 1 KB smaller gzipped (29.0 KB, from 30.0 KB) and every part is
+  0.2–0.6 KB smaller: the core shares with its parts only the functions they use, and the store
+  countries code behind `Tether.getLocalization()` lives in the markets part, which that function
+  already loaded.
+- Fix: a Storefront answer missing fields Tether reads (a product without prices or variants, a
+  cart without lines, a page without `pageInfo`) is a `TetherError` `Invalid response (200)`
+  (`HTTP_200`) instead of a crash inside the render, in the browser script and in
+  `createStorefront()`, whose `getProduct(gid)` no longer reads a node of another type as a product.
+  A malformed product fails the batch it was loaded in. `Tether.query()` answers stay typed by the
+  caller.
 - Fix: `tether:layout-changed` is always dispatched. A page `ScrollTrigger` whose `refresh` isn't a
   function is skipped, and an `onLayoutChange` hook or refresh that throws is reported to `onError`.
 - Types: the published `Tether` type no longer includes the `<script>` build's internal `__core`

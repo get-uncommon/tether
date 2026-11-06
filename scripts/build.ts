@@ -34,28 +34,6 @@ const GZIP_LEVEL = 9;
 /** The optional parts, each `src/parts/<name>.ts` built into `tether.<name>(.min).js`. */
 const PARTS = ['diagnose', 'markets', 'search', 'extras', 'account', 'account-pages', 'analytics'];
 
-/**
- * The core modules a part uses through `window.Tether.__core` instead of bundling copies: the same names as
- * `coreModules` in src/lazy-iife.ts.
- */
-const CORE = [
-  'config.ts',
-  'client.ts',
-  'dom.ts',
-  'fragments.ts',
-  'loader.ts',
-  'selling-plans.ts',
-  'status.ts',
-  'cart.ts',
-  'product.ts',
-  'collection.ts',
-  'mounting.ts',
-  'shopify-values.ts',
-  'store-html.ts',
-  'market-codes.ts',
-  'lazy.ts',
-];
-
 const graphqlPlugin: esbuild.Plugin = {
   name: 'tether-graphql',
   setup(build) {
@@ -104,13 +82,33 @@ const iifeLazyPlugin: esbuild.Plugin = {
   },
 };
 
-/** @returns Each core module's export names. */
+/** @returns The module namespace of a source file. */
+async function importSource(file: string): Promise<Record<string, unknown>> {
+  const module: unknown = await import(pathToFileURL(file).href);
+  // `import()` always resolves to a module namespace object.
+  return module as Record<string, unknown>;
+}
+
+/**
+ * @returns The export names of the values each core module shares with the parts (`coreModules` in src/lazy-iife.ts),
+ *   in the order it lists them, by file name. A part uses those through `window.Tether.__core` instead of bundling
+ *   copies.
+ * @throws {Error} When a shared value isn't exactly one export of its module.
+ */
 async function coreExports(): Promise<Record<string, string[]>> {
+  const lazyIife = join(SRC, 'lazy-iife.ts');
+  const coreModules = (await importSource(lazyIife))['coreModules'];
+  // The browser program types lazy-iife.ts; here each entry is read as the list of values it is.
+  const entries = Object.entries(coreModules as Record<string, unknown[]>);
   const exportsByFile: Record<string, string[]> = {};
-  for (const file of CORE) {
-    const module: unknown = await import(pathToFileURL(join(SRC, file)).href);
-    // `import()` always resolves to a module namespace object.
-    exportsByFile[file] = Object.keys(module as object);
+  for (const [file, values] of entries) {
+    // The <script> build's lazy.ts is lazy-iife.ts (`iifeLazyPlugin`).
+    const module = await importSource(file === 'lazy.ts' ? lazyIife : join(SRC, file));
+    exportsByFile[file] = values.map((value) => {
+      const [name, ...others] = Object.keys(module).filter((key) => module[key] === value);
+      if (name === undefined || others.length) throw new Error(`${file} shares a value that isn't one of its exports`);
+      return name;
+    });
   }
   return exportsByFile;
 }
@@ -125,10 +123,10 @@ function partPlugin(exportsByFile: Record<string, string[]>): esbuild.Plugin {
       build.onResolve({ filter: /^\.\.?\/[\w-]+\.ts$/ }, (args) => {
         const file = basename(args.path);
         const inSrc = dirname(join(args.resolveDir, args.path)) === SRC;
-        return inSrc && CORE.includes(file) ? { path: file, namespace: 'tether-core' } : undefined;
+        return inSrc && file in exportsByFile ? { path: file, namespace: 'tether-core' } : undefined;
       });
       build.onLoad({ filter: /.*/, namespace: 'tether-core' }, (args) => ({
-        contents: `const m = window.Tether.__core[${JSON.stringify(args.path)}];\nexport const { ${(exportsByFile[args.path] ?? []).join(', ')} } = m;\n`,
+        contents: `const m = window.Tether.__core[${JSON.stringify(args.path)}];\nexport const [${(exportsByFile[args.path] ?? []).join(', ')}] = m;\n`,
         loader: 'js',
       }));
     },

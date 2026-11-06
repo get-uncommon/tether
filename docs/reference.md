@@ -210,8 +210,11 @@ handlers, `javascript:` links, `<style>` blocks, form fields, `id`s and `class`e
 can't borrow your overlay or modal classes) are removed; other elements are unwrapped, so their text
 stays; inline styles lose `position`, `top`/`right`/`bottom`/`left`/`inset`, `z-index`, transforms
 (`transform`, `translate`, `rotate`, `scale`), `offset-*`, `-webkit-box-reflect`, negative
-margins, `text-indent`, `letter-spacing` and `word-spacing`, values in viewport units (`100vw`) and
-any value with `url(`, so a description can't be laid over the page or load from elsewhere.
+margins, values in viewport units (`100vw`) and any value with `url(`, so a description can't be
+laid over the page or load from elsewhere. Negative `letter-spacing` and `word-spacing` stay down to
+`-4px` or `-0.25em` (tight tracking such as `-0.02em` looks as written), and a negative
+`text-indent` down to `-40px`; a value beyond that, in another unit, or with `var()`/`calc()` is
+removed.
 Outlines, `box-shadow`, `text-shadow`, `filter`, border-image and mask-border outsets, text
 decoration (thickness and underline offset included) and `-webkit-text-stroke` paint beyond the
 element, so they are kept only while every number in them, apart from colours and colour filters (`brightness()`, `opacity()`,
