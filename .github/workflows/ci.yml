@@ -38,6 +38,8 @@ jobs:
       # release's updater is not among them: every release tag, so a new one can't be left out here.
       - run: git fetch --depth=1 --no-tags origin '+refs/tags/v*:refs/tags/v*'
       - run: npm ci
+      # Any advisory against a dependency, dev-only included, fails the run: fix it with an update or an override.
+      - run: npm audit --audit-level=low
       - run: npm run check
 
   workflows:
