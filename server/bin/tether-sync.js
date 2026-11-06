@@ -17,15 +17,60 @@ import { dirname, join } from 'node:path';
 import { createApp } from '../src/app.js';
 import { runCheck, formatCheck } from '../src/check.js';
 import { fileStore, loadConfig, serve } from '../src/node.js';
+import { messageOf } from '../src/util.js';
+
+/** @typedef {import('../src/util.js').Logger} Logger */
+/** @typedef {import('../src/node.js').FileStore} FileStore */
+/** @typedef {ReturnType<typeof createApp>} App */
+
+/** Exit codes: 2 is a usage error; `null` keeps the process running (serve). */
+const EXIT_USAGE = 2;
+const EXIT_INTERRUPTED = 130;
+const DEFAULT_PORT = '8787';
 
 const argv = process.argv.slice(2);
-const cmd = argv[0];
+const [command] = argv;
+/** @param {string} name */
 const flag = (name) => argv.includes(`--${name}`);
-const opt = (name, def) => { const i = argv.indexOf(`--${name}`); return i > -1 && argv[i + 1] ? argv[i + 1] : def; };
+/**
+ * The value after `--name`, or `undefined` when the option or its value is missing.
+ *
+ * @param {string} name
+ */
+const option = (name) => {
+  const index = argv.indexOf(`--${name}`);
+  const value = index > -1 ? argv[index + 1] : undefined;
+  return value || undefined;
+};
+
+/**
+ * A positive whole number from the command line.
+ *
+ * @param {string} name
+ * @param {string} text
+ * @throws {Error} When it is anything else.
+ */
+function wholeNumber(name, text) {
+  const value = Number(text);
+  if (!Number.isInteger(value) || value < 0) throw new Error(`--${name} must be a whole number (got "${text}")`);
+  return value;
+}
+
 const verbose = flag('verbose');
+/** @type {Logger} */
 const log = {
-  info: (...a) => console.log(...a), warn: (...a) => console.warn('warn:', ...a),
-  error: (...a) => console.error('error:', ...a), debug: (...a) => { if (verbose) console.log(...a); },
+  info: (...args) => {
+    console.log(...args);
+  },
+  warn: (...args) => {
+    console.warn('warn:', ...args);
+  },
+  error: (...args) => {
+    console.error('error:', ...args);
+  },
+  debug: (...args) => {
+    if (verbose) console.log(...args);
+  },
 };
 
 const HELP = `tether-sync <check|import|reconcile|serve|sync|webhooks> [options]
@@ -42,80 +87,170 @@ const HELP = `tether-sync <check|import|reconcile|serve|sync|webhooks> [options]
   --host <addr>     (serve) interface to listen on (default: all; 127.0.0.1 behind a proxy)
 Env: WEBFLOW_TOKEN, SHOPIFY_ADMIN_TOKEN or SHOPIFY_CLIENT_ID + SHOPIFY_CLIENT_SECRET, SHOPIFY_WEBHOOK_SECRET`;
 
-async function main() {
-  if (!cmd || flag('help') || cmd === 'help') { console.log(HELP); return 0; }
-  const { path, config } = await loadConfig(opt('config'));
-  const envFile = join(dirname(path), '.env');
-  if (existsSync(envFile) && typeof process.loadEnvFile === 'function') process.loadEnvFile(envFile);
-  log.debug(`config: ${path}`);
+/** @param {App} app */
+async function runImport({ sync, webflow }) {
+  const result = await sync.importAll({
+    prune: flag('prune'),
+    force: flag('force'),
+    onProgress: (count, product) => {
+      log.debug?.(`${String(count)} ${product.handle}`);
+    },
+  });
+  const pruned = result.pruned.length ? `pruned ${String(result.pruned.length)}` : '';
+  log.info(`import: ${String(result.products)} products`, result.stats, pruned);
+  for (const failure of result.failures) log.error(`${failure.handle}: ${failure.error}`);
+  log.info(`Webflow requests: ${String(webflow.requests)}`);
+  return result.failures.length ? 1 : 0;
+}
 
-  if (cmd === 'check') {
+/** @param {App} app */
+async function runReconcile({ sync }) {
+  const max = option('max');
+  const since = option('since');
+  const result = await sync.reconcile({
+    ...(max === undefined ? {} : { maxChanges: wholeNumber('max', max) }),
+    ...(since === undefined ? {} : { since }),
+  });
+  const stopped = result.complete ? '' : ` (stopped at the ${String(result.stopped)} limit, continues next run)`;
+  log.info(
+    `reconcile ${result.since} -> ${result.until}: ${String(result.processed)} checked, ${String(result.changes)} written${stopped}`,
+    result.stats,
+  );
+  for (const failure of result.failures) log.error(`product ${String(failure.id)}: ${failure.error}`);
+  return result.failures.length ? 1 : 0;
+}
+
+/** @param {App} app */
+async function runSyncOne({ sync, shopify }) {
+  const key = argv[1];
+  if (!key) {
+    log.error('usage: tether-sync sync <handle|id>');
+    return EXIT_USAGE;
+  }
+  let id = key;
+  if (!/^\d+$|^gid:/.test(key)) {
+    const {
+      products: [product],
+    } = await shopify.listProducts({ first: 1, query: `handle:${JSON.stringify(key)}` });
+    if (!product) {
+      log.error(`no product with handle ${key}`);
+      return 1;
+    }
+    id = product.id;
+  }
+  const result = await sync.syncById(id);
+  log.info(result.action, result.itemId ?? '', result.reason ?? '');
+  return 0;
+}
+
+/**
+ * @param {App} app
+ * @param {FileStore} store
+ */
+async function runWebhooks({ shopify }, store) {
+  const base = argv[1];
+  if (!base?.startsWith('https://')) {
+    log.error('usage: tether-sync webhooks https://your-host (where `serve` is reachable)');
+    return EXIT_USAGE;
+  }
+  const { ensureWebhooks } = await import('../src/webhooks.js');
+  const result = await ensureWebhooks({
+    shopify,
+    store,
+    uri: `${base.replace(/\/$/, '')}/webhooks/shopify`,
+    force: true,
+  });
+  const created = result.created.length ? `registered ${result.created.join(', ')}` : 'already registered';
+  log.info(created, `-> ${result.uri}`);
+  if (result.others?.length) log.warn(`also registered for other URLs: ${result.others.join(', ')}`);
+  return 0;
+}
+
+/** @param {App} app */
+async function runServe(app) {
+  await serve(app, {
+    port: wholeNumber('port', option('port') ?? (process.env['PORT'] || DEFAULT_PORT)),
+    host: option('host') ?? (process.env['HOST'] || undefined),
+    log,
+  });
+  return null;
+}
+
+/** @type {FileStore | null} */
+let stateStore = null;
+
+/**
+ * Runs the command.
+ *
+ * @returns {Promise<number | null>} The exit code, or `null` while `serve` keeps running.
+ */
+async function main() {
+  if (!command || flag('help') || command === 'help') {
+    console.log(HELP);
+    return 0;
+  }
+  const { path, config } = await loadConfig(option('config'));
+  const envFile = join(dirname(path), '.env');
+  // process.loadEnvFile needs Node 20.12; on older versions the environment alone is used.
+  if (existsSync(envFile) && 'loadEnvFile' in process) process.loadEnvFile(envFile);
+  log.debug?.(`config: ${path}`);
+
+  if (command === 'check') {
     const report = await runCheck(config, process.env, { deep: !flag('offline') });
     console.log(flag('json') ? JSON.stringify(report, null, 2) : formatCheck(report));
     return report.ok ? 0 : 1;
   }
 
-  const store = fileStore(opt('state', join(dirname(path), '.tether-sync-state.json')));
-  storeRef = store;
+  const store = fileStore(option('state') ?? join(dirname(path), '.tether-sync-state.json'), { log });
+  stateStore = store;
   const dryRun = flag('dry-run');
+  /** @type {App} */
   let app;
-  try { app = createApp(config, process.env, { store, log, dryRun }); } catch (err) {
-    log.error(`${err.message}\nRun \`tether-sync check\` to see everything that's missing.`);
+  try {
+    app = createApp(config, process.env, { store, log, dryRun });
+  } catch (err) {
+    log.error(`${messageOf(err)}\nRun \`tether-sync check\` to see everything that's missing.`);
     return 1;
   }
-  const { sync, shopify, webflow } = app;  // eslint-disable-line no-unused-vars
   if (dryRun) log.info('dry run: nothing is written');
 
-  switch (cmd) {
-    case 'import': {
-      const r = await sync.importAll({
-        prune: flag('prune'), force: flag('force'),
-        onProgress: (n, p) => log.debug(`${n} ${p.handle}`),
-      });
-      log.info(`import: ${r.products} products`, r.stats, r.pruned.length ? `pruned ${r.pruned.length}` : '');
-      r.failures.forEach((f) => log.error(`${f.handle}: ${f.error}`));
-      log.info(`Webflow requests: ${webflow.requests}`);
-      return r.failures.length ? 1 : 0;
-    }
-    case 'reconcile': {
-      const max = opt('max') ? parseInt(opt('max'), 10) : undefined;
-      const r = await sync.reconcile({ maxChanges: max, since: opt('since') });
-      log.info(`reconcile ${r.since} -> ${r.until}: ${r.processed} checked, ${r.changes} written${r.complete ? '' : ` (stopped at the ${r.stopped} limit, continues next run)`}`, r.stats);
-      r.failures.forEach((f) => log.error(`product ${f.id}: ${f.error}`));
-      return r.failures.length ? 1 : 0;
-    }
-    case 'sync': {
-      const key = argv[1];
-      if (!key) { log.error('usage: tether-sync sync <handle|id>'); return 2; }
-      let id = key;
-      if (!/^\d+$|^gid:/.test(key)) {
-        const { products } = await shopify.listProducts({ first: 1, query: `handle:${JSON.stringify(key)}` });
-        if (!products[0]) { log.error(`no product with handle ${key}`); return 1; }
-        id = products[0].id;
-      }
-      const r = await sync.syncById(id);
-      log.info(r.action, r.itemId || '', r.reason || '');
-      return 0;
-    }
-    case 'webhooks': {
-      const base = argv[1];
-      if (!base || !/^https:\/\//.test(base)) { log.error('usage: tether-sync webhooks https://your-host (where `serve` is reachable)'); return 2; }
-      const { ensureWebhooks } = await import('../src/webhooks.js');
-      const r = await ensureWebhooks({ shopify, store, uri: `${base.replace(/\/$/, '')}/webhooks/shopify`, force: true });
-      log.info(r.created.length ? `registered ${r.created.join(', ')}` : 'already registered', `-> ${r.uri}`);
-      if (r.others?.length) log.warn(`also registered for other URLs: ${r.others.join(', ')}`);
-      return 0;
-    }
+  switch (command) {
+    case 'import':
+      return runImport(app);
+    case 'reconcile':
+      return runReconcile(app);
+    case 'sync':
+      return runSyncOne(app);
+    case 'webhooks':
+      return runWebhooks(app, store);
     case 'serve':
-      await serve(app, { port: parseInt(opt('port', process.env.PORT || '8787'), 10), host: opt('host', process.env.HOST) || undefined, log });
-      return null;
+      return runServe(app);
     default:
       console.log(HELP);
-      return 2;
+      return EXIT_USAGE;
   }
 }
 
-let storeRef = null;
-const flushState = () => storeRef?.flush?.().catch((err) => console.error(`state not saved: ${err.message}`));
-main().then(async (code) => { await flushState(); if (code !== null) process.exit(code); }, async (err) => { await flushState(); console.error(err.message); process.exit(1); });
-process.on('SIGINT', async () => { await flushState(); process.exit(130); });
+/** Writes what the state file store still holds; a failure is reported, the exit goes ahead. */
+async function flushState() {
+  try {
+    await stateStore?.flush();
+  } catch (err) {
+    console.error(`state not saved: ${messageOf(err)}`);
+  }
+}
+
+void main().then(
+  async (code) => {
+    await flushState();
+    if (code !== null) process.exit(code);
+  },
+  async (/** @type {unknown} */ err) => {
+    await flushState();
+    console.error(messageOf(err));
+    process.exit(1);
+  },
+);
+process.on('SIGINT', () => {
+  void flushState().then(() => process.exit(EXIT_INTERRUPTED));
+});

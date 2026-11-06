@@ -7,19 +7,41 @@ import { fileURLToPath } from 'node:url';
 const ROOT = fileURLToPath(new URL('../examples/astro/dist/', import.meta.url));
 const DIST = fileURLToPath(new URL('../dist/', import.meta.url));
 const PLAIN = fileURLToPath(new URL('./plain/', import.meta.url));
-const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.json': 'application/json' };
+const TYPES = {
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'text/javascript',
+  '.css': 'text/css',
+  '.svg': 'image/svg+xml',
+  '.json': 'application/json',
+};
 
 createServer(async (req, res) => {
   let path;
-  try { path = decodeURIComponent(new URL(req.url, 'http://x').pathname); } catch { res.writeHead(400); res.end('bad path'); return; }
+  try {
+    path = decodeURIComponent(new URL(req.url, 'http://x').pathname);
+  } catch {
+    res.writeHead(400);
+    res.end('bad path');
+    return;
+  }
   // /plain/: a plain HTML page with Tether's <script> build (dist/), like a Webflow site.
-  const base = path.startsWith('/plain/dist/') ? DIST : path.startsWith('/plain/') ? PLAIN : ROOT;
+  let base = ROOT;
+  if (path.startsWith('/plain/dist/')) base = DIST;
+  else if (path.startsWith('/plain/')) base = PLAIN;
   if (base !== ROOT) path = path.replace(base === DIST ? '/plain/dist/' : '/plain/', '/');
   // Only files inside the base folder (an encoded %2F can't climb out).
   const inside = (f) => f === base.replace(/[\\/]$/, '') || f.startsWith(base.endsWith(sep) ? base : base + sep);
   let file = resolve(base, `.${path}`);
-  try { if ((await stat(file)).isDirectory()) file = join(file, 'index.html'); } catch { file = resolve(base, `.${path.replace(/\/$/, '')}.html`); }
-  if (path.includes('\0') || !inside(file)) { res.writeHead(403, { 'content-type': 'text/plain' }); res.end('forbidden'); return; }
+  try {
+    if ((await stat(file)).isDirectory()) file = join(file, 'index.html');
+  } catch {
+    file = resolve(base, `.${path.replace(/\/$/, '')}.html`);
+  }
+  if (path.includes('\0') || !inside(file)) {
+    res.writeHead(403, { 'content-type': 'text/plain' });
+    res.end('forbidden');
+    return;
+  }
   try {
     const body = await readFile(file);
     res.writeHead(200, { 'content-type': TYPES[extname(file)] || 'application/octet-stream' });

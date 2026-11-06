@@ -204,7 +204,8 @@ Markup written for an older `wfs-*` prefix keeps working with `prefix: 'wfs'`.
 | `tether-variant-url` | | On a scope: `?variant=` follows the choice (shareable links). Global: `variantUrl: true` for the page's main product |
 | `tether-show` | condition | Shows/hides, see conditions |
 
-`tether-bind` values: `title`, `description` (HTML), `description-text`, `vendor`, `type`,
+`tether-bind` values: `title`, `description` (the HTML written in Shopify, with
+scripts, event handlers and script links removed), `description-text`, `vendor`, `type`,
 `handle`, `published-at`, `price`, `total-price`, `compare-at-price`, `unit-price`, `min-price`,
 `max-price`, `discount-percentage`, `discount-amount`, `variant-title`, `variant-id`, `sku`,
 `barcode`, `stock`, `quantity`, `featured-image`, `variant-image`, `image:N` (nth image), `images` (repeater), `tags`
@@ -405,7 +406,11 @@ later, e.g. Finsweet load-more; off by default, or call `Tether.mount(el)` yours
 does nothing), `lowStock`, `variantUrl`, `warningText` (your text for Shopify's cart warnings, e.g.
 translated by `code`), `prefix`, and the hooks `onLayoutChange`, `onCartOpen`,
 `onCartClose`, `onLineEnter`, `onLineLeave`, `onValueChange`, `onError`, `cartFocus` (keyboard focus
-in the cart drawer, on by default) and `partsUrl` (folder of the optional parts when self-hosting).
+in the cart drawer, on by default) and `partsUrl` (folder of the optional parts when self-hosting: https or on your own site).
+
+To pin exactly what runs, load a fixed release (`@v0.6.8`, never `@0.6` or `@latest`) and add the file's
+[`integrity`](https://www.srihash.org/) hash to the script tag. The optional parts load from the same release folder,
+whose files never change.
 
 **Optional parts.** `Tether.diagnose()` and markets (`markets.detect`, `tether-country-select`,
 `Tether.setCountry()`) live in separate files that load on first use: `tether.diagnose.min.js` and

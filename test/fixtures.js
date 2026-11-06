@@ -7,7 +7,9 @@ const allocation = (planId, price) => ({
   sellingPlan: { id: planId },
   checkoutChargeAmount: money(price),
   remainingBalanceChargeAmount: money(0),
-  priceAdjustments: [{ price: money(price), compareAtPrice: money(30), perDeliveryPrice: money(price), unitPrice: null }],
+  priceAdjustments: [
+    { price: money(price), compareAtPrice: money(30), perDeliveryPrice: money(price), unitPrice: null },
+  ],
 });
 
 const variant = (id, size, allocations, available = true) => ({
@@ -42,30 +44,58 @@ export const product = {
   seo: { title: null, description: null },
   featuredImage: { url: 'https://cdn.shopify.com/a.jpg', altText: null, width: 10, height: 10 },
   images: { nodes: [{ url: 'https://cdn.shopify.com/a.jpg', altText: null, width: 10, height: 10 }] },
-  options: [{ name: 'Size', optionValues: [{ name: '250g', swatch: null }, { name: '1kg', swatch: null }] }],
+  options: [
+    {
+      name: 'Size',
+      optionValues: [
+        { name: '250g', swatch: null },
+        { name: '1kg', swatch: null },
+      ],
+    },
+  ],
   priceRange: { minVariantPrice: money(30), maxVariantPrice: money(30) },
   compareAtPriceRange: { minVariantPrice: money(0), maxVariantPrice: money(0) },
-  metafields: [{ namespace: 'custom', key: 'origin', type: 'single_line_text_field', value: 'Ethiopia', reference: null }],
+  metafields: [
+    { namespace: 'custom', key: 'origin', type: 'single_line_text_field', value: 'Ethiopia', reference: null },
+  ],
   sellingPlanGroups: {
-    nodes: [{
-      name: 'Subscribe & save',
-      appName: 'Shopify Subscriptions',
-      options: [{ name: 'Delivery every', values: ['1 month', '2 months'] }],
-      sellingPlans: {
-        nodes: [
-          {
-            id: PLAN_MONTH, name: 'Every month', description: null, recurringDeliveries: true,
-            options: [{ name: 'Delivery every', value: '1 month' }],
-            priceAdjustments: [{ orderCount: null, adjustmentValue: { __typename: 'SellingPlanPercentagePriceAdjustment', adjustmentPercentage: 10 } }],
-          },
-          {
-            id: PLAN_2MONTH, name: 'Every 2 months', description: null, recurringDeliveries: true,
-            options: [{ name: 'Delivery every', value: '2 months' }],
-            priceAdjustments: [{ orderCount: null, adjustmentValue: { __typename: 'SellingPlanPercentagePriceAdjustment', adjustmentPercentage: 5 } }],
-          },
-        ],
+    nodes: [
+      {
+        name: 'Subscribe & save',
+        appName: 'Shopify Subscriptions',
+        options: [{ name: 'Delivery every', values: ['1 month', '2 months'] }],
+        sellingPlans: {
+          nodes: [
+            {
+              id: PLAN_MONTH,
+              name: 'Every month',
+              description: null,
+              recurringDeliveries: true,
+              options: [{ name: 'Delivery every', value: '1 month' }],
+              priceAdjustments: [
+                {
+                  orderCount: null,
+                  adjustmentValue: { __typename: 'SellingPlanPercentagePriceAdjustment', adjustmentPercentage: 10 },
+                },
+              ],
+            },
+            {
+              id: PLAN_2MONTH,
+              name: 'Every 2 months',
+              description: null,
+              recurringDeliveries: true,
+              options: [{ name: 'Delivery every', value: '2 months' }],
+              priceAdjustments: [
+                {
+                  orderCount: null,
+                  adjustmentValue: { __typename: 'SellingPlanPercentagePriceAdjustment', adjustmentPercentage: 5 },
+                },
+              ],
+            },
+          ],
+        },
       },
-    }],
+    ],
   },
   variants: {
     nodes: [
@@ -82,8 +112,12 @@ export function cartFrom(lines) {
     id: 'gid://shopify/Cart/abc',
     checkoutUrl: 'https://shop.test/checkout/abc',
     totalQuantity: lines.reduce((s, l) => s + l.quantity, 0),
-    note: null, createdAt: '', updatedAt: '',
-    attributes: [], buyerIdentity: { countryCode: 'NL', email: null }, discountCodes: [],
+    note: null,
+    createdAt: '',
+    updatedAt: '',
+    attributes: [],
+    buyerIdentity: { countryCode: 'NL', email: null },
+    discountCodes: [],
     cost: { subtotalAmount: money(total), totalAmount: money(total), checkoutChargeAmount: money(total) },
     lines: {
       nodes: lines.map((l, i) => ({
@@ -97,18 +131,80 @@ export function cartFrom(lines) {
           compareAtAmountPerQuantity: null,
         },
         discountAllocations: [],
-        sellingPlanAllocation: l.sellingPlanId ? {
-          sellingPlan: { id: l.sellingPlanId, name: 'Every month', description: null, recurringDeliveries: true, options: [] },
-          checkoutChargeAmount: money(27),
-          priceAdjustments: [{ price: money(27), compareAtPrice: money(30), perDeliveryPrice: money(27) }],
-        } : null,
+        sellingPlanAllocation: l.sellingPlanId
+          ? {
+              sellingPlan: {
+                id: l.sellingPlanId,
+                name: 'Every month',
+                description: null,
+                recurringDeliveries: true,
+                options: [],
+              },
+              checkoutChargeAmount: money(27),
+              priceAdjustments: [{ price: money(27), compareAtPrice: money(30), perDeliveryPrice: money(27) }],
+            }
+          : null,
         merchandise: {
-          id: l.merchandiseId, title: '250g', sku: 'SKU-10', availableForSale: true, requiresShipping: true,
-          image: null, price: money(30), compareAtPrice: null,
+          id: l.merchandiseId,
+          title: '250g',
+          sku: 'SKU-10',
+          availableForSale: true,
+          requiresShipping: true,
+          image: null,
+          price: money(30),
+          compareAtPrice: null,
           selectedOptions: [{ name: 'Size', value: '250g' }],
-          product: { id: product.id, title: product.title, handle: product.handle, vendor: 'Test', featuredImage: null },
+          product: {
+            id: product.id,
+            title: product.title,
+            handle: product.handle,
+            vendor: 'Test',
+            featuredImage: null,
+          },
         },
       })),
     },
   };
 }
+
+const apparelVariant = (id, size, color, overrides = {}) => ({
+  ...variant(id, `${size} / ${color}`, []),
+  selectedOptions: [
+    { name: 'Size', value: size },
+    { name: 'Color', value: color },
+  ],
+  ...overrides,
+});
+
+// Two options, no plans: S/Red is sold out, M/Blue doesn't exist, S/Blue is on sale and low in stock, M/Red is on
+// backorder.
+export const apparel = {
+  ...product,
+  id: 'gid://shopify/Product/2',
+  handle: 'tee',
+  title: 'Tee',
+  options: [
+    {
+      name: 'Size',
+      optionValues: [
+        { name: 'S', swatch: null },
+        { name: 'M', swatch: null },
+      ],
+    },
+    {
+      name: 'Color',
+      optionValues: [
+        { name: 'Red', swatch: { color: '#f00', image: null } },
+        { name: 'Blue', swatch: { color: '#00f', image: null } },
+      ],
+    },
+  ],
+  sellingPlanGroups: { nodes: [] },
+  variants: {
+    nodes: [
+      apparelVariant(31, 'S', 'Red', { availableForSale: false, quantityAvailable: 0 }),
+      apparelVariant(32, 'S', 'Blue', { quantityAvailable: 2, price: money('19.99'), compareAtPrice: money('25.5') }),
+      apparelVariant(33, 'M', 'Red', { currentlyNotInStock: true, quantityAvailable: 0 }),
+    ],
+  },
+};

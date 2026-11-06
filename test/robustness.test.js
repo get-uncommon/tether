@@ -6,9 +6,13 @@ import { product } from './fixtures.js';
 
 const dom = new JSDOM('<!doctype html><body></body>', { url: 'https://site.test/product?handle=coffee-box' });
 Object.assign(globalThis, {
-  window: dom.window, document: dom.window.document, localStorage: dom.window.localStorage,
-  CustomEvent: dom.window.CustomEvent, MutationObserver: dom.window.MutationObserver,
-  Option: dom.window.Option, getComputedStyle: dom.window.getComputedStyle,
+  window: dom.window,
+  document: dom.window.document,
+  localStorage: dom.window.localStorage,
+  CustomEvent: dom.window.CustomEvent,
+  MutationObserver: dom.window.MutationObserver,
+  Option: dom.window.Option,
+  getComputedStyle: dom.window.getComputedStyle,
 });
 
 let mode = 'ok'; // 'ok' | 'down' | 'unauthorized'
@@ -18,14 +22,24 @@ globalThis.fetch = async (url, init) => {
   const op = query.match(/(?:query|mutation)\s+(\w+)/)[1];
   calls.push({ op, variables });
   if (mode === 'down') throw new TypeError('fetch failed');
-  if (mode === 'unauthorized') return { ok: false, status: 401, json: async () => ({ errors: [{ message: 'Unauthorized' }] }) };
+  if (mode === 'unauthorized')
+    return { ok: false, status: 401, json: async () => ({ errors: [{ message: 'Unauthorized' }] }) };
   const ok = (data) => ({ ok: true, status: 200, json: async () => ({ data }) });
   if (op === 'TetherProducts') {
     const data = {};
-    Object.keys(variables).forEach((k) => { if (k.startsWith('h')) data[k] = variables[k] === product.handle ? product : null; });
+    Object.keys(variables).forEach((k) => {
+      if (k.startsWith('h')) data[k] = variables[k] === product.handle ? product : null;
+    });
     return ok(data);
   }
-  if (op === 'TetherDiagnose') return ok({ shop: { name: 'Test shop', primaryDomain: { url: 'https://shop.test' }, paymentSettings: { currencyCode: 'EUR' } } });
+  if (op === 'TetherDiagnose')
+    return ok({
+      shop: {
+        name: 'Test shop',
+        primaryDomain: { url: 'https://shop.test' },
+        paymentSettings: { currencyCode: 'EUR' },
+      },
+    });
   if (op === 'TetherCart') return ok({ cart: null });
   throw new Error(`unexpected op ${op}`);
 };
@@ -38,12 +52,21 @@ const errors = [];
 before(async () => {
   ({ default: Tether } = await import('../src/index.js'));
   await Tether.init({
-    domain: 'shop.test', token: 'public-token-123', autoMount: false, retries: 0,
-    productPath: '/product?handle={handle}', onError: (err, ctx) => errors.push({ err, ctx }),
+    domain: 'shop.test',
+    token: 'public-token-123',
+    autoMount: false,
+    retries: 0,
+    productPath: '/product?handle={handle}',
+    onError: (err, ctx) => errors.push({ err, ctx }),
   });
 });
 
-beforeEach(() => { mode = 'ok'; calls.length = 0; errors.length = 0; Tether.clearProductCache(); });
+beforeEach(() => {
+  mode = 'ok';
+  calls.length = 0;
+  errors.length = 0;
+  Tether.clearProductCache();
+});
 
 const page = (key, extra = '') => `
   <div tether-product="${key}" ${extra}>
@@ -58,7 +81,10 @@ const visible = (id) => document.getElementById(id).style.display !== 'none';
 
 test('resolveProductKey: url:handle, any param, url:path, plain values', () => {
   const el = document.createElement('div');
-  const key = (v, url) => { el.setAttribute('tether-product', v); return Tether.resolveProductKey(el, new URL(url)).key; };
+  const key = (v, url) => {
+    el.setAttribute('tether-product', v);
+    return Tether.resolveProductKey(el, new URL(url)).key;
+  };
   assert.equal(key('url:handle', 'https://x.test/product?handle=coffee-box'), 'coffee-box');
   assert.equal(key('url:p', 'https://x.test/shop?p=beans'), 'beans');
   assert.equal(key('url:path', 'https://x.test/shop/coffee%20box/'), 'coffee box');
@@ -94,7 +120,13 @@ test('unknown handle shows not-found, disables add to cart, no onError for URL t
   go('https://site.test/product?handle=nope');
   document.body.innerHTML = page('url:handle');
   let notFound = null;
-  document.addEventListener('tether:product-not-found', (e) => { notFound = e.detail; }, { once: true });
+  document.addEventListener(
+    'tether:product-not-found',
+    (e) => {
+      notFound = e.detail;
+    },
+    { once: true },
+  );
   Tether.mount(document);
   await tick();
   const root = document.querySelector('[tether-product]');
@@ -170,7 +202,10 @@ test('diagnose reports config, reachability, plans and markup problems', async (
     <span tether-show="in-stok"></span>
     <div tether-product="coffee-box"><span tether-bind="metafield:custom.nope"></span></div>`;
   const r = await Tether.diagnose({ silent: true, now: new Date('2026-11-04') });
-  assert.equal(r.version, JSON.parse((await import('node:fs')).readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version);
+  assert.equal(
+    r.version,
+    JSON.parse((await import('node:fs')).readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version,
+  );
   assert.equal(r.reachable, true);
   assert.equal(r.shop.name, 'Test shop');
   assert.match(r.config.token, /^publ…-123/);

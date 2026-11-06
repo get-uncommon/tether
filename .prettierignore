@@ -1,0 +1,9 @@
+dist/
+node_modules/
+package-lock.json
+examples/astro/.astro/
+test-results/
+playwright-report/
+*.md
+# Deployed copies cannot update their own workflow, so this file stays byte-identical (server/test/update.test.js).
+server/.github/workflows/update-tether.yml

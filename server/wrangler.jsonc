@@ -11,7 +11,7 @@
   "triggers": { "crons": ["*/10 * * * *"] },
 
   // Sync state. No id: Wrangler creates the namespace on first deploy.
-  "kv_namespaces": [{ "binding": "TETHER_SYNC" }]
+  "kv_namespaces": [{ "binding": "TETHER_SYNC" }],
 
   // Secrets (prompted by the Deploy button, from .dev.vars.example; or `npx wrangler secret put NAME`):
   // SHOPIFY_DOMAIN, WEBFLOW_COLLECTION_ID, WEBFLOW_TOKEN, SHOPIFY_CLIENT_ID, SHOPIFY_CLIENT_SECRET,

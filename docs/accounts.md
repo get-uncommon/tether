@@ -62,7 +62,7 @@ Then the Worker's secrets (Settings → Variables and Secrets):
 | `ACCOUNT_ORIGINS` | your site, e.g. `https://your-shop.com` (more with commas) |
 | `STOREFRONT_TOKEN` | the public Storefront token (to link carts, so checkout knows the customer) |
 | `ACCOUNT_SESSION_DAYS` | optional, how long a login lasts at most (default 14) |
-| `ACCOUNT_SECRET` | optional, 24+ characters: the encryption key for sessions, instead of deriving it from `SYNC_SECRET` |
+| `ACCOUNT_SECRET` | recommended, 24+ random characters: the encryption key for sessions. Without it the key comes from `SYNC_SECRET`, which is also the password for `/reconcile` and `/check` |
 
 `SHOPIFY_DOMAIN` and `SYNC_SECRET` are already set; the encryption keys are derived from
 `SYNC_SECRET` (or `ACCOUNT_SECRET`). The Worker's `/check` (e.g. `https://tether-sync.your-name.workers.dev/check`) says
@@ -94,6 +94,11 @@ when a live site uses this mode.
 2. Your site: `account: { clientId: '…', callbackUrl: 'https://your-shop.com/account', logoutUrl: 'https://your-shop.com/' }`.
 
 Shopify only allows `https` addresses, no `localhost`: test on a staging domain or a tunnel.
+
+`account.tokenUrl` sends the token requests to another address, for a browser that can't reach
+Shopify's token endpoint. It must be your shop's own first-party endpoint that passes the form body
+on to Shopify unchanged: the browser takes the id token in its answer as Shopify's without checking
+a signature, which is safe only because the answer comes from Shopify over TLS.
 
 ## Markup
 

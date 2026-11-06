@@ -1,0 +1,14 @@
+# Local git hooks (https://lefthook.dev). These are the gate: GitHub Actions only run the smoke and e2e suites.
+pre-commit:
+  parallel: true
+  commands:
+    format:
+      glob: '*.{js,mjs,cjs,ts,json,yml,yaml,html}'
+      run: npx prettier --check {staged_files}
+    lint:
+      glob: '*.{js,mjs,cjs}'
+      run: npx eslint {staged_files}
+pre-push:
+  commands:
+    check:
+      run: npm run check

@@ -1,346 +1,290 @@
 /**
- * Tether — Shopify <-> Webflow (or any HTML) sync via the Storefront API.
+ * Tether's entry: `window.Tether`, `init()`, `mount()` and the start of the plain `<script>` setup.
  *
  *   <script>window.TETHER_CONFIG = { domain: 'x.myshopify.com', token: '...' }</script>
  *   <script src="tether.min.js" defer></script>
  *
- * With page transitions (Barba, Swup): set autoMount: false, call
- * Tether.init() once and Tether.mount(container) after every page enter.
+ * With page transitions (Barba, Swup): set `autoMount: false`, call `Tether.init()` once and
+ * `Tether.mount(container)` after every page enter.
  */
 import { cfg, configure, isConfigured, log, warn, reportError } from './config.js';
 import { gql, TetherError, withContext } from './client.js';
-import { Cart, focusables } from './cart.js';
+import { Cart } from './cart.js';
 import { scopes } from './product.js';
 import { ListScope, listSelector } from './collection.js';
 import {
-  getProduct, getProducts, getRecommendations, clearProductCache, primeProduct, normalizeProductKey,
+  getProduct,
+  getProducts,
+  getRecommendations,
+  clearProductCache,
+  primeProduct,
+  normalizeProductKey,
 } from './loader.js';
 import * as plans from './selling-plans.js';
 import { resolveProductKey } from './status.js';
-import { attr, sel, get, qsa, emit, formatMoney, busy, parseJSONAttr, toAttributes, imageUrl } from './dom.js';
+import { sel, emit, formatMoney, imageUrl } from './dom.js';
 import { loadPart, coreModules } from './lazy.js';
-import { mountedLists, liveLists, pruneLive, within, mountProduct, retryFailed, hydrateFromPage, settleMarket, trackMarket } from './mounting.js';
+import {
+  mountedLists,
+  liveLists,
+  pruneLive,
+  within,
+  mountProduct,
+  hydrateFromPage,
+  settleMarket,
+  trackMarket,
+} from './mounting.js';
+import { applyStartMarket, setCountry } from './page-market.js';
+import { accountApi, mountAccountIfUsed } from './account-api.js';
+import { bindCartControls } from './controls/cart-controls.js';
+import { bindDiscountControls } from './controls/discount.js';
+import { addGroup, bindExtrasControls } from './controls/extras.js';
+import { bindNavigation, rememberDocumentMount } from './controls/navigation.js';
+/** @import { TetherConfig, TetherOptions, MarketsConfig } from './config.js' */
+/** @import { ShopifyCart } from './cart/store.js' */
+/** @import { ProductScope } from './product.js' */
+/** @import { DiagnoseOptions } from './diagnose.js' */
+
+export { addGroup, setCountry };
 
 export const VERSION = '0.6.7';
 
+/** The events the analytics part reports, buffered from `init()` until the part has loaded. */
+const ANALYTICS_EVENTS = ['product-ready', 'list-ready', 'cart-updated', 'cart-toggled', 'checkout', 'search'];
+
+/** Milliseconds `observe` waits after the last added node, so a burst of additions mounts once. */
+const OBSERVE_DEBOUNCE_MS = 50;
+
+/**
+ * @typedef {object} TetherGlobals What the page sets on `window` for Tether, and `window.Tether` itself.
+ * @property {TetherOptions} [TETHER_CONFIG] The site's config; `configure()` validates it.
+ * @property {string} [TETHER_INTEGRATION] Set by a framework integration (Astro) that starts Tether itself.
+ * @property {TetherApi} [Tether]
+ */
+
+/** @returns {Window & TetherGlobals} */
+const pageGlobals = () => window;
+
+/** @type {Promise<TetherApi | null> | null} */
 let initPromise = null;
+
+/** @type {MutationObserver | null} */
 let observer = null;
-let mountedBody = null; // the page body mount(document) last ran on (Astro's first page-load repeats it)
 
-/** Mount every product scope and product list inside `root`. Safe to call repeatedly. */
-export function mount(root = document) {
-  if (!isConfigured()) return 0;
-  if (root === document) mountedBody = document.body;
+/** @type {Event[] | null} The analytics part's queue, created once by the first `init()` with `analytics`. */
+let analyticsQueue = null;
+
+/** @type {boolean} The document-wide listeners are bound once, by the first configured `init()`. */
+let controlsBound = false;
+
+/**
+ * Mounts the lists of `root` and the product scopes in them as they render.
+ *
+ * @param {ParentNode} root
+ * @returns {number} The lists mounted.
+ */
+function mountLists(root) {
   let count = 0;
-  pruneLive(); // page transitions detach old roots: don't keep them alive
-  hydrateFromPage(root); // products the server already rendered: no request needed
-
   within(root, listSelector()).forEach((el) => {
     if (mountedLists.has(el)) return;
     mountedLists.add(el);
     count++;
     const list = new ListScope(el);
     liveLists.add(list);
-    el.addEventListener(`${cfg.prefix}:list-rendered`, (e) => mount(e.detail.container));
-    trackMarket(list.load());
+    el.addEventListener(`${cfg.prefix}:list-rendered`, (event) => {
+      // The list emits this CustomEvent once its products are in the page.
+      mount(/** @type {CustomEvent<{ container: ParentNode }>} */ (event).detail.container);
+    });
+    void trackMarket(list.load());
   });
+  return count;
+}
 
-  within(root, sel('product')).forEach((el) => { if (mountProduct(el)) count++; });
-
-  // The country select lives in the optional markets part: load it only when the page uses it.
+/**
+ * Loads each optional part `root` uses: the country select, customer accounts and search as you type.
+ *
+ * @param {ParentNode} root
+ */
+function mountParts(root) {
   if (within(root, `${sel('country-select')},${sel('country-bind')}`).length) {
-    loadPart('markets').then((m) => m.renderCountrySelects(root)).catch((err) => reportError(err, 'markets'));
+    loadPart('markets')
+      .then((part) => part.renderCountrySelects(root))
+      .catch((/** @type {unknown} */ error) => {
+        reportError(error, 'markets');
+      });
   }
-
-  // Customer accounts: their own optional part, when configured and the page (or a login) needs it.
-  if ((cfg.account?.clientId || cfg.account?.server) && (within(root, ['account-login', 'account-bind', 'account-link', 'orders', 'order', 'addresses', 'subscriptions', 'profile-form', 'address-form'].map((n) => `[${attr(n)}]`).join(',') + `,[${attr('show')}^="logged-"]`).length
-    || /[?&]code=/.test(window.location.search) || hasAccountSession())) {
-    loadPart('account').then((m) => m.mountAccount(root)).catch((err) => reportError(err, 'account'));
-  }
-
-  // Search as you type: its own optional part, only for pages that have it.
+  mountAccountIfUsed(root);
   if (within(root, sel('search')).length) {
-    loadPart('search').then((m) => m.mountSearch(root)).catch((err) => reportError(err, 'search'));
+    loadPart('search')
+      .then((part) => {
+        part.mountSearch(root);
+      })
+      .catch((/** @type {unknown} */ error) => {
+        reportError(error, 'search');
+      });
   }
+}
 
-
+/**
+ * Mounts every product scope and product list inside `root`. Safe to call repeatedly.
+ *
+ * @param {ParentNode} [root]
+ * @returns {number} The scopes and lists newly mounted.
+ */
+export function mount(root = document) {
+  if (!isConfigured()) return 0;
+  if (root === document) rememberDocumentMount();
+  // Page transitions detach old roots: they aren't kept alive.
+  pruneLive();
+  // Products the server rendered into the page need no request.
+  hydrateFromPage(root.ownerDocument ?? document);
+  let count = mountLists(root);
+  within(root, sel('product')).forEach((el) => {
+    if (mountProduct(el)) count++;
+  });
+  mountParts(root);
   settleMarket();
   Cart.render();
   log(`mounted ${count} scope(s)`, root);
   return count;
 }
 
-// ---------------------------------------------------------------------------
-// Markets: country select + switching
-// ---------------------------------------------------------------------------
-
-/** Call before a page transition removes `root` (closes the drawer etc.). */
+/** Call before a page transition removes the page: closes the cart drawer. */
 export function unmount() {
   Cart.close();
 }
 
+/**
+ * @param {Element | null | undefined} el
+ * @returns {ProductScope | null} The product scope `el` is in.
+ */
 export function getScope(el) {
-  const root = el?.closest?.(sel('product'));
-  return root ? scopes.get(root) || null : null;
+  const root = el?.closest(sel('product'));
+  return root ? (scopes.get(root) ?? null) : null;
 }
-
-// ---------------------------------------------------------------------------
-// Document-wide controls (delegated, so they survive page swaps)
-// ---------------------------------------------------------------------------
-
-let controlsBound = false;
 
 function bindControls() {
   if (controlsBound) return;
   controlsBound = true;
-
-  document.addEventListener('click', (e) => {
-    const t = e.target;
-    if (!t?.closest) return;
-
-    if (t.closest(sel('cart-open'))) { e.preventDefault(); Cart.toggle(); return; }
-    if (t.closest(sel('cart-close'))) { e.preventDefault(); Cart.close(); return; }
-
-    const clear = t.closest(sel('cart-clear'));
-    if (clear) { e.preventDefault(); busy(clear, () => Cart.clear().catch((err) => reportError(err, 'cart clear'))); return; }
-
-    const checkout = t.closest(sel('checkout'));
-    if (checkout) { e.preventDefault(); busy(checkout, () => Cart.checkout()); return; }
-
-    const line = t.closest(dataKeySel());
-    if (line && line.closest(sel('cart-lines'))) {
-      const id = line.getAttribute(`data-${cfg.prefix}-key`);
-      const current = Cart.lines.find((l) => l.id === id);
-      const run = (fn) => { e.preventDefault(); fn().catch((err) => reportError(err, 'cart line')); };
-      if (t.closest(sel('line-remove'))) { line.classList.add('is-busy'); return run(() => Cart.removeLine(id)); }
-      if (current && t.closest(sel('line-plus'))) return run(() => Cart.changeQuantity(id, 1));
-      if (current && t.closest(sel('line-minus'))) return run(() => Cart.changeQuantity(id, -1));
-    }
-
-    const removeCode = t.closest(sel('discount-remove'));
-    if (removeCode) {
-      e.preventDefault();
-      const code = removeCode.closest(sel('discount-code'))?.getAttribute(attr('discount-code'));
-      if (code) Cart.removeDiscount(code).catch((err) => reportError(err, 'discount'));
-      return;
-    }
-
-    const groupBtn = t.closest(sel('group-add'));
-    if (groupBtn) { e.preventDefault(); busy(groupBtn, () => addGroup(groupBtn)); }
-  });
-
-  document.addEventListener('change', (e) => {
-    const t = e.target;
-    if (!t?.closest) return;
-    const lineEl = t.closest(dataKeySel());
-    const id = lineEl?.getAttribute(`data-${cfg.prefix}-key`);
-    // The line shows is-busy / aria-busy until Shopify has answered (removed by the next render).
-    const busyLine = (p, what) => { lineEl.classList.add('is-busy'); lineEl.setAttribute('aria-busy', 'true'); p.catch((err) => reportError(err, what)); };
-    if (id && t.matches(`input${sel('line', 'quantity')}`)) {
-      busyLine(Cart.updateLine(id, parseInt(t.value, 10) || 0), 'cart line');
-    } else if (id && t.matches(`select${sel('line-plan')}`)) {
-      busyLine(Cart.updateLine(id, { sellingPlanId: t.value || null }), 'cart line plan');
-    } else if (t.matches(`select${sel('country-select')}`)) {
-      if (t.value) setCountry(t.value).catch((err) => reportError(err, 'country'));
-    } else if (t.matches(sel('cart-note'))) {
-      Cart.setNote(t.value).catch((err) => reportError(err, 'cart note'));
-    }
-  });
-
-  document.addEventListener('submit', (e) => {
-    const form = e.target.closest?.(sel('discount-form'));
-    if (!form) return;
-    e.preventDefault();
-    const input = form.querySelector(sel('discount-input')) || form.querySelector('input');
-    const code = input?.value.trim();
-    if (!code) return;
-    busy(form, async () => {
-      const mark = (bad) => {
-        form.classList.toggle('is-invalid', bad);
-        if (input) { if (bad) input.setAttribute('aria-invalid', 'true'); else input.removeAttribute('aria-invalid'); }
-      };
-      try {
-        await Cart.applyDiscount(code);
-        mark(false);
-        emit('discount-applied', { code }, form);
-        if (input) input.value = '';
-      } catch (err) {
-        mark(true);
-        if (err?.code === 'INVALID_DISCOUNT') emit('discount-invalid', { code }, form); else reportError(err, 'discount');
-      }
-    });
-  }, true); // capture: before a router (Astro's ClientRouter) turns the submit into a navigation
-  document.addEventListener('input', (e) => {
-    const f = e.target.closest?.(sel('discount-form'));
-    if (f) { f.classList.remove('is-invalid'); e.target.removeAttribute?.('aria-invalid'); }
-  });
-
-  // Other tabs: the cart or the market changed there (handled by the extras part, loaded then).
-  window.addEventListener('storage', (e) => {
-    if (cfg.domain && e.key?.startsWith(`${cfg.prefix}:`)) loadPart('extras').then((m) => m.onStorage(e)).catch(() => {});
-  });
-  // Shareable variant links: only when turned on.
-  document.addEventListener(`${cfg.prefix}:variant-changed`, (e) => {
-    const root = e.target;
-    if (cfg.variantUrl || root.hasAttribute?.(attr('variant-url'))) loadPart('extras').then((m) => m.writeVariantUrl(root, e.detail)).catch(() => {});
-  });
-
-  // Astro View Transitions (<ClientRouter />): mount every new page, close the cart while leaving.
-  if (cfg.astro !== false) {
-    // Astro fires this on the first load too: wait for init (the visitor's saved market) first.
-    document.addEventListener('astro:page-load', () => (initPromise || Promise.resolve()).then(() => {
-      // Navigated to a page of another market (e.g. /de/): switch first, then mount in that market.
-      // Back on a normal page after one: the visitor's own choice, else the default market.
-      let target = pageMarket();
-      if (!target && onPageMarket) {
-        try { target = JSON.parse(localStorage.getItem(`${cfg.prefix}:market:${cfg.domain}`) || 'null'); } catch { target = null; }
-        target = target?.country ? target : baseMarket;
-      }
-      onPageMarket = Boolean(pageMarket());
-      const differs = target?.country && (String(target.country).toUpperCase() !== String(cfg.country || '').toUpperCase()
-        || String(target.language || '').toUpperCase() !== String(cfg.language || '').toUpperCase());
-      if (differs) setCountry(target.country, { language: target.language ?? null, locale: target.locale, remember: false }).then(() => mount(document), () => mount(document));
-      else if (mountedBody !== document.body) mount(document); // the first load is already mounted: no second round of requests
-    }));
-    document.addEventListener('astro:before-swap', () => { mountedBody = null; unmount(); });
-  }
-
-  // Back online after a failed load: try the failed products and lists again.
-  window.addEventListener('online', () => {
-    retryFailed();
-    liveLists.forEach((l) => { if (l.root.getAttribute(attr('state')) === 'error') l.load(); });
-  });
-
-  document.addEventListener('keydown', (e) => {
-    if (!Cart.isOpen()) return;
-    if (e.key === 'Escape') { Cart.close(); return; }
-    if (e.key !== 'Tab' || cfg.cartFocus === false) return;
-    // Keep Tab inside the open cart.
-    const d = Cart.drawers().find((x) => x.classList.contains(cfg.cartDrawerOpenClass));
-    const f = d ? focusables(d) : [];
-    if (!f.length) return;
-    const first = f[0];
-    const last = f[f.length - 1];
-    if (!d.contains(document.activeElement) || (e.shiftKey && document.activeElement === first) || (!e.shiftKey && document.activeElement === last)) {
-      e.preventDefault();
-      (e.shiftKey ? last : first).focus();
-    }
-  });
+  bindCartControls();
+  bindDiscountControls();
+  bindExtrasControls();
+  bindNavigation({ ready: () => initPromise ?? Promise.resolve(null), mount, unmount });
 }
 
-function dataKeySel() { return `[data-${cfg.prefix}-key]`; }
+/** Buffers Tether's events until the analytics part has loaded, so none are missed. */
+function startAnalyticsQueue() {
+  /** @type {Event[]} */
+  const queue = [];
+  analyticsQueue = queue;
+  ANALYTICS_EVENTS.forEach((name) => {
+    document.addEventListener(`${cfg.prefix}:${name}`, (event) => queue.push(event));
+  });
+  document.addEventListener('astro:page-load', () => queue.push(new CustomEvent(`${cfg.prefix}:page`)));
+  loadPart('analytics')
+    .then((part) => part.startAnalytics(queue))
+    .catch((/** @type {unknown} */ error) => {
+      reportError(error, 'analytics');
+    });
+}
 
 /**
- * [tether-group] + [tether-group-add]: adds every product scope inside the
- * group in one request. Bundles, build-a-box, "complete the set".
- * Lines get attribute _group (and the group's tether-line-attributes).
+ * A saved cart from another market moves to this one, so its prices match the page's.
+ *
+ * @param {ShopifyCart | null} cart
+ * @returns {Promise<ShopifyCart | null>}
  */
-export const addGroup = (btn) => loadPart('extras').then((m) => m.addGroup(btn));
+async function cartInPageMarket(cart) {
+  const country = cfg.country?.toUpperCase();
+  const cartCountry = cart?.buyerIdentity.countryCode;
+  if (!cart || !country || !cartCountry || cartCountry === country) return cart;
+  try {
+    return await Cart.setBuyerIdentity({ countryCode: country }, { create: false });
+  } catch (error) {
+    reportError(error, 'cart country');
+    return cart;
+  }
+}
 
-// ---------------------------------------------------------------------------
-// Init
-// ---------------------------------------------------------------------------
-
-let analyticsQueue = null;
-
+/**
+ * Configures Tether (`window.TETHER_CONFIG` with `overrides` over it), applies the visitor's market and loads the
+ * cart. A second call without overrides returns the first one's promise.
+ *
+ * @param {TetherOptions} [overrides]
+ * @returns {Promise<TetherApi | null>} `null` without a domain and token, when Tether stays idle.
+ */
 export function init(overrides = {}) {
   if (initPromise && !Object.keys(overrides).length) return initPromise;
-  configure({ ...(window.TETHER_CONFIG || {}), ...overrides });
-
+  configure({ ...pageGlobals().TETHER_CONFIG, ...overrides });
   if (!isConfigured()) {
     warn('TETHER_CONFIG is missing domain or token. Tether is idle.');
     initPromise = Promise.resolve(null);
     return initPromise;
   }
-
   bindControls();
   if (cfg.observe) startObserver();
-  // Analytics (optional part): buffer Tether's events until it has loaded, so none are missed.
-  if (cfg.analytics && !analyticsQueue) {
-    analyticsQueue = [];
-    ['product-ready', 'list-ready', 'cart-updated', 'cart-toggled', 'checkout', 'search'].forEach((n) => document.addEventListener(`${cfg.prefix}:${n}`, (e) => analyticsQueue.push(e)));
-    document.addEventListener('astro:page-load', () => analyticsQueue.push(new CustomEvent(`${cfg.prefix}:page`)));
-    loadPart('analytics').then((m) => m.startAnalytics(analyticsQueue)).catch((err) => reportError(err, 'analytics'));
-  }
-
-  initPromise = applyMarket(overrides).then(() => Cart.init()).then(async (cart) => {
-    // A saved cart from another market: move it to this one, so prices match the page.
-    const want = cfg.country ? String(cfg.country).toUpperCase() : null;
-    if (cart && want && cart.buyerIdentity?.countryCode && cart.buyerIdentity.countryCode !== want) {
-      try { cart = await Cart.setBuyerIdentity({ countryCode: want }, { create: false }); } catch (err) { reportError(err, 'cart country'); }
-    }
-    emit('ready', { cart });
-    return api;
-  });
+  if (cfg.analytics && !analyticsQueue) startAnalyticsQueue();
+  initPromise = applyStartMarket(overrides)
+    .then(() => Cart.init())
+    .then(cartInPageMarket)
+    .then((cart) => {
+      emit('ready', { cart });
+      return api;
+    });
   return initPromise;
 }
 
-/**
- * Detected market (saved choice, server hint, Webflow locale) wins over the static config.
- * Without markets.detect only the visitor's saved choice applies, read here without loading
- * the markets part.
- */
-/**
- * A page built for one market (e.g. /de/ pages): <meta name="tether-page-country" content="DE">,
- * tether-page-language, tether-page-locale. Wins over the visitor's saved choice, isn't remembered.
- */
-function pageMarket(doc = document) {
-  const get = (n) => doc.querySelector(`meta[name="${cfg.prefix}-page-${n}"]`)?.getAttribute('content') || undefined;
-  const country = get('country');
-  return country ? { country: country.toUpperCase(), language: get('language'), locale: get('locale') } : null;
-}
-
-let baseMarket = null; // the configured market, before a visitor's or page's market applied
-let onPageMarket = false;
-
-async function applyMarket(overrides) {
-  const m = cfg.markets || {};
-  baseMarket = { country: cfg.country, language: cfg.language, locale: cfg.locale };
-  const page = pageMarket();
-  onPageMarket = Boolean(page);
-  if (page) {
-    cfg.country = page.country;
-    cfg.language = page.language ? page.language.toUpperCase() : undefined;
-    if (page.locale) cfg.locale = page.locale;
-    return;
-  }
-  if (m.detect === false) return;
-  let market = null;
-  if (m.detect) {
-    try { market = (await loadPart('markets')).detectMarket(m); } catch (err) { reportError(err, 'markets'); return; }
-  } else if (m.remember !== false) {
-    try { market = JSON.parse(localStorage.getItem(`${cfg.prefix}:market:${cfg.domain}`) || 'null'); } catch { /* none */ }
-    if (market && !/^[A-Z]{2}$/.test(market.country || '')) market = null;
-  }
-  if (!market) return;
-  if (market.country) cfg.country = market.country;
-  if (market.language) cfg.language = market.language;
-  if (market.locale && !overrides.locale) cfg.locale = market.locale; // the visitor's market wins over the default
-  log('market', market);
-}
-
-function hasAccountSession() {
-  try { return Boolean(sessionStorage[`${cfg.prefix}:account:${cfg.domain}`] || localStorage[`${cfg.prefix}:account:${cfg.domain}`] || localStorage[`${cfg.prefix}:account-hint:${cfg.domain}`]); } catch { return false; }
-}
-
-/** Customer accounts (optional part, loaded on first use). See src/account.js. */
-const accountApi = new Proxy({}, { get: (_, n) => (...a) => loadPart('account').then((m) => m[n](...a)) });
-
-/** Tether.setCountry('DE'): loads the markets part on first use. */
-export function setCountry(code, opts) {
-  return loadPart('markets').then((m) => m.setCountry(code, opts));
-}
-
+/** `observe`: mounts the elements added to the page later. */
 function startObserver() {
   if (observer || typeof MutationObserver === 'undefined') return;
-  let t = null;
+  /** @type {ReturnType<typeof setTimeout> | undefined} */
+  let timer;
+  /** @type {Set<Element>} */
   const queued = new Set();
-  observer = new MutationObserver((muts) => {
-    muts.forEach((m) => m.addedNodes.forEach((n) => { if (n.nodeType === 1) queued.add(n); }));
-    clearTimeout(t);
-    t = setTimeout(() => { queued.forEach((n) => { if (n.isConnected) mount(n); }); queued.clear(); }, 50);
+  observer = new MutationObserver((mutations) => {
+    mutations.forEach((mutation) => {
+      mutation.addedNodes.forEach((node) => {
+        if (node instanceof window.Element) queued.add(node);
+      });
+    });
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      queued.forEach((node) => {
+        if (node.isConnected) mount(node);
+      });
+      queued.clear();
+    }, OBSERVE_DEBOUNCE_MS);
   });
   observer.observe(document.body, { childList: true, subtree: true });
+}
+
+/**
+ * @param {MarketsConfig | null} [markets] Default `markets` of the config.
+ */
+const detectMarket = (markets) => loadPart('markets').then((part) => part.detectMarket(markets ?? cfg.markets));
+
+const getLocalization = () => loadPart('markets').then((part) => part.getLocalization());
+
+/** @param {Omit<DiagnoseOptions, 'version'>} [options] */
+const diagnose = (options) => loadPart('diagnose').then((part) => part.diagnose({ ...options, version: VERSION }));
+
+/**
+ * Listens to the Tether event `<prefix>:<name>`.
+ *
+ * @param {string} name
+ * @param {(detail: unknown, event: CustomEvent) => void} listener
+ * @returns {() => void} Stops listening.
+ */
+function on(name, listener) {
+  /** @param {Event} event */
+  const handler = (event) => {
+    const custom = /** @type {CustomEvent} Tether's events are CustomEvents. */ (event);
+    listener(custom.detail, custom);
+  };
+  document.addEventListener(`${cfg.prefix}:${name}`, handler);
+  return () => {
+    document.removeEventListener(`${cfg.prefix}:${name}`, handler);
+  };
 }
 
 export const api = {
@@ -348,8 +292,14 @@ export const api = {
   init,
   mount,
   unmount,
-  get config() { return cfg; },
-  get ready() { return initPromise || Promise.resolve(null); },
+  /** @returns {TetherConfig} */
+  get config() {
+    return cfg;
+  },
+  /** @returns {Promise<TetherApi | null>} */
+  get ready() {
+    return initPromise ?? Promise.resolve(null);
+  },
   query: gql,
   withContext,
   cart: Cart,
@@ -368,28 +318,36 @@ export const api = {
   TetherError,
   resolveProductKey,
   setCountry,
-  detectMarket: (markets) => loadPart('markets').then((m) => m.detectMarket(markets || cfg.markets)),
-  getLocalization: () => loadPart('markets').then((m) => m.getLocalization()),
-  diagnose: (opts) => loadPart('diagnose').then((m) => m.diagnose({ ...opts, version: VERSION })),
+  detectMarket,
+  getLocalization,
+  diagnose,
   __core: coreModules,
-  __parts: {},
-  on(name, fn) {
-    const h = (e) => fn(e.detail, e);
-    document.addEventListener(`${cfg.prefix}:${name}`, h);
-    return () => document.removeEventListener(`${cfg.prefix}:${name}`, h);
-  },
+  // The `<script>` build's parts register here when their file has loaded.
+  __parts: /** @type {Record<string, unknown>} */ ({}),
+  on,
 };
+
+/** @typedef {typeof api} TetherApi */
 
 export default api;
 
-// Auto-start for the plain <script> setup.
-if (typeof window !== 'undefined' && typeof document !== 'undefined') {
-  window.Tether = api;
-  // Not with a framework integration (Astro), which starts Tether itself.
-  const auto = window.TETHER_CONFIG && window.TETHER_CONFIG.autoMount !== false && !window.TETHER_INTEGRATION;
-  if (auto) {
-    const start = () => init().then(() => mount(document));
-    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start, { once: true });
-    else start();
-  }
+/**
+ * The plain `<script>` setup starts by itself, unless `autoMount: false` or a framework integration (Astro), which
+ * starts Tether itself.
+ */
+function autoStart() {
+  const globals = pageGlobals();
+  globals.Tether = api;
+  if (!globals.TETHER_CONFIG || globals.TETHER_CONFIG.autoMount === false || globals.TETHER_INTEGRATION) return;
+  const start = () => {
+    init()
+      .then(() => mount(document))
+      .catch((/** @type {unknown} */ error) => {
+        reportError(error, 'init');
+      });
+  };
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start, { once: true });
+  else start();
 }
+
+if (typeof window !== 'undefined' && typeof document !== 'undefined') autoStart();

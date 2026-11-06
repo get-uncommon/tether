@@ -1,0 +1,26 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "entry": [
+    "src/index.js",
+    "src/server.js",
+    "src/astro.js",
+    "src/presets/barba.js",
+    "src/parts/*.js",
+    "src/lazy-iife.js",
+    "server/src/entry.js",
+    "server/src/index.js",
+    "server/bin/tether-sync.js",
+    "server/scripts/*.mjs",
+    "scripts/*.mjs",
+    "test/**/*.js",
+    "server/test/**/*.js",
+    "e2e/*.{js,mjs}",
+    "types/check.ts"
+  ],
+  "project": ["src/**/*.js", "server/src/**/*.js", "server/bin/*.js", "server/scripts/*.mjs", "scripts/*.mjs"],
+  "ignoreBinaries": ["tsc"],
+  "ignoreDependencies": ["astro"],
+  "rules": {
+    "duplicates": "off"
+  }
+}

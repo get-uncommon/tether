@@ -9,17 +9,34 @@ import { createMockApis, shopifyProduct, baseConfig, instantSleep } from './mock
 const HOOK = 'https://api.pages.test/deploy_hooks/abc';
 const shopEnv = { SHOPIFY_DOMAIN: 'shop.myshopify.com', SHOPIFY_ADMIN_TOKEN: 'shpat_x', DEPLOY_HOOK_URL: HOOK };
 
-function setup({ products = [shopifyProduct(1), shopifyProduct(2)], env = shopEnv, config = defaultConfig, hookStatus = 200 } = {}) {
+function setup({
+  products = [shopifyProduct(1), shopifyProduct(2)],
+  env = shopEnv,
+  config = defaultConfig,
+  hookStatus = 200,
+} = {}) {
   const apis = createMockApis({ products });
   const hooks = [];
   let clock = Date.parse('2026-11-04T12:00:00Z');
   const fetch = async (url, init) => {
-    if (String(url) === HOOK) { hooks.push(clock); return new Response('{}', { status: hookStatus }); }
+    if (String(url) === HOOK) {
+      hooks.push(clock);
+      return new Response('{}', { status: hookStatus });
+    }
     return apis.fetch(url, init);
   };
   const store = memoryStore();
   const make = () => createApp(config, env, { store, fetch, sleep: instantSleep });
-  return { apis, hooks, store, make, tick: (s) => { clock += s * 1000; }, now: () => clock };
+  return {
+    apis,
+    hooks,
+    store,
+    make,
+    tick: (s) => {
+      clock += s * 1000;
+    },
+    now: () => clock,
+  };
 }
 
 test('deploy-only: the first import starts one build; running it again starts none', async () => {
@@ -50,7 +67,15 @@ test('deploy-only: a content change starts a build, a stock-only change does not
   // A new title is content: rebuild.
   t.apis.shop.products.set(p1.id, { ...p1, title: 'New name' });
   await new Promise((r) => setTimeout(r, 5));
-  const app = createApp(defaultConfig, { ...shopEnv, DEPLOY_HOOK_MIN_SECONDS: '0' }, { store: t.store, fetch: async (u, i) => (String(u) === HOOK ? (t.hooks.push(Date.now()), new Response('{}')) : t.apis.fetch(u, i)), sleep: instantSleep });
+  const app = createApp(
+    defaultConfig,
+    { ...shopEnv, DEPLOY_HOOK_MIN_SECONDS: '0' },
+    {
+      store: t.store,
+      fetch: async (u, i) => (String(u) === HOOK ? (t.hooks.push(Date.now()), new Response('{}')) : t.apis.fetch(u, i)),
+      sleep: instantSleep,
+    },
+  );
   const r2 = await app.sync.syncById(1);
   assert.equal(r2.action, 'updated');
   assert.equal(r2.deploy.triggered, true);
@@ -75,7 +100,9 @@ test('deploy-only: changes within the interval wait for the next run, then give 
     const r3 = await t.make().sync.reconcile(); // the cron run
     assert.equal(r3.deploy.triggered, true);
     assert.equal(t.hooks.length, 2, 'two changes, one build');
-  } finally { Date.now = realNow; }
+  } finally {
+    Date.now = realNow;
+  }
 });
 
 test('deploy-only: a failing hook is retried on the next run', async () => {
@@ -94,7 +121,10 @@ test('deploy-only from the Deploy button: Webflow fields filled with "none" coun
 });
 
 test('Webflow + deploy hook: Webflow is written and a build starts', async () => {
-  const t = setup({ config: baseConfig, env: { ...shopEnv, WEBFLOW_TOKEN: 'wf', SHOPIFY_DOMAIN: 'shop.myshopify.com' } });
+  const t = setup({
+    config: baseConfig,
+    env: { ...shopEnv, WEBFLOW_TOKEN: 'wf', SHOPIFY_DOMAIN: 'shop.myshopify.com' },
+  });
   const app = t.make();
   assert.equal(app.deployOnly, false);
   await app.sync.importAll();
@@ -115,7 +145,11 @@ test('deploy hook: a network error keeps the build pending for the next run', as
   const { createDeployHook } = await import('../src/deploy.js');
   const store = memoryStore();
   let calls = 0;
-  const fetch = async () => { calls++; if (calls === 1) throw new Error('offline'); return new Response('{}', { status: 200 }); };
+  const fetch = async () => {
+    calls++;
+    if (calls === 1) throw new Error('offline');
+    return new Response('{}', { status: 200 });
+  };
   const hook = createDeployHook({ url: HOOK, store, fetch, now: () => 1e12 });
   hook.markDirty();
   await assert.rejects(hook.maybeTrigger(), /offline/);

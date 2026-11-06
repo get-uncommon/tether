@@ -19,7 +19,12 @@ const setup = (opts = {}, config = baseConfig, extra = {}) => {
 test('query cost: pages stay under 1,000 points, and shrink when Shopify still says too much', async () => {
   assert.ok(pageSizeFor() * (6 + 25 + 10) <= 1000);
   const apis = createMockApis({ products: [1, 2, 3, 4, 5, 6].map((n) => shopifyProduct(n)), maxFirst: 4 });
-  const shopify = createShopify({ domain: 'shop.myshopify.com', adminToken: 'x', fetch: apis.fetch, sleep: instantSleep });
+  const shopify = createShopify({
+    domain: 'shop.myshopify.com',
+    adminToken: 'x',
+    fetch: apis.fetch,
+    sleep: instantSleep,
+  });
   const page = await shopify.listProducts({});
   assert.equal(page.products.length, 4);
   assert.ok(shopify.pageSize <= 4, 'remembers the smaller page size');
@@ -56,7 +61,9 @@ test('reconcile: overlap catches a product indexed late, just before the cursor'
 test('reconcile: a Shopify error saves progress instead of throwing', async () => {
   const { sync, store, app } = setup({ products: [shopifyProduct(1)] });
   await store.put('reconcile:since', '2026-01-01T00:00:00Z');
-  app.shopify.listProducts = async () => { throw new Error('boom'); };
+  app.shopify.listProducts = async () => {
+    throw new Error('boom');
+  };
   const r = await sync.reconcile();
   assert.equal(r.complete, false);
   assert.equal(r.stopped, 'error');
@@ -79,16 +86,39 @@ test('a failed publish is not committed, so the next run publishes again', async
 test('concurrent create + update webhooks in two Worker invocations: one item (unique slug)', async () => {
   const apis = createMockApis({ products: [shopifyProduct(5)] });
   const kv = new Map();
-  const TETHER_SYNC = { async get(k, t) { const v = kv.get(k); return v == null ? null : t === 'json' ? JSON.parse(v) : v; }, async put(k, v) { kv.set(k, v); }, async delete(k) { kv.delete(k); } };
+  const TETHER_SYNC = {
+    async get(k, t) {
+      const v = kv.get(k);
+      if (v == null) return null;
+      return t === 'json' ? JSON.parse(v) : v;
+    },
+    async put(k, v) {
+      kv.set(k, v);
+    },
+    async delete(k) {
+      kv.delete(k);
+    },
+  };
   const worker = createWorker(baseConfig, { fetch: apis.fetch, sleep: instantSleep });
   const tasks = [];
   const ctx = { waitUntil: (p) => tasks.push(p) };
   const hook = async (topic) => {
     const body = JSON.stringify({ id: 5 });
-    return new Request('https://w.test/webhooks/shopify', { method: 'POST', body, headers: { 'x-shopify-topic': topic, 'x-shopify-hmac-sha256': await signShopify(body, 'whsec') } });
+    return new Request('https://w.test/webhooks/shopify', {
+      method: 'POST',
+      body,
+      headers: {
+        'x-shopify-topic': topic,
+        'x-shopify-hmac-sha256': await signShopify(body, 'whsec'),
+        'x-shopify-shop-domain': 'shop.myshopify.com',
+      },
+    });
   };
   // separate invocations = separate sync instances
-  await Promise.all([worker.fetch(await hook('products/update'), { ...env, TETHER_SYNC }, ctx), worker.fetch(await hook('products/update'), { ...env, TETHER_SYNC }, ctx)]);
+  await Promise.all([
+    worker.fetch(await hook('products/update'), { ...env, TETHER_SYNC }, ctx),
+    worker.fetch(await hook('products/update'), { ...env, TETHER_SYNC }, ctx),
+  ]);
   await Promise.all(tasks);
   assert.equal(apis.wf.items.size, 1);
 });
@@ -108,7 +138,19 @@ test('subrequest budget: a Worker reconcile stops before the limit and resumes n
   const products = Array.from({ length: 12 }, (_, i) => shopifyProduct(i + 1));
   const apis = createMockApis({ products });
   const kv = new Map();
-  const TETHER_SYNC = { async get(k, t) { const v = kv.get(k); return v == null ? null : t === 'json' ? JSON.parse(v) : v; }, async put(k, v) { kv.set(k, v); }, async delete(k) { kv.delete(k); } };
+  const TETHER_SYNC = {
+    async get(k, t) {
+      const v = kv.get(k);
+      if (v == null) return null;
+      return t === 'json' ? JSON.parse(v) : v;
+    },
+    async put(k, v) {
+      kv.set(k, v);
+    },
+    async delete(k) {
+      kv.delete(k);
+    },
+  };
   kv.set('tether-sync:reconcile:since', JSON.stringify('2026-01-01T00:00:00Z'));
   const worker = createWorker(baseConfig, { fetch: apis.fetch, sleep: instantSleep });
   const wenv = { ...env, TETHER_SYNC, MAX_SUBREQUESTS: '15' };
@@ -120,7 +162,10 @@ test('subrequest budget: a Worker reconcile stops before the limit and resumes n
     if (r.complete) break;
   }
   assert.ok(runs.length > 1, 'needed more than one run');
-  assert.ok(runs.every(({ used }) => used <= 15), `subrequests per run: ${runs.map((x) => x.used)}`);
+  assert.ok(
+    runs.every(({ used }) => used <= 15),
+    `subrequests per run: ${runs.map((x) => x.used)}`,
+  );
   assert.equal(runs.at(-1).r.complete, true);
   assert.equal(apis.wf.items.size, 12);
 });
@@ -134,7 +179,11 @@ test('caches: the Shopify token and the item index are reused across invocations
   await store.delete('p:1'); // force a lookup on the next run
   await run();
   assert.equal(apis.calls.filter((c) => c.path === '/admin/oauth/access_token').length, 1);
-  assert.equal(apis.calls.filter((c) => c.method === 'GET' && c.path.includes('/items?')).length, 1, 'collection listed once');
+  assert.equal(
+    apis.calls.filter((c) => c.method === 'GET' && c.path.includes('/items?')).length,
+    1,
+    'collection listed once',
+  );
 });
 
 test('a draft product whose item was deleted in Webflow is not recreated', async () => {
@@ -148,10 +197,13 @@ test('a draft product whose item was deleted in Webflow is not recreated', async
 });
 
 test('prune with onDelete "unpublish" does not repeat itself', async () => {
-  const { sync, webflowWrites } = setup({
-    products: [shopifyProduct(1)],
-    items: [{ id: 'orphan', fieldData: { name: 'Gone', slug: 'gone', 'shopify-id': '42' } }],
-  }, { ...baseConfig, onDelete: 'unpublish' });
+  const { sync, webflowWrites } = setup(
+    {
+      products: [shopifyProduct(1)],
+      items: [{ id: 'orphan', fieldData: { name: 'Gone', slug: 'gone', 'shopify-id': '42' } }],
+    },
+    { ...baseConfig, onDelete: 'unpublish' },
+  );
   assert.equal((await sync.importAll({ prune: true })).pruned.length, 1);
   const n = webflowWrites().length;
   assert.equal((await sync.importAll({ prune: true })).pruned.length, 0);
@@ -162,19 +214,48 @@ test('webhook failure is queued for the next reconcile', async () => {
   const apis = createMockApis({ products: [shopifyProduct(1, { handle: 'bad' })], failCreateFor: 'bad' });
   const store = memoryStore();
   const worker = createWorker(baseConfig, { fetch: apis.fetch, sleep: instantSleep });
-  const kv = { async get(k) { return store.get(k); }, async put(k, v) { return store.put(k, JSON.parse(v)); }, async delete(k) { return store.delete(k); } };
+  const kv = {
+    async get(k) {
+      return store.get(k);
+    },
+    async put(k, v) {
+      return store.put(k, JSON.parse(v));
+    },
+    async delete(k) {
+      return store.delete(k);
+    },
+  };
   const tasks = [];
   const body = JSON.stringify({ id: 1 });
-  await worker.fetch(new Request('https://w.test/webhooks/shopify', { method: 'POST', body, headers: { 'x-shopify-topic': 'products/update', 'x-shopify-hmac-sha256': await signShopify(body, 'whsec') } }), { ...env, TETHER_SYNC: kv }, { waitUntil: (p) => tasks.push(p) });
+  await worker.fetch(
+    new Request('https://w.test/webhooks/shopify', {
+      method: 'POST',
+      body,
+      headers: {
+        'x-shopify-topic': 'products/update',
+        'x-shopify-hmac-sha256': await signShopify(body, 'whsec'),
+        'x-shopify-shop-domain': 'shop.myshopify.com',
+      },
+    }),
+    { ...env, TETHER_SYNC: kv },
+    { waitUntil: (p) => tasks.push(p) },
+  );
   await Promise.all(tasks);
-  assert.deepEqual((await store.get('tether-sync:reconcile:retry')).map((r) => r.id), ['1']);
+  assert.deepEqual(
+    (await store.get('tether-sync:reconcile:retry')).map((r) => r.id),
+    ['1'],
+  );
 });
 
 test('SYNC_SECRET "none" does not open /reconcile; /check without it hides values', async () => {
   const apis = createMockApis();
   const worker = createWorker(baseConfig, { fetch: apis.fetch, sleep: instantSleep });
   const wenv = { ...env, SYNC_SECRET: 'none', SHOPIFY_DOMAIN: 'secret-shop.myshopify.com' };
-  const r = await worker.fetch(new Request('https://w.test/reconcile', { method: 'POST', headers: { authorization: 'Bearer none' } }), wenv, {});
+  const r = await worker.fetch(
+    new Request('https://w.test/reconcile', { method: 'POST', headers: { authorization: 'Bearer none' } }),
+    wenv,
+    {},
+  );
   assert.equal(r.status, 401);
   const check = await (await worker.fetch(new Request('https://w.test/check'), wenv, {})).text();
   assert.ok(!check.includes('secret-shop'));
@@ -190,8 +271,8 @@ test('file store: batched writes, merged with another process, survives a failed
   await b.flush();
   await a.flush();
   const disk = JSON.parse(await readFile(path, 'utf8'));
-  assert.equal(Object.keys(disk).length, 101, 'both processes\' keys are kept');
-  assert.equal(await b.get('p:5').then((v) => v.i), 5, 'b sees a\'s writes');
+  assert.equal(Object.keys(disk).length, 101, "both processes' keys are kept");
+  assert.equal(await b.get('p:5').then((v) => v.i), 5, "b sees a's writes");
 
   const bad = fileStore(join(dir, 'missing-dir', 'state.json'), { delayMs: 10_000 });
   await bad.put('k', 1);
@@ -200,19 +281,47 @@ test('file store: batched writes, merged with another process, survives a failed
 });
 
 test('POST /reconcile?since=all imports everything, and the cron finishes what one run cannot', async () => {
-  const products = Array.from({ length: 10 }, (_, i) => shopifyProduct(i + 1, { updatedAt: `2025-0${(i % 9) + 1}-01T00:00:00Z` }));
+  const products = Array.from({ length: 10 }, (_, i) =>
+    shopifyProduct(i + 1, { updatedAt: `2025-0${(i % 9) + 1}-01T00:00:00Z` }),
+  );
   const apis = createMockApis({ products });
   const kv = new Map();
-  const TETHER_SYNC = { async get(k, t) { const v = kv.get(k); return v == null ? null : t === 'json' ? JSON.parse(v) : v; }, async put(k, v) { kv.set(k, v); }, async delete(k) { kv.delete(k); } };
+  const TETHER_SYNC = {
+    async get(k, t) {
+      const v = kv.get(k);
+      if (v == null) return null;
+      return t === 'json' ? JSON.parse(v) : v;
+    },
+    async put(k, v) {
+      kv.set(k, v);
+    },
+    async delete(k) {
+      kv.delete(k);
+    },
+  };
   const worker = createWorker(baseConfig, { fetch: apis.fetch, sleep: instantSleep });
   const secret = 'a-long-random-sync-secret-123';
   const wenv = { ...env, TETHER_SYNC, SYNC_SECRET: secret, MAX_SUBREQUESTS: '14' };
-  const res = await worker.fetch(new Request('https://w.test/reconcile?since=all', { method: 'POST', headers: { authorization: `Bearer ${secret}` } }), wenv, {});
+  const res = await worker.fetch(
+    new Request('https://w.test/reconcile?since=all', {
+      method: 'POST',
+      headers: { authorization: `Bearer ${secret}` },
+    }),
+    wenv,
+    {},
+  );
   const first = await res.json();
   assert.equal(first.complete, false, 'too much for one run');
   for (let i = 0; i < 10 && !(await worker.scheduled({}, wenv, { waitUntil() {} })).complete; i++);
   assert.equal(apis.wf.items.size, 10, 'cron finished the import');
   assert.equal(JSON.parse(kv.get('tether-sync:reconcile:since')), '2025-09-01T00:00:00Z');
-  const bad = await worker.fetch(new Request('https://w.test/reconcile?since=yesterday', { method: 'POST', headers: { authorization: `Bearer ${secret}` } }), wenv, {});
+  const bad = await worker.fetch(
+    new Request('https://w.test/reconcile?since=yesterday', {
+      method: 'POST',
+      headers: { authorization: `Bearer ${secret}` },
+    }),
+    wenv,
+    {},
+  );
   assert.equal(bad.status, 400);
 });
