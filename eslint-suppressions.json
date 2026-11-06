@@ -129,23 +129,6 @@
       "count": 1
     }
   },
-  "src/collection.js": {
-    "@typescript-eslint/no-confusing-void-expression": {
-      "count": 4
-    },
-    "@typescript-eslint/no-floating-promises": {
-      "count": 1
-    },
-    "@typescript-eslint/restrict-plus-operands": {
-      "count": 1
-    },
-    "@typescript-eslint/switch-exhaustiveness-check": {
-      "count": 1
-    },
-    "complexity": {
-      "count": 1
-    }
-  },
   "src/index.js": {
     "@typescript-eslint/no-confusing-void-expression": {
       "count": 20
@@ -184,46 +167,6 @@
       "count": 1
     },
     "no-restricted-syntax": {
-      "count": 2
-    }
-  },
-  "src/initial.js": {
-    "@typescript-eslint/no-unnecessary-condition": {
-      "count": 1
-    },
-    "@typescript-eslint/prefer-nullish-coalescing": {
-      "count": 3
-    },
-    "complexity": {
-      "count": 1
-    }
-  },
-  "src/product.js": {
-    "@typescript-eslint/no-confusing-void-expression": {
-      "count": 19
-    },
-    "@typescript-eslint/no-floating-promises": {
-      "count": 1
-    },
-    "@typescript-eslint/no-unnecessary-condition": {
-      "count": 3
-    },
-    "@typescript-eslint/prefer-nullish-coalescing": {
-      "count": 6
-    },
-    "@typescript-eslint/restrict-plus-operands": {
-      "count": 1
-    },
-    "complexity": {
-      "count": 2
-    },
-    "max-lines": {
-      "count": 1
-    },
-    "max-lines-per-function": {
-      "count": 2
-    },
-    "no-nested-ternary": {
       "count": 2
     }
   },

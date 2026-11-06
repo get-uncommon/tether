@@ -166,3 +166,45 @@ export function cartFrom(lines) {
     },
   };
 }
+
+const apparelVariant = (id, size, color, overrides = {}) => ({
+  ...variant(id, `${size} / ${color}`, []),
+  selectedOptions: [
+    { name: 'Size', value: size },
+    { name: 'Color', value: color },
+  ],
+  ...overrides,
+});
+
+// Two options, no plans: S/Red is sold out, M/Blue doesn't exist, S/Blue is on sale and low in stock, M/Red is on
+// backorder.
+export const apparel = {
+  ...product,
+  id: 'gid://shopify/Product/2',
+  handle: 'tee',
+  title: 'Tee',
+  options: [
+    {
+      name: 'Size',
+      optionValues: [
+        { name: 'S', swatch: null },
+        { name: 'M', swatch: null },
+      ],
+    },
+    {
+      name: 'Color',
+      optionValues: [
+        { name: 'Red', swatch: { color: '#f00', image: null } },
+        { name: 'Blue', swatch: { color: '#00f', image: null } },
+      ],
+    },
+  ],
+  sellingPlanGroups: { nodes: [] },
+  variants: {
+    nodes: [
+      apparelVariant(31, 'S', 'Red', { availableForSale: false, quantityAvailable: 0 }),
+      apparelVariant(32, 'S', 'Blue', { quantityAvailable: 2, price: money('19.99'), compareAtPrice: money('25.5') }),
+      apparelVariant(33, 'M', 'Red', { currentlyNotInStock: true, quantityAvailable: 0 }),
+    ],
+  },
+};
