@@ -31,8 +31,9 @@ export async function handleShopifyWebhook(
     log?.warn?.('webhook rejected: bad HMAC');
     return { response: reply(401, 'invalid signature') };
   }
-  const shop = request.headers.get('x-shopify-shop-domain');
-  if (shopDomain && shop && shop.toLowerCase() !== shopDomain.toLowerCase()) {
+  // Shopify sends the shop on every webhook. With a store configured, a webhook without it is not ours either.
+  const shop = request.headers.get('x-shopify-shop-domain') ?? '';
+  if (shopDomain && shop.toLowerCase() !== shopDomain.toLowerCase()) {
     return { response: reply(403, 'unknown shop') };
   }
   const topic = request.headers.get('x-shopify-topic');

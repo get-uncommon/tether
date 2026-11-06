@@ -106,7 +106,11 @@ test('concurrent create + update webhooks in two Worker invocations: one item (u
     return new Request('https://w.test/webhooks/shopify', {
       method: 'POST',
       body,
-      headers: { 'x-shopify-topic': topic, 'x-shopify-hmac-sha256': await signShopify(body, 'whsec') },
+      headers: {
+        'x-shopify-topic': topic,
+        'x-shopify-hmac-sha256': await signShopify(body, 'whsec'),
+        'x-shopify-shop-domain': 'shop.myshopify.com',
+      },
     });
   };
   // separate invocations = separate sync instances
@@ -225,7 +229,11 @@ test('webhook failure is queued for the next reconcile', async () => {
     new Request('https://w.test/webhooks/shopify', {
       method: 'POST',
       body,
-      headers: { 'x-shopify-topic': 'products/update', 'x-shopify-hmac-sha256': await signShopify(body, 'whsec') },
+      headers: {
+        'x-shopify-topic': 'products/update',
+        'x-shopify-hmac-sha256': await signShopify(body, 'whsec'),
+        'x-shopify-shop-domain': 'shop.myshopify.com',
+      },
     }),
     { ...env, TETHER_SYNC: kv },
     { waitUntil: (p) => tasks.push(p) },

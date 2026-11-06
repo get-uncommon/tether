@@ -302,15 +302,9 @@ test('client credentials grant: token fetched once and sent to the Admin API', a
 
 async function webhook(topic, payload, { secret = 'whsec', shop = 'shop.myshopify.com' } = {}) {
   const body = JSON.stringify(payload);
-  return new Request('https://sync.test/webhooks/shopify', {
-    method: 'POST',
-    body,
-    headers: {
-      'x-shopify-topic': topic,
-      'x-shopify-hmac-sha256': await signShopify(body, secret),
-      'x-shopify-shop-domain': shop,
-    },
-  });
+  const headers = { 'x-shopify-topic': topic, 'x-shopify-hmac-sha256': await signShopify(body, secret) };
+  if (shop) headers['x-shopify-shop-domain'] = shop;
+  return new Request('https://sync.test/webhooks/shopify', { method: 'POST', body, headers });
 }
 
 test('webhook: verifies HMAC and shop, syncs update, archives on delete', async () => {
@@ -321,6 +315,8 @@ test('webhook: verifies HMAC and shop, syncs update, archives on delete', async 
   assert.equal(r.response.status, 401);
   r = await handleShopifyWebhook(await webhook('products/update', { id: 1 }, { shop: 'evil.myshopify.com' }), opts);
   assert.equal(r.response.status, 403);
+  r = await handleShopifyWebhook(await webhook('products/update', { id: 1 }, { shop: null }), opts);
+  assert.equal(r.response.status, 403, 'a signed webhook without a shop header is not accepted');
   r = await handleShopifyWebhook(await webhook('orders/create', { id: 1 }), opts);
   assert.equal(r.response.status, 200);
   assert.equal(r.task, undefined);

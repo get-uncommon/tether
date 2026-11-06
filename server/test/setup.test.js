@@ -241,7 +241,11 @@ test('webhooks signed with either the client secret or SHOPIFY_WEBHOOK_SECRET ar
       new Request('https://w.test/webhooks/shopify', {
         method: 'POST',
         body,
-        headers: { 'x-shopify-topic': 'products/update', 'x-shopify-hmac-sha256': await signShopify(body, key) },
+        headers: {
+          'x-shopify-topic': 'products/update',
+          'x-shopify-hmac-sha256': await signShopify(body, key),
+          'x-shopify-shop-domain': 'shop.myshopify.com',
+        },
       }),
       { ...deployEnv, SHOPIFY_WEBHOOK_SECRET: 'admin-key' },
       { waitUntil() {} },
