@@ -23,17 +23,16 @@ import { TetherError } from './client.js';
 import { sel, get, qsa, setText, show, emit } from './dom.js';
 import { Cart } from './cart.js';
 import { loadPart } from './lazy.js';
-import { ORDERS_QUERY } from '../server/src/shared/account-documents.js';
 import {
   browserCustomer,
-  browserLoginRedirect,
   browserLogout,
+  browserOrders,
   forgetBrowserCustomer,
   getToken,
-  handleCallback,
   hasBrowserLogin,
   query as browserQuery,
 } from './account/browser-session.js';
+import { browserLoginRedirect, handleCallback } from './account/browser-login.js';
 import {
   forgetServerLogin,
   isServerLoggedIn,
@@ -46,14 +45,20 @@ import {
 } from './account/server-client.js';
 import { renderOrderList } from './account/order-list.js';
 import { ownValue } from './account/markup.js';
-/** @import { AccountCustomer } from './account/browser-session.js' */
-/** @import { AccountOrder } from './account/order-list.js' */
+import { toAccountOrders } from './account/answers.js';
+/** @import { AccountCustomer, AccountOrder } from './account/answers.js' */
 /** @import { Parts } from './lazy.js' */
 /** @import { AddressFields, ReturnLine } from './account/operations.js' */
 /** @import { SubscriptionAction } from '../server/src/shared/account-ops.js' */
 
 export { getToken, handleCallback };
 
+/**
+ * What the Worker's login redirect says in `?account=`: `in` after a login, `expired` when the login took too long,
+ * `error` when it failed.
+ *
+ * @typedef {'in' | 'expired' | 'error'} LoginOutcome
+ */
 /**
  * @typedef {{ kind: 'logged-in' } | { kind: 'logged-out' } | { kind: 'unknown', error: unknown }} LoginState
  *   `unknown` when the Worker or Shopify can't say: the page shows its logged-out content, and the account pages their
@@ -83,15 +88,14 @@ export async function login({ returnTo = window.location.href, locale } = {}) {
 /**
  * Any Customer Account API query, in browser mode.
  *
- * @template T The shape of the query's `data`.
  * @param {string} document
  * @param {Record<string, unknown>} [variables]
- * @returns {Promise<T>}
+ * @returns {Promise<unknown>} The answer's `data`, whose shape the query text decides.
  * @throws {TetherError} `NOT_ALLOWED` in server mode, which answers only its fixed operations; `NOT_LOGGED_IN`.
  */
 export async function query(document, variables = {}) {
   if (serverBase()) {
-    throw new TetherError('Customer accounts in server mode only answer customer() and orders()', {
+    throw new TetherError('Customer accounts: query() is for browser mode; server mode answers its fixed operations', {
       code: 'NOT_ALLOWED',
     });
   }
@@ -102,30 +106,18 @@ export async function query(document, variables = {}) {
 export async function customer() {
   if (!serverBase()) return browserCustomer();
   const me = await serverLogin();
-  if (!me.loggedIn) return null;
-  return {
-    ...me.customer,
-    emailAddress: { emailAddress: me.customer.email },
-    defaultAddress: { formatted: me.customer.address },
-  };
+  return me.loggedIn ? me.customer : null;
 }
 
 /**
  * @param {{ first?: number }} [options]
- * @returns {Promise<AccountOrder[]>} The customer's most recent orders, newest first; none when nobody is logged in
- *   (server mode).
+ * @returns {Promise<AccountOrder[]>} The customer's most recent orders, newest first; none when nobody is logged in.
+ * @throws {TetherError} When the Worker or Shopify can't answer.
  */
 export async function orders({ first = 10 } = {}) {
-  if (serverBase()) {
-    const answer = await serverFetch(`/orders?first=${first}`);
-    if (answer.kind === 'logged-out') return [];
-    const list = answer.data['orders'];
-    // The Worker sends the nodes of the same `ORDERS_QUERY`.
-    return Array.isArray(list) ? /** @type {AccountOrder[]} */ (list) : [];
-  }
-  /** @type {{ customer: { orders: { nodes: AccountOrder[] } } | null }} */
-  const data = await browserQuery(ORDERS_QUERY, { first });
-  return data.customer?.orders.nodes ?? [];
+  if (!serverBase()) return browserOrders(first);
+  const answer = await serverFetch(`/orders?first=${first}`);
+  return answer.kind === 'logged-out' ? [] : toAccountOrders(answer.data['orders']);
 }
 
 /**
@@ -160,14 +152,21 @@ const usesPages = (root) => PAGE_ATTRIBUTES.some((name) => qsa(root, sel(name)).
  * @param {ParentNode} root
  */
 function linkShopifyPages(root) {
-  const account = cfg.account;
   qsa(root, sel('account-link')).forEach((link) => {
-    const page = get(link, 'account-link');
-    const subscriptions = account?.subscriptionsUrl;
-    const url =
-      (page === 'payment' && (account?.paymentUrl || subscriptions)) || (page === 'subscriptions' && subscriptions);
-    link.setAttribute('href', url || `https://${cfg.domain}/account`);
+    link.setAttribute('href', shopifyPageUrl(get(link, 'account-link')));
   });
+}
+
+/**
+ * @param {string | null} page The `tether-account-link` value.
+ * @returns {string} The configured page for it, else the shop's account.
+ */
+function shopifyPageUrl(page) {
+  const account = cfg.account;
+  const fallback = `https://${cfg.domain}/account`;
+  if (page === 'payment') return account?.paymentUrl || account?.subscriptionsUrl || fallback;
+  if (page === 'subscriptions') return account?.subscriptionsUrl || fallback;
+  return fallback;
 }
 
 /**
@@ -208,17 +207,22 @@ export async function render(root = document) {
 async function bindCustomer(root) {
   const binds = qsa(root, sel('account-bind'));
   if (!binds.length) return;
-  const profile = await customer().catch((/** @type {unknown} */ error) => {
+  /** @type {AccountCustomer | null} */
+  let profile;
+  try {
+    profile = await customer();
+  } catch (error) {
     reportError(error, 'account');
-    return null;
-  });
+    return;
+  }
+  if (!profile) return;
   /** @type {Record<string, string | null | undefined>} */
   const texts = {
-    'first-name': profile?.firstName,
-    'last-name': profile?.lastName,
-    name: profile?.displayName,
-    email: profile?.emailAddress?.emailAddress,
-    address: profile?.defaultAddress?.formatted?.join(', '),
+    'first-name': profile.firstName,
+    'last-name': profile.lastName,
+    name: profile.displayName,
+    email: profile.emailAddress?.emailAddress,
+    address: profile.defaultAddress?.formatted.join(', '),
   };
   binds.forEach((el) => {
     const text = ownValue(texts, get(el, 'account-bind') ?? '');
@@ -295,14 +299,36 @@ function onClick(event) {
   }
 }
 
-/** Back from the Worker's login (`?account=in`): drops the mark, and lets the Worker link the cart at checkout. */
-function startServerMode() {
+/**
+ * @param {string | null} value
+ * @returns {value is LoginOutcome}
+ */
+const isLoginOutcome = (value) => value === 'in' || value === 'expired' || value === 'error';
+
+/**
+ * Back from the Worker's login (`?account=`): drops the mark and sends `tether:account-login`, or
+ * `tether:account-error` with the outcome as its `error` when the login didn't finish.
+ */
+function finishServerLogin() {
   const url = new URL(window.location.href);
-  if (url.searchParams.get('account')) {
-    url.searchParams.delete('account');
-    window.history.replaceState(window.history.state, '', url);
-    emit('account-login', {});
+  const outcome = url.searchParams.get('account');
+  if (!isLoginOutcome(outcome)) return;
+  url.searchParams.delete('account');
+  window.history.replaceState(window.history.state, '', url);
+  switch (outcome) {
+    case 'in':
+      emit('account-login', {});
+      break;
+    case 'expired':
+    case 'error':
+      emit('account-error', { error: outcome });
+      break;
   }
+}
+
+/** Finishes a login that's coming back from the Worker, and lets the Worker link the cart at checkout. */
+function startServerMode() {
+  finishServerLogin();
   Cart.setCustomer({ beforeCheckout: serverCheckoutUrl });
 }
 

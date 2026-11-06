@@ -11,6 +11,7 @@ import { renderAddresses } from './account/addresses-view.js';
 import { renderSubscriptions } from './account/subscriptions-view.js';
 import { listenToPages } from './account/page-events.js';
 import { showIn } from './account/markup.js';
+/** @import { AccountCustomer } from './account/answers.js' */
 
 export {
   setup,
@@ -33,15 +34,18 @@ const PROFILE_FIELDS = /** @type {const} */ (['firstName', 'lastName']);
  * @param {HTMLElement} form
  */
 async function renderProfile(form) {
-  const customer = await pagesContext()
-    .customer()
-    .catch((/** @type {unknown} */ error) => {
-      // The form stays empty and still saves: only the prefill is missing.
-      reportError(error, 'account');
-      return null;
-    });
-  if (!customer || form.tagName !== 'FORM') return;
-  const fields = /** @type {HTMLFormElement} */ (form).elements;
+  if (!(form instanceof window.HTMLFormElement)) return;
+  /** @type {AccountCustomer | null} */
+  let customer;
+  try {
+    customer = await pagesContext().customer();
+  } catch (error) {
+    // The form stays empty and still saves: only the prefill is missing.
+    reportError(error, 'account');
+    return;
+  }
+  if (!customer) return;
+  const fields = form.elements;
   PROFILE_FIELDS.forEach((name) => {
     const input = fields.namedItem(name);
     const isTextField = input instanceof window.HTMLInputElement || input instanceof window.HTMLTextAreaElement;

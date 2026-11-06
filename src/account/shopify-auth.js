@@ -5,8 +5,10 @@
  */
 import { cfg } from '../config.js';
 import { TetherError } from '../client.js';
+import { isHttpsUrl } from '../shopify-values.js';
 import { fromBase64Url } from '../../server/src/shared/base64url.js';
-import { isRecord, readJsonObjectOrEmpty, textOrNull } from './shared.js';
+import { isRecord } from '../../server/src/shared/json.js';
+import { accountFetch, readJsonObjectOrEmpty, textOrNull } from './shared.js';
 
 /**
  * @typedef {object} Endpoints
@@ -36,23 +38,23 @@ let endpoints = null;
  */
 async function wellKnown(document) {
   const shop = cfg.account?.shopDomain || cfg.domain;
-  const response = await fetch(`https://${shop}/.well-known/${document}`);
+  const response = await accountFetch(`https://${shop}/.well-known/${document}`);
   if (!response.ok) {
     throw new TetherError(`Customer accounts: ${document} answered ${response.status}`, { status: response.status });
   }
-  const json = /** @type {unknown} */ (await response.json());
-  return isRecord(json) ? json : {};
+  return readJsonObjectOrEmpty(response);
 }
 
 /**
  * @param {Record<string, unknown>} json
  * @param {string} name
  * @returns {string}
- * @throws {TetherError} When Shopify's document lacks the endpoint.
+ * @throws {TetherError} When Shopify's document lacks the endpoint, or names one that isn't https: the tokens and the
+ *   customer's data go there.
  */
 function endpointIn(json, name) {
   const url = textOrNull(json[name]);
-  if (!url) throw new TetherError(`Customer accounts: Shopify named no ${name}`);
+  if (url === null || !isHttpsUrl(url)) throw new TetherError(`Customer accounts: Shopify named no https ${name}`);
   return url;
 }
 
@@ -85,7 +87,7 @@ export async function discover() {
  */
 export async function requestToken(params) {
   const { tokenEndpoint } = await discover();
-  const response = await fetch(cfg.account?.tokenUrl || tokenEndpoint, {
+  const response = await accountFetch(cfg.account?.tokenUrl || tokenEndpoint, {
     method: 'POST',
     body: new URLSearchParams(params),
   });
@@ -107,6 +109,18 @@ export async function requestToken(params) {
 }
 
 /**
+ * @param {string} payload
+ * @returns {unknown} The payload's JSON; `null` for one that isn't base64url JSON, which is no id token.
+ */
+function decodedJsonOrNull(payload) {
+  try {
+    return JSON.parse(new TextDecoder().decode(fromBase64Url(payload)));
+  } catch {
+    return null;
+  }
+}
+
+/**
  * The id token's claims. Its signature isn't checked: the token comes straight from Shopify's token endpoint over
  * TLS, in answer to this browser's own code and verifier, so nobody else could have written it. That holds only while
  * `account.tokenUrl` (when set) is the shop's own first-party endpoint passing the request on to Shopify (see
@@ -118,14 +132,7 @@ export async function requestToken(params) {
 function idTokenClaims(idToken) {
   const payload = idToken.split('.')[1];
   if (!payload) return null;
-  /** @type {unknown} */
-  let claims;
-  try {
-    claims = JSON.parse(new TextDecoder().decode(fromBase64Url(payload)));
-  } catch {
-    // Not base64url JSON: not an id token, which the caller refuses.
-    return null;
-  }
+  const claims = decodedJsonOrNull(payload);
   return isRecord(claims) ? claims : null;
 }
 

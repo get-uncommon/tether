@@ -6,25 +6,7 @@ import { reportError } from '../config.js';
 import { get, qsa, repeat, sel, setText } from '../dom.js';
 import { addressText, bindsIn, ownValue, showIn } from './markup.js';
 import { addresses } from './operations.js';
-
-/**
- * @typedef {object} CustomerAddress An address of account-ops.js's documents, with `isDefault` added.
- * @property {string} id
- * @property {string | null} firstName
- * @property {string | null} lastName
- * @property {string | null} company
- * @property {string | null} address1
- * @property {string | null} address2
- * @property {string | null} city
- * @property {string | null} province
- * @property {string | null} zoneCode
- * @property {string | null} zip
- * @property {string | null} country
- * @property {string | null} countryCode
- * @property {string | null} phoneNumber
- * @property {string[]} formatted
- * @property {boolean} isDefault
- */
+/** @import { CustomerAddress } from './page-answers.js' */
 
 /** @type {readonly CustomerAddress[]} */
 let shown = [];

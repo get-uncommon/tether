@@ -7,7 +7,7 @@ import { TetherError } from '../client.js';
 import { Cart } from '../cart.js';
 import { emit } from '../dom.js';
 import {
-  isRecord,
+  accountFetch,
   loginCountry,
   loginLanguage,
   navigate,
@@ -15,21 +15,14 @@ import {
   setLoginHint,
   textOrNull,
 } from './shared.js';
-/** @import { UserError } from '../client.js' */
+import { toServerCustomer, toUserErrors } from './answers.js';
+/** @import { AccountCustomer } from './answers.js' */
 
 /**
  * @typedef {{ kind: 'answer', data: Record<string, unknown> } | { kind: 'logged-out' }} ServerAnswer The Worker's
  *   answer, or a 401: the session cookie is missing, has expired, or Shopify ended the login.
  */
-/**
- * @typedef {object} ServerCustomer The profile the Worker's `/me` sends.
- * @property {string | null} firstName
- * @property {string | null} lastName
- * @property {string | null} displayName
- * @property {string | null} email
- * @property {string[] | null} address The default address, one line per entry.
- */
-/** @typedef {{ loggedIn: true, customer: ServerCustomer } | { loggedIn: false }} ServerLogin */
+/** @typedef {{ loggedIn: true, customer: AccountCustomer } | { loggedIn: false }} ServerLogin */
 /** @typedef {{ method?: 'GET' | 'POST', body?: Record<string, unknown> }} ServerRequest */
 
 /** @type {ServerLogin | null} The Worker's `/me` answer, until a change of the customer's data. */
@@ -52,45 +45,28 @@ export function serverBase() {
  * @param {string} path
  * @param {ServerRequest} [request]
  * @returns {Promise<ServerAnswer>}
- * @throws {TetherError} `HTTP_<status>` for any failure but a 401, with the Worker's `userErrors`.
+ * @throws {TetherError} `INVALID` for refused input, `HTTP_<status>` for any other failure but a 401, with the
+ *   Worker's `userErrors`; `NETWORK` when the Worker can't be reached.
  */
 export async function serverFetch(path, { method = 'GET', body } = {}) {
   /** @type {RequestInit} */
   const init = { method, credentials: 'include' };
   if (method === 'POST') init.headers = { 'Content-Type': 'application/json', 'X-Tether-Account': '1' };
   if (body) init.body = JSON.stringify(body);
-  const response = await fetch(`${serverBase()}${path}`, init);
+  const response = await accountFetch(`${serverBase()}${path}`, init);
   if (response.status === 401) return { kind: 'logged-out' };
   const data = await readJsonObjectOrEmpty(response);
   if (!response.ok) {
     const reason = textOrNull(data['error']) ?? String(response.status);
-    /** @type {TetherError['userErrors']} */
-    const userErrors = Array.isArray(data['userErrors'])
-      ? // The Worker sends Shopify's own `userErrors` list unchanged.
-        /** @type {UserError[]} */ (data['userErrors'])
-      : undefined;
+    const userErrors = toUserErrors(data['userErrors']);
     throw new TetherError(`Customer accounts: ${reason}`, {
       status: response.status,
-      ...(userErrors && { userErrors }),
+      ...(userErrors.length > 0 && { userErrors }),
+      // The Worker marks refused input (a 400, or a 404 for a contract that isn't the customer's) with `code`.
+      ...(data['code'] === 'INVALID' && { code: 'INVALID' }),
     });
   }
   return { kind: 'answer', data };
-}
-
-/**
- * @param {unknown} value
- * @returns {ServerCustomer}
- */
-function toServerCustomer(value) {
-  const customer = isRecord(value) ? value : {};
-  const address = customer['address'];
-  return {
-    firstName: textOrNull(customer['firstName']),
-    lastName: textOrNull(customer['lastName']),
-    displayName: textOrNull(customer['displayName']),
-    email: textOrNull(customer['email']),
-    address: Array.isArray(address) ? address.filter((line) => typeof line === 'string') : null,
-  };
 }
 
 /**

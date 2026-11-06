@@ -5,20 +5,13 @@
  */
 import { formatMoney, get, qsa, repeat, sel, setImage, setText } from '../dom.js';
 import { bindsIn, ownValue, showIn } from './markup.js';
-/** @import { Money } from '../shopify-values.js' */
+/** @import { AccountOrderLine } from './answers.js' */
+/** @import { OrderDetailLine } from './page-answers.js' */
 
 /**
- * @typedef {object} OrderLine A line of `ORDERS_QUERY` or of the order page's document (account-ops.js).
- * @property {string} [id] Only on the order page.
- * @property {string} [name]
- * @property {string} title
- * @property {string | null} [variantTitle]
- * @property {number} quantity
- * @property {string | null} [sku]
- * @property {{ url: string, altText: string | null } | null} [image]
- * @property {Money | null} [price]
- * @property {Money | null} [totalPrice]
- * @property {{ nodes: { id: string, name: string }[] }} [suggestedReturnReasonDefinitions]
+ * @typedef {AccountOrderLine
+ *   & Partial<Pick<OrderDetailLine, 'id' | 'name' | 'sku' | 'price' | 'totalPrice' | 'suggestedReturnReasonDefinitions'>>}
+ *   OrderLine A line of the order list, or of the order page, which has the fields after `image` too.
  */
 /** @typedef {ReadonlyMap<string, number>} Returnable Line id → how many of it can still be returned. */
 
@@ -28,7 +21,7 @@ import { bindsIn, ownValue, showIn } from './markup.js';
  * @returns {Record<string, string | undefined>} The text of each `tether-order-line` value.
  */
 const lineTexts = (line, returnable) => ({
-  title: line.title || line.name,
+  title: line.title || line.name || '',
   'variant-title': line.variantTitle || '',
   quantity: String(line.quantity),
   price: formatMoney(line.price),
@@ -64,7 +57,7 @@ function fillReturnControls(row, line, returnable) {
     if (select.dataset['tetherFilled'] === line.id) return;
     select.dataset['tetherFilled'] = line.id;
     (line.suggestedReturnReasonDefinitions?.nodes ?? []).forEach((reason) => {
-      select.appendChild(new Option(reason.name, reason.id));
+      select.appendChild(new Option(reason.name ?? '', reason.id));
     });
   });
 }
@@ -85,7 +78,7 @@ export function fillLines(box, lines, returns) {
     bindsIn(row, 'order-line').forEach((el) => {
       const key = get(el, 'order-line') ?? '';
       if (key === 'image') {
-        if (line.image) setImage(el, line.image.url, line.image.altText || line.title);
+        if (line.image) setImage(el, line.image.url, line.image.altText || line.title || '');
         return;
       }
       const text = ownValue(texts, key);

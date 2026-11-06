@@ -1,4 +1,3 @@
-// The account part on its own: outages, the logout's privacy step, the documents it shares with the Worker.
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
@@ -18,6 +17,8 @@ Object.assign(globalThis, {
 const { configure } = await import('../src/config.js');
 const { Cart } = await import('../src/cart.js');
 const account = await import('../src/account.js');
+const { forgetServerLogin } = await import('../src/account/server-client.js');
+const { forgetBrowserCustomer } = await import('../src/account/browser-session.js');
 const { CUSTOMER_QUERY, ORDERS_QUERY } = await import('../server/src/shared/account-documents.js');
 
 const CART_KEY = 'tether:cart:shop.test';
@@ -26,6 +27,32 @@ const GRAPHQL = 'https://shopify.com/1/account/customer/api/2026-10/graphql';
 const reported = [];
 const json = (data, status = 200) => ({ ok: status < 400, status, json: async () => data });
 const visible = (id) => window.getComputedStyle(document.getElementById(id)).display !== 'none';
+const ADA = {
+  id: 'gid://shopify/Customer/1',
+  firstName: 'Ada',
+  lastName: 'Lovelace',
+  displayName: 'Ada Lovelace',
+  emailAddress: { emailAddress: 'ada@x.test' },
+  defaultAddress: { formatted: ['Street 1', 'Utrecht'] },
+};
+
+/**
+ * The account events sent on `document` while `run` runs.
+ *
+ * @param {() => Promise<unknown>} run
+ */
+async function eventsDuring(run) {
+  const seen = [];
+  const names = ['tether:account-login', 'tether:account-error'];
+  const listener = (event) => seen.push({ name: event.type, detail: event.detail });
+  names.forEach((name) => document.addEventListener(name, listener));
+  try {
+    await run();
+  } finally {
+    names.forEach((name) => document.removeEventListener(name, listener));
+  }
+  return seen;
+}
 
 /** The shop's `.well-known` documents, for browser mode. */
 function discovery(url) {
@@ -65,6 +92,9 @@ beforeEach(() => {
   reported.length = 0;
   Cart.setCustomer({ accessToken: null, beforeCheckout: null });
   document.body.innerHTML = '';
+  forgetServerLogin();
+  forgetBrowserCustomer();
+  window.history.replaceState(null, '', '/account');
 });
 
 test('server mode: a Worker outage is reported, not shown as a logout without a word', async () => {
@@ -127,6 +157,118 @@ test('browser mode: when Shopify is not told about the logout, the cart is forgo
   assert.equal(Cart.customerAccessToken, null);
   assert.equal(sessionStorage.getItem(SESSION_KEY), null);
   assert.deepEqual(loggedOut, [true]);
+});
+
+for (const [outcome, events] of [
+  ['in', [{ name: 'tether:account-login', detail: {} }]],
+  ['expired', [{ name: 'tether:account-error', detail: { error: 'expired' } }]],
+  ['error', [{ name: 'tether:account-error', detail: { error: 'error' } }]],
+]) {
+  test(`server mode: ?account=${outcome} from the Worker's login sends ${events[0].name}`, async () => {
+    configure({ ...testConfig(), account: { server: '/_tether/account' } });
+    globalThis.fetch = async () => json({ loggedIn: outcome === 'in', customer: { firstName: 'Ada' } });
+    window.history.replaceState(null, '', `/account?account=${outcome}&page=2`);
+    const fresh = await import(`../src/account.js?account-${outcome}`);
+    assert.deepEqual(await eventsDuring(() => fresh.mountAccount(document)), events);
+    assert.equal(window.location.search, '?page=2', 'the mark is dropped, the rest of the URL kept');
+  });
+}
+
+test('server mode: another ?account= value is not the login redirect, and is left alone', async () => {
+  configure({ ...testConfig(), account: { server: '/_tether/account' } });
+  globalThis.fetch = async () => json({ loggedIn: false });
+  window.history.replaceState(null, '', '/account?account=settings');
+  const fresh = await import('../src/account.js?account-other');
+  assert.deepEqual(await eventsDuring(() => fresh.mountAccount(document)), []);
+  assert.equal(window.location.search, '?account=settings');
+});
+
+test('both modes: customer() has one shape, the id included when the Worker sends it', async () => {
+  configure({ ...testConfig(), account: { server: '/_tether/account' } });
+  const { emailAddress, defaultAddress, ...names } = ADA;
+  const me = { ...names, email: emailAddress.emailAddress, address: defaultAddress.formatted };
+  globalThis.fetch = async () => json({ loggedIn: true, customer: me });
+  const fromWorker = await account.customer();
+  assert.deepEqual(fromWorker, ADA);
+  forgetServerLogin();
+  const { id, ...withoutId } = me;
+  globalThis.fetch = async () => json({ loggedIn: true, customer: withoutId });
+  assert.equal(id, ADA.id);
+  assert.equal('id' in (await account.customer()), false, 'no id: left out, not null');
+
+  configure({ ...testConfig(), account: { clientId: 'client-1' } });
+  storeSession();
+  globalThis.fetch = async (url) => discovery(String(url)) ?? json({ data: { customer: ADA } });
+  assert.deepEqual(await account.customer(), fromWorker);
+  await account.logout();
+});
+
+test('both modes: nobody logged in is customer() null and orders() empty, not an error', async () => {
+  configure({ ...testConfig(), account: { clientId: 'client-1' } });
+  globalThis.fetch = async () => {
+    throw new Error('no request expected');
+  };
+  assert.equal(await account.customer(), null);
+  assert.deepEqual(await account.orders(), []);
+  configure({ ...testConfig(), account: { server: '/_tether/account' } });
+  globalThis.fetch = async () => json({ loggedIn: false }, 401);
+  assert.equal(await account.customer(), null);
+  assert.deepEqual(await account.orders(), []);
+});
+
+test('both modes: input Shopify or the operation refuses is INVALID', async () => {
+  configure({ ...testConfig(), account: { server: '/_tether/account' } });
+  globalThis.fetch = async () =>
+    json({ error: 'City is required', code: 'INVALID', userErrors: [{ message: 'City is required' }] }, 400);
+  await assert.rejects(account.saveAddress({ address1: 'Main St 1' }), (error) => {
+    assert.equal(error.code, 'INVALID');
+    assert.deepEqual(
+      error.userErrors.map((userError) => userError.message),
+      ['City is required'],
+    );
+    return true;
+  });
+  configure({ ...testConfig(), account: { clientId: 'client-1' } });
+  globalThis.fetch = async () => {
+    throw new Error('refused before any request');
+  };
+  await assert.rejects(account.saveAddress('not an address'), { code: 'INVALID' });
+});
+
+test('server mode: an answer without the ids the page acts on is an error, other fields read as null', async () => {
+  configure({ ...testConfig(), account: { server: '/_tether/account' } });
+  globalThis.fetch = async (url) =>
+    new URL(url).pathname.endsWith('/orders')
+      ? json({ orders: [{ id: 'gid://shopify/Order/1', name: 7, lineItems: { nodes: [{ title: 'Tee' }] } }] })
+      : json({ order: { name: '#1' } });
+  const [first] = await account.orders();
+  assert.equal(first.name, null);
+  assert.equal(first.totalPrice, null);
+  assert.deepEqual(first.lineItems.nodes, [{ title: 'Tee', variantTitle: null, quantity: 0, image: null }]);
+  await assert.rejects(account.order(1), /the answer has no order id/);
+});
+
+test('browser mode: a stored session is a login before any request', async () => {
+  configure({ ...testConfig(), account: { clientId: 'client-1' } });
+  storeSession();
+  assert.equal(account.isLoggedIn(), true);
+});
+
+test('browser mode: a token Shopify refuses and that cannot be refreshed ends the login', async () => {
+  configure({ ...testConfig(), account: { clientId: 'client-1' } });
+  storeSession({ refresh: 'refresh-1' });
+  const authorizations = [];
+  globalThis.fetch = async (url, init) => {
+    const known = discovery(String(url));
+    if (known) return known;
+    if (String(url).endsWith('/oauth/token')) return json({ error: 'invalid_grant' }, 400);
+    authorizations.push(init.headers.Authorization);
+    return json({ errors: [{ message: 'Unauthorized' }] }, 401);
+  };
+  await assert.rejects(account.query(CUSTOMER_QUERY), { code: 'NOT_LOGGED_IN' });
+  assert.deepEqual(authorizations, ['tok-1'], 'no second request without a token');
+  assert.equal(sessionStorage.getItem(SESSION_KEY), null);
+  assert.equal(account.isLoggedIn(), false);
 });
 
 test('browser mode: a stored session of another shape is not a login', async () => {

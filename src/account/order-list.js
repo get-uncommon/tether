@@ -2,40 +2,47 @@
  * The customer's recent orders (`tether-orders`), with `tether-show="orders-loading"` while they load and
  * `orders-empty` when there are none yet.
  */
-import { reportError } from '../config.js';
-import { orderUrl, localDate } from '../account-links.js';
-import { formatMoney, get, qsa, repeat, sel, setImage, setText } from '../dom.js';
+import { cfg, reportError } from '../config.js';
+import { isHttpsUrl } from '../shopify-values.js';
+import { formatDate, formatMoney, get, qsa, repeat, sel, setImage, setText } from '../dom.js';
 import { ownValue, showIn } from './markup.js';
 import { fillLines } from './order-lines.js';
-/** @import { Money } from '../shopify-values.js' */
-/** @import { OrderLine } from './order-lines.js' */
-
-/**
- * @typedef {object} AccountOrder A node of `ORDERS_QUERY` (account-ops.js).
- * @property {string} id
- * @property {string} name
- * @property {string} processedAt
- * @property {string | null} financialStatus
- * @property {string | null} fulfillmentStatus
- * @property {string | null} statusPageUrl
- * @property {Money} totalPrice
- * @property {{ nodes: OrderLine[] }} lineItems
- */
+/** @import { AccountOrder } from './answers.js' */
 
 /** How many orders a `tether-orders` list shows without `tether-limit`. */
 const DEFAULT_ORDER_COUNT = 10;
+
+/**
+ * @param {string} gid `gid://shopify/Order/123`, possibly with a query.
+ * @returns {string} The numeric id at its end.
+ */
+const numericId = (gid) => gid.replace(/\?.*$/, '').replace(/^.*\//, '');
+
+/**
+ * The order's page: the site's own (`account.orderUrl`, e.g. `/account/order?id={id}`, every `{id}` the numeric
+ * order id), else Shopify's status page when it is https.
+ *
+ * @param {AccountOrder} order
+ * @returns {string | null}
+ */
+function orderUrl(order) {
+  const template = cfg.account?.orderUrl;
+  if (template) return template.replaceAll('{id}', encodeURIComponent(numericId(order.id)));
+  const statusPage = order.statusPageUrl;
+  return statusPage !== null && isHttpsUrl(statusPage) ? statusPage : null;
+}
 
 /**
  * @param {AccountOrder} order
  * @returns {Record<string, string | undefined>} The text of each `tether-order-bind` value.
  */
 const orderTexts = (order) => ({
-  name: order.name,
-  date: localDate(order.processedAt),
+  name: order.name ?? '',
+  date: formatDate(order.processedAt),
   total: formatMoney(order.totalPrice),
   status: order.financialStatus?.toLowerCase(),
   fulfillment: order.fulfillmentStatus?.toLowerCase(),
-  items: order.lineItems.nodes.map((line) => `${line.quantity}× ${line.title}`).join(', '),
+  items: order.lineItems.nodes.map((line) => `${line.quantity}× ${line.title ?? ''}`).join(', '),
 });
 
 /**
@@ -80,10 +87,13 @@ export async function renderOrderList(root, loadOrders) {
   showIn(root, 'show', { 'orders-loading': true, 'orders-empty': false });
   const limit = Number.parseInt(get(first, 'limit') || String(DEFAULT_ORDER_COUNT), 10) || DEFAULT_ORDER_COUNT;
   /** @type {AccountOrder[] | null} `null` after a failure. */
-  const orders = await loadOrders(limit).catch((/** @type {unknown} */ error) => {
+  let orders;
+  try {
+    orders = await loadOrders(limit);
+  } catch (error) {
     reportError(error, 'orders');
-    return null;
-  });
+    orders = null;
+  }
   showIn(root, 'show', { 'orders-loading': false, 'orders-empty': orders?.length === 0 });
   lists.forEach((list) => {
     repeat(list, orders ?? [], fillOrder);

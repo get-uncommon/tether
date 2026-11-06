@@ -38,21 +38,32 @@ const accountSelector = () =>
   [...ACCOUNT_ATTRIBUTES.map((name) => `[${attr(name)}]`), `[${attr('show')}^="logged-"]`].join(',');
 
 /**
+ * @param {'session' | 'local'} area
+ * @param {string} key
+ * @returns {boolean} True when `area` holds `key`; false where the browser blocks storage, which then holds nothing.
+ */
+function isStoredIfAllowed(area, key) {
+  try {
+    return Boolean((area === 'local' ? localStorage : sessionStorage).getItem(key));
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Whether this browser keeps an account session or the hint of one, so a page without account markup still finishes
- * a login. Storage throws where the browser blocks it, and then there is no session.
+ * a login. The keys are account/shared.js's, which the part owns.
  *
  * @returns {boolean}
  */
 function hasSavedSession() {
   const sessionKey = `${cfg.prefix}:account:${cfg.domain}`;
   const hintKey = `${cfg.prefix}:account-hint:${cfg.domain}`;
-  try {
-    return Boolean(
-      sessionStorage.getItem(sessionKey) || localStorage.getItem(sessionKey) || localStorage.getItem(hintKey),
-    );
-  } catch {
-    return false;
-  }
+  return (
+    isStoredIfAllowed('session', sessionKey) ||
+    isStoredIfAllowed('local', sessionKey) ||
+    isStoredIfAllowed('local', hintKey)
+  );
 }
 
 /**

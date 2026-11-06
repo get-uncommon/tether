@@ -4,32 +4,10 @@
  * follow the contract's status and its next billing cycle.
  */
 import { reportError } from '../config.js';
-import { attr, formatMoney, get, qsa, repeat, sel, setImage, setText } from '../dom.js';
+import { attr, formatDate, formatMoney, get, qsa, repeat, sel, setImage, setText } from '../dom.js';
 import { bindsIn, enumText, ownValue, showIn } from './markup.js';
 import { subscriptions } from './operations.js';
-import { localDate } from '../account-links.js';
-/** @import { Money } from '../shopify-values.js' */
-
-/**
- * @typedef {object} SubscriptionLine
- * @property {string} title
- * @property {string | null} variantTitle
- * @property {number} quantity
- * @property {Money} currentPrice
- * @property {Money | null} lineDiscountedPrice
- * @property {{ url: string, altText: string | null } | null} image
- */
-/**
- * @typedef {object} SubscriptionContract The subscriptions document in account-ops.js.
- * @property {string} id
- * @property {'ACTIVE' | 'PAUSED' | 'CANCELLED' | 'EXPIRED' | 'FAILED'} status
- * @property {string | null} nextBillingDate
- * @property {string} currencyCode
- * @property {Money | null} deliveryPrice
- * @property {{ interval: string | null, intervalCount: { count: number } | null } | null} deliveryPolicy
- * @property {{ nodes: SubscriptionLine[] }} lines
- * @property {{ nodes: { cycleIndex: number, skipped: boolean }[] }} upcomingBillingCycles
- */
+/** @import { SubscriptionContract, SubscriptionLine } from './page-answers.js' */
 
 /**
  * @param {SubscriptionContract} contract
@@ -74,10 +52,12 @@ function contractTexts(contract) {
   const total = lines.reduce((sum, line) => sum + Number.parseFloat(line.lineDiscountedPrice?.amount ?? '0'), 0);
   return {
     status: enumText(contract.status),
-    next: contract.nextBillingDate ? localDate(contract.nextBillingDate) : '',
+    next: formatDate(contract.nextBillingDate),
     interval: intervalText(contract),
-    products: lines.map((line) => `${line.quantity}× ${line.title}`).join(', '),
-    total: lines.length ? formatMoney({ amount: String(total), currencyCode: contract.currencyCode }) : '',
+    products: lines.map((line) => `${line.quantity}× ${line.title ?? ''}`).join(', '),
+    total: formatMoney(
+      lines.length && contract.currencyCode ? { amount: String(total), currencyCode: contract.currencyCode } : null,
+    ),
     delivery: formatMoney(contract.deliveryPrice),
   };
 }
@@ -89,7 +69,7 @@ function contractTexts(contract) {
 function fillLine(row, line) {
   /** @type {Record<string, string>} */
   const texts = {
-    title: line.title,
+    title: line.title ?? '',
     'variant-title': line.variantTitle || '',
     quantity: String(line.quantity),
     price: formatMoney(line.currentPrice),
@@ -97,7 +77,7 @@ function fillLine(row, line) {
   bindsIn(row, 'subscription-line').forEach((el) => {
     const key = get(el, 'subscription-line') ?? '';
     if (key === 'image') {
-      if (line.image) setImage(el, line.image.url, line.image.altText || line.title);
+      if (line.image) setImage(el, line.image.url, line.image.altText || line.title || '');
       return;
     }
     const text = ownValue(texts, key);

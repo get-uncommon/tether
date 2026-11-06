@@ -30,15 +30,18 @@ const isSubscriptionAction = (value) => SUBSCRIPTION_ACTIONS.some((action) => ac
 
 /**
  * @param {Element} el
- * @returns {el is HTMLInputElement}
+ * @returns {el is HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement}
  */
-const isInput = (el) => el.tagName === 'INPUT';
+const isField = (el) =>
+  el instanceof window.HTMLInputElement ||
+  el instanceof window.HTMLSelectElement ||
+  el instanceof window.HTMLTextAreaElement;
 
 /**
  * @param {Element} el
  * @returns {el is HTMLFormElement}
  */
-const isForm = (el) => el.tagName === 'FORM';
+const isForm = (el) => el instanceof window.HTMLFormElement;
 
 /**
  * @param {HTMLFormElement} form
@@ -48,10 +51,9 @@ function fieldsOf(form) {
   /** @type {Record<string, string>} */
   const fields = {};
   for (const field of form.elements) {
-    if (!isInput(field) && field.tagName !== 'SELECT' && field.tagName !== 'TEXTAREA') continue;
-    const input = /** @type {HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement} */ (field);
-    if (!input.name || input.type === 'submit' || input.type === 'button' || input.type === 'checkbox') continue;
-    fields[input.name] = input.value;
+    if (!isField(field)) continue;
+    if (!field.name || field.type === 'submit' || field.type === 'button' || field.type === 'checkbox') continue;
+    fields[field.name] = field.value;
   }
   return fields;
 }
@@ -150,12 +152,12 @@ function editAddress(id) {
   if (!address || !form || !isForm(form)) return;
   form.dataset['tetherAddressId'] = address.id;
   for (const field of form.elements) {
-    if (!isInput(field) && field.tagName !== 'SELECT' && field.tagName !== 'TEXTAREA') continue;
-    const input = /** @type {HTMLInputElement} */ (field);
-    if (input.name === 'isDefault') input.checked = address.isDefault;
-    else if (input.name && Object.hasOwn(address, input.name)) {
-      const value = Object.entries(address).find(([key]) => key === input.name)?.[1];
-      input.value = typeof value === 'string' ? value : '';
+    if (!isField(field)) continue;
+    if (field.name === 'isDefault') {
+      if (field instanceof window.HTMLInputElement) field.checked = address.isDefault;
+    } else if (field.name && Object.hasOwn(address, field.name)) {
+      const value = Object.entries(address).find(([key]) => key === field.name)?.[1];
+      field.value = typeof value === 'string' ? value : '';
     }
   }
   form.scrollIntoView({ block: 'nearest' });

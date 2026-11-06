@@ -4,43 +4,12 @@
  * `error`.
  */
 import { reportError } from '../config.js';
-import { isHttpsUrl, localDate } from '../account-links.js';
-import { attr, formatMoney, get, qsa, repeat, sel, setText, show } from '../dom.js';
+import { isHttpsUrl } from '../shopify-values.js';
+import { attr, formatDate, formatMoney, get, qsa, repeat, sel, setText, show } from '../dom.js';
 import { addressText, bindsIn, enumText, ownValue, showIn } from './markup.js';
 import { fillLines } from './order-lines.js';
 import { order } from './operations.js';
-/** @import { Money } from '../shopify-values.js' */
-/** @import { OrderLine } from './order-lines.js' */
-
-/**
- * @typedef {object} Fulfillment
- * @property {string} status
- * @property {string} createdAt
- * @property {string | null} estimatedDeliveryAt
- * @property {string | null} latestShipmentStatus
- * @property {{ company: string | null, number: string | null, url: string | null }[]} trackingInformation
- */
-/**
- * @typedef {object} OrderDetail The order page's document in account-ops.js.
- * @property {string} id
- * @property {string} name
- * @property {string} processedAt
- * @property {string | null} cancelledAt
- * @property {string | null} financialStatus
- * @property {string | null} fulfillmentStatus
- * @property {string | null} statusPageUrl
- * @property {Money} totalPrice
- * @property {Money | null} subtotal
- * @property {Money | null} totalShipping
- * @property {Money | null} totalTax
- * @property {{ formatted: string[] } | null} shippingAddress
- * @property {{ formatted: string[] } | null} billingAddress
- * @property {{ nodes: (OrderLine & { id: string })[] }} lineItems
- * @property {{ nodes: Fulfillment[] }} fulfillments
- * @property {{ returnableLineItems: { nodes: { quantity: number, lineItem: { id: string } | null }[] } } | null}
- *   returnInformation
- * @property {{ nodes: { id: string, status: string }[] }} returns
- */
+/** @import { Fulfillment, OrderDetail } from './page-answers.js' */
 /** @typedef {'loading' | 'ready' | 'not-found' | 'error'} OrderState */
 
 /**
@@ -74,8 +43,8 @@ export function showOrderState(el, state) {
  * @returns {Record<string, string>} The text of each `tether-order-bind` value.
  */
 const orderTexts = (detail) => ({
-  name: detail.name,
-  date: localDate(detail.processedAt),
+  name: detail.name ?? '',
+  date: formatDate(detail.processedAt),
   total: formatMoney(detail.totalPrice),
   subtotal: formatMoney(detail.subtotal),
   shipping: formatMoney(detail.totalShipping),
@@ -84,8 +53,8 @@ const orderTexts = (detail) => ({
   fulfillment: enumText(detail.fulfillmentStatus),
   'shipping-address': addressText(detail.shippingAddress),
   'billing-address': addressText(detail.billingAddress),
-  items: detail.lineItems.nodes.map((line) => `${line.quantity}× ${line.title || line.name}`).join(', '),
-  cancelled: detail.cancelledAt ? localDate(detail.cancelledAt) : '',
+  items: detail.lineItems.nodes.map((line) => `${line.quantity}× ${line.title || line.name || ''}`).join(', '),
+  cancelled: formatDate(detail.cancelledAt),
 });
 
 /**
@@ -99,17 +68,17 @@ function fillFulfillment(row, fulfillment) {
   /** @type {Record<string, string>} */
   const texts = {
     status: enumText(fulfillment.latestShipmentStatus || fulfillment.status),
-    date: localDate(fulfillment.createdAt),
-    eta: fulfillment.estimatedDeliveryAt ? localDate(fulfillment.estimatedDeliveryAt) : '',
+    date: formatDate(fulfillment.createdAt),
+    eta: formatDate(fulfillment.estimatedDeliveryAt),
     company: tracking?.company || '',
     number: tracking?.number || '',
   };
   bindsIn(row, 'fulfillment-bind').forEach((el) => {
     const key = get(el, 'fulfillment-bind') ?? '';
     if (key === 'url') {
-      const url = tracking?.url;
-      const linked = isHttpsUrl(url);
-      if (linked && url) el.setAttribute('href', url);
+      const url = tracking?.url ?? null;
+      const linked = url !== null && isHttpsUrl(url);
+      if (linked) el.setAttribute('href', url);
       show(el, linked);
       return;
     }
@@ -134,7 +103,8 @@ function fillOrder(el, detail) {
   qsa(el, sel('order-bind')).forEach((bind) => {
     const key = get(bind, 'order-bind') ?? '';
     if (key === 'url') {
-      if (detail.statusPageUrl && isHttpsUrl(detail.statusPageUrl)) bind.setAttribute('href', detail.statusPageUrl);
+      const statusPage = detail.statusPageUrl;
+      if (statusPage !== null && isHttpsUrl(statusPage)) bind.setAttribute('href', statusPage);
       return;
     }
     const text = ownValue(texts, key);

@@ -1,9 +1,11 @@
 /**
- * What both account modes share: the storage keys, the redirect to Shopify's pages, the login language, and reading
- * the JSON that Shopify and the Worker answer with. Storage throws in private mode and where the visitor blocks site
- * data; a login then lasts as long as the page.
+ * What both account modes share: the storage keys, where browser mode keeps its session, one request to Shopify or
+ * the Worker, the redirect to Shopify's pages, and the login language. Storage throws in private mode and where the
+ * visitor blocks site data; a login then lasts as long as the page.
  */
 import { cfg } from '../config.js';
+import { TetherError } from '../client.js';
+import { isRecord } from '../../server/src/shared/json.js';
 
 /** @typedef {'session' | 'local'} StorageArea */
 
@@ -20,7 +22,14 @@ export const pendingLoginKey = () => `${cfg.prefix}:account-login:${cfg.domain}`
  */
 const hintKey = () => `${cfg.prefix}:account-hint:${cfg.domain}`;
 
-/** @returns {StorageArea} Where the browser-mode session lives: `localStorage` with `account.remember`. */
+/**
+ * Where browser mode keeps the customer's tokens, which carry the `customer-account-api:full` scope. By default
+ * `sessionStorage`: the login ends with the tab. `account.remember` chooses `localStorage`, where the refresh token
+ * stays on the device until logout. Any script on the page can read either area, so a site that renders HTML it
+ * doesn't control, or loads third-party scripts, should use server mode, which keeps every token in the Worker.
+ *
+ * @returns {StorageArea}
+ */
 export const sessionArea = () => (cfg.account?.remember ? 'local' : 'session');
 
 /** @param {StorageArea} area */
@@ -62,15 +71,27 @@ export function setLoginHint(loggedIn) {
 
 /**
  * @param {unknown} value
- * @returns {value is Record<string, unknown>}
- */
-export const isRecord = (value) => typeof value === 'object' && value !== null && !Array.isArray(value);
-
-/**
- * @param {unknown} value
  * @returns {string | null}
  */
 export const textOrNull = (value) => (typeof value === 'string' ? value : null);
+
+/**
+ * One request to Shopify or the Worker. A request that never got an answer is a `NETWORK` error in both modes.
+ *
+ * @param {string} url
+ * @param {RequestInit} [init]
+ * @returns {Promise<Response>}
+ * @throws {TetherError} `NETWORK` when the request fails before an answer.
+ */
+export async function accountFetch(url, init) {
+  try {
+    return await fetch(url, init);
+  } catch (error) {
+    throw new TetherError(`Network error: ${error instanceof Error ? error.message : String(error)}`, {
+      code: 'NETWORK',
+    });
+  }
+}
 
 /**
  * An error page that isn't JSON reads as an empty answer: the response's status then says what went wrong.

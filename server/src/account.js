@@ -283,6 +283,7 @@ function customerApi({ settings, sessions, sessionId, fetch: fetchImpl, siteOrig
 function customerProfile(data) {
   const customer = field(data, 'customer');
   return {
+    id: textOrNull(field(customer, 'id')),
     firstName: textOrNull(field(customer, 'firstName')),
     lastName: textOrNull(field(customer, 'lastName')),
     displayName: textOrNull(field(customer, 'displayName')),
@@ -360,7 +361,8 @@ async function operation(cors, customer, { name, input }) {
   } catch (error) {
     if (!(error instanceof InputError)) throw error;
     const userErrors = error.userErrors.length ? error.userErrors : undefined;
-    return jsonResponse({ error: error.message, userErrors }, error.status, cors);
+    // `code` tells the browser this is refused input, not a missing route, whatever the status.
+    return jsonResponse({ error: error.message, code: 'INVALID', userErrors }, error.status, cors);
   }
 }
 

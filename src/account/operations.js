@@ -1,17 +1,28 @@
 /**
  * The account pages' operations, the same fixed ones in both modes: the Worker's routes in server mode, the Customer
  * Account API directly in browser mode, with the documents and input checks of account-ops.js either way. Each
- * result has the shape of its document there, which the typedefs of the views that render it state.
+ * result is read into its typed shape (page-answers.js), so both modes return the same values and fail with the same
+ * `TetherError` codes: `NOT_LOGGED_IN`, `INVALID` for input that account-ops.js or Shopify refuses, `NETWORK`, and
+ * `HTTP_<status>` for a request that failed.
  */
 import { TetherError } from '../client.js';
 import { emit } from '../dom.js';
-import { ops, InputError } from '../../server/src/shared/account-ops.js';
+import { isRecord } from '../../server/src/shared/json.js';
+import { ops, operationRequest, InputError } from '../../server/src/shared/account-ops.js';
+import {
+  toAccountAddress,
+  toCustomerAddresses,
+  toDeletedId,
+  toOrderDetail,
+  toProfile,
+  toReturn,
+  toSubscriptionChange,
+  toSubscriptionContracts,
+} from './page-answers.js';
 /** @import { ServerAnswer, ServerRequest } from './server-client.js' */
-/** @import { AccountCustomer } from './browser-session.js' */
-/** @import { OrderDetail } from './order-page.js' */
-/** @import { CustomerAddress } from './addresses-view.js' */
-/** @import { SubscriptionContract } from './subscriptions-view.js' */
-/** @import { SubscriptionAction } from '../../server/src/shared/account-ops.js' */
+/** @import { AccountCustomer } from './answers.js' */
+/** @import { AccountAddress, CustomerAddress, OrderDetail, SubscriptionChange, SubscriptionContract } from './page-answers.js' */
+/** @import { OperationName, SubscriptionAction } from '../../server/src/shared/account-ops.js' */
 
 /**
  * @typedef {object} PagesContext The account part's session, shared so both parts act as one customer.
@@ -30,7 +41,6 @@ import { ops, InputError } from '../../server/src/shared/account-ops.js';
  * @property {string} [reasonId]
  * @property {string} [note]
  */
-/** @typedef {'order' | 'addresses' | 'subscriptions' | 'profile' | 'saveAddress' | 'deleteAddress' | 'subscription' | 'requestReturn'} OperationName */
 /** @typedef {'profile' | 'addresses' | 'subscriptions' | 'orders'} ChangedData `tether:account-updated`'s `what`. */
 
 /** @type {PagesContext | null} */
@@ -54,45 +64,46 @@ export function pagesContext() {
   return context;
 }
 
-/** @type {Record<OperationName, (input: Record<string, unknown>) => ['GET' | 'POST', string]>} */
-const ROUTE = {
-  order: (input) => ['GET', `/order?id=${encodeURIComponent(String(input['id']))}`],
-  addresses: () => ['GET', '/addresses'],
-  subscriptions: () => ['GET', '/subscriptions'],
-  profile: () => ['POST', '/profile'],
-  saveAddress: () => ['POST', '/address'],
-  deleteAddress: () => ['POST', '/address/delete'],
-  subscription: () => ['POST', '/subscription'],
-  requestReturn: () => ['POST', '/return'],
-};
+/**
+ * @param {OperationName} name
+ * @param {Record<string, unknown>} input
+ * @returns {Promise<Record<string, unknown>>}
+ */
+async function runAtWorker(name, input) {
+  const { serverFetch } = pagesContext();
+  const { method, path } = operationRequest(name, input);
+  const answer = await serverFetch(path, method === 'POST' ? { method, body: input } : {});
+  if (answer.kind === 'logged-out') throw new TetherError('Not logged in', { code: 'NOT_LOGGED_IN', status: 401 });
+  return answer.data;
+}
+
+/**
+ * @param {OperationName} name
+ * @param {Record<string, unknown>} input
+ * @returns {Promise<Record<string, unknown>>}
+ */
+async function runInBrowser(name, input) {
+  const { query } = pagesContext();
+  try {
+    return await ops[name](async (document, variables) => {
+      const data = await query(document, variables);
+      return isRecord(data) ? data : null;
+    }, input);
+  } catch (error) {
+    if (!(error instanceof InputError)) throw error;
+    const { userErrors } = error;
+    throw new TetherError(error.message, { code: 'INVALID', ...(userErrors.length > 0 && { userErrors }) });
+  }
+}
 
 /**
  * @param {OperationName} name
  * @param {Record<string, unknown>} [input]
- * @returns {Promise<Record<string, unknown>>} The operation's result fields.
- * @throws {TetherError} `NOT_LOGGED_IN` (status 401), `INVALID` for input account-ops.js refuses (with Shopify's
- *   `userErrors`), or the request's failure.
+ * @returns {Promise<Record<string, unknown>>} The operation's result fields, read by the caller.
+ * @throws {TetherError} With one of the codes in the file's comment.
  */
-async function run(name, input = {}) {
-  const { serverBase, serverFetch, query } = pagesContext();
-  if (serverBase()) {
-    const [method, path] = ROUTE[name](input);
-    const answer = await serverFetch(path, method === 'POST' ? { method, body: input } : {});
-    if (answer.kind === 'logged-out') throw new TetherError('Not logged in', { code: 'NOT_LOGGED_IN', status: 401 });
-    return answer.data;
-  }
-  const operation = ops[name];
-  if (!operation) throw new TetherError(`Customer accounts: no operation ${name}`);
-  try {
-    // account-ops.js's `Ask` reads every answer field by field, so the answer's shape needn't be stated here.
-    return await operation(
-      async (document, variables) => /** @type {Record<string, unknown> | null} */ (await query(document, variables)),
-      input,
-    );
-  } catch (error) {
-    if (!(error instanceof InputError)) throw error;
-    throw new TetherError(error.message, { code: 'INVALID', userErrors: error.userErrors });
-  }
+function run(name, input = {}) {
+  return pagesContext().serverBase() ? runAtWorker(name, input) : runInBrowser(name, input);
 }
 
 /** @param {ChangedData} what */
@@ -109,7 +120,7 @@ function changed(what) {
  */
 export async function order(id) {
   const result = await run('order', { id });
-  return /** @type {OrderDetail | null} */ (result['order'] ?? null);
+  return toOrderDetail(result['order']);
 }
 
 /**
@@ -119,13 +130,13 @@ export async function order(id) {
 export async function updateProfile({ firstName, lastName } = {}) {
   const result = await run('profile', { firstName, lastName });
   changed('profile');
-  return /** @type {{ firstName: string | null, lastName: string | null }} */ (result['customer']);
+  return toProfile(result['customer']);
 }
 
 /** @returns {Promise<CustomerAddress[]>} The customer's addresses, the default one marked `isDefault`. */
 export async function addresses() {
   const result = await run('addresses');
-  return /** @type {CustomerAddress[]} */ (result['addresses']);
+  return toCustomerAddresses(result['addresses']);
 }
 
 /**
@@ -133,12 +144,12 @@ export async function addresses() {
  *
  * @param {AddressFields | null} address
  * @param {{ id?: string | undefined, isDefault?: boolean }} [options]
- * @returns {Promise<CustomerAddress>}
+ * @returns {Promise<AccountAddress>}
  */
 export async function saveAddress(address, { id, isDefault } = {}) {
   const result = await run('saveAddress', { id, address, isDefault });
   changed('addresses');
-  return /** @type {CustomerAddress} */ (result['address']);
+  return toAccountAddress(result['address']);
 }
 
 /**
@@ -148,33 +159,33 @@ export async function saveAddress(address, { id, isDefault } = {}) {
 export async function deleteAddress(id) {
   const result = await run('deleteAddress', { id });
   changed('addresses');
-  return /** @type {string} */ (result['deleted']);
+  return toDeletedId(result['deleted']);
 }
 
 /** @returns {Promise<SubscriptionContract[]>} */
 export async function subscriptions() {
   const result = await run('subscriptions');
-  return /** @type {SubscriptionContract[]} */ (result['subscriptions']);
+  return toSubscriptionContracts(result['subscriptions']);
 }
 
 /**
  * @param {string | number} id
  * @param {SubscriptionAction} action
- * @returns {Promise<Record<string, unknown>>} The changed contract or billing cycle.
+ * @returns {Promise<SubscriptionChange>} The changed contract or billing cycle.
  */
 export async function subscriptionAction(id, action) {
   const result = await run('subscription', { id, action });
   changed('subscriptions');
-  return result;
+  return toSubscriptionChange(result);
 }
 
 /**
  * @param {string | number} orderId
  * @param {ReturnLine[]} lines
- * @returns {Promise<{ id: string, status: string }>} The return Shopify opened.
+ * @returns {Promise<{ id: string, status: string | null }>} The return Shopify opened.
  */
 export async function requestReturn(orderId, lines) {
   const result = await run('requestReturn', { orderId, lines });
   changed('orders');
-  return /** @type {{ id: string, status: string }} */ (result['return']);
+  return toReturn(result['return']);
 }
