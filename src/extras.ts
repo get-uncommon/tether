@@ -8,14 +8,8 @@ import { sel, get, has, qsa, emit, parseJSONAttr, attributesFromJson } from './d
 import { scopes } from './product.ts';
 import { Cart } from './cart.ts';
 import { setCountry } from './page-market.ts';
-import { isRecord } from '../server/src/shared/json.ts';
+import { parseSavedMarket, storageKey as marketStorageKey } from './markets.ts';
 import type { ShopifyCart } from './cart/store.ts';
-
-interface StoredMarket {
-  country: string;
-  language: string | null;
-  locale: string | undefined;
-}
 
 /** @param name The group's `tether-group` value. */
 function groupAttributes(group: Element, name: string | null) {
@@ -54,24 +48,6 @@ export async function addGroup(button: Element): Promise<ShopifyCart | null> {
   }
 }
 
-/** Another tab writes the market as JSON; a value that isn't (written by something else under the key) is skipped. */
-function parseStoredMarket(text: string): StoredMarket | null {
-  let value: unknown;
-  try {
-    value = JSON.parse(text);
-  } catch {
-    return null;
-  }
-  if (!isRecord(value)) return null;
-  const { country, language, locale } = value;
-  if (typeof country !== 'string' || !country) return null;
-  return {
-    country,
-    language: typeof language === 'string' ? language : null,
-    locale: typeof locale === 'string' ? locale : undefined,
-  };
-}
-
 /** Another tab changed the cart (it is loaded again here) or the visitor's market (this tab follows it). */
 export function onStorage(event: StorageEvent): void {
   if (event.key === cfg.storageKey || event.key === `${cfg.storageKey}:seen`) {
@@ -80,10 +56,12 @@ export function onStorage(event: StorageEvent): void {
     });
     return;
   }
-  if (event.key !== `${cfg.prefix}:market:${cfg.domain}` || !event.newValue) return;
-  const market = parseStoredMarket(event.newValue);
+  if (event.key !== marketStorageKey() || !event.newValue) return;
+  // A value that isn't a market was written under the key by something else.
+  const market = parseSavedMarket(event.newValue);
   if (!market) return;
-  const options = { language: market.language, locale: market.locale, remember: false };
+  // The other tab saved the language it uses, so none saved means none.
+  const options = { language: market.language ?? null, locale: market.locale, remember: false };
   setCountry(market.country, options).catch((error: unknown) => {
     reportError(error, 'market from another tab');
   });

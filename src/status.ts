@@ -3,6 +3,7 @@
  * API never leaves a broken page.
  */
 import { attr, sel, get, scoped, show } from './dom.ts';
+import { decodeOrKeep } from './uri.ts';
 
 interface ProductKeySource {
   /** The product to load; `null` when the attribute or the page URL has none. */
@@ -16,16 +17,6 @@ interface ProductKeySource {
 type ScopeStatus = 'loading' | 'ready' | 'error' | 'not-found';
 
 const URL_SOURCE = 'url:';
-
-/** A path segment as text. A malformed escape (`%E0%A4%A`) is kept as written, which is how the browser shows it. */
-function decodePathSegment(segment: string): string {
-  try {
-    return decodeURIComponent(segment);
-  } catch (error) {
-    if (error instanceof URIError) return segment;
-    throw error;
-  }
-}
 
 /**
  * Reads a `tether-product` value:
@@ -47,7 +38,8 @@ export function resolveProductKey(
   if (source.toLowerCase() === 'path') {
     const segments = location.pathname.split('/').filter(Boolean);
     const segment = segments[segments.length - 1];
-    key = segment === undefined ? null : decodePathSegment(segment);
+    // A malformed escape is kept as written, which is how the browser shows it.
+    key = segment === undefined ? null : decodeOrKeep(segment);
   } else {
     key = new URLSearchParams(location.search).get(source || 'handle');
   }

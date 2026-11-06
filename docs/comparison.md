@@ -4,8 +4,9 @@ Three ways to sell Shopify products on a Webflow site (Tether also works in Astr
 and Storesynk (formerly Shopyflow) are paid services with support and visual tooling. This page
 tries to be fair: where something couldn't be confirmed from the vendor's own pages, it says so.
 
-_Tether as of 0.6. Checked on 4 November 2026 from the vendors' public pages (links below). Prices and features
-change, so check the sources before you decide. Corrections are welcome: open an issue._
+_Tether's column checked against its code on 6 November 2026, the others against the vendors' public pages
+(links below) on 4 November 2026. Prices and features change, so check the sources before you decide.
+Corrections are welcome: open an issue._
 
 ## At a glance
 

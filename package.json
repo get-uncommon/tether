@@ -46,7 +46,7 @@
     "pretest": "node --experimental-strip-types scripts/build.ts --out .test-dist",
     "presmoke": "node --experimental-strip-types scripts/build.ts",
     "release": "node --experimental-strip-types scripts/release.ts",
-    "e2e:build": "npm run build && cd examples/astro && (test -f .env || cp .env.example .env) && npm install --no-audit --no-fund && npm install --no-save ../.. && npx astro build",
+    "e2e:build": "npm run build && cd examples/astro && (test -f .env || cp .env.example .env) && npm install --no-save --no-audit --no-fund --ignore-scripts ../.. && npx astro build",
     "e2e": "npm run e2e:build && playwright test -c e2e/playwright.config.js"
   },
   "devDependencies": {

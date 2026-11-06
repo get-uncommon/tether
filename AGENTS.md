@@ -48,7 +48,7 @@ A refactor keeps all of them. A change to one is a behaviour change, with a CHAN
 
 - **Simplicity first.** No single-use abstraction, no configurability nobody asked for, no error handling for impossible cases.
 - **One method per concern.** One Storefront client (`client.ts`), one place that formats money, one sealing scheme for anything stored. No fallback chains.
-- **Surgical changes.** A refactor and a behaviour change are separate commits. Formatting-only commits go in `.git-blame-ignore-revs`.
+- **Surgical changes.** A refactor and a behaviour change never share a commit: each goes in its own, and the pull request says which commit is which. Formatting-only commits go in `.git-blame-ignore-revs`.
 - **Never disable a lint rule to get green.** Fix the code. If a rule is wrong for a line, the disable comment says why.
 - **State is a union, not a set of booleans or strings.** If two fields must agree, make them one field.
 - **Input is parsed where it arrives.** Check attributes, `localStorage`, `<meta>`, URL parameters, request bodies and webhook payloads once, at the boundary. Values go into GraphQL variables, never into the query text.

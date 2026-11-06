@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { VERSION_COPIES, syncVersions, versionMismatches } from '../scripts/versions.ts';
-import { asRecord, parseJson } from '../server/test/mocks.js';
+import { asRecord, parseJson, recordAt } from '../server/test/mocks.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -25,6 +25,16 @@ test('the release writes the package.json version into every copy', async () => 
   assert.equal(await syncVersions(copy), '9.8.7');
   assert.deepEqual(await versionMismatches(copy), []);
   assert.match(await readFile(join(copy, 'src/index.ts'), 'utf8'), /export const VERSION = '9\.8\.7';/);
+  const starter = asRecord(parseJson(await readFile(join(copy, 'examples/astro/package.json'), 'utf8')), 'starter');
+  assert.equal(recordAt(starter, 'dependencies')['@occluze/tether'], '^9.8.0', 'new projects get every 9.8 patch');
+});
+
+test("the Astro starter's lockfile locks what its package.json asks for, so e2e installs the locked tree", async () => {
+  const starter = join(ROOT, 'examples/astro');
+  const pkg = asRecord(parseJson(await readFile(join(starter, 'package.json'), 'utf8')), 'package.json');
+  const lock = asRecord(parseJson(await readFile(join(starter, 'package-lock.json'), 'utf8')), 'package-lock.json');
+  const root = recordAt(recordAt(lock, 'packages'), '');
+  assert.deepEqual(root['dependencies'], pkg['dependencies']);
 });
 
 test('the docs pin no release: the README, which the release rewrites, is the one place that names one', async () => {
