@@ -47,10 +47,6 @@ export function scalarText(value: unknown): string {
   return '';
 }
 
-export function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
 /** JSON with sorted keys, so equal data always hashes the same. */
 export function stableStringify(value: unknown): string {
   if (value === undefined) return 'null';

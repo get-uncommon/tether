@@ -3,6 +3,7 @@ import { test, before, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
 import { cartFrom, detailOf, find, graphqlRequest, jsonResponse, operationName, product } from './fixtures.js';
+import { waitFor } from '../server/test/mocks.js';
 
 // A German Webflow locale page, with a saved cart from the Dutch market.
 const dom = new JSDOM('<!doctype html><html lang="de-DE"><body></body></html>', {
@@ -47,9 +48,13 @@ globalThis.fetch = async (url, init) => {
   const op = operationName(query);
   const ctx = query.match(/@inContext\(([^)]*)\)/)?.[1] || '';
   const country = ctx.match(/country: (\w+)/)?.[1] || null;
-  calls.push({ host, op, variables, ctx, country });
+  const call = { host, op, variables, ctx, country, answered: false };
+  calls.push(call);
   hosts.add(host);
-  const ok = (data) => jsonResponse({ data });
+  const ok = (data) => {
+    call.answered = true;
+    return jsonResponse({ data });
+  };
   if (delays[country]) await new Promise((r) => setTimeout(r, delays[country]));
 
   switch (op) {
@@ -92,7 +97,8 @@ globalThis.fetch = async (url, init) => {
   }
 };
 
-const tick = (ms = 40) => new Promise((r) => setTimeout(r, ms));
+const priceText = () => document.querySelector('#price')?.textContent ?? '';
+const listPrice = () => document.querySelector('.p')?.textContent ?? '';
 let Tether;
 
 before(async () => {
@@ -203,7 +209,7 @@ test('init used the detected market: @inContext DE and the saved NL cart moved t
   assert.equal(Tether.cart.state.buyerIdentity.countryCode, 'DE');
   document.body.innerHTML = '<div tether-product="coffee-box"><span id="price" tether-bind="price"></span></div>';
   Tether.mount(document);
-  await tick();
+  await waitFor(() => calls.some((c) => c.op === 'TetherProducts'), 'the product request');
   const p = calls.find((c) => c.op === 'TetherProducts');
   assert.equal(p.ctx, 'country: DE, language: DE');
 });
@@ -216,7 +222,10 @@ test('tether-country-select lists the markets; switching re-renders prices and u
     <div tether-product="coffee-box"><span id="price" tether-bind="price"></span>
       <div tether-option-list="Size"><button>v</button></div></div>`;
   Tether.mount(document);
-  await tick();
+  await waitFor(
+    () => document.querySelector('select')?.options.length === 3 && /30/.test(priceText()),
+    'the country select and the price',
+  );
   const s = document.querySelector('select');
   assert.ok(s);
   assert.deepEqual(
@@ -234,7 +243,10 @@ test('tether-country-select lists the markets; switching re-renders prices and u
   calls.length = 0;
   s.value = 'US';
   s.dispatchEvent(new window.Event('change', { bubbles: true }));
-  await tick(80);
+  await waitFor(
+    () => changes.length === 1 && /35/.test(priceText()) && find('#cur').textContent === 'USD',
+    'the switch to US',
+  );
 
   const update = calls.find((c) => c.op === 'Tether_cartBuyerIdentityUpdate');
   assert.equal(update.variables.buyerIdentity.countryCode, 'US');
@@ -265,11 +277,10 @@ test('a list re-renders in the new market', async () => {
   document.body.innerHTML =
     '<div tether-products=""><div tether-list><div><span class="p" tether-bind="price"></span></div></div></div>';
   Tether.mount(document);
-  await tick(80);
-  assert.match(find('.p').textContent, /35/);
+  await waitFor(() => /35/.test(listPrice()), 'the list in US prices');
   calls.length = 0;
   await Tether.setCountry('NL', { remember: false });
-  await tick(80);
+  await waitFor(() => /30/.test(listPrice()), 'the list in NL prices');
   assert.equal(calls.find((c) => c.op === 'TetherSearch').country, 'NL');
   assert.match(find('.p').textContent, /30/);
   assert.equal(document.querySelectorAll('.p').length, 1);
@@ -280,11 +291,14 @@ test('a slow response from the old market never overwrites the new one or refill
   Tether.clearProductCache();
   delays.NL = 120;
   document.body.innerHTML = '<div tether-product="coffee-box"><span id="price" tether-bind="price"></span></div>';
-  Tether.mount(document); // NL request in flight (slow)
-  await tick(10);
-  const switching = Tether.setCountry('US', { remember: false });
-  await switching;
-  await tick(200); // the NL response has arrived by now
+  calls.length = 0;
+  Tether.mount(document);
+  await waitFor(() => calls.some((c) => c.op === 'TetherProducts' && c.country === 'NL'), 'the slow NL request');
+  await Tether.setCountry('US', { remember: false });
+  const slow = calls.find((c) => c.country === 'NL');
+  await waitFor(() => slow?.answered === true, 'the NL answer');
+  // Nothing may happen once the stale answer is read: give it a moment to be (wrongly) applied.
+  await new Promise((r) => setTimeout(r, 20));
   delete delays.NL;
   assert.match(find('#price').textContent, /35/);
   const cached = await Tether.getProduct('coffee-box');
@@ -294,17 +308,15 @@ test('a slow response from the old market never overwrites the new one or refill
 test('switching country keeps rendered products visible (state "updating", not "loading")', async () => {
   document.body.innerHTML = '<div tether-product="coffee-box"><div id="ready" tether-show="ready">x</div></div>';
   Tether.mount(document);
-  await tick();
+  const root = find('[tether-product]');
+  await waitFor(() => root.getAttribute('tether-state') === 'ready', 'the product');
   delays.DE = 60;
   const p = Tether.setCountry('DE', { remember: false });
-  await tick(15); // the markets part loads first
-  const root = find('[tether-product]');
-  assert.equal(root.getAttribute('tether-state'), 'updating');
+  await waitFor(() => root.getAttribute('tether-state') === 'updating', 'the switch to start');
   assert.notEqual(find('#ready').style.display, 'none');
   await p;
-  await tick(100);
+  await waitFor(() => root.getAttribute('tether-state') === 'ready', 'the product in DE');
   delete delays.DE;
-  assert.equal(root.getAttribute('tether-state'), 'ready');
 });
 
 test('an expired saved cart is dropped on a country switch, not replaced by a new empty cart', async () => {
@@ -334,7 +346,7 @@ test('setCountry: the money format follows the country (option or markets.locale
 test('tether-countries limits a country select to your list, in your order', async () => {
   document.body.innerHTML = '<select id="cs2" tether-country-select tether-countries="NL, DE"></select>';
   Tether.mount(document);
-  await tick(80);
+  await waitFor(() => document.querySelector('select')?.options.length === 2, 'the country select');
   const select = document.querySelector('select');
   assert.ok(select);
   assert.deepEqual(
@@ -349,14 +361,13 @@ test('page market: <meta name="tether-page-country"> pages switch on View Transi
     '<meta name="tether-page-country" content="DE"><meta name="tether-page-language" content="DE"><meta name="tether-page-locale" content="de-DE">';
   document.body.innerHTML = '';
   document.dispatchEvent(new window.Event('astro:page-load'));
-  await tick(80);
+  await waitFor(() => Tether.config.locale === 'de-DE', 'the German page market');
   assert.equal(Tether.config.country, 'DE');
   assert.equal(Tether.config.language, 'DE');
   assert.equal(Tether.config.locale, 'de-DE');
   document.head.innerHTML = '';
   document.dispatchEvent(new window.Event('astro:page-load'));
-  await tick(80);
-  assert.notEqual(Tether.config.language, 'DE', 'left the German page');
+  await waitFor(() => Tether.config.language !== 'DE', 'leaving the German page');
 });
 
 test('page market: leaving a market page, a saved market that is not valid falls back to the configured one', async () => {
@@ -364,13 +375,11 @@ test('page market: leaving a market page, a saved market that is not valid falls
   document.head.innerHTML = '<meta name="tether-page-country" content="DE">';
   document.body.innerHTML = '';
   document.dispatchEvent(new window.Event('astro:page-load'));
-  await tick(80);
-  assert.equal(Tether.config.country, 'DE');
+  await waitFor(() => Tether.config.country === 'DE', 'the German page market');
   localStorage.setItem('tether:market:shop.test', JSON.stringify({ country: 'not a country' }));
   document.head.innerHTML = '';
   document.dispatchEvent(new window.Event('astro:page-load'));
-  await tick(80);
-  assert.equal(Tether.config.country, 'NL', 'the configured market');
+  await waitFor(() => Tether.config.country === 'NL', 'the configured market');
   localStorage.removeItem('tether:market:shop.test');
 });
 

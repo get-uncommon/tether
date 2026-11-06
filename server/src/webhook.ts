@@ -15,7 +15,8 @@
 import { readRequestCapped } from './capped-body.ts';
 import { verifyShopifyHmac } from './hmac.ts';
 import { isRecord } from './shared/json.ts';
-import { messageOf, sleep as realSleep } from './util.ts';
+import { sleep as realSleep } from './util.ts';
+import { messageOf } from './shared/error-message.ts';
 import type { SyncAction } from './sync-product.ts';
 
 /** Largest webhook body read. Shopify's product webhooks are a few KB. */

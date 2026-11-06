@@ -16,7 +16,7 @@
  * tether-search-limit (default 6), tether-search-min (characters, default 2).
  */
 import { cfg, log, reportError } from './config.ts';
-import { gql } from './client.ts';
+import { gql, orNull, shaped } from './client.ts';
 import { attr, sel, get, qsa, setText, setImage, repeat, show, formatMoney, productUrl, emit } from './dom.ts';
 import { within } from './mounting.ts';
 import type { Money } from './shopify-values.ts';
@@ -46,6 +46,14 @@ export interface SearchResults {
   collections: SearchCollection[];
   queries: SearchQuery[];
 }
+/** No results, or lists whose items have what `render` reads without a fallback. */
+const isSearchAnswer = shaped<{ predictiveSearch: SearchResults | null }>({
+  predictiveSearch: orNull({
+    products: [{ priceRange: 'object' }],
+    collections: ['object'],
+    queries: [{ text: 'string' }],
+  }),
+});
 type SearchState = 'idle' | 'loading' | 'ready' | 'empty' | 'error';
 interface BindValues {
   title?: string;
@@ -173,7 +181,7 @@ class SearchBox {
   async fetchResults(term: string): Promise<SearchResults | null> {
     const cached = this.cache.get(term);
     if (cached) return cached;
-    const data = await gql<{ predictiveSearch: SearchResults | null }>(QUERY, { q: term, limit: this.limit });
+    const data = await gql(QUERY, { q: term, limit: this.limit }, isSearchAnswer);
     this.cache.set(term, data.predictiveSearch);
     return data.predictiveSearch;
   }

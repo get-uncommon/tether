@@ -6,7 +6,7 @@
  * The browser asks for them through the routes in `shared/account-routes.ts`.
  */
 import { field, isRecord } from '../shared/json.ts';
-import type { OperationName, SubscriptionAction, UncheckedInputs } from '../shared/account-routes.ts';
+import type { AddressFields, OperationName, SubscriptionAction, UncheckedInputs } from '../shared/account-routes.ts';
 
 /** Runs one of the documents below with the customer's token. */
 type Ask = (query: string, variables: Record<string, unknown>) => Promise<Record<string, unknown> | null>;
@@ -157,17 +157,18 @@ function text(value: unknown, maxLength = 255): string | undefined {
   return clean;
 }
 
-const ADDRESS_FIELDS = [
-  'firstName',
-  'lastName',
-  'company',
-  'address1',
-  'address2',
-  'city',
-  'zip',
-  'zoneCode',
-  'phoneNumber',
-];
+/** The text fields of {@link AddressFields}, every one, so a field added there and not here is a type error. */
+const ADDRESS_FIELDS = Object.keys({
+  firstName: true,
+  lastName: true,
+  company: true,
+  address1: true,
+  address2: true,
+  city: true,
+  zip: true,
+  zoneCode: true,
+  phoneNumber: true,
+} satisfies Record<Exclude<keyof AddressFields, 'countryCode'>, true>);
 
 /**
  * Only the `CustomerAddressInput` fields, as bounded strings, with `countryCode` as two letters. On an update

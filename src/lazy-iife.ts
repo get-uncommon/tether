@@ -4,63 +4,107 @@
  * serve the files of the same release. A part registers itself in `window.Tether.__parts` and uses the core modules in
  * `window.Tether.__core` instead of bundling copies.
  */
-import * as config from './config.ts';
-import * as client from './client.ts';
-import * as dom from './dom.ts';
-import * as fragments from './fragments.ts';
-import * as loader from './loader.ts';
-import * as sellingPlans from './selling-plans.ts';
-import * as status from './status.ts';
-import * as cart from './cart.ts';
-import * as product from './product.ts';
-import * as collection from './collection.ts';
-import * as mounting from './mounting.ts';
-import * as marketCodes from './market-codes.ts';
-import * as shopifyValues from './shopify-values.ts';
-import * as storeHtml from './store-html.ts';
+import { cfg, isConfigured, log, MARKET_SOURCES, parseMarkets, reportError, warn } from './config.ts';
+import { endpoint, gql, orNull, shaped, TetherError } from './client.ts';
+import {
+  ANALYTICS_EVENTS,
+  attr,
+  attributesFromJson,
+  emit,
+  formatDate,
+  formatMoney,
+  get,
+  has,
+  hasTemplate,
+  isOwnEvent,
+  parseJSONAttr,
+  productUrl,
+  qsa,
+  repeat,
+  sel,
+  setImage,
+  setText,
+  show,
+} from './dom.ts';
+import { clearProductCache, getProduct } from './loader.ts';
+import { allPlans } from './selling-plans.ts';
+import { boundary, resolveProductKey } from './status.ts';
+import { Cart } from './cart.ts';
+import { scopes } from './product.ts';
+import { listSelector } from './collection.ts';
+import { liveLists, liveProducts, mountedProducts, mountProduct, pruneLive, within } from './mounting.ts';
+import { toCountry, toLanguage } from './market-codes.ts';
+import { isHttpsUrl } from './shopify-values.ts';
 import { PART_INTEGRITY } from './part-integrity.ts';
 import type { Parts, PartName, TetherInternals } from './lazy.ts';
 
-const { cfg } = config;
-
-/** The modules a part may use, by the file name scripts/build.ts maps a part's imports to. */
-interface CoreModules {
-  'config.ts': typeof config;
-  'client.ts': typeof client;
-  'dom.ts': typeof dom;
-  'fragments.ts': typeof fragments;
-  'loader.ts': typeof loader;
-  'selling-plans.ts': typeof sellingPlans;
-  'status.ts': typeof status;
-  'cart.ts': typeof cart;
-  'product.ts': typeof product;
-  'collection.ts': typeof collection;
-  'mounting.ts': typeof mounting;
-  'market-codes.ts': typeof marketCodes;
-  'shopify-values.ts': typeof shopifyValues;
-  'store-html.ts': typeof storeHtml;
-  'lazy.ts': { loadPart: typeof loadPart; coreModules: CoreModules };
-}
-
-/** The modules a part may use, shared instead of bundled twice. */
-export const coreModules: CoreModules = {
-  'config.ts': config,
-  'client.ts': client,
-  'dom.ts': dom,
-  'fragments.ts': fragments,
-  'loader.ts': loader,
-  'selling-plans.ts': sellingPlans,
-  'status.ts': status,
-  'cart.ts': cart,
-  'product.ts': product,
-  'collection.ts': collection,
-  'mounting.ts': mounting,
-  'market-codes.ts': marketCodes,
-  'shopify-values.ts': shopifyValues,
-  'store-html.ts': storeHtml,
+/**
+ * The core exports the parts use, shared instead of bundled twice, by the file name scripts/build.ts maps a part's
+ * imports to. Each file shares a list of values without their names: the build finds each value's export name in its
+ * module and hands a part's import of that name the value at its position. The core so carries no export names and no
+ * export a part doesn't use, and a part that imports one not listed here fails its build. A part reads its entries
+ * when it loads, once every module has run; read while the core runs, an import cycle through this file could leave
+ * a value unset.
+ */
+export const coreModules = {
+  get 'config.ts'() {
+    return [cfg, isConfigured, log, MARKET_SOURCES, parseMarkets, reportError, warn];
+  },
+  get 'client.ts'() {
+    return [endpoint, gql, orNull, shaped, TetherError];
+  },
+  get 'dom.ts'() {
+    return [
+      ANALYTICS_EVENTS,
+      attr,
+      attributesFromJson,
+      emit,
+      formatDate,
+      formatMoney,
+      get,
+      has,
+      hasTemplate,
+      isOwnEvent,
+      parseJSONAttr,
+      productUrl,
+      qsa,
+      repeat,
+      sel,
+      setImage,
+      setText,
+      show,
+    ];
+  },
+  get 'loader.ts'() {
+    return [clearProductCache, getProduct];
+  },
+  get 'selling-plans.ts'() {
+    return [allPlans];
+  },
+  get 'status.ts'() {
+    return [boundary, resolveProductKey];
+  },
+  get 'cart.ts'() {
+    return [Cart];
+  },
+  get 'product.ts'() {
+    return [scopes];
+  },
+  get 'collection.ts'() {
+    return [listSelector];
+  },
+  get 'mounting.ts'() {
+    return [liveLists, liveProducts, mountedProducts, mountProduct, pruneLive, within];
+  },
+  get 'market-codes.ts'() {
+    return [toCountry, toLanguage];
+  },
+  get 'shopify-values.ts'() {
+    return [isHttpsUrl];
+  },
   // Parts that load other parts (account → account-pages) use this same loader.
   get 'lazy.ts'() {
-    return { loadPart, coreModules };
+    return [loadPart];
   },
 };
 

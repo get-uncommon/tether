@@ -30,8 +30,13 @@ type SessionDays =
 type AccountSecret = { kind: 'set'; value: string } | { kind: 'missing' } | { kind: 'same-as-sync-secret' };
 
 export interface AccountSettings extends ShopifyAccountSettings {
-  /** The site's https origins, without a trailing slash, the first being the site's home. */
+  /**
+   * The site's https origins as a browser's Origin header writes them (lower case, no default port, no trailing
+   * slash), the first being the site's home.
+   */
   origins: string[];
+  /** The ACCOUNT_ORIGINS entries that are not an https origin alone, as written. */
+  invalidOrigins: string[];
   secret: AccountSecret;
   sessionDays: SessionDays;
 }
@@ -55,15 +60,13 @@ const WHOLE_NUMBER = /^\d+$/;
 /** A DNS host name: dot-separated labels of letters, digits and inner hyphens. */
 const HOST_NAME = /^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/i;
 
-/**
- * @param raw ACCOUNT_SESSION_DAYS.
- */
 function secretOf({ ACCOUNT_SECRET, SYNC_SECRET }: CleanEnv): AccountSecret {
   if (ACCOUNT_SECRET === undefined) return { kind: 'missing' };
   if (ACCOUNT_SECRET === SYNC_SECRET) return { kind: 'same-as-sync-secret' };
   return { kind: 'set', value: ACCOUNT_SECRET };
 }
 
+/** @param raw ACCOUNT_SESSION_DAYS. */
 function sessionDaysOf(raw: string | undefined): SessionDays {
   if (raw === undefined) return { kind: 'as-set', days: DEFAULT_SESSION_DAYS };
   if (!WHOLE_NUMBER.test(raw)) {
@@ -75,6 +78,33 @@ function sessionDaysOf(raw: string | undefined): SessionDays {
 }
 
 /**
+ * @param entry One entry of ACCOUNT_ORIGINS.
+ * @returns The origin as the browser's Origin header writes it, `null` unless the entry is an https origin with
+ *   nothing more than a trailing slash: a path, user name or query would never match a request.
+ */
+function httpsOrigin(entry: string): string | null {
+  try {
+    const url = new URL(entry);
+    return url.protocol === 'https:' && url.href === new URL(url.origin).href ? url.origin : null;
+  } catch {
+    // Not an absolute URL.
+    return null;
+  }
+}
+
+/** @param raw ACCOUNT_ORIGINS. */
+function originsOf(raw: string | undefined): Pick<AccountSettings, 'origins' | 'invalidOrigins'> {
+  const origins: string[] = [];
+  const invalidOrigins: string[] = [];
+  for (const entry of (raw ?? '').split(/[\s,]+/).filter(Boolean)) {
+    const origin = httpsOrigin(entry);
+    if (origin === null) invalidOrigins.push(entry);
+    else origins.push(origin);
+  }
+  return { origins, invalidOrigins };
+}
+
+/**
  * @returns `null` when accounts are off (no ACCOUNT_CLIENT_ID).
  */
 export function accountSettings(rawEnv: Record<string, unknown>): AccountSettings | null {
@@ -83,10 +113,7 @@ export function accountSettings(rawEnv: Record<string, unknown>): AccountSetting
   return {
     clientId: env.ACCOUNT_CLIENT_ID,
     clientSecret: env.ACCOUNT_CLIENT_SECRET,
-    origins: (env.ACCOUNT_ORIGINS ?? '')
-      .split(/[\s,]+/)
-      .map((origin) => origin.replace(/\/$/, ''))
-      .filter(Boolean),
+    ...originsOf(env.ACCOUNT_ORIGINS),
     shopDomain: (env.SHOPIFY_DOMAIN ?? '').replace(/^https?:\/\//, '').replace(/\/$/, ''),
     storefrontToken: env.STOREFRONT_TOKEN,
     secret: secretOf(env),
@@ -101,10 +128,12 @@ function siteAndShopProblems(
   error: (message: string) => void,
   warning: (message: string) => void,
 ): void {
-  if (!settings.origins.length) error('ACCOUNT_ORIGINS is missing: your site, e.g. https://shop.com');
-  if (settings.origins.some((origin) => !/^https:\/\/[^/]+$/.test(origin))) {
-    error('ACCOUNT_ORIGINS must be https origins without a path, e.g. https://shop.com');
-  }
+  const { origins, invalidOrigins } = settings;
+  if (invalidOrigins.length) {
+    error(
+      `ACCOUNT_ORIGINS must be https origins without a path, e.g. https://shop.com, not ${invalidOrigins.join(', ')}`,
+    );
+  } else if (!origins.length) error('ACCOUNT_ORIGINS is missing: your site, e.g. https://shop.com');
   if (!settings.shopDomain) error('SHOPIFY_DOMAIN is missing');
   else if (!HOST_NAME.test(settings.shopDomain)) {
     error('SHOPIFY_DOMAIN must be the store domain alone, e.g. your-store.myshopify.com');

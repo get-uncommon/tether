@@ -3,10 +3,12 @@
  * product fragment, so what the server renders and hands over has the shape the script expects. Runs in Node and
  * Workers: no DOM, no shared config.
  */
-import { request } from '../client.ts';
+import { orNull, request, shaped } from '../client.ts';
 import { productFragment, collectionFields } from '../fragments.ts';
 import { productKey } from '../shopify-values.ts';
-import type { StorefrontConfig } from '../client.ts';
+import { PRODUCT, PRODUCT_NODE } from '../product-shape.ts';
+import { isCollectionAnswer, isRecommendationsAnswer, isSearchAnswer } from '../loader.ts';
+import type { DataCheck, StorefrontConfig } from '../client.ts';
 import type { ProductFragmentConfig, Product } from '../fragments.ts';
 import type { Collection, PageInfo, ProductPage } from '../loader.ts';
 
@@ -75,14 +77,22 @@ const recommendationsQuery = (
   productRecommendations(${byId ? 'productId: $id' : 'productHandle: $handle'}, intent: $intent) { ...TetherProduct }
 }`;
 
+const isProductAnswer = shaped<{ product: Product | null }>({ product: orNull(PRODUCT) });
+const isNodeAnswer = shaped<{ node: Product | { id?: undefined } | null }>({ node: orNull(PRODUCT_NODE) });
+const isCollectionsAnswer = shaped<{ collections: Connection<Collection> }>({
+  collections: { nodes: [{ handle: 'string' }], pageInfo: { hasNextPage: 'boolean' } },
+});
+
 async function allCollectionsOf(conf: StorefrontConfig): Promise<Collection[]> {
   const collections: Collection[] = [];
   let after: string | null = null;
   for (let page = 0; page < MAX_COLLECTION_PAGES; page++) {
-    const data: { collections: Connection<Collection> } = await request(conf, collectionsQuery(), {
-      first: COLLECTIONS_PER_PAGE,
-      after,
-    });
+    const data: { collections: Connection<Collection> } = await request(
+      conf,
+      collectionsQuery(),
+      { first: COLLECTIONS_PER_PAGE, after },
+      isCollectionsAnswer,
+    );
     collections.push(...data.collections.nodes);
     if (!data.collections.pageInfo.hasNextPage) break;
     after = data.collections.pageInfo.endCursor;
@@ -92,12 +102,9 @@ async function allCollectionsOf(conf: StorefrontConfig): Promise<Collection[]> {
 
 /** @param pageSize Products per page when a query doesn't say. */
 export function createCatalog(conf: CatalogConfig, pageSize: number) {
-  /**
-   * @typeParam T The shape of the query's `data`.
-   * @param operation The query, without the product fragment.
-   */
-  const send = <T>(operation: string, variables: Record<string, unknown>): Promise<T> =>
-    request<T>(conf, (access) => `${operation}\n${productFragment(conf, access)}`, variables);
+  /** @param operation The query, without the product fragment. */
+  const send = <T>(operation: string, variables: Record<string, unknown>, isData: DataCheck<T>): Promise<T> =>
+    request(conf, (access) => `${operation}\n${productFragment(conf, access)}`, variables, isData);
 
   /**
    * @param raw A handle, numeric id, gid or product URL.
@@ -107,11 +114,10 @@ export function createCatalog(conf: CatalogConfig, pageSize: number) {
     const key = productKey(raw);
     if (!key) return null;
     if (key.startsWith('gid://')) {
-      const data = await send<{ node: Partial<Product> | null }>(PRODUCT_BY_ID, { id: key });
-      // A gid of another type answers with a node that isn't a product: no fields of the fragment.
-      return data.node?.id ? (data.node as Product) : null;
+      const { node } = await send(PRODUCT_BY_ID, { id: key }, isNodeAnswer);
+      return node?.id ? node : null;
     }
-    const data = await send<{ product: Product | null }>(PRODUCT_BY_HANDLE, { handle: key });
+    const data = await send(PRODUCT_BY_HANDLE, { handle: key }, isProductAnswer);
     return data.product;
   }
 
@@ -120,7 +126,7 @@ export function createCatalog(conf: CatalogConfig, pageSize: number) {
     handle: string,
     { first = pageSize, after = null, sortKey, reverse = false, filters }: Omit<CatalogQuery, 'collection' | 'query'>,
   ): Promise<ProductPage> {
-    const data = await send<{ collection: (Collection & { products: Connection<Product> }) | null }>(
+    const data = await send(
       collectionQuery(),
       {
         handle,
@@ -130,6 +136,7 @@ export function createCatalog(conf: CatalogConfig, pageSize: number) {
         reverse,
         filters: filters ?? undefined,
       },
+      isCollectionAnswer,
     );
     if (!data.collection) return { collection: null, products: [], pageInfo: { hasNextPage: false, endCursor: null } };
     const { products, ...collection } = data.collection;
@@ -139,13 +146,11 @@ export function createCatalog(conf: CatalogConfig, pageSize: number) {
   async function getProducts(options: CatalogQuery = {}): Promise<ProductPage> {
     const { collection, query, first = pageSize, after = null, sortKey, reverse = false } = options;
     if (collection) return getCollectionPage(collection, options);
-    const data = await send<{ products: Connection<Product> }>(SEARCH_QUERY, {
-      first,
-      after,
-      query: query || undefined,
-      sortKey: sortKey || undefined,
-      reverse,
-    });
+    const data = await send(
+      SEARCH_QUERY,
+      { first, after, query: query || undefined, sortKey: sortKey || undefined, reverse },
+      isSearchAnswer,
+    );
     return { collection: null, products: data.products.nodes, pageInfo: data.products.pageInfo };
   }
 
@@ -178,9 +183,10 @@ export function createCatalog(conf: CatalogConfig, pageSize: number) {
   ): Promise<Product[]> {
     const key = productKey(typeof product === 'object' ? product?.id : product);
     const byId = key?.startsWith('gid://') ?? false;
-    const data = await send<{ productRecommendations: Product[] | null }>(
+    const data = await send(
       recommendationsQuery(byId),
       byId ? { id: key, intent } : { handle: key, intent },
+      isRecommendationsAnswer,
     );
     return data.productRecommendations ?? [];
   }

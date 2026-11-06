@@ -4,6 +4,7 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
 import { apparel, find, findAll, jsonResponse, PLAN_2MONTH, PLAN_MONTH, product } from './fixtures.js';
+import { waitFor } from '../server/test/mocks.js';
 
 const dom = new JSDOM('<!doctype html><body></body>', { url: 'https://state.test/product/coffee-box' });
 Object.assign(globalThis, {
@@ -37,7 +38,6 @@ const SHOW_KEYS = [
   'has-savings',
 ];
 const LOCALE = 'nl-NL';
-const tick = (ms = 20) => new Promise((resolve) => setTimeout(resolve, ms));
 const variantId = (n) => `gid://shopify/ProductVariant/${n}`;
 
 let Tether;
@@ -71,7 +71,10 @@ async function mountScope(p, { attributes = '', search = '' } = {}) {
     <div tether-plan-list><button></button></div>
   </div>`;
   Tether.mount(document);
-  await tick();
+  await waitFor(
+    () => document.querySelector('[tether-product]')?.getAttribute('tether-state') === 'ready',
+    'the product scope to be ready',
+  );
   window.history.replaceState({}, '', '/product/');
   return Tether.getScope(document.querySelector('[tether-product]'));
 }

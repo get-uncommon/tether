@@ -24,7 +24,7 @@ import { runCheck } from './check.ts';
 import { cleanEnv, kvBinding } from './env.ts';
 import { ensureWebhooks } from './webhooks.ts';
 import { VERSION } from './version.ts';
-import { messageOf } from './util.ts';
+import { messageOf } from './shared/error-message.ts';
 import { handleAccount } from './account.ts';
 import type { RawConfig } from './mapping.ts';
 import type { Store } from './store.ts';

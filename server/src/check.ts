@@ -7,7 +7,8 @@
  */
 import { cleanEnv } from './env.ts';
 import { normalizeConfig, applyEnv } from './mapping.ts';
-import { messageOf, SyncError } from './util.ts';
+import { SyncError } from './util.ts';
+import { messageOf } from './shared/error-message.ts';
 import { createSteps } from './check/steps.ts';
 import { checkSettings, reportIgnoredValues } from './check/settings.ts';
 import { checkConnections } from './check/connections.ts';

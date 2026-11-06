@@ -8,7 +8,7 @@
  * `Tether.mount(container)` after every page enter.
  */
 import { cfg, configView, configure, isConfigured, log, warn, reportError } from './config.ts';
-import { gql, TetherError, withContext } from './client.ts';
+import { query, TetherError, withContext } from './client.ts';
 import { Cart } from './cart.ts';
 import { scopes } from './product.ts';
 import { ListScope, listSelector } from './collection.ts';
@@ -356,7 +356,7 @@ const publicApi = {
   get ready(): Promise<Tether | null> {
     return initPromise ?? Promise.resolve(null);
   },
-  query: gql,
+  query,
   withContext,
   cart: Cart,
   getProduct,

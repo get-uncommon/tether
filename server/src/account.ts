@@ -16,7 +16,7 @@ import { authorizeUrl } from './account/authorize.ts';
 import { randomToken } from './base64url.ts';
 import { isRecord } from './shared/json.ts';
 import { open, seal } from './crypto.ts';
-import { messageOf } from './util.ts';
+import { messageOf } from './shared/error-message.ts';
 import { kvBinding } from './env.ts';
 import { accountProblems, accountSettings, readyAccountSettings } from './account/settings.ts';
 import { kvAccountStore, memoryAccountStore } from './account/kv.ts';
@@ -113,11 +113,13 @@ async function sealForCookie(
 ): Promise<string | null> {
   const sealed = await seal(settings.secret, purpose, name, value);
   if (sealed.length <= MAX_COOKIE_VALUE) return sealed;
+  const home = await seal(settings.secret, purpose, name, { ...value, returnTo: `${settings.origins[0]}/` });
+  // Too long even with the home page: the address wasn't the cause, and the caller says what was.
+  if (home.length > MAX_COOKIE_VALUE) return null;
   console.warn(
     `account ${purpose}: the page's address (${String(value.returnTo.length)} characters) is too long to keep in a cookie, so the customer comes back to the site's home`,
   );
-  const home = await seal(settings.secret, purpose, name, { ...value, returnTo: `${settings.origins[0]}/` });
-  return home.length <= MAX_COOKIE_VALUE ? home : null;
+  return home;
 }
 
 async function login({ request, url, settings, fetch: fetchImpl, callbackUrl }: AccountRequest): Promise<Response> {
@@ -320,8 +322,8 @@ function sessionStorage(env: Record<string, unknown>, memory: MemoryEntries | un
 /** The answer while accounts can't work; what is missing is only logged and shown by an authorized /check. */
 const NOT_SET_UP = { error: 'accounts are not set up (see /check)' };
 /**
- * The answer while ACCOUNT_SECRET is all that is missing. It is named because a Worker set up before 0.7.0 can run
- * accounts without it until it updates, and the name says nothing about the shop.
+ * The answer while ACCOUNT_SECRET is all that is missing. Unlike the other settings, it is named in the answer, so the
+ * owner can tell what to add without the /check password: the name says nothing about the shop.
  */
 const NO_ACCOUNT_SECRET = { error: 'accounts need the Worker secret ACCOUNT_SECRET (see /check)' };
 
@@ -384,18 +386,18 @@ export async function handleAccount(
       return navigationFailed(context.siteOrigin);
     }
   }
+  // Everything else is fetch() from the site: allowed origins only, and POSTs carry a custom header, which forces a
+  // CORS preflight (CSRF).
+  if (!cors) return jsonResponse({ error: 'origin not allowed' }, 403);
   try {
-    // Everything else is fetch() from the site: allowed origins only, and POSTs carry a custom header, which forces a
-    // CORS preflight (CSRF).
-    if (!cors) return jsonResponse({ error: 'origin not allowed' }, 403);
     if (request.method === 'POST' && request.headers.get('x-tether-account') !== '1') {
       return jsonResponse({ error: 'missing header' }, 400, cors);
     }
     if (route === '/logout' && request.method === 'POST') return await logout(context, cors);
     return await customerRoute(context, cors, route);
   } catch (error) {
-    if (error instanceof BodyTooLarge) return jsonResponse({ error: 'too large' }, 413, cors ?? {});
+    if (error instanceof BodyTooLarge) return jsonResponse({ error: 'too large' }, 413, cors);
     console.error('account', messageOf(error));
-    return jsonResponse({ error: 'account error' }, 502, cors ?? {});
+    return jsonResponse({ error: 'account error' }, 502, cors);
   }
 }

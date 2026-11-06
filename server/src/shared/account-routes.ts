@@ -62,19 +62,24 @@ interface OperationRoute<Name extends OperationName> {
   name: Name;
   method: 'GET' | 'POST';
   path: string;
-  /** Names of the input's fields, so one renamed in {@link OperationInputs} and not here is a type error. */
-  fields: readonly (keyof OperationInputs[Name] & string)[];
+  /** Every field of the input, so one added to or renamed in {@link OperationInputs} and not here is a type error. */
+  fields: Record<keyof OperationInputs[Name], true>;
 }
 
 export const OPERATION_ROUTES = {
-  order: { name: 'order', method: 'GET', path: '/order', fields: ['id'] },
-  addresses: { name: 'addresses', method: 'GET', path: '/addresses', fields: [] },
-  subscriptions: { name: 'subscriptions', method: 'GET', path: '/subscriptions', fields: [] },
-  profile: { name: 'profile', method: 'POST', path: '/profile', fields: ['firstName', 'lastName'] },
-  saveAddress: { name: 'saveAddress', method: 'POST', path: '/address', fields: ['id', 'address', 'isDefault'] },
-  deleteAddress: { name: 'deleteAddress', method: 'POST', path: '/address/delete', fields: ['id'] },
-  subscription: { name: 'subscription', method: 'POST', path: '/subscription', fields: ['id', 'action'] },
-  requestReturn: { name: 'requestReturn', method: 'POST', path: '/return', fields: ['orderId', 'lines'] },
+  order: { name: 'order', method: 'GET', path: '/order', fields: { id: true } },
+  addresses: { name: 'addresses', method: 'GET', path: '/addresses', fields: {} },
+  subscriptions: { name: 'subscriptions', method: 'GET', path: '/subscriptions', fields: {} },
+  profile: { name: 'profile', method: 'POST', path: '/profile', fields: { firstName: true, lastName: true } },
+  saveAddress: {
+    name: 'saveAddress',
+    method: 'POST',
+    path: '/address',
+    fields: { id: true, address: true, isDefault: true },
+  },
+  deleteAddress: { name: 'deleteAddress', method: 'POST', path: '/address/delete', fields: { id: true } },
+  subscription: { name: 'subscription', method: 'POST', path: '/subscription', fields: { id: true, action: true } },
+  requestReturn: { name: 'requestReturn', method: 'POST', path: '/return', fields: { orderId: true, lines: true } },
 } satisfies { [Name in OperationName]: OperationRoute<Name> };
 
 /** A route of any operation, with its field names as plain strings. */
@@ -87,7 +92,10 @@ interface AnyRoute {
 
 /** The route of each `METHOD /path`. */
 const ROUTE_BY_REQUEST = new Map<string, AnyRoute>(
-  Object.values(OPERATION_ROUTES).map((route) => [`${route.method} ${route.path}`, route]),
+  Object.values(OPERATION_ROUTES).map((route) => [
+    `${route.method} ${route.path}`,
+    { ...route, fields: Object.keys(route.fields) },
+  ]),
 );
 
 /**
@@ -118,11 +126,11 @@ export function operationRequest<Name extends OperationName>(
   name: Name,
   input: OperationInputs[Name],
 ): { method: 'GET' | 'POST'; path: string } {
-  const route: AnyRoute = OPERATION_ROUTES[name];
+  const route = OPERATION_ROUTES[name];
   if (route.method === 'POST') return { method: 'POST', path: route.path };
   const values: Readonly<Record<string, unknown>> = input;
   const query = new URLSearchParams();
-  for (const fieldName of route.fields) {
+  for (const fieldName of Object.keys(route.fields)) {
     const value = values[fieldName];
     if (typeof value === 'string' || typeof value === 'number') query.set(fieldName, String(value));
   }

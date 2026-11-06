@@ -9,6 +9,7 @@ import { TetherError } from '../client.ts';
 import { Cart } from '../cart.ts';
 import { emit } from '../dom.ts';
 import { isRecord, textOrNull } from '../../server/src/shared/json.ts';
+import { messageOf } from '../../server/src/shared/error-message.ts';
 import { hintKey } from '../account-marks.ts';
 import { toAccountCustomer, toUserErrors } from './answers.ts';
 import type { AccountCustomer } from './answers.ts';
@@ -55,7 +56,7 @@ async function fetchFromWorker(url: string, init: RequestInit): Promise<Response
   try {
     return await fetch(url, init);
   } catch (error) {
-    throw new TetherError(`Network error: ${error instanceof Error ? error.message : String(error)}`, {
+    throw new TetherError(`Network error: ${messageOf(error)}`, {
       code: 'NETWORK',
     });
   }

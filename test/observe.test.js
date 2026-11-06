@@ -3,6 +3,7 @@ import { test, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
 import { apparel, find, graphqlRequest, jsonResponse, product } from './fixtures.js';
+import { waitFor } from '../server/test/mocks.js';
 
 const dom = new JSDOM('<!doctype html><body><span tether-cart-count></span><main></main></body>', {
   url: 'https://site.test/',
@@ -30,7 +31,6 @@ globalThis.fetch = async (_url, init) => {
   return jsonResponse({ data });
 };
 
-const tick = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 let Tether;
 let server;
 
@@ -49,7 +49,7 @@ before(async () => {
 });
 
 /**
- * @param {() => Promise<void>} run
+ * @param {(selectors: string[]) => Promise<void>} run Given the selectors queried so far.
  * @returns {Promise<string[]>} The selectors queried on the whole document while `run` ran.
  */
 async function documentQueries(run) {
@@ -60,7 +60,7 @@ async function documentQueries(run) {
     return querySelectorAll.call(this, selector);
   };
   try {
-    await run();
+    await run(selectors);
   } finally {
     document.querySelectorAll = querySelectorAll;
   }
@@ -70,7 +70,7 @@ async function documentQueries(run) {
 test('a burst of added cards mounts each card, reads only their hydrate tags and renders the cart once', async () => {
   const shop = server.createStorefront({ domain: 'shop.test', token: 't', country: 'NL' });
   const main = find('main');
-  const selectors = await documentQueries(async () => {
+  const selectors = await documentQueries(async (queried) => {
     for (const handle of ['coffee-box', 'coffee-box', 'tee']) {
       const card = document.createElement('div');
       card.setAttribute('tether-product', handle);
@@ -81,7 +81,12 @@ test('a burst of added cards mounts each card, reads only their hydrate tags and
     const hydrated = document.createElement('div');
     hydrated.innerHTML = shop.hydrate([product, apparel]);
     main.append(hydrated);
-    await tick(120);
+    await waitFor(
+      () =>
+        [...main.querySelectorAll('[tether-bind="title"]')].every((title) => title.textContent !== '') &&
+        queried.includes('[tether-cart-count]'),
+      'the cards and the cart to render',
+    );
   });
   const titles = [...main.querySelectorAll('[tether-bind="title"]')].map((title) => title.textContent);
   assert.deepEqual(titles, [product.title, product.title, apparel.title]);
@@ -102,7 +107,7 @@ test('a hydrate entry without the lists a render walks is skipped, and the produ
   const box = document.createElement('div');
   box.innerHTML = `${shop.hydrate(truncated)}<div tether-product="tee"><span tether-bind="title"></span></div>`;
   find('main').append(box);
-  await tick(120);
+  await waitFor(() => find('[tether-bind="title"]', box).textContent !== '', 'the product to load');
   assert.deepEqual(requested, ['tee']);
   assert.equal(find('[tether-bind="title"]', box).textContent, apparel.title);
 });

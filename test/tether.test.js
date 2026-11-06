@@ -4,6 +4,7 @@ import { JSDOM } from 'jsdom';
 import {
   cartFrom,
   find,
+  findAll,
   graphqlRequest,
   jsonResponse,
   operationName,
@@ -11,6 +12,7 @@ import {
   PLAN_MONTH,
   product,
 } from './fixtures.js';
+import { waitFor } from '../server/test/mocks.js';
 
 const dom = new JSDOM('<!doctype html><body></body>', { url: 'https://site.test/product/coffee-box' });
 Object.assign(globalThis, {
@@ -65,7 +67,25 @@ globalThis.fetch = async (_url, init) => {
   }
 };
 
-const tick = (ms = 30) => new Promise((r) => setTimeout(r, ms));
+/** @returns A check that turns true once the document has sent `type` after this call. */
+function sent(type) {
+  let seen = false;
+  document.addEventListener(
+    type,
+    () => {
+      seen = true;
+    },
+    { once: true },
+  );
+  return () => seen;
+}
+
+/** Waits until every product scope on the page has loaded. */
+const productsReady = () =>
+  waitFor(
+    () => findAll('[tether-product]').every((el) => el.getAttribute('tether-state') === 'ready'),
+    'the products to load',
+  );
 let Tether;
 let plans;
 
@@ -134,7 +154,7 @@ function mountProduct(extra = '') {
       <span class="sub" tether-line-show="subscription">S</span><button class="rm" tether-line-remove>x</button></div></div>
   </div>`;
   Tether.mount(document);
-  return tick();
+  return productsReady();
 }
 
 test('renders product, metafield and one-time price by default', async () => {
@@ -159,8 +179,9 @@ test('subscription toggle changes price and adds sellingPlanId to the cart line'
   assert.equal(find('#sub-only').style.display, '');
   assert.equal(find('#plan-name').textContent, 'Every month');
 
+  const added = sent('tether:added');
   find('#add').click();
-  await tick(60);
+  await waitFor(added, 'the line to be added');
   const create = calls.find((c) => c.op === 'Tether_cartCreate');
   assert.ok(create, 'cartCreate called');
   const line = create.variables.input.lines[0];
@@ -190,8 +211,9 @@ test('one-time add has no sellingPlanId; lines can switch plan and be removed', 
   cartLines = [];
   await mountProduct();
   find('#one').click();
+  const added = sent('tether:added');
   find('#add').click();
-  await tick(60);
+  await waitFor(added, 'the line to be added');
   assert.equal(calls.find((c) => c.op === 'Tether_cartCreate').variables.input.lines[0].sellingPlanId, undefined);
 
   await Tether.cart.updateLine('gid://shopify/CartLine/1', { sellingPlanId: '111' });
@@ -202,7 +224,7 @@ test('one-time add has no sellingPlanId; lines can switch plan and be removed', 
   assert.equal(calls.at(-1).variables.lines[0].sellingPlanId, null);
 
   find('.rm').click();
-  await tick(60);
+  await waitFor(() => Tether.cart.count === 0, 'the line to be removed');
   assert.equal(Tether.cart.count, 0);
 });
 
@@ -216,9 +238,10 @@ test('group add sends all scopes in one request with _group attribute', async ()
     <button id="g" tether-group-add>Add set</button>
   </div>`;
   Tether.mount(document);
-  await tick();
+  await productsReady();
+  const added = sent('tether:added');
   find('#g').click();
-  await tick(60);
+  await waitFor(added, 'the group to be added');
   const create = calls.filter((c) => c.op === 'Tether_cartCreate').at(-1);
   assert.equal(create.variables.input.lines.length, 2);
   assert.equal(create.variables.input.lines[1].sellingPlanId, PLAN_MONTH);
@@ -229,7 +252,7 @@ test('binds on the product root itself (card link)', async () => {
   document.body.innerHTML =
     '<a href="#" tether-product="coffee-box" tether-bind="link"><span tether-bind="title"></span></a>';
   Tether.mount(document);
-  await tick();
+  await productsReady();
   assert.equal(find('a').getAttribute('href'), '/product/coffee-box');
 });
 
@@ -237,7 +260,7 @@ test('image:N binds the nth product image, background for non-img', async () => 
   document.body.innerHTML =
     '<div tether-product="coffee-box"><div id="bg" tether-bind="image:1"></div><img id="i9" tether-bind="image:9"></div>';
   Tether.mount(document);
-  await tick();
+  await productsReady();
   assert.match(find('#bg').style.backgroundImage, /a\.jpg/);
   assert.match(find('#i9').getAttribute('src') ?? '', /a\.jpg/);
 });
@@ -246,8 +269,7 @@ test('a custom prefix reads its own attributes', async () => {
   await Tether.init({ domain: 'shop.test', token: 't', autoMount: false, prefix: 'wfs' });
   document.body.innerHTML = '<div wfs-product="coffee-box"><h2 wfs-bind="title"></h2></div>';
   Tether.mount(document);
-  await tick();
-  assert.equal(find('h2').textContent, 'Coffee Box');
+  await waitFor(() => find('h2').textContent === 'Coffee Box', 'the title in the custom prefix');
   await Tether.init({ domain: 'shop.test', token: 't', autoMount: false });
 });
 

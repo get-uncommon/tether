@@ -1,23 +1,60 @@
 /**
- * Optional part, loaded on first use: market detection, `select[tether-country-select]`, `tether-country-bind` and
- * `Tether.setCountry()`. See markets.ts for the detection rules.
+ * Optional part, loaded on first use: market detection, the store's countries (`Tether.getLocalization()`),
+ * `select[tether-country-select]`, `tether-country-bind` and `Tether.setCountry()`. See markets.ts for the detection
+ * rules.
  */
 import { cfg, reportError } from './config.ts';
-import { TetherError } from './client.ts';
+import { gql, shaped, TetherError } from './client.ts';
 import { Cart } from './cart.ts';
 import { listSelector } from './collection.ts';
 import { clearProductCache } from './loader.ts';
 import { attr, sel, get, emit } from './dom.ts';
 import { within, pruneLive, liveLists, liveProducts, mountedProducts, mountProduct } from './mounting.ts';
-import { rememberMarket, getLocalization, clearLocalization } from './markets.ts';
+import { rememberMarket } from './markets.ts';
 import { toCountry, toLanguage } from './market-codes.ts';
 import type { LocalizedCountry, Localization } from './markets.ts';
 import type { CountryCode, LanguageCode } from './market-codes.ts';
 
-export { detectMarket, getLocalization } from './markets.ts';
+export { detectMarket } from './markets.ts';
 
 const DEFAULT_LABEL = '{name} ({currency})';
 const DEFAULT_BIND = 'name';
+
+let localizationPromise: Promise<Localization> | null = null;
+
+/** Forgets the cached localization, for when country names change language. */
+function clearLocalization(): void {
+  localizationPromise = null;
+}
+
+const LOCALIZATION_QUERY = `query TetherLocalization {
+  localization {
+    country { isoCode name currency { isoCode symbol } }
+    language { isoCode name }
+    availableCountries { isoCode name currency { isoCode symbol } availableLanguages { isoCode name } }
+  }
+}`;
+
+/** A country with the code, name and currency the country select and binds read. */
+const COUNTRY = { isoCode: 'string', name: 'string', currency: 'object' } as const;
+const isLocalizationAnswer = shaped<{ localization: Localization }>({
+  localization: { country: COUNTRY, availableCountries: [COUNTRY] },
+});
+
+/**
+ * The countries the store sells to (Shopify Markets), with their currency. Cached per page; a failed request is not
+ * cached, so the next call tries again.
+ */
+export function getLocalization(): Promise<Localization> {
+  localizationPromise ??= gql(LOCALIZATION_QUERY, {}, isLocalizationAnswer).then(
+    (data) => data.localization,
+    (error: unknown) => {
+      localizationPromise = null;
+      throw error;
+    },
+  );
+  return localizationPromise;
+}
 
 interface SetCountryOptions {
   /** A Shopify language; `null` clears it. Default: the `markets.locales` entry for the country, else unchanged. */

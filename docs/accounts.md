@@ -2,7 +2,7 @@
 
 Login, the customer's name and orders, and a checkout that knows them (saved addresses and cards),
 with Shopify's [Customer Account API](https://shopify.dev/docs/api/customer). The account part
-(about 8 KB gzipped) loads only on pages that need it: pages with account markup, a login coming
+(about 4 KB gzipped) loads only on pages that need it: pages with account markup, a login coming
 back (the Worker's `?account=`), and pages where the visitor may be logged in.
 
 Accounts run through your own [sync Worker](../server/README.md). A customer token gives full access

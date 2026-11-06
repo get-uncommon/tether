@@ -15,6 +15,7 @@
  *   webflowOwned: ['description'],        // written when the item is created, never overwritten
  */
 import { isRecord } from './shared/json.ts';
+import { messageOf } from './shared/error-message.ts';
 import { SyncError, scalarText } from './util.ts';
 import { DEFAULT_API_VERSION } from './shopify.ts';
 
@@ -200,7 +201,7 @@ function parseFieldMap(text: string): Record<string, unknown> {
   try {
     map = JSON.parse(text);
   } catch (err) {
-    const reason = err instanceof Error ? err.message : String(err);
+    const reason = messageOf(err);
     throw new SyncError(`FIELD_MAP is not valid JSON: ${reason}`, { code: 'FIELD_MAP' });
   }
   if (!isRecord(map))

@@ -9,7 +9,7 @@ import { handleShopifyWebhook, MAX_WEBHOOK_BYTES } from './webhook.ts';
 import { parseConfigFile } from './config-file.ts';
 import { asRecord } from './json.ts';
 import { isRecord } from './shared/json.ts';
-import { messageOf } from './util.ts';
+import { messageOf } from './shared/error-message.ts';
 
 import type { Stats } from 'node:fs';
 import type { IncomingMessage, Server, ServerResponse } from 'node:http';

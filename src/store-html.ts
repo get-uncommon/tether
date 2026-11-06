@@ -10,9 +10,11 @@
  * shop's own origin). Removed for that: `id` (it would clobber `window.<id>` and the site's own ids); `class`, which
  * would let a description borrow the site's own overlay or modal classes; and every style that takes content out of
  * the flow (`position`, `inset`, `z-index`), moves it from where the flow put it (transforms, motion paths, negative
- * margins) or sizes it to the window (viewport units). Outlines, shadows, filters, border-image outsets, reflections,
- * text decoration and text stroke paint beyond their element, so they are kept only while every length they give is a
- * few dozen pixels at most (`MAX_PAINT_PX`): enough to set off an image or a callout, too little to cover the page.
+ * margins, and negative indents and spacing beyond the small values that tighten text, `NEGATIVE_LIMITS`), copies it
+ * elsewhere (reflections) or sizes it to the window (viewport units).
+ * Outlines, shadows, filters, border-image and mask-border outsets, text decoration and text stroke paint beyond their
+ * element, so they are kept only while every number they give is a pixel length of a few dozen pixels at most
+ * (`MAX_PAINT_PX`): enough to set off an image or a callout, too little to cover the page.
  * Styles that fetch anything go too.
  *
  * A frame shows whatever its origin serves, sized as the description likes, so a frame from a page store staff can
@@ -68,30 +70,54 @@ const DATA_IMAGE = /^data:image\/(png|gif|jpeg|webp|avif);/i;
 
 /**
  * Style properties that take content out of the flow or move it from where the flow put it. `inset` and its logical
- * forms, the transform properties and the motion path (`offset-*`) are matched by prefix (`isOutOfPlace`).
+ * forms, the transform properties and the motion path (`offset-*`) are matched by prefix (`isOutOfPlace`). A
+ * reflection (`-webkit-box-reflect`) paints a copy of the element beside it, as far away as the element is large.
  */
-const OUT_OF_PLACE_PROPERTIES = new Set(['position', 'top', 'right', 'bottom', 'left', 'z-index']);
+const OUT_OF_PLACE_PROPERTIES = new Set([
+  'position',
+  'top',
+  'right',
+  'bottom',
+  'left',
+  'z-index',
+  '-webkit-box-reflect',
+]);
 const OUT_OF_PLACE_PREFIXES = ['inset', 'transform', 'translate', 'rotate', 'scale', 'offset'];
 /** A length in viewport units (`100vw`, `50dvh`, `10vmax`), which sizes content to the window, not the description. */
 const VIEWPORT_LENGTH = /\d(?:[sld]?v(?:w|h|i|b|min|max))\b/i;
 /**
- * Style properties that paint beyond their element's box by as far as their lengths say, matched by prefix: outlines
- * and their offset, shadows, `filter` (`drop-shadow()`, `blur()`), a border image's or mask border's outset, a
- * reflection, text decoration and its offset, and text stroke.
+ * Style properties, without a `-webkit-` prefix, that paint beyond their element's box by as far as their numbers
+ * say: outlines and their offset, shadows, `filter` (`drop-shadow()`, `blur()`), text decoration and its offset, text
+ * stroke, and the outset of a border image or mask border, which a unitless number multiplies by the border width.
+ * Browsers list a shorthand's longhands; the border image and mask border shorthands are checked whole where a
+ * parser keeps them.
  */
-const PAINTS_BEYOND_PREFIXES = [
-  ...['outline', 'box-shadow', 'text-shadow', 'filter', 'border-image', 'mask-border', '-webkit-mask-box-image'],
-  ...['-webkit-box-reflect', 'text-decoration', 'text-underline-offset', '-webkit-text-stroke'],
-];
+const PAINTS_BEYOND =
+  /^(?:outline|box-shadow|text-shadow|filter|text-decoration|text-underline-offset|text-stroke)|^(?:border-image|mask-border|mask-box-image)(?:-outset)?$/;
 /** The longest length, in pixels, those properties may give. */
 const MAX_PAINT_PX = 40;
 /**
- * A number with a unit (`5000px`, `1.5em`, `5e3px`, `90deg`), with the unit captured. Digits inside a word or a hex
- * colour (`#5000ff`) are not one.
+ * Properties on which a small negative value only tightens text, with the most a negative value may be in each unit;
+ * one in another unit, or beyond the limit, is removed. Spacing stops at -0.25em (-4px at a 16px font), less than the
+ * advance of a letter or a space, so text tightens without running back over what precedes it. An indent stops at
+ * `MAX_PAINT_PX`, the reach allowed to anything that paints beyond its element.
  */
-const DIMENSION = /(?<![\w#.-])[+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?([a-z]+)/gi;
-/** Angles, which a filter's `hue-rotate()` takes: they paint nothing beyond the box. */
-const ANGLE_UNITS = new Set(['deg', 'rad', 'grad', 'turn']);
+const NEGATIVE_LIMITS = new Map<string, Partial<Record<string, number>>>([
+  ['letter-spacing', { px: 4, em: 0.25 }],
+  ['word-spacing', { px: 4, em: 0.25 }],
+  ['text-indent', { px: MAX_PAINT_PX }],
+]);
+/**
+ * A number with its unit, if any, captured (`5000px`, `1.5em`, `5e3px`, `100`, `5000%`). Digits inside a word or a
+ * hex colour (`#5000ff`) are not one.
+ */
+const NUMBER = /(?<![\w#.-])[+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?(%|[a-z]+)?/gi;
+/**
+ * A function other than `drop-shadow()` and `blur()`, with no function inside it: colours, a filter's colour and
+ * opacity changes and a border image's gradient, whose numbers paint nothing beyond the box. They are left out before
+ * the numbers are checked.
+ */
+const NON_LENGTH_FUNCTION = /(?<![\w-])(?!drop-shadow\(|blur\()[\w-]+\([^()]*\)/g;
 /**
  * Values whose lengths depend on more than the declaration (the page's custom properties, arithmetic, the
  * environment), so they can't be checked against `MAX_PAINT_PX`.
@@ -201,23 +227,36 @@ function isOutOfPlace(property: string, value: string): boolean {
   if (OUT_OF_PLACE_PROPERTIES.has(property) || OUT_OF_PLACE_PREFIXES.some((prefix) => property.startsWith(prefix))) {
     return true;
   }
-  // A minus sign in a margin is a negative length, or a `calc()` that can be one.
-  return (property.startsWith('margin') && value.includes('-')) || VIEWPORT_LENGTH.test(value);
+  if (VIEWPORT_LENGTH.test(value)) return true;
+  const limits = NEGATIVE_LIMITS.get(property);
+  if (limits) return COMPUTED_VALUE.test(value) || movesBackTooFar(value, limits);
+  // A negative margin moves content back over what comes before. A minus sign is a negative length, or a `calc()`
+  // that can be one.
+  return property.startsWith('margin') && value.includes('-');
+}
+
+/** @param limits The most a negative number may be, by its unit (`NEGATIVE_LIMITS`). */
+function movesBackTooFar(value: string, limits: Partial<Record<string, number>>): boolean {
+  return [...value.matchAll(NUMBER)].some(([number = '', unit = '']) => {
+    const amount = parseFloat(number);
+    if (amount >= 0) return false;
+    const limit = limits[unit.toLowerCase()];
+    return limit === undefined || -amount > limit;
+  });
 }
 
 /**
  * @param property A style property name, lower case.
  * @returns True for a declaration that would paint farther beyond its element than `MAX_PAINT_PX`. Only pixel
- *   lengths can be checked: a length in any other unit (`em` grows with the font size, which a description sets too)
- *   counts as too far.
+ *   lengths can be checked: any other non-zero number counts as too far, whether it has another unit (`em` grows with
+ *   the font size, which a description sets too), a percentage or none (an outset's multiple of the border width).
  */
 function paintsTooFar(property: string, value: string): boolean {
-  if (!PAINTS_BEYOND_PREFIXES.some((prefix) => property.startsWith(prefix))) return false;
+  if (!PAINTS_BEYOND.test(property.replace(/^-webkit-/, ''))) return false;
   if (COMPUTED_VALUE.test(value)) return true;
-  return [...value.matchAll(DIMENSION)].some(([length = '', unit = '']) => {
-    const lowerUnit = unit.toLowerCase();
-    if (ANGLE_UNITS.has(lowerUnit)) return false;
-    return lowerUnit !== 'px' || Math.abs(parseFloat(length)) > MAX_PAINT_PX;
+  return [...value.replace(NON_LENGTH_FUNCTION, '').matchAll(NUMBER)].some(([number = '', unit = '']) => {
+    const amount = Math.abs(parseFloat(number));
+    return amount !== 0 && (unit.toLowerCase() !== 'px' || amount > MAX_PAINT_PX);
   });
 }
 

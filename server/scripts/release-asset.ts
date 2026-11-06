@@ -10,6 +10,7 @@ import { existsSync } from 'node:fs';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { join, relative } from 'node:path';
 import { asList, field } from '../src/shared/json.ts';
+import { messageOf } from '../src/shared/error-message.ts';
 
 export type GitHubGet = (path: string) => Promise<unknown>;
 /** How a command ended. `missing`: the program isn't installed, which a person running the updater by hand can fix. */
@@ -69,7 +70,7 @@ export async function releaseAssetUrl(get: GitHubGet, release: Release): Promise
   try {
     answer = await get(`/repos/${release.upstream}/releases/tags/v${release.version}`);
   } catch (error) {
-    throw unsignedRelease(release, error instanceof Error ? error.message : String(error));
+    throw unsignedRelease(release, messageOf(error));
   }
   const asset = asList(field(answer, 'assets')).find((entry) => field(entry, 'name') === name);
   const url = field(asset, 'browser_download_url');

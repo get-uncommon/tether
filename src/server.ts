@@ -9,7 +9,7 @@
  *   const all = await shop.allProducts();
  */
 import { DEFAULTS, resolveConfig } from './config.ts';
-import { request, withContext, TetherError } from './client.ts';
+import { request, hasData, withContext, TetherError } from './client.ts';
 import * as plans from './selling-plans.ts';
 import { imageUrl, formatPercent } from './dom.ts';
 import { initialState } from './initial.ts';
@@ -192,7 +192,8 @@ export function createStorefront(options: StorefrontOptions = {}) {
   return {
     config: conf,
     query: <T>(query: string, variables?: Record<string, unknown>, requestOptions?: { context?: boolean }) =>
-      request<T>(conf, query, variables, requestOptions),
+      // The caller's own query text decides the shape of `data`, and the caller's `T` states it.
+      request(conf, query, variables ?? {}, hasData, requestOptions) as Promise<T>,
     ...catalog,
     hydrate,
     formatMoney: (money: Money | null | undefined, locale: string | undefined = conf.locale) =>

@@ -6,7 +6,8 @@
  */
 import { flushPublish, removeProduct, syncProduct } from './sync-product.ts';
 import { PAGE_KEY, RETRY_KEY, SINCE_KEY, readPage, readRetries, readSince } from './sync-state.ts';
-import { messageOf, numericId, productGid } from './util.ts';
+import { numericId, productGid } from './util.ts';
+import { messageOf } from './shared/error-message.ts';
 
 import type { Product } from './product.ts';
 import type { SyncContext, SyncResult, SyncStats } from './sync-product.ts';

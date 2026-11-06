@@ -12,6 +12,7 @@ import {
   operationName,
   product,
 } from './fixtures.js';
+import { waitFor } from '../server/test/mocks.js';
 
 // The failures these tests cause on purpose are checked through onError, states and events, not the console.
 captureTetherWarnings();
@@ -146,7 +147,8 @@ test('serial: each task starts once the one before has settled, failed or not', 
     order.push('b start');
     return 'b';
   });
-  await new Promise((r) => setTimeout(r, 5));
+  // Every task already queued has run by the next macrotask: b would have started by then.
+  await new Promise(setImmediate);
   assert.deepEqual(order, ['a start'], 'b waits for a');
   first.resolve();
   await assert.rejects(a, /a failed/);
@@ -165,7 +167,7 @@ test('queue: quick changes reach Shopify one after another, each with the cart a
   };
   const first = Cart.setAttributes({ gift: 'yes' });
   const second = Cart.setAttributes({ wrap: 'blue' });
-  await new Promise((r) => setTimeout(r, 5));
+  await waitFor(() => calls.length > 0, 'the first change to be sent');
   assert.equal(calls.length, 1, 'the second change waits');
   slow.resolve();
   await Promise.all([first, second]);

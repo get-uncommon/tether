@@ -11,6 +11,7 @@ import {
   operationName,
   product,
 } from './fixtures.js';
+import { waitFor } from '../server/test/mocks.js';
 
 // The failures these tests cause on purpose are checked through onError, states and events, not the console.
 captureTetherWarnings();
@@ -26,7 +27,7 @@ Object.assign(globalThis, {
   getComputedStyle: dom.window.getComputedStyle,
 });
 
-let mode = 'ok'; // 'ok' | 'down' | 'unauthorized'
+let mode = 'ok'; // 'ok' | 'down' | 'unauthorized' | 'malformed'
 const calls = [];
 globalThis.fetch = async (_url, init) => {
   const { query, variables } = graphqlRequest(init);
@@ -35,6 +36,10 @@ globalThis.fetch = async (_url, init) => {
   if (mode === 'down') throw new TypeError('fetch failed');
   if (mode === 'unauthorized') return jsonResponse({ errors: [{ message: 'Unauthorized' }] }, 401);
   const ok = (data) => jsonResponse({ data });
+  if (mode === 'malformed' && op === 'TetherProducts') return ok({ h0: { ...product, variants: null } });
+  if (mode === 'malformed' && op.startsWith('Tether_cart')) {
+    return ok({ [op.slice('Tether_'.length)]: { cart: { id: 'gid://shopify/Cart/1', lines: null }, userErrors: [] } });
+  }
   if (op === 'TetherProducts') {
     const data = {};
     Object.keys(variables).forEach((k) => {
@@ -54,7 +59,9 @@ globalThis.fetch = async (_url, init) => {
   throw new Error(`unexpected op ${op}`);
 };
 
-const tick = (ms = 40) => new Promise((r) => setTimeout(r, ms));
+/** Waits until the first element matching `selector` is in `state`. */
+const waitForState = (state, selector = '[tether-product]') =>
+  waitFor(() => find(selector)?.getAttribute('tether-state') === state, `${selector} to be ${state}`);
 const go = (url) => dom.reconfigure({ url });
 let Tether;
 const errors = [];
@@ -110,7 +117,7 @@ test('dynamic product page renders the product from ?handle=', async () => {
   assert.equal(root.getAttribute('tether-state'), 'loading');
   assert.ok(visible('loading'));
   assert.ok(!visible('nf') && !visible('err'));
-  await tick();
+  await waitForState('ready');
   assert.equal(root.getAttribute('tether-state'), 'ready');
   assert.equal(find('h1').textContent, 'Coffee Box');
   assert.ok(visible('ready') && !visible('loading') && !visible('nf') && !visible('err'));
@@ -122,7 +129,7 @@ test('url:path takes the last path segment', async () => {
   go('https://site.test/shop/coffee-box');
   document.body.innerHTML = page('url:path');
   Tether.mount(document);
-  await tick();
+  await waitForState('ready');
   assert.equal(find('h1').textContent, 'Coffee Box');
 });
 
@@ -132,7 +139,7 @@ test('unknown handle shows not-found, disables add to cart, no onError for URL t
   const notFound = [];
   document.addEventListener('tether:product-not-found', (e) => notFound.push(detailOf(e)), { once: true });
   Tether.mount(document);
-  await tick();
+  await waitForState('error');
   const root = find('[tether-product]');
   assert.equal(root.getAttribute('tether-state'), 'error');
   assert.equal(root.getAttribute('tether-error'), 'not-found');
@@ -146,7 +153,7 @@ test('missing ?handle= is not-found without a request', async () => {
   go('https://site.test/product');
   document.body.innerHTML = page('url:handle');
   Tether.mount(document);
-  await tick();
+  await waitForState('error');
   assert.ok(visible('nf'));
   assert.equal(calls.filter((c) => c.op === 'TetherProducts').length, 0);
 });
@@ -154,7 +161,7 @@ test('missing ?handle= is not-found without a request', async () => {
 test('a CMS-bound handle that no longer exists is reported to onError', async () => {
   document.body.innerHTML = page('deleted-product');
   Tether.mount(document);
-  await tick();
+  await waitForState('error');
   assert.ok(visible('nf'));
   assert.equal(errors.length, 1);
   assert.equal(errors[0].err.code, 'NOT_FOUND');
@@ -165,7 +172,7 @@ test('API down: error state, onError called, blocks hidden by a class still appe
   document.head.innerHTML = '<style>.hidden { display: none; }</style>';
   document.body.innerHTML = page('coffee-box').replace('id="err"', 'id="err" class="hidden"');
   Tether.mount(document);
-  await tick();
+  await waitForState('error');
   const root = find('[tether-product]');
   assert.equal(root.getAttribute('tether-state'), 'error');
   assert.equal(root.getAttribute('tether-error'), 'NETWORK');
@@ -182,7 +189,7 @@ test('list error state', async () => {
     <div id="lerr" tether-show="error">Couldn't load products</div>
   </div>`;
   Tether.mount(document);
-  await tick();
+  await waitForState('error', '[tether-collection]');
   assert.equal(find('[tether-collection]').getAttribute('tether-state'), 'error');
   assert.ok(visible('lerr'));
 });
@@ -194,6 +201,19 @@ test('cart-error shows after a failed cart call', async () => {
   mode = 'down';
   await assert.rejects(Tether.cart.add({ variantId: '10' }));
   assert.ok(visible('cerr'));
+});
+
+test('a Storefront answer missing fields Tether reads is a TetherError, not a crash in the render', async () => {
+  mode = 'malformed';
+  document.body.innerHTML = page('coffee-box');
+  Tether.mount(document);
+  await waitFor(() => find('[tether-product]').getAttribute('tether-state') === 'error', 'the error state');
+  assert.equal(errors[0].err.name, 'TetherError');
+  assert.equal(errors[0].err.message, 'Invalid response (200)');
+  await assert.rejects(Tether.cart.add({ variantId: '10' }), {
+    name: 'TetherError',
+    message: 'Invalid response (200)',
+  });
 });
 
 test('diagnose reports config, reachability, plans and markup problems', async () => {
@@ -274,13 +294,13 @@ test('back online: failed products load again by themselves', async () => {
   mode = 'down';
   document.body.innerHTML = page('coffee-box');
   Tether.mount(document);
-  await tick();
+  await waitForState('error');
   const root = find('[tether-product]');
   assert.equal(root.getAttribute('tether-state'), 'error');
   assert.equal(find('#add').getAttribute('aria-disabled'), 'true');
   mode = 'ok';
   window.dispatchEvent(new window.Event('online'));
-  await tick();
+  await waitForState('ready');
   assert.equal(root.getAttribute('tether-state'), 'ready');
   assert.equal(find('h1').textContent, 'Coffee Box');
   assert.equal(find('#add').getAttribute('aria-disabled'), 'false');

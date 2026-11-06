@@ -6,6 +6,7 @@ import { readFile } from 'node:fs/promises';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { find, graphqlRequest, jsonResponse, operationName, product } from './fixtures.js';
+import { waitFor } from '../server/test/mocks.js';
 
 const DIST = join(dirname(fileURLToPath(import.meta.url)), '..', '.test-dist');
 let win;
@@ -61,14 +62,10 @@ before(async () => {
   });
   win = dom.window;
   await new Promise((r) => win.addEventListener('load', r));
-  // Wait for the markets part (its own file) instead of a fixed time: CI runners can be slow.
-  for (
-    let i = 0;
-    i < 100 && !(win.Tether?.__parts?.markets && (win.document.querySelector('select')?.options.length ?? 0) > 1);
-    i++
-  ) {
-    await new Promise((r) => setTimeout(r, 50));
-  }
+  await waitFor(
+    () => Boolean(win.Tether?.__parts?.markets) && (win.document.querySelector('select')?.options.length ?? 0) > 1,
+    'the markets part (its own file) to fill the country select',
+  );
 });
 
 test('the built script renders a product (and its GraphQL is minified but valid-looking)', () => {
@@ -110,13 +107,14 @@ test('parts are small and the core is under budget', async () => {
   const gz = async (f) => gzipSync(await readFile(join(DIST, f)), { level: 9 }).length;
   // The README promises a core of about 29 KB gzipped. Each budget sits about half a KB above today's build, so growth
   // is a decision; the build, not golfed source, keeps the files small.
-  assert.ok((await gz('tether.min.js')) < 30 * 1024, 'core gzip budget');
+  assert.ok((await gz('tether.min.js')) < 29.5 * 1024, 'core gzip budget');
   assert.ok((await gz('tether.search.min.js')) < 3 * 1024);
-  assert.ok((await gz('tether.account.min.js')) < 8.25 * 1024, 'account part budget');
-  assert.ok((await gz('tether.account-pages.min.js')) < 9 * 1024, 'account pages part budget');
+  assert.ok((await gz('tether.account.min.js')) < 4.75 * 1024, 'account part budget');
+  assert.ok((await gz('tether.account-pages.min.js')) < 6.75 * 1024, 'account pages part budget');
   assert.ok((await gz('tether.extras.min.js')) < 1.5 * 1024);
   assert.ok((await gz('tether.markets.min.js')) < 3 * 1024);
-  assert.ok((await gz('tether.diagnose.min.js')) < 6 * 1024);
+  assert.ok((await gz('tether.diagnose.min.js')) < 5.75 * 1024);
+  assert.ok((await gz('tether.analytics.min.js')) < 3.5 * 1024);
 });
 
 test('e2e static server: stays inside its folders and listens on loopback only', async () => {
