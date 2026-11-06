@@ -4,9 +4,20 @@
  * elements and attributes that show content are kept (an allow-list, so markup nobody reviewed is never let in):
  * text formatting, lists, tables, images, links and video embeds look as written, inline `style` included, because
  * the Shopify editor writes its formatting there. Script, page-wide `<style>` and forms (which could post the
- * visitor's input anywhere) are removed, and embeds run sandboxed. What stays can't reach outside the description's
- * box: no `id` (it would clobber `window.<id>` and the site's own ids), no style that positions content over the page
- * or fetches anything, and no embed from the site's own origin, where a sandbox can be lifted from inside.
+ * visitor's input anywhere) are removed, and embeds run sandboxed.
+ *
+ * A description stays where it is written, so it can't be laid over the page as a fake login (a phishing form on the
+ * shop's own origin). Removed for that: `id` (it would clobber `window.<id>` and the site's own ids); `class`, which
+ * would let a description borrow the site's own overlay or modal classes; and every style that takes content out of
+ * the flow (`position`, `inset`, `z-index`), moves it from where the flow put it (transforms, motion paths, negative
+ * margins) or sizes it to the window (viewport units). Styles that fetch anything go too, as do embeds from the site's
+ * own origin, where a sandbox can be lifted from inside.
+ *
+ * Not prevented: content wider than the description (a table or embed on a narrow screen, or a box given a large
+ * width in pixels) overflows beside it, and shadows and outlines paint past their element, as in any HTML. Tether
+ * doesn't clip the element it fills (`contain: paint`, `overflow`), because that would cut off those wide tables and
+ * embeds, stop margins collapsing through it and make it contain floats, changing how ordinary descriptions look. A
+ * site that wants the clip sets it on that element in its own CSS.
  */
 
 const HTML_NAMESPACE = 'http://www.w3.org/1999/xhtml';
@@ -23,7 +34,7 @@ const ALLOWED_ELEMENTS = new Set([
 const REMOVED_WITH_CONTENT = new Set(['script', 'style', 'template', 'noscript', 'textarea', 'select', 'title']);
 
 /** Attributes any kept element may have, and every `aria-*` one (`isAllowedAttribute`). */
-const GLOBAL_ATTRIBUTES = new Set(['class', 'style', 'title', 'lang', 'dir', 'role', 'align', 'width', 'height']);
+const GLOBAL_ATTRIBUTES = new Set(['style', 'title', 'lang', 'dir', 'role', 'align', 'width', 'height']);
 /** Further attributes per element. */
 const ELEMENT_ATTRIBUTES = new Map([
   ['a', new Set(['href', 'target', 'rel', 'hreflang'])],
@@ -48,10 +59,13 @@ const SCRIPT_URL = /^(javascript|vbscript|data):/i;
 const DATA_IMAGE = /^data:image\/(png|gif|jpeg|webp|avif);/i;
 
 /**
- * Style properties that take content out of the flow and place it over the rest of the page (a full-page overlay is
- * a phishing form on the shop's own origin). `inset` and its logical forms are matched by prefix.
+ * Style properties that take content out of the flow or move it from where the flow put it. `inset` and its logical
+ * forms, the transform properties and the motion path (`offset-*`) are matched by prefix (`isOutOfPlace`).
  */
-const POSITIONING_PROPERTIES = new Set(['position', 'top', 'right', 'bottom', 'left', 'z-index']);
+const OUT_OF_PLACE_PROPERTIES = new Set(['position', 'top', 'right', 'bottom', 'left', 'z-index']);
+const OUT_OF_PLACE_PREFIXES = ['inset', 'transform', 'translate', 'rotate', 'scale', 'offset'];
+/** A length in viewport units (`100vw`, `50dvh`, `10vmax`), which sizes content to the window, not the description. */
+const VIEWPORT_LENGTH = /\d(?:[sld]?v(?:w|h|i|b|min|max))\b/i;
 /** Style values that fetch a resource or run code (`expression()` in old Internet Explorer). */
 const FETCHING_VALUE = /url\(|expression\(|@import/i;
 
@@ -130,13 +144,20 @@ function allowedFeatures(value: string): string {
   return [...new Set(features.filter((feature) => IFRAME_FEATURES.has(feature)))].join('; ');
 }
 
-/** @param property A style property name, lower case. */
-function isPositioning(property: string): boolean {
-  return POSITIONING_PROPERTIES.has(property) || property.startsWith('inset');
+/**
+ * @param property A style property name, lower case.
+ * @returns True for a declaration that would put content anywhere but where the description's flow puts it.
+ */
+function isOutOfPlace(property: string, value: string): boolean {
+  if (OUT_OF_PLACE_PROPERTIES.has(property) || OUT_OF_PLACE_PREFIXES.some((prefix) => property.startsWith(prefix))) {
+    return true;
+  }
+  // A minus sign in a margin is a negative length, or a `calc()` that can be one.
+  return (property.startsWith('margin') && value.includes('-')) || VIEWPORT_LENGTH.test(value);
 }
 
 /**
- * An inline style as the browser's own parser reads it, without positioning or fetching declarations. The parsed
+ * An inline style as the browser's own parser reads it, without out-of-place or fetching declarations. The parsed
  * form is written back, so text the parser skipped (an unknown or malformed declaration) is gone too.
  */
 function cleanStyle(value: string, styleParser: HTMLElement): string {
@@ -144,9 +165,8 @@ function cleanStyle(value: string, styleParser: HTMLElement): string {
   style.cssText = value;
   const properties = Array.from({ length: style.length }, (_, index) => style.item(index));
   for (const property of properties) {
-    if (isPositioning(property) || FETCHING_VALUE.test(style.getPropertyValue(property))) {
-      style.removeProperty(property);
-    }
+    const value = style.getPropertyValue(property);
+    if (isOutOfPlace(property, value) || FETCHING_VALUE.test(value)) style.removeProperty(property);
   }
   const cleaned = style.cssText;
   styleParser.removeAttribute('style');

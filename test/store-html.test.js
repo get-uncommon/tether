@@ -15,7 +15,7 @@ const REFERRER = 'referrerpolicy="strict-origin-when-cross-origin"';
 
 test('markup, inline styles, images, links and video embeds are kept as written', () => {
   const html =
-    '<h2 style="color: red;">Coffee</h2><p class="lead">Roasted <a href="https://shop.test/x">here</a></p>' +
+    '<h2 style="color: red;">Coffee</h2><p style="margin: 0px 0px 1em;">Roasted <a href="https://shop.test/x">here</a></p>' +
     '<img src="https://cdn.shopify.com/a.jpg" alt="bag"><img src="data:image/png;base64,AAAA" alt="dot">' +
     '<iframe src="https://www.youtube.com/embed/abc" allowfullscreen=""></iframe>';
   const expected = html.replace('allowfullscreen="">', `allowfullscreen="" ${SANDBOX} ${REFERRER}>`);
@@ -122,9 +122,33 @@ test('a background image URL cannot end the CSS string or use another scheme', a
 
 test("an id is removed, so a description cannot clobber window.<id> or the site's own ids", () => {
   assert.equal(
-    render('<div id="cart-drawer" class="x">a</div><a id="TETHER_CONFIG">b</a>').innerHTML,
-    '<div class="x">a</div><a>b</a>',
+    render('<div id="cart-drawer" title="x">a</div><a id="TETHER_CONFIG">b</a>').innerHTML,
+    '<div title="x">a</div><a>b</a>',
   );
+});
+
+test("a class is removed, so a description cannot borrow the site's overlay or modal classes", () => {
+  assert.equal(
+    render('<div class="modal-overlay w--open"><a href="https://evil.test/login">Session expired, log in</a></div>')
+      .innerHTML,
+    '<div><a href="https://evil.test/login">Session expired, log in</a></div>',
+  );
+});
+
+test('transforms, motion paths, negative margins and viewport sizes are removed; spacing and sizes in the flow stay', () => {
+  const box = render(
+    '<div style="transform: translateY(-100vh); width: 100vw; height: 100vh; background: #fff">a</div>' +
+      '<div style="translate: 0 -500px; rotate: 1deg; scale: 2; offset-path: ray(45deg); color: blue">b</div>' +
+      '<p style="margin-top: -2000px; margin: 0 -50px; padding: 8px">c</p>' +
+      '<p style="margin: 1em auto; width: 50%; max-width: 600px; min-height: 10dvh">d</p>',
+  );
+  const styles = [...box.children].map((element) => element.getAttribute('style'));
+  assert.deepEqual(styles, [
+    'background: rgb(255, 255, 255);',
+    'color: blue;',
+    'padding: 8px;',
+    'margin: 1em auto; width: 50%; max-width: 600px;',
+  ]);
 });
 
 test('inline styles keep their look but cannot place content over the page or fetch anything', () => {

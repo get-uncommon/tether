@@ -4,6 +4,9 @@
  * scripts.
  */
 
+/** A dated version such as `2026-07`, as `isQuarterlyVersion` checks it. */
+export type ApiVersion = string & { readonly __brand: 'ApiVersion' };
+
 const QUARTERLY_VERSION = /^(\d{4})-(01|04|07|10)$/;
 const MONTHS_PER_QUARTER = 3;
 const QUARTERS_PER_YEAR = 4;
@@ -31,7 +34,7 @@ function parseVersion(version: unknown): { year: number; month: number } | null 
 }
 
 /** @returns True for a dated version such as `2026-07`. */
-export const isQuarterlyVersion = (version: unknown): version is string => parseVersion(version) !== null;
+export const isQuarterlyVersion = (version: unknown): version is ApiVersion => parseVersion(version) !== null;
 
 /** @param month 1 to 12. */
 const formatVersion = (year: number, month: number) => `${year}-${String(month).padStart(2, '0')}`;

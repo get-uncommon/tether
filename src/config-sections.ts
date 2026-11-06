@@ -9,6 +9,9 @@ import type { AccountConfig, AnalyticsConfig, MarketsConfig, MetafieldIdentifier
 
 /** Warns that an option was dropped. */
 type Invalid = (name: string, value: unknown) => void;
+
+/** A host name, without protocol or path: what `domainOption` keeps of the `domain` option. */
+export type ShopDomain = string & { readonly __brand: 'ShopDomain' };
 type LocaleMarket = NonNullable<MarketsConfig['locales']>[string];
 type ShopifyAnalyticsOptions = Exclude<NonNullable<AnalyticsConfig['shopify']>, boolean>;
 
@@ -46,7 +49,7 @@ const isFunction = (value: unknown): value is (...args: unknown[]) => unknown =>
  * @returns The store's domain without protocol or path (`https://shop.example/x` → `shop.example`), `''` for anything
  *   that isn't a host name.
  */
-export function domainOption(value: unknown, invalid: Invalid): string {
+export function domainOption(value: unknown, invalid: Invalid): ShopDomain | '' {
   if (typeof value !== 'string' || !value) return '';
   const host = value.replace(/^https?:\/\//, '').replace(/\/.*$/, '');
   if (isHostname(host)) return host;
@@ -131,7 +134,8 @@ const when =
   (value: unknown): T | undefined =>
     check(value) ? value : undefined;
 
-const isHostname = (value: unknown): value is string => isText(value) && HOSTNAME.test(value);
+/** The pattern is what makes a string a `ShopDomain`. */
+const isHostname = (value: unknown): value is ShopDomain => isText(value) && HOSTNAME.test(value);
 
 const isCookieName = (value: unknown): value is string => isText(value) && COOKIE_NAME.test(value);
 

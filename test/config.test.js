@@ -2,6 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DEFAULTS, cfg, configure, resolveConfig } from '../src/config.ts';
+import { isQuarterlyVersion } from '../src/api-version.ts';
 
 const quietly = (fn) => {
   const warned = [];
@@ -95,6 +96,10 @@ test('the domain must be a host name, and apiVersion a dated version', () => {
   const unstable = quietly(() => resolveConfig({ apiVersion: 'unstable' }));
   assert.equal(unstable.result.apiVersion, 'unstable');
   assert.match(unstable.warned[0], /changes without notice/);
+});
+
+test('the default apiVersion is a dated version, as the config types it', () => {
+  assert.ok(isQuarterlyVersion(DEFAULTS.apiVersion));
 });
 
 test('country and language become Shopify codes, or nothing', () => {

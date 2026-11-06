@@ -17,6 +17,8 @@ import {
 
 export { MARKET_SOURCES } from './config-sections.ts';
 import { toCountry, toLanguage } from './market-codes.ts';
+import type { ApiVersion } from './api-version.ts';
+import type { ShopDomain } from './config-sections.ts';
 import type { Money } from './shopify-values.ts';
 import type { CountryCode, LanguageCode } from './market-codes.ts';
 
@@ -78,12 +80,12 @@ type PurchaseKind = 'one-time' | 'subscription';
 
 /** Every option, with its default filled in. */
 export interface TetherConfig {
-  /** The store's domain, without protocol or path. */
-  domain: string;
+  /** The store's domain, without protocol or path; `''` until one is set. */
+  domain: ShopDomain | '';
   /** The public Storefront API access token. */
   token: string;
   /** A dated Shopify API version (or `unstable`, with a warning). */
-  apiVersion: string;
+  apiVersion: ApiVersion | 'unstable';
   /** The market's country, for `@inContext(country:)`. */
   country: CountryCode | undefined;
   /** The market's language, for `@inContext(language:)`. */
@@ -149,18 +151,24 @@ export interface TetherConfig {
   debug: boolean;
 }
 
+/** The options a site writes as plain text, which `resolveConfig` checks into their typed form. */
+type ParsedFromText = 'domain' | 'apiVersion' | 'country' | 'language' | 'storageKey';
+
 /**
  * What a site passes: any option, the market as the codes people write (`'de'`, `'pt-BR'`), and `null` for the
  * default storage key.
  */
 export type TetherOptions = {
-  [Key in Exclude<keyof TetherConfig, 'country' | 'language' | 'storageKey'>]?: TetherConfig[Key];
-} & { country?: string | undefined; language?: string | undefined; storageKey?: string | null | undefined };
+  [Key in Exclude<keyof TetherConfig, ParsedFromText>]?: TetherConfig[Key];
+} & Partial<Record<Exclude<ParsedFromText, 'storageKey'>, string | undefined>> & {
+    storageKey?: string | null | undefined;
+  };
 
 export const DEFAULTS: Readonly<TetherConfig> = {
   domain: '',
   token: '',
-  apiVersion: STOREFRONT_API_VERSION,
+  // A dated version: test/config.test.js checks it with `isQuarterlyVersion`.
+  apiVersion: STOREFRONT_API_VERSION as ApiVersion,
   country: undefined,
   language: undefined,
   locale: undefined,
@@ -367,7 +375,7 @@ function choiceOption<Choice extends string>(
  * @returns A quarterly version, or `unstable` with a warning; the default for anything else, which would be written
  *   into the endpoint's path.
  */
-function apiVersionOption(value: unknown): string {
+function apiVersionOption(value: unknown): ApiVersion | 'unstable' {
   if (value === 'unstable') {
     warn('apiVersion "unstable" changes without notice. Pin a dated version (e.g. 2026-07).');
     return value;

@@ -22,7 +22,7 @@ import {
 } from './loader.ts';
 import * as plans from './selling-plans.ts';
 import { resolveProductKey } from './status.ts';
-import { sel, emit, isOwnEvent, ownEvent, formatMoney, imageUrl } from './dom.ts';
+import { sel, emit, isOwnEvent, ANALYTICS_EVENTS, formatMoney, imageUrl } from './dom.ts';
 import { loadPart, coreModules } from './lazy.ts';
 import {
   mountedLists,
@@ -97,9 +97,6 @@ export type SellingPlanHelpers = typeof plans;
 
 export const VERSION = '0.6.8';
 
-/** The events the analytics part reports, buffered from `init()` until the part has loaded. */
-const ANALYTICS_EVENTS = ['product-ready', 'list-ready', 'cart-updated', 'cart-toggled', 'checkout', 'search'];
-
 /** Milliseconds `observe` waits after the last added node, so a burst of additions mounts once. */
 const OBSERVE_DEBOUNCE_MS = 50;
 
@@ -141,8 +138,7 @@ function mountLists(root: ParentNode): number {
     liveLists.add(list);
     el.addEventListener(`${cfg.prefix}:list-rendered`, (event) => {
       // The list emits this once its products are in the page, with the element they are in.
-      if (!isOwnEvent(event)) return;
-      mount((event as CustomEvent<{ container: Element }>).detail.container);
+      if (isOwnEvent(event, 'list-rendered')) mount(event.detail.container);
     });
     void trackMarket(list.load());
   });
@@ -253,7 +249,7 @@ function startAnalyticsQueue() {
   ANALYTICS_EVENTS.forEach((name) => {
     document.addEventListener(`${cfg.prefix}:${name}`, (event) => queue.push(event));
   });
-  document.addEventListener('astro:page-load', () => queue.push(ownEvent('page')));
+  document.addEventListener('astro:page-load', (event) => queue.push(event));
   loadPart('analytics')
     .then((part) => part.startAnalytics(queue))
     .catch((error: unknown) => {
@@ -335,25 +331,22 @@ const diagnose = (options?: Omit<DiagnoseOptions, 'version'>) =>
   loadPart('diagnose').then((part) => part.diagnose({ ...options, version: VERSION }));
 
 /**
- * Listens to the Tether event `<prefix>:<name>`. A name Tether doesn't dispatch (another script's event under the
- * prefix) hands the listener an unknown detail.
+ * Listens to the Tether event `<prefix>:<name>`. Only the events Tether dispatched reach the listener: one another
+ * script dispatches under the same name is ignored, so the detail is always the one `TetherEvents` gives.
  *
  * @returns Stops listening.
  */
 function on<Name extends keyof TetherEvents>(
   name: Name,
   listener: (detail: TetherEvents[Name], event: CustomEvent<TetherEvents[Name]>) => void,
-): () => void;
-function on(name: string, listener: (detail: unknown, event: CustomEvent) => void): () => void;
-function on(name: string, listener: (detail: unknown, event: CustomEvent) => void): () => void {
+): () => void {
+  const type = `${cfg.prefix}:${name}`;
   const handler = (event: Event) => {
-    // Tether dispatches its events as CustomEvents (`ownEvent`); the overloads type the detail per name.
-    const custom = event as CustomEvent<unknown>;
-    listener(custom.detail, custom);
+    if (isOwnEvent(event, name)) listener(event.detail, event);
   };
-  document.addEventListener(`${cfg.prefix}:${name}`, handler);
+  document.addEventListener(type, handler);
   return () => {
-    document.removeEventListener(`${cfg.prefix}:${name}`, handler);
+    document.removeEventListener(type, handler);
   };
 }
 

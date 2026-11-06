@@ -40,7 +40,8 @@ export const scoped = (root: Element | null | undefined, selector: string, scope
 
 /**
  * The events Tether dispatches, as `<prefix>:<name>` (`tether:cart-updated`), bubbling up to `document`, with the
- * detail each carries. `emit` takes only these, so `Tether.on()` hands a listener the detail its event really has.
+ * detail each carries. `emit` takes only these, and `Tether.on()` passes on only the events `emit` dispatched, so a listener gets the
+ * detail its event really has.
  */
 export interface TetherEvents {
   ready: { cart: ShopifyCart | null };
@@ -80,22 +81,40 @@ export interface TetherEvents {
   'account-updated': { what: 'profile' | 'addresses' | 'subscriptions' | 'orders' };
 }
 
+/** The events the analytics part reports, which the core buffers from `init()` until the part has loaded. */
+export const ANALYTICS_EVENTS = [
+  'product-ready',
+  'list-ready',
+  'cart-updated',
+  'cart-toggled',
+  'checkout',
+  'search',
+] as const satisfies readonly (keyof TetherEvents)[];
+
+export type AnalyticsEventName = (typeof ANALYTICS_EVENTS)[number];
+
 /**
- * The events Tether created. Any script can dispatch a `<prefix>:<name>` event with any detail; a listener that reads
- * the detail's fields (analytics) checks the event is in here, so the detail is the one Tether wrote.
+ * The events Tether created, with the name each was created under. Any script can dispatch a `<prefix>:<name>` event
+ * with any detail; only an event in here carries the detail `TetherEvents` gives its name.
  */
-const ownEvents = new WeakSet<Event>();
+const ownEvents = new WeakMap<Event, keyof TetherEvents>();
 
 /** @returns The bubbling event `<prefix>:<name>`, known to `isOwnEvent`. */
-export function ownEvent(name: string, detail?: unknown): CustomEvent {
+export function ownEvent<Name extends keyof TetherEvents>(
+  name: Name,
+  detail: TetherEvents[Name],
+): CustomEvent<TetherEvents[Name]> {
   const event = new CustomEvent(`${cfg.prefix}:${name}`, { detail, bubbles: true });
-  ownEvents.add(event);
+  ownEvents.set(event, name);
   return event;
 }
 
-/** @returns True for an event `ownEvent` created, false for one another script dispatched. */
-export function isOwnEvent(event: Event): boolean {
-  return ownEvents.has(event);
+/** @returns True for an event `ownEvent` created as `name`, false for any other, such as one another script dispatched. */
+export function isOwnEvent<Name extends keyof TetherEvents>(
+  event: Event,
+  name: Name,
+): event is CustomEvent<TetherEvents[Name]> {
+  return ownEvents.get(event) === name;
 }
 
 /** Dispatches the bubbling event `<prefix>:<name>`. */
