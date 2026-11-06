@@ -63,9 +63,14 @@ async function getJson(fetchImpl, url) {
   return asRecord(await response.json());
 }
 
-/** @param {Record<string, unknown>} oidc @param {string} graphql @returns {Discovery} */
+/**
+ * @param {Record<string, unknown>} oidc
+ * @param {string} graphql
+ * @returns {Discovery}
+ * @throws {Error} When an endpoint is missing or isn't https.
+ */
 function toDiscovery(oidc, graphql) {
-  return {
+  const discovery = {
     issuer: text(oidc, 'issuer'),
     authorization_endpoint: text(oidc, 'authorization_endpoint'),
     token_endpoint: text(oidc, 'token_endpoint'),
@@ -73,6 +78,10 @@ function toDiscovery(oidc, graphql) {
     jwks_uri: text(oidc, 'jwks_uri'),
     graphql,
   };
+  for (const [name, value] of Object.entries(discovery)) {
+    if (!value.startsWith('https://')) throw new Error(`Shopify's account discovery has no https ${name}`);
+  }
+  return discovery;
 }
 
 /**
@@ -123,20 +132,15 @@ export async function discover(settings, fetchImpl) {
     value = toDiscovery(oidc.value, text(api.value, 'graphql_api'));
   } else {
     // The store domain's bot protection can refuse requests from Workers (403). Shopify's account host and the
-    // Storefront API don't: find the shop id and use the same addresses.
-    const id = await shopId(settings, fetchImpl).catch(() => null);
-    if (!id) throw firstRejection(oidc, api);
-    const auth = `https://shopify.com/authentication/${id}`;
+    // Storefront API don't: find the shop id and ask Shopify's account host instead. Its answer is the only other
+    // source: an endpoint or issuer is never guessed.
+    const storeDomainError = firstRejection(oidc, api);
+    const id = await shopId(settings, fetchImpl);
+    if (!id) throw storeDomainError;
     const config =
       oidc.status === 'fulfilled'
         ? oidc.value
-        : await getJson(fetchImpl, `${auth}/.well-known/openid-configuration`).catch(() => ({
-            issuer: auth,
-            authorization_endpoint: `${auth}/oauth/authorize`,
-            token_endpoint: `${auth}/oauth/token`,
-            end_session_endpoint: `${auth}/logout`,
-            jwks_uri: `${auth}/.well-known/jwks.json`,
-          }));
+        : await getJson(fetchImpl, `https://shopify.com/authentication/${id}/.well-known/openid-configuration`);
     const graphql =
       api.status === 'fulfilled'
         ? text(api.value, 'graphql_api')
@@ -147,7 +151,12 @@ export async function discover(settings, fetchImpl) {
   return value;
 }
 
-/** @type {Map<string, { keys: SigningKey[] }>} */
+/** How long Shopify's signing keys are trusted before they are fetched again. */
+const JWKS_TTL_MS = 3600e3;
+/** Clock difference allowed between Shopify and the Worker for `iat` and `nbf`. */
+const CLOCK_SKEW_SECONDS = 300;
+
+/** @type {Map<string, { keys: SigningKey[], until: number }>} */
 const jwksCache = new Map();
 
 /**
@@ -159,7 +168,35 @@ function jwtPart(part) {
 }
 
 /**
- * Checks the id token's RS256 signature against Shopify's published keys, then its issuer, audience, nonce and expiry.
+ * Shopify's signing keys, fetched again after {@link JWKS_TTL_MS} or when a token names a key they don't have.
+ *
+ * @param {string} jwksUri
+ * @param {string} kid
+ * @param {Fetch} fetchImpl
+ * @returns {Promise<SigningKey[]>}
+ */
+async function signingKeys(jwksUri, kid, fetchImpl) {
+  const cached = jwksCache.get(jwksUri);
+  if (cached && cached.until > Date.now() && cached.keys.some((key) => key.kid === kid)) return cached.keys;
+  const response = await fetchImpl(jwksUri, { headers: JSON_HEADERS });
+  const body = response.ok ? asRecord(await response.json().catch(() => null)) : {};
+  const keys = /** @type {unknown} */ (body['keys']);
+  if (!Array.isArray(keys)) {
+    const type = response.headers.get('content-type') ?? 'no type';
+    throw new Error(`Shopify's signing keys answered ${response.status} (${type})`);
+  }
+  /** @type {unknown[]} */
+  const entries = keys;
+  const parsed = entries
+    .filter((key) => key !== null && typeof key === 'object')
+    .map((key) => /** @type {SigningKey} */ (key));
+  jwksCache.set(jwksUri, { keys: parsed, until: Date.now() + JWKS_TTL_MS });
+  return parsed;
+}
+
+/**
+ * Checks the id token's RS256 signature against Shopify's published key with the token's `kid`, and only then its
+ * claims: issuer, audience, nonce, expiry, and that it was issued and valid by now.
  *
  * @param {string | undefined} token
  * @param {Discovery} discovery
@@ -171,28 +208,10 @@ export async function verifyIdToken(token, discovery, settings, nonce, fetchImpl
   const [headerPart, payloadPart, signature] = (token ?? '').split('.');
   if (!headerPart || !payloadPart || !signature) throw new Error('id token missing');
   const header = jwtPart(headerPart);
-  const claims = jwtPart(payloadPart);
   if (header['alg'] !== 'RS256') throw new Error(`id token alg ${String(header['alg'])}`);
-  let set = jwksCache.get(discovery.jwks_uri);
-  if (!set?.keys.some((key) => key.kid === header['kid'])) {
-    const response = await fetchImpl(discovery.jwks_uri, { headers: JSON_HEADERS });
-    const body = response.ok ? asRecord(await response.json().catch(() => null)) : {};
-    const keys = /** @type {unknown} */ (body['keys']);
-    if (!Array.isArray(keys)) {
-      throw new Error(
-        `Shopify's signing keys answered ${response.status} (${response.headers.get('content-type') ?? 'no type'})`,
-      );
-    }
-    /** @type {unknown[]} */
-    const entries = keys;
-    set = {
-      keys: entries
-        .filter((key) => key !== null && typeof key === 'object')
-        .map((key) => /** @type {SigningKey} */ (key)),
-    };
-    jwksCache.set(discovery.jwks_uri, set);
-  }
-  const jwk = set.keys.find((key) => key.kid === header['kid']) ?? (set.keys.length === 1 ? set.keys[0] : undefined);
+  const kid = header['kid'];
+  if (typeof kid !== 'string' || !kid) throw new Error('id token has no key id');
+  const jwk = (await signingKeys(discovery.jwks_uri, kid, fetchImpl)).find((key) => key.kid === kid);
   if (!jwk) throw new Error('id token key not found');
   const key = await crypto.subtle.importKey('jwk', jwk, { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, false, [
     'verify',
@@ -201,11 +220,15 @@ export async function verifyIdToken(token, discovery, settings, nonce, fetchImpl
   if (!(await crypto.subtle.verify('RSASSA-PKCS1-v1_5', key, fromBase64Url(signature), signed))) {
     throw new Error('id token signature');
   }
+  const claims = jwtPart(payloadPart);
+  const now = Date.now() / 1000;
   const audience = /** @type {unknown[]} */ ([]).concat(claims['aud'] ?? []);
   if (claims['iss'] !== discovery.issuer) throw new Error('id token issuer');
   if (!audience.includes(settings.clientId)) throw new Error('id token audience');
   if (claims['nonce'] !== nonce) throw new Error('id token nonce');
-  if (!(Number(claims['exp']) * 1000 > Date.now())) throw new Error('id token expired');
+  if (!(Number(claims['exp']) > now)) throw new Error('id token expired');
+  if (Number(claims['iat'] ?? 0) > now + CLOCK_SKEW_SECONDS) throw new Error('id token issued in the future');
+  if (Number(claims['nbf'] ?? 0) > now + CLOCK_SKEW_SECONDS) throw new Error('id token not valid yet');
   return claims;
 }
 

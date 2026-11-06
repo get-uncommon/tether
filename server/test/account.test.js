@@ -21,8 +21,8 @@ const { privateKey, publicKey } = await crypto.subtle.generateKey(
   ['sign', 'verify'],
 );
 const jwk = { ...(await crypto.subtle.exportKey('jwk', publicKey)), kid: 'k1', alg: 'RS256', use: 'sig' };
-async function idToken(claims, { tamper = false } = {}) {
-  const h = b64url(JSON.stringify({ alg: 'RS256', kid: 'k1' }));
+async function idToken(claims, { tamper = false, kid = 'k1' } = {}) {
+  const h = b64url(JSON.stringify(kid ? { alg: 'RS256', kid } : { alg: 'RS256' }));
   const p = b64url(JSON.stringify(claims));
   const sig = new Uint8Array(
     await crypto.subtle.sign('RSASSA-PKCS1-v1_5', privateKey, new TextEncoder().encode(`${h}.${p}`)),
@@ -31,7 +31,7 @@ async function idToken(claims, { tamper = false } = {}) {
   return `${h}.${p}.${b64url(sig)}`;
 }
 
-function shopify({ tamper = false, wrongNonce = false } = {}) {
+function shopify({ tamper = false, wrongNonce = false, kid = 'k1', claims = {} } = {}) {
   const calls = [];
   let lastNonce = null;
   const fetch = async (url, init = {}) => {
@@ -61,8 +61,9 @@ function shopify({ tamper = false, wrongNonce = false } = {}) {
           aud: 'client-1',
           nonce: wrongNonce ? 'other' : lastNonce,
           exp: Math.floor(Date.now() / 1000) + 3600,
+          ...claims,
         },
-        { tamper },
+        { tamper, kid },
       );
       return ok({ access_token: 'access-1', refresh_token: 'refresh-1', id_token: token, expires_in: 3600 });
     }
@@ -292,7 +293,16 @@ test('me / orders: only for the allowed origin, with the cookie', async () => {
 });
 
 test('attacks: tampered or wrong id token, replay, missing CSRF header, open redirect, moved KV blobs', async () => {
-  for (const opts of [{ tamper: true }, { wrongNonce: true }]) {
+  const inAnHour = Math.floor(Date.now() / 1000) + 3600;
+  const attacks = [
+    { tamper: true },
+    { wrongNonce: true },
+    { kid: null },
+    { kid: 'unknown-key' },
+    { claims: { iat: inAnHour } },
+    { claims: { nbf: inAnHour } },
+  ];
+  for (const opts of attacks) {
     const { back } = await loginFlow(opts);
     assert.ok(!pick(back, '__Host-tether-account'), JSON.stringify(opts));
     assert.equal(back.status, 502);
@@ -619,4 +629,26 @@ test('settings: the session key never comes from a placeholder, and a key shared
   const own = accountSettings({ ...env, ACCOUNT_SECRET: 'a-separate-account-secret-xyz' });
   assert.deepEqual([own.secretSource, own.secret], ['ACCOUNT_SECRET', 'a-separate-account-secret-xyz']);
   assert.ok(!accountProblems(own).some((p) => /SYNC_SECRET/.test(p.message)));
+});
+
+test('discovery: when Shopify answers neither on the store domain nor on its account host, login fails closed', async () => {
+  const sh = shopify();
+  const fetch = async (url, init = {}) => {
+    const u = String(url);
+    if (u.includes('/.well-known/')) return new Response('forbidden', { status: 403 });
+    if (u.startsWith('https://closed.myshopify.com/api/')) {
+      return new Response(JSON.stringify({ data: { shop: { id: 'gid://shopify/Shop/9' } } }), { status: 200 });
+    }
+    return sh.fetch(url, init);
+  };
+  const r = await handleAccount(
+    req('/login'),
+    { ...env, SHOPIFY_DOMAIN: 'closed.myshopify.com' },
+    {
+      fetch,
+      memory: new Map(),
+    },
+  );
+  assert.equal(r.status, 502, 'no login is started against guessed endpoints');
+  assert.equal(r.headers.get('location'), null);
 });
