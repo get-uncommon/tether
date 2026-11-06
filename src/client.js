@@ -4,6 +4,7 @@
  * readable errors. Exposed as Tether.query() for anything Tether doesn't cover.
  */
 import { cfg, log } from './config.js';
+import { toCountry, toLanguage } from './market-codes.js';
 
 export class TetherError extends Error {
   constructor(message, { status, errors, userErrors, code } = {}) {
@@ -24,12 +25,14 @@ export function endpoint(conf = cfg) {
  * Adds @inContext(country, language) to the first operation in the document,
  * so prices, currency and translations follow the configured market.
  * Operations are always written first, fragments after, so the first match is
- * the operation.
+ * the operation. A country or language that isn't a valid code is left out.
  */
 export function withContext(query, ctx = cfg) {
   const args = [];
-  if (ctx.country) args.push(`country: ${String(ctx.country).toUpperCase()}`);
-  if (ctx.language) args.push(`language: ${String(ctx.language).toUpperCase().replace('-', '_')}`);
+  const country = toCountry(ctx.country);
+  const language = toLanguage(ctx.language);
+  if (country) args.push(`country: ${country}`);
+  if (language) args.push(`language: ${language}`);
   if (!args.length || /@inContext/.test(query)) return query;
 
   const tag = `@inContext(${args.join(', ')})`;

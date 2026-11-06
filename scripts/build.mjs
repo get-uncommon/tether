@@ -110,6 +110,7 @@ const CORE = [
   'product.js',
   'collection.js',
   'mounting.js',
+  'market-codes.js',
   'lazy.js',
 ];
 async function coreExports() {

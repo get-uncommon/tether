@@ -10,7 +10,8 @@ import { listSelector } from './collection.js';
 import { clearProductCache } from './loader.js';
 import { attr, sel, get, emit } from './dom.js';
 import { within, pruneLive, liveLists, liveProducts, mountedProducts, mountProduct } from './mounting.js';
-import { rememberMarket, getLocalization, clearLocalization, toCountry, toLanguage } from './markets.js';
+import { rememberMarket, getLocalization, clearLocalization } from './markets.js';
+import { toCountry, toLanguage } from './market-codes.js';
 
 export { detectMarket, getLocalization } from './markets.js';
 

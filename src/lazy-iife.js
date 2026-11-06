@@ -14,6 +14,7 @@ import * as cart from './cart.js';
 import * as product from './product.js';
 import * as collection from './collection.js';
 import * as mounting from './mounting.js';
+import * as marketCodes from './market-codes.js';
 
 const { cfg } = config;
 
@@ -30,6 +31,7 @@ export const coreModules = {
   'product.js': product,
   'collection.js': collection,
   'mounting.js': mounting,
+  'market-codes.js': marketCodes,
 };
 
 const self = typeof document !== 'undefined' ? document.currentScript?.src || '' : '';

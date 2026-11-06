@@ -25,6 +25,7 @@ import * as plans from './selling-plans.js';
 import { resolveProductKey } from './status.js';
 import { attr, sel, get, qsa, emit, formatMoney, busy, parseJSONAttr, toAttributes, imageUrl } from './dom.js';
 import { loadPart, coreModules } from './lazy.js';
+import { toCountry, toLanguage } from './market-codes.js';
 import {
   mountedLists,
   liveLists,
@@ -414,8 +415,8 @@ export function init(overrides = {}) {
  */
 function pageMarket(doc = document) {
   const get = (n) => doc.querySelector(`meta[name="${cfg.prefix}-page-${n}"]`)?.getAttribute('content') || undefined;
-  const country = get('country');
-  return country ? { country: country.toUpperCase(), language: get('language'), locale: get('locale') } : null;
+  const country = toCountry(get('country'));
+  return country ? { country, language: toLanguage(get('language')) ?? undefined, locale: get('locale') } : null;
 }
 
 let baseMarket = null; // the configured market, before a visitor's or page's market applied
@@ -428,7 +429,7 @@ async function applyMarket(overrides) {
   onPageMarket = Boolean(page);
   if (page) {
     cfg.country = page.country;
-    cfg.language = page.language ? page.language.toUpperCase() : undefined;
+    cfg.language = page.language;
     if (page.locale) cfg.locale = page.locale;
     return;
   }
@@ -447,7 +448,7 @@ async function applyMarket(overrides) {
     } catch {
       /* none */
     }
-    if (market && !/^[A-Z]{2}$/.test(market.country || '')) market = null;
+    market = market && toCountry(market.country) ? { ...market, language: toLanguage(market.language) } : null;
   }
   if (!market) return;
   if (market.country) cfg.country = market.country;

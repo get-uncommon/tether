@@ -22,10 +22,7 @@
  */
 import { cfg } from './config.js';
 import { gql } from './client.js';
-
-const COUNTRY = /^[A-Z]{2}$/;
-// Shopify LanguageCode values with a region; others are the plain ISO 639-1 code.
-const REGIONAL_LANGUAGES = new Set(['PT_BR', 'PT_PT', 'ZH_CN', 'ZH_TW']);
+import { toCountry, toLanguage } from './market-codes.js';
 
 export const storageKey = () => `${cfg.prefix}:market:${cfg.domain}`;
 
@@ -41,25 +38,6 @@ const defaultEnv = () => ({
   })(),
   global: typeof window !== 'undefined' ? window : {},
 });
-
-export function toCountry(v) {
-  const c = String(v || '')
-    .trim()
-    .toUpperCase();
-  return COUNTRY.test(c) && c !== 'XX' && c !== 'T1' ? c : null; // XX/T1: Cloudflare's unknown/Tor
-}
-
-/** 'de-DE' -> 'DE', 'pt-BR' -> 'PT_BR', 'en' -> 'EN'. */
-export function toLanguage(v) {
-  const raw = String(v || '')
-    .trim()
-    .replace('-', '_')
-    .toUpperCase();
-  if (!raw) return null;
-  if (REGIONAL_LANGUAGES.has(raw)) return raw;
-  const primary = raw.split('_')[0];
-  return /^[A-Z]{2,3}$/.test(primary) ? primary : null;
-}
 
 function readCookie(doc, name) {
   if (!doc || !name) return null;
