@@ -15,7 +15,9 @@
  * from its branch `release/X.Y`, made once from that line's last tag (`git push origin vX.Y.Z:refs/heads/release/X.Y`);
  * the branch needs this script and `.github/workflows/release.yml` from main first, since a tag runs the workflow at
  * its own commit. Deployed Worker copies install only a tag whose commit is on main, so the script also records the
- * maintenance commit in main's history, by a merge commit that keeps main's files as they are.
+ * maintenance commit in main's history, by a merge commit that keeps main's files as they are but for CHANGELOG.md,
+ * which gets the release's section. The branch, main and the tag are pushed in one atomic push: all of them land, or
+ * none does.
  */
 import { readFile, writeFile } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
@@ -23,6 +25,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { compareVersions, parseVersion } from '../server/src/release-range.ts';
 import { field } from '../server/src/shared/json.ts';
+import { sectionOf, withSection } from './changelog.ts';
 import { packageVersion, syncVersions } from './versions.ts';
 import type { Version } from '../server/src/release-range.ts';
 
@@ -49,9 +52,13 @@ function spawnable(command: string, args: string[]): [string, string[]] {
   return [needsShell(command) ? 'npm.cmd' : command, args];
 }
 
-/** @returns The command's output, trimmed. */
-function output(command: string, args: string[]): string {
-  return execFileSync(...spawnable(command, args), { cwd: ROOT, encoding: 'utf8', shell: needsShell(command) }).trim();
+/**
+ * @param input Written to the command's stdin.
+ * @returns The command's output, trimmed.
+ */
+function output(command: string, args: string[], input?: string): string {
+  const options = { cwd: ROOT, encoding: 'utf8', shell: needsShell(command) } as const;
+  return execFileSync(...spawnable(command, args), input === undefined ? options : { ...options, input }).trim();
 }
 
 function fail(message: string): never {
@@ -151,15 +158,35 @@ async function bump(text: string): Promise<void> {
 }
 
 /**
- * A merge commit on top of origin/main with main's files and the maintenance release commit as second parent, so the
- * release's commit is in main's history without changing main.
+ * @returns The tree of origin/main with the maintenance release's CHANGELOG.md section added to its CHANGELOG.md, in
+ *   version order.
+ */
+function mainTreeWithSection(version: string): string {
+  const mainTree = `origin/${MAIN}^{tree}`;
+  const mainChangelog = output('git', ['show', `origin/${MAIN}:CHANGELOG.md`]);
+  const section = sectionOf(output('git', ['show', 'HEAD:CHANGELOG.md']), version);
+  if (section === null) fail(`the release commit's CHANGELOG.md has no "## ${version}" section`);
+  // `output` trims, and the file ends with a newline.
+  const changelog = `${withSection(mainChangelog, section, version)}\n`;
+  const blob = output('git', ['hash-object', '-w', '--stdin'], changelog);
+  // CHANGELOG.md is at the top level, so only main's top tree changes.
+  const entries = output('git', ['ls-tree', mainTree])
+    .split('\n')
+    .map((entry) => (entry.endsWith('\tCHANGELOG.md') ? `100644 blob ${blob}\tCHANGELOG.md` : entry));
+  return output('git', ['mktree'], `${entries.join('\n')}\n`);
+}
+
+/**
+ * A merge commit on top of origin/main, fetched again first, with the maintenance release commit as second parent,
+ * so the release's commit is in main's history and only main's CHANGELOG.md changes.
  *
  * @returns Its SHA.
  */
 function mainHistoryCommit(version: string): string {
+  run('git', ['fetch', '--quiet', 'origin', MAIN]);
   return output('git', [
     'commit-tree',
-    `origin/${MAIN}^{tree}`,
+    mainTreeWithSection(version),
     '-p',
     `origin/${MAIN}`,
     '-p',
@@ -169,11 +196,15 @@ function mainHistoryCommit(version: string): string {
   ]);
 }
 
-/** The pushes that publish the release: the branch first, then the tag, which starts the release workflow. */
-function pushes(line: Line, version: string): string[][] {
-  const tag = ['push', 'origin', `v${version}`];
-  if (line.kind === 'main') return [['push', 'origin', `HEAD:${MAIN}`], tag];
-  return [['push', 'origin', `HEAD:${line.branch}`], ['push', 'origin', `${mainHistoryCommit(version)}:${MAIN}`], tag];
+/**
+ * The push that publishes the release: the branch, main for a maintenance release, and the tag, which starts the
+ * release workflow. `--atomic` makes GitHub take every ref or none, so the tag never lands without main, and a
+ * branch that moved in the meantime leaves nothing half-pushed.
+ */
+function pushOf(line: Line, version: string): string[] {
+  const tag = `refs/tags/v${version}`;
+  if (line.kind === 'main') return ['push', '--atomic', 'origin', `HEAD:${MAIN}`, tag];
+  return ['push', '--atomic', 'origin', `HEAD:${line.branch}`, `${mainHistoryCommit(version)}:${MAIN}`, tag];
 }
 
 const [version = ''] = process.argv.slice(2).filter((arg) => !arg.startsWith('--'));
@@ -192,10 +223,16 @@ run('git', ['add', '-A']);
 run('git', ['commit', '-q', '-m', `Tether ${version}`]);
 run('git', ['tag', `v${version}`]);
 console.log(`\nTagged v${version} on ${branchOf(line)}.`);
-const commands = pushes(line, version);
+const retry = `git tag -d v${version} && git reset --hard origin/${branchOf(line)}, then run the release again`;
+const command = pushOf(line, version);
 if (push) {
-  for (const command of commands) run('git', command);
+  try {
+    run('git', command);
+  } catch {
+    fail(`the push was refused, so nothing was pushed (a branch moved?). To start over: ${retry}`);
+  }
   console.log('Pushed. GitHub Actions creates the release and publishes to npm.');
 } else {
-  console.log(`Push when ready: ${commands.map((command) => `git ${command.join(' ')}`).join(' && ')}`);
+  console.log(`Push when ready: git ${command.join(' ')}`);
+  console.log(`If GitHub refuses it, nothing was pushed. To start over: ${retry}`);
 }

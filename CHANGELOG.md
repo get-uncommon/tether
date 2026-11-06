@@ -2,10 +2,23 @@
 
 ## 0.7.1 (unreleased)
 
-- Fix: when a cart change fails without a clear answer (a network error or a 5xx, when Shopify may
-  or may not have applied it), Tether loads the cart again, so the page and the visitor's other tabs
-  show what Shopify really has. The change still rejects and `tether:cart-error` still fires; a
-  clear refusal (Shopify's user errors, a 4xx) works as before.
+- Fix: when a cart change fails without a clear answer (a network error, a connection that drops
+  while Shopify's answer arrives, a 2xx answer that isn't valid, or a 5xx, when Shopify may or may
+  not have applied it), Tether loads the cart again, so the page and the visitor's other tabs show
+  what Shopify really has. The change still rejects and `tether:cart-error` still fires; a clear
+  refusal (Shopify's user errors, a 4xx) works as before.
+- Fix: a query whose answer stops arriving partway is retried like a network error, and rejects with
+  `NETWORK` once its retries are spent.
+- A 2xx answer that isn't valid (not JSON, not in the GraphQL shape, or without the data Tether
+  reads) rejects with the new code `INVALID_RESPONSE` (`status` 200) instead of `HTTP_200`.
+- Types: `TetherError`'s `name`, `code`, `status`, `errors` and `userErrors` are `readonly`
+  (`errors` is a `readonly GraphQLError[]`). Code that assigned to them no longer type-checks;
+  nothing changes at runtime.
+- Docs: the `retries` option says which failures it retries: for a query a network error, a 429, a
+  5xx or `THROTTLED`; for a mutation, cart changes included, only a 429 or `THROTTLED`.
+- npm package: `src/` is no longer published. It imported files the package doesn't contain; the
+  package's entry points, types and the script's source map (which embeds its sources) are
+  unchanged.
 - Fix: a market chosen in another tab is followed even after another script has replaced
   `window.Tether`.
 - Fix: cart changes and other Storefront mutations are no longer sent again after a network error or
@@ -34,7 +47,9 @@
 - Releases: the GitHub Release, with the Worker's signed file, is created before the npm publish. A
   maintenance release of an older minor line (cut from `release/X.Y`) is no longer marked as
   GitHub's latest release and goes to npm under the `latest-X.Y` dist-tag. `npm run release` tags
-  only after the whole gate passes.
+  only after the whole gate passes, adds a maintenance release's section to main's `CHANGELOG.md`,
+  and pushes the branch, main and the tag in one atomic push, so a branch that moved meanwhile
+  leaves nothing half-pushed.
 - Docs: the reference no longer tells sites to load `@0.6` / `@v0.6.8`; pinning is described as
   `@X.Y` / `@vX.Y.Z`, and a test keeps release numbers out of `docs/`.
 

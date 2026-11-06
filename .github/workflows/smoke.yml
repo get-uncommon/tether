@@ -6,8 +6,9 @@
 # Cost: ~1-2 minutes a run, weekly plus per push to main. Free on public repositories.
 #
 # The `smoke` job installs the dependencies and runs their code, so it can only read the repository, and gets no
-# dependency cache another run wrote. The `report` job, which can write issues, checks nothing out and installs
-# nothing: it reads only the smoke job's outputs.
+# dependency cache another run wrote. The store's secrets reach only the two smoke steps, not the install or the
+# tests. The `report` job, which can write issues, checks nothing out and installs nothing: it reads only the smoke
+# job's outputs.
 name: smoke
 
 on:
@@ -19,8 +20,10 @@ on:
 
 permissions: {}
 
+# One group per trigger: a push or a manual run cancels an older run of its own kind, never the weekly one, which
+# would then report nothing.
 concurrency:
-  group: weekly-smoke
+  group: smoke-${{ github.event_name }}
   cancel-in-progress: true
 
 jobs:
@@ -34,9 +37,6 @@ jobs:
       next: ${{ steps.versions.outputs.next }}
       pinned-outcome: ${{ steps.pinned.outcome }}
       next-outcome: ${{ steps.next.outcome }}
-    env:
-      TETHER_DOMAIN: ${{ secrets.TETHER_DOMAIN }}
-      TETHER_TOKEN: ${{ secrets.TETHER_TOKEN }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
@@ -57,11 +57,16 @@ jobs:
           echo "next=$(node --experimental-strip-types scripts/api-version.ts --next)" >> "$GITHUB_OUTPUT"
       - name: Smoke (pinned ${{ steps.versions.outputs.pinned }})
         id: pinned
+        env:
+          TETHER_DOMAIN: ${{ secrets.TETHER_DOMAIN }}
+          TETHER_TOKEN: ${{ secrets.TETHER_TOKEN }}
         run: npm run smoke
       - name: Smoke (next ${{ steps.versions.outputs.next }})
         id: next
         if: always() && steps.versions.outcome == 'success'
         env:
+          TETHER_DOMAIN: ${{ secrets.TETHER_DOMAIN }}
+          TETHER_TOKEN: ${{ secrets.TETHER_TOKEN }}
           TETHER_API_VERSION: ${{ steps.versions.outputs.next }}
         run: npm run smoke
 

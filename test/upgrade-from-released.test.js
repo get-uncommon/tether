@@ -6,12 +6,13 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile, execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { chmod, copyFile, cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { delimiter, dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
+import { releaseAssetName } from '../server/scripts/release-asset.ts';
 import { KEPT, MANAGED } from '../server/scripts/update-tether.ts';
 import { SHIPPED_REVISION, workflowRevisionAt } from '../server/scripts/workflow-check.ts';
 import { asRecord, fieldOf, numberAt, parseJson, stringAt } from '../server/test/mocks.js';
@@ -25,15 +26,15 @@ const versionIn = async (folder) => fieldOf(parseJson(await readFile(join(folder
  * - v0.6.8: downloads it from codeload by commit, after checking the commit is on the default branch;
  * - v0.7.0: installs only the release's signed asset, after `gh attestation verify` has checked it against GitHub.
  *
- * The 0.6 updaters take their real route, against a local stand-in for GitHub. 0.7.0's would have `gh` check the
- * asset's attestation with GitHub itself, which nothing local can sign, so it installs the release with `--from`.
+ * Each takes its real route, against a local stand-in for GitHub: `codeload` downloads the tarball codeload serves,
+ * `asset` the Release's asset, which a stand-in for `gh` passes (`ghStub`), since nothing local can sign it.
  *
- * @type {{ tag: string, route: 'github' | 'from' }[]}
+ * @type {{ tag: string, route: 'codeload' | 'asset' }[]}
  */
 const OLD_UPDATERS = [
-  { tag: 'v0.6.7', route: 'github' },
-  { tag: 'v0.6.8', route: 'github' },
-  { tag: 'v0.7.0', route: 'from' },
+  { tag: 'v0.6.7', route: 'codeload' },
+  { tag: 'v0.6.8', route: 'codeload' },
+  { tag: 'v0.7.0', route: 'asset' },
 ];
 const [major, minor, patch] = stringAt(JSON.parse(await readFile(join(ROOT, 'package.json'), 'utf8')), 'version')
   .split('.')
@@ -44,6 +45,10 @@ const UPGRADE_TIMEOUT_MS = 180_000;
 const UPSTREAM = 'test-owner/tether';
 const RELEASE_SHA = 'c0ffee'.repeat(6).padEnd(40, '0');
 const OFFLINE_GITHUB = pathToFileURL(join(ROOT, 'test', 'offline-github.js')).href;
+const GH_STUB = pathToFileURL(join(ROOT, 'test', 'gh-stub.js')).href;
+const ASSET = releaseAssetName(RELEASE_VERSION);
+/** Where the Release's asset is on github.com. */
+const ASSET_PATH = `${UPSTREAM}/releases/download/v${RELEASE_VERSION}/${ASSET}`;
 const OUTDATED = /^::warning title=Tether workflow file outdated::/m;
 
 const run = promisify(execFile);
@@ -163,8 +168,9 @@ function node(copy, args, { summary, env: extra = {} } = {}) {
 }
 
 /**
- * A local stand-in for GitHub as the 0.6 updaters call it: the tags, the default branch, how a tag's commit compares
- * with it, and the release's tarball by tag (0.6.0 to 0.6.7) or by commit (0.6.8).
+ * A local stand-in for GitHub as the released updaters call it: the tags, the default branch, how a tag's commit
+ * compares with it, the GitHub Release, and the release's tarball by tag (0.6.0 to 0.6.7), by commit (0.6.8) or as
+ * the Release's asset (0.7.0).
  *
  * @param {Buffer} tarball
  */
@@ -176,10 +182,14 @@ async function fakeGitHub(tarball) {
   const answers = {
     [repo]: { default_branch: 'main' },
     [`${repo}/compare/${RELEASE_SHA}...main`]: { status: 'ahead' },
+    [`${repo}/releases/tags/v${RELEASE_VERSION}`]: {
+      assets: [{ name: ASSET, browser_download_url: `https://github.com/${ASSET_PATH}` }],
+    },
   };
   const downloads = [
     `/codeload/${UPSTREAM}/tar.gz/refs/tags/v${RELEASE_VERSION}`,
     `/codeload/${UPSTREAM}/tar.gz/${RELEASE_SHA}`,
+    `/web/${ASSET_PATH}`,
   ];
   const server = createServer((request, response) => {
     const url = new URL(request.url ?? '/', 'http://localhost');
@@ -215,41 +225,92 @@ async function fakeGitHub(tarball) {
 }
 
 /**
- * `PATH` for a 0.6 updater. On Windows, Windows' own tar goes first: the GNU tar that Git for Windows puts on the
- * `PATH` reads the `C:` of the absolute paths those updaters pass it as a remote host. Deployed copies run on Linux.
+ * `PATH` for an updater, with `first` in front. On Windows, Windows' own tar comes next: the GNU tar that Git for
+ * Windows puts on the `PATH` reads the `C:` of the absolute paths the 0.6 updaters pass it as a remote host. Deployed
+ * copies run on Linux.
  *
+ * @param {string[]} first
  * @returns {Record<string, string>}
  */
-function tarPath() {
+function updaterPath(first) {
   const name = Object.keys(process.env).find((key) => key.toUpperCase() === 'PATH') ?? 'PATH';
-  const path = process.env[name] ?? '';
-  if (process.platform !== 'win32') return { [name]: path };
-  const system = join(process.env['SystemRoot'] ?? 'C:\\Windows', 'System32');
-  return { [name]: `${system}${delimiter}${path}` };
+  const system = process.platform === 'win32' ? [join(process.env['SystemRoot'] ?? 'C:\\Windows', 'System32')] : [];
+  return { [name]: [...first, ...system, process.env[name] ?? ''].join(delimiter) };
+}
+
+/**
+ * Puts a `gh` first on the `PATH` that answers the one call the 0.7.0 updater makes, `gh attestation verify …`, as
+ * `gh` does for an attestation that verifies, and writes its arguments to `log`, one per line. On Linux and macOS it
+ * is a shell script. On Windows the updater's `spawnSync` finds only an .exe, so it is a copy of node.exe that
+ * test/gh-stub.js, loaded through `NODE_OPTIONS`, turns into the stand-in.
+ *
+ * @param {string} dir An empty folder for it.
+ * @param {string} log
+ * @returns {Promise<Record<string, string>>} The environment that puts it first.
+ */
+async function ghStub(dir, log) {
+  await mkdir(dir, { recursive: true });
+  const env = { ...updaterPath([dir]), TETHER_TEST_GH_LOG: log };
+  if (process.platform === 'win32') {
+    await copyFile(process.execPath, join(dir, 'gh.exe'));
+    return { ...env, NODE_OPTIONS: `--import=${GH_STUB}` };
+  }
+  const script = join(dir, 'gh');
+  await writeFile(
+    script,
+    [
+      '#!/bin/sh',
+      '[ "$1 $2" = "attestation verify" ] || { echo "gh stub: unexpected gh $*" >&2; exit 1; }',
+      `printf '%s\\n' "$@" > "$TETHER_TEST_GH_LOG"`,
+      '',
+    ].join('\n'),
+  );
+  await chmod(script, 0o755);
+  return env;
 }
 
 /**
  * Runs the copy's updater the way its workflow does, with GitHub answered by {@link fakeGitHub}: it lists the tags,
- * downloads the tarball codeload would serve for the release (a top folder holding the repository, `server/` in it),
- * and unpacks it.
+ * downloads the release (a top folder with `server/` in it: the repository in codeload's tarball, the folder alone in
+ * the asset), has `gh` check the asset, and unpacks it.
  *
  * @param {string} copy
  * @param {string} release This tree's `server/`, as {@link releaseFolder} wrote it.
  * @param {string} work An empty folder for the tarball.
+ * @param {'codeload' | 'asset'} route
  */
-async function updateThroughGitHub(copy, release, work) {
-  const top = `tether-${RELEASE_VERSION}`;
+async function updateThroughGitHub(copy, release, work, route) {
+  // The asset's layout is release.yml's `git archive --prefix="tether-server-$V/" … -- server`.
+  const top = route === 'asset' ? `tether-server-${RELEASE_VERSION}` : `tether-${RELEASE_VERSION}`;
   await cp(release, join(work, 'archive', top, 'server'), { recursive: true });
   // Relative paths: GNU tar reads the `C:` of a Windows path as a remote host.
   execFileSync('tar', ['-czf', 'release.tgz', '-C', 'archive', top], { cwd: work });
   const github = await fakeGitHub(await readFile(join(work, 'release.tgz')));
+  const ghLog = join(work, 'gh-arguments.txt');
   try {
-    const env = { ...tarPath(), TETHER_TEST_GITHUB: github.url, TETHER_UPSTREAM: UPSTREAM };
+    const path = route === 'asset' ? await ghStub(join(work, 'bin'), ghLog) : updaterPath([]);
+    const env = { ...path, TETHER_TEST_GITHUB: github.url, TETHER_UPSTREAM: UPSTREAM };
     const update = await node(copy, ['--import', OFFLINE_GITHUB, 'scripts/update-tether.mjs'], { env });
+    const download = route === 'asset' ? `/web/${ASSET_PATH}` : `/codeload/${UPSTREAM}/tar.gz/`;
     assert.ok(
-      github.requests.some((path) => path.startsWith(`/codeload/${UPSTREAM}/tar.gz/`)),
+      github.requests.some((requested) => requested.startsWith(download)),
       'the release was downloaded',
     );
+    if (route === 'asset') {
+      const [command, verify, file, ...flags] = (await readFile(ghLog, 'utf8')).trimEnd().split('\n');
+      assert.deepEqual([command, verify], ['attestation', 'verify']);
+      assert.match(file ?? '', /release\.tgz$/, 'gh checks the downloaded asset');
+      assert.deepEqual(flags, [
+        '--repo',
+        UPSTREAM,
+        '--signer-workflow',
+        `${UPSTREAM}/.github/workflows/release.yml`,
+        '--source-ref',
+        `refs/tags/v${RELEASE_VERSION}`,
+        '--source-digest',
+        RELEASE_SHA,
+      ]);
+    }
     return update;
   } finally {
     await github.close();
@@ -280,10 +341,7 @@ for (const { tag, route } of OLD_UPDATERS) {
         assert.ok(revision !== null, `${tag} ships the update workflow`);
         const outdated = revision < SHIPPED_REVISION;
 
-        const update =
-          route === 'github'
-            ? await updateThroughGitHub(copy, release, join(work, 'download'))
-            : await node(copy, ['scripts/update-tether.mjs', '--from', release]);
+        const update = await updateThroughGitHub(copy, release, join(work, 'download'), route);
         assert.match(update.stdout, new RegExp(`^updated=${RELEASE_VERSION.replaceAll('.', '\\.')}$`, 'm'));
         assert.equal(await versionIn(copy), RELEASE_VERSION);
         assert.equal(

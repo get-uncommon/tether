@@ -6,8 +6,9 @@
  */
 import { matches } from './client.ts';
 import { field, isRecord } from '../server/src/shared/json.ts';
-import type { Shape } from './client.ts';
+import type { ShapeOf } from './client.ts';
 import type { Product } from './fragments.ts';
+import type { Money } from './shopify-values.ts';
 import type { PageInfo } from './loader.ts';
 
 /** A page of a GraphQL connection of products. */
@@ -17,7 +18,7 @@ export interface ProductConnection {
 }
 
 /** A Storefront API `MoneyV2`. */
-export const MONEY = { amount: 'string', currencyCode: 'string' } as const satisfies Shape;
+export const MONEY = { amount: 'string', currencyCode: 'string' } as const satisfies ShapeOf<Money>;
 
 /**
  * A product's id, handle and title, and every list and price a render walks without a fallback: images, options,
@@ -32,10 +33,13 @@ export const PRODUCT = {
   images: { nodes: ['object'] },
   priceRange: { minVariantPrice: MONEY, maxVariantPrice: MONEY },
   variants: { nodes: [{ id: 'string', price: MONEY, selectedOptions: ['object'] }] },
-} as const satisfies Shape;
+} as const satisfies ShapeOf<Product>;
 
 /** A page of products, with the `pageInfo` paging reads. */
-export const PRODUCT_CONNECTION = { nodes: [PRODUCT], pageInfo: { hasNextPage: 'boolean' } } as const satisfies Shape;
+export const PRODUCT_CONNECTION = {
+  nodes: [PRODUCT],
+  pageInfo: { hasNextPage: 'boolean' },
+} as const satisfies ShapeOf<ProductConnection>;
 
 /** True for a value with the structure of `PRODUCT` and a non-empty id and handle. */
 export const isProductShape = (value: unknown): value is Product =>
@@ -45,5 +49,5 @@ export const isProductShape = (value: unknown): value is Product =>
  * A node a lookup by gid answers: a product, or a node of another type, for which `... on Product` selects no field
  * (no `id`).
  */
-export const PRODUCT_NODE = (node: unknown): boolean =>
+export const PRODUCT_NODE = (node: unknown): node is Product | { id?: undefined } =>
   isRecord(node) && (node['id'] === undefined || matches(node, PRODUCT));

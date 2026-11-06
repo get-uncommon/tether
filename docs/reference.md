@@ -444,6 +444,12 @@ and `embedOrigins` (more origins a description's iframes may load from, besides 
 players: `['https://video.example']`; whatever such an origin serves is shown in the description, so
 add only hosts whose embeds you trust).
 
+**Retries (`retries`, default 2).** A query that failed on the network, with a 429 or 5xx, or with
+Shopify's `THROTTLED` is sent again, up to `retries` times. A mutation, add to cart and every other
+cart change included, is sent again only after a 429 or `THROTTLED`, which Shopify answers without
+running it: after a network error or a 5xx Shopify may already have applied it, so Tether doesn't
+send it twice, and a failed cart change loads the cart again to show what Shopify has.
+
 **Validation.** Every option is checked once, when Tether starts. An option Tether doesn't know (a
 typo such as `openCartOnAd`) logs a warning and is left out. A value it can't use logs a
 warning in the console and falls back to the default (or is left out): `apiVersion` must be a
@@ -503,8 +509,8 @@ metafield binds missing from `config.metafields`. It returns the same report as 
 **Error reporting (`onError`)**: every failure that reaches the visitor (product or list that
 didn't load, add to cart, cart actions, discount codes) goes through `onError(error, context)`.
 Errors are `TetherError`s with `code` (`NOT_FOUND`, `NETWORK`, `HTTP_401`, `NOT_CONFIGURED`,
-`INVALID_COUNTRY`, `INVALID_DISCOUNT`; accounts add [their own](accounts.md#errors)),
-`status`, `errors` (GraphQL) and `userErrors` (cart). For Sentry:
+`INVALID_COUNTRY`, `INVALID_DISCOUNT`, `INVALID_RESPONSE` for a 2xx answer that isn't valid
+GraphQL; accounts add [their own](accounts.md#errors)), `status`, `errors` (GraphQL) and `userErrors` (cart). For Sentry:
 
 ```js
 window.TETHER_CONFIG = {

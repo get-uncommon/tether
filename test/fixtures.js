@@ -355,6 +355,18 @@ export function builtTether(window) {
 export const jsonResponse = (body, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 
+/** @returns A 200 whose body stops arriving partway, as when the connection drops after Shopify answered. */
+export const okWithDroppedBody = () =>
+  new Response(
+    new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('{"data":'));
+        controller.error(new TypeError('network error'));
+      },
+    }),
+    { status: 200, headers: { 'Content-Type': 'application/json' } },
+  );
+
 /**
  * The GraphQL request a fake Storefront API received.
  *
