@@ -6,7 +6,14 @@ import prettier from 'eslint-config-prettier';
 import globals from 'globals';
 import tseslint from 'typescript-eslint';
 
-const TYPED_FILES = ['src/**/*.js', 'server/src/**/*.js', 'server/bin/*.js', 'server/scripts/*.mjs', 'scripts/*.mjs'];
+// scripts/smoke.mjs runs the built dist/, like the tests, so it is linted untyped with them.
+const TYPED_FILES = [
+  'src/**/*.js',
+  'server/src/**/*.js',
+  'server/bin/*.js',
+  'server/scripts/*.mjs',
+  'scripts/{build,release,api-version}.mjs',
+];
 
 export default tseslint.config(
   {
