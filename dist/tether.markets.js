@@ -1,4 +1,3 @@
-"use strict";
 (() => {
   var __defProp = Object.defineProperty;
   var __export = (target, all) => {
@@ -6,7 +5,7 @@
       __defProp(target, name, { get: all[name], enumerable: true });
   };
 
-  // src/markets-ui.js
+  // src/markets-ui.ts
   var markets_ui_exports = {};
   __export(markets_ui_exports, {
     detectMarket: () => detectMarket,
@@ -15,65 +14,69 @@
     setCountry: () => setCountry
   });
 
-  // tether-core:config.js
-  var m = window.Tether.__core["config.js"];
-  var { DEFAULTS, cfg, configure, isConfigured, log, reportError, resolveConfig, toMetafieldIdentifier, warn } = m;
+  // tether-core:config.ts
+  var m = window.Tether.__core["config.ts"];
+  var [cfg, isConfigured, log, MARKET_SOURCES, parseMarkets, reportError, warn] = m;
 
-  // tether-core:client.js
-  var m2 = window.Tether.__core["client.js"];
-  var { TetherError, endpoint, gql, request, unwrap, withContext } = m2;
+  // tether-core:client.ts
+  var m2 = window.Tether.__core["client.ts"];
+  var [endpoint, gql, orNull, shaped, TetherError] = m2;
 
-  // tether-core:cart.js
-  var m3 = window.Tether.__core["cart.js"];
-  var { Cart, trapFocus } = m3;
+  // tether-core:cart.ts
+  var m3 = window.Tether.__core["cart.ts"];
+  var [Cart] = m3;
 
-  // tether-core:collection.js
-  var m4 = window.Tether.__core["collection.js"];
-  var { ListScope, listSelector } = m4;
+  // tether-core:collection.ts
+  var m4 = window.Tether.__core["collection.ts"];
+  var [listSelector] = m4;
 
-  // tether-core:loader.js
-  var m5 = window.Tether.__core["loader.js"];
-  var { clearProductCache, getProduct, getProducts, getRecommendations, hydrateProducts, normalizeProductKey, primeProduct, refreshProducts, takeStale } = m5;
+  // tether-core:loader.ts
+  var m5 = window.Tether.__core["loader.ts"];
+  var [clearProductCache, getProduct] = m5;
 
-  // tether-core:dom.js
-  var m6 = window.Tether.__core["dom.js"];
-  var { attr, busy, cdnUrl, emit, formatDate, formatMoney, formatPercent, get, has, hasTemplate, imageUrl, notifyLayoutChanged, parseJSONAttr, productUrl, qsa, repeat, repeatKeyed, sameImage, scoped, sel, setImage, setSelected, setStoreHtml, setText, setTextTracked, show, toAttributes, watchImages } = m6;
+  // tether-core:dom.ts
+  var m6 = window.Tether.__core["dom.ts"];
+  var [ANALYTICS_EVENTS, attr, attributesFromJson, emit, formatDate, formatMoney, get, has, hasTemplate, isOwnEvent, parseJSONAttr, productUrl, qsa, repeat, sel, setImage, setText, show] = m6;
 
-  // tether-core:mounting.js
-  var m7 = window.Tether.__core["mounting.js"];
-  var { hydrateFromPage, liveLists, liveProducts, mountProduct, mountedLists, mountedProducts, pruneLive, retryFailed, settleMarket, trackMarket, within } = m7;
+  // tether-core:mounting.ts
+  var m7 = window.Tether.__core["mounting.ts"];
+  var [liveLists, liveProducts, mountedProducts, mountProduct, pruneLive, within] = m7;
 
-  // tether-core:market-codes.js
-  var m8 = window.Tether.__core["market-codes.js"];
-  var { toCountry, toLanguage } = m8;
+  // tether-core:market-codes.ts
+  var m8 = window.Tether.__core["market-codes.ts"];
+  var [toCountry, toLanguage] = m8;
 
-  // src/markets.js
-  var ALL_SOURCES = ["saved", "server", "webflow"];
-  var DEFAULT_COOKIE = "tether_country";
-  var storageKey = () => `${cfg.prefix}:market:${cfg.domain}`;
-  function localStorageIfAllowed() {
-    if (typeof window === "undefined") return null;
+  // src/storage.ts
+  function getStored(key, area = "localStorage") {
     try {
-      return window.localStorage;
+      return window[area].getItem(key);
     } catch {
       return null;
     }
   }
+  function setStored(key, value, area = "localStorage") {
+    try {
+      window[area].setItem(key, value);
+    } catch {
+    }
+  }
+
+  // src/markets.ts
+  var DEFAULT_COOKIE = "tether_country";
+  var storageKey = () => `${cfg.prefix}:market:${cfg.domain}`;
+  var pageStorage = { getItem: (key) => getStored(key) };
   function pageEnv() {
     const hasWindow = typeof window !== "undefined";
     return {
       document: typeof document !== "undefined" ? document : null,
       location: hasWindow ? window.location : null,
-      storage: localStorageIfAllowed(),
+      storage: pageStorage,
       global: hasWindow ? window : {}
     };
   }
   function parseJsonOrNull(text) {
     try {
-      return (
-        /** @type {unknown} */
-        JSON.parse(text)
-      );
+      return JSON.parse(text);
     } catch (error) {
       if (error instanceof SyntaxError) return null;
       throw error;
@@ -83,18 +86,15 @@
     if (typeof value !== "object" || value === null) return null;
     const country = toCountry(Reflect.get(value, "country"));
     if (!country) return null;
-    const locale = (
-      /** @type {unknown} */
-      Reflect.get(value, "locale")
-    );
+    const locale = Reflect.get(value, "locale");
     return {
       country,
       language: toLanguage(Reflect.get(value, "language")) ?? void 0,
       locale: typeof locale === "string" && locale ? locale : void 0
     };
   }
-  function readSavedMarket(storage = localStorageIfAllowed()) {
-    const text = storage?.getItem(storageKey());
+  function readSavedMarket(storage = pageStorage) {
+    const text = storage.getItem(storageKey());
     return text ? toMarket(parseJsonOrNull(text)) : null;
   }
   function readCookie(doc, name) {
@@ -110,9 +110,12 @@
   }
   function readServerHint(markets, env) {
     const meta = (name) => env.document?.querySelector(`meta[name="${name}"]`)?.getAttribute("content");
+    const globalCountry = Reflect.get(env.global, "TETHER_COUNTRY");
+    const globalLanguage = Reflect.get(env.global, "TETHER_LANGUAGE");
+    const pageCountry = meta("tether-country") || readCookie(env.document, markets.cookie || DEFAULT_COOKIE);
     return {
-      country: Reflect.get(env.global, "TETHER_COUNTRY") || meta("tether-country") || readCookie(env.document, markets.cookie || DEFAULT_COOKIE),
-      language: Reflect.get(env.global, "TETHER_LANGUAGE") || meta("tether-language")
+      country: globalCountry || pageCountry,
+      language: globalLanguage || meta("tether-language")
     };
   }
   function readWebflowLocale(markets, env) {
@@ -137,17 +140,12 @@
         return readWebflowLocale(markets, env);
     }
   }
-  var isMarketSource = (name) => ALL_SOURCES.some((source) => source === name);
   function sourcesFor(detect) {
     if (!detect) return ["saved"];
-    if (detect === true) return ALL_SOURCES;
-    return (
-      /** @type {unknown[]} */
-      [detect].flat().filter(isMarketSource)
-    );
+    return detect === true ? MARKET_SOURCES : detect;
   }
   function detectMarket(markets = cfg.markets, env = pageEnv()) {
-    const config = markets ?? {};
+    const config = (markets === cfg.markets ? markets : parseMarkets(markets)) ?? {};
     if (config.detect === false) return {};
     const sources = {};
     const found = { sources };
@@ -172,40 +170,34 @@
     }
     return found;
   }
-  function storeIfAllowed(key, value) {
-    try {
-      localStorage.setItem(key, value);
-    } catch {
-      return;
-    }
-  }
   function rememberMarket(market) {
     if (cfg.markets?.remember === false) return;
     const saved = { country: market.country, language: market.language || void 0, locale: market.locale || void 0 };
-    storeIfAllowed(storageKey(), JSON.stringify(saved));
+    setStored(storageKey(), JSON.stringify(saved));
   }
+
+  // src/markets-ui.ts
+  var DEFAULT_LABEL = "{name} ({currency})";
+  var DEFAULT_BIND = "name";
   var localizationPromise = null;
   function clearLocalization() {
     localizationPromise = null;
   }
   var LOCALIZATION_QUERY = `query TetherLocalization{localization{country{isoCode name currency{isoCode symbol}}language{isoCode name}availableCountries{isoCode name currency{isoCode symbol}availableLanguages{isoCode name}}}}`;
+  var COUNTRY = { isoCode: "string", name: "string", currency: "object" };
+  var isLocalizationAnswer = shaped({
+    localization: { country: COUNTRY, availableCountries: [COUNTRY] }
+  });
   function getLocalization() {
-    if (!localizationPromise) {
-      const loading = gql(LOCALIZATION_QUERY);
-      localizationPromise = loading.then(
-        (data) => data.localization,
-        (error) => {
-          localizationPromise = null;
-          throw error;
-        }
-      );
-    }
+    localizationPromise ?? (localizationPromise = gql(LOCALIZATION_QUERY, {}, isLocalizationAnswer).then(
+      (data) => data.localization,
+      (error) => {
+        localizationPromise = null;
+        throw error;
+      }
+    ));
     return localizationPromise;
   }
-
-  // src/markets-ui.js
-  var DEFAULT_LABEL = "{name} ({currency})";
-  var DEFAULT_BIND = "name";
   function countryField(country, field) {
     switch (field) {
       case "name":
@@ -220,10 +212,7 @@
         return "";
     }
   }
-  var fillLabel = (template, country) => template.replace(
-    /\{(name|code|currency|symbol)\}/g,
-    (_match, field) => countryField(country, field)
-  );
+  var fillLabel = (template, country) => template.replace(/\{(name|code|currency|symbol)\}/g, (_match, field) => countryField(country, field));
   function fillCountrySelect(select, countries, current) {
     const template = select.getAttribute(attr("country-label")) || DEFAULT_LABEL;
     const only = (select.getAttribute(attr("countries")) || "").toUpperCase().split(/[\s,]+/).filter(Boolean);
@@ -247,10 +236,7 @@
     });
   }
   function renderCountrySelects(root = document) {
-    const selects = (
-      /** @type {HTMLSelectElement[]} */
-      within(root, `select${sel("country-select")}`)
-    );
+    const selects = within(root, `select${sel("country-select")}`);
     const binds = within(root, sel("country-bind"));
     if (!selects.length && !binds.length) return Promise.resolve();
     return getLocalization().then((localization) => {
@@ -291,7 +277,7 @@
     const ownLocale = locale || entry?.locale;
     const nextLocale = ownLocale || cfg.locale;
     const nextLanguage = languageFor(language, entry);
-    const changed = country !== cfg.country?.toUpperCase() || nextLanguage !== cfg.language || nextLocale !== cfg.locale;
+    const changed = country !== cfg.country || nextLanguage !== cfg.language || nextLocale !== cfg.locale;
     cfg.country = country;
     cfg.language = nextLanguage || void 0;
     cfg.locale = nextLocale;
@@ -308,11 +294,8 @@
     return Cart.state;
   }
 
-  // src/parts/markets.js
-  var { Tether } = (
-    /** @type {Window & { Tether?: { __parts: Record<string, unknown> } }} */
-    window
-  );
+  // src/parts/markets.ts
+  var { Tether } = window;
   if (!Tether) throw new Error("tether.markets.js runs after the Tether script, which loads it");
-  Tether.__parts["markets"] = markets_ui_exports;
+  Tether.__parts.markets = markets_ui_exports;
 })();

@@ -1,34 +1,42 @@
-"use strict";
 (() => {
   var __defProp = Object.defineProperty;
+  var __defNormalProp = (obj, key, value) => key in obj ? __defProp(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
   var __export = (target, all) => {
     for (var name in all)
       __defProp(target, name, { get: all[name], enumerable: true });
   };
+  var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "symbol" ? key + "" : key, value);
 
-  // src/search.js
+  // src/search.ts
   var search_exports = {};
   __export(search_exports, {
     mountSearch: () => mountSearch
   });
 
-  // tether-core:config.js
-  var m = window.Tether.__core["config.js"];
-  var { DEFAULTS, cfg, configure, isConfigured, log, reportError, resolveConfig, toMetafieldIdentifier, warn } = m;
+  // tether-core:config.ts
+  var m = window.Tether.__core["config.ts"];
+  var [cfg, isConfigured, log, MARKET_SOURCES, parseMarkets, reportError, warn] = m;
 
-  // tether-core:client.js
-  var m2 = window.Tether.__core["client.js"];
-  var { TetherError, endpoint, gql, request, unwrap, withContext } = m2;
+  // tether-core:client.ts
+  var m2 = window.Tether.__core["client.ts"];
+  var [endpoint, gql, orNull, shaped, TetherError] = m2;
 
-  // tether-core:dom.js
-  var m3 = window.Tether.__core["dom.js"];
-  var { attr, busy, cdnUrl, emit, formatDate, formatMoney, formatPercent, get, has, hasTemplate, imageUrl, notifyLayoutChanged, parseJSONAttr, productUrl, qsa, repeat, repeatKeyed, sameImage, scoped, sel, setImage, setSelected, setStoreHtml, setText, setTextTracked, show, toAttributes, watchImages } = m3;
+  // tether-core:dom.ts
+  var m3 = window.Tether.__core["dom.ts"];
+  var [ANALYTICS_EVENTS, attr, attributesFromJson, emit, formatDate, formatMoney, get, has, hasTemplate, isOwnEvent, parseJSONAttr, productUrl, qsa, repeat, sel, setImage, setText, show] = m3;
 
-  // tether-core:mounting.js
-  var m4 = window.Tether.__core["mounting.js"];
-  var { hydrateFromPage, liveLists, liveProducts, mountProduct, mountedLists, mountedProducts, pruneLive, retryFailed, settleMarket, trackMarket, within } = m4;
+  // tether-core:mounting.ts
+  var m4 = window.Tether.__core["mounting.ts"];
+  var [liveLists, liveProducts, mountedProducts, mountProduct, pruneLive, within] = m4;
 
-  // src/search.js
+  // src/search.ts
+  var isSearchAnswer = shaped({
+    predictiveSearch: orNull({
+      products: [{ priceRange: "object" }],
+      collections: ["object"],
+      queries: [{ text: "string" }]
+    })
+  });
   var QUERY = `query TetherPredictive($q:String!,$limit:Int!){predictiveSearch(query:$q,limit:$limit,limitScope:EACH,types:[PRODUCT,COLLECTION,QUERY]){products{id handle title availableForSale featuredImage{url altText}priceRange{minVariantPrice{amount currencyCode}}}collections{handle title image{url altText}}queries{text}}}`;
   var DEFAULT_LIMIT = 6;
   var DEFAULT_MIN_CHARACTERS = 2;
@@ -51,16 +59,23 @@
   function linkOption(node, href) {
     const link = linkIn(node);
     if (!link) return;
-    link.setAttribute("href", href);
+    if (href) link.setAttribute("href", href);
     link.setAttribute("role", "option");
   }
   var SearchBox = class {
-    /**
-     * @param {HTMLElement} root
-     * @param {HTMLInputElement} input
-     * @param {HTMLElement} results
-     */
     constructor(root, input, results) {
+      __publicField(this, "root");
+      __publicField(this, "input");
+      __publicField(this, "results");
+      __publicField(this, "limit");
+      __publicField(this, "minCharacters");
+      __publicField(this, "resultsId");
+      /** Counts searches, so only the latest one renders. */
+      __publicField(this, "searchNumber", 0);
+      __publicField(this, "timer");
+      __publicField(this, "lastTerm", "");
+      /** Results per term, for typing back and forth. */
+      __publicField(this, "cache", /* @__PURE__ */ new Map());
       this.root = root;
       this.input = input;
       this.results = results;
@@ -71,10 +86,6 @@
         results.id = `${cfg.prefix}-search-${searchBoxCount}`;
       }
       this.resultsId = results.id;
-      this.searchNumber = 0;
-      this.timer = void 0;
-      this.lastTerm = "";
-      this.cache = /* @__PURE__ */ new Map();
       this.setUpAria();
       this.listen();
     }
@@ -102,17 +113,12 @@
         this.onKeydown(event);
       });
       document.addEventListener("click", (event) => {
-        if (!this.root.contains(
-          /** @type {Node | null} */
-          event.target
-        )) this.open(false);
+        if (!this.root.contains(event.target)) this.open(false);
       });
     }
-    /** @param {SearchState} state */
     setState(state) {
       this.root.setAttribute(attr("search-state"), state);
     }
-    /** @param {boolean} open */
     open(open) {
       this.root.classList.toggle("is-open", open);
       this.results.hidden = !open;
@@ -122,18 +128,13 @@
     options() {
       return qsa(this.results, '[role="option"]');
     }
-    /**
-     * @param {string} term
-     * @returns {Promise<SearchResults | null>}
-     */
     async fetchResults(term) {
       const cached = this.cache.get(term);
       if (cached) return cached;
-      const data = await gql(QUERY, { q: term, limit: this.limit });
+      const data = await gql(QUERY, { q: term, limit: this.limit }, isSearchAnswer);
       this.cache.set(term, data.predictiveSearch);
       return data.predictiveSearch;
     }
-    /** @param {string} term */
     async search(term) {
       this.searchNumber += 1;
       const searchNumber = this.searchNumber;
@@ -155,28 +156,18 @@
         reportError(error, "search");
       }
     }
-    /**
-     * @template Item
-     * @param {string} name The list attribute, e.g. `search-products`.
-     * @param {readonly Item[]} items
-     * @param {(node: HTMLElement, item: Item) => void} render
-     */
+    /** @param name The list attribute, e.g. `search-products`. */
     fillList(name, items, render) {
       qsa(this.results, sel(name)).forEach((list) => {
         repeat(list, items, render);
         show(list, items.length > 0);
       });
     }
-    /** @param {string} text */
     queryUrl(text) {
       const action = this.root.getAttribute("action") || DEFAULT_ACTION;
       const separator = action.includes("?") ? "&" : "?";
       return `${action}${separator}${this.input.name || "q"}=${encodeURIComponent(text)}`;
     }
-    /**
-     * @param {SearchResults | null} results
-     * @param {string} term
-     */
     render(results, term) {
       const products = results?.products ?? [];
       const collections = results?.collections ?? [];
@@ -201,7 +192,6 @@
       this.open(true);
       emit("search", { term, products, collections, queries }, this.root);
     }
-    /** @param {number} count */
     showCount(count) {
       qsa(this.root, sel("show")).forEach((el) => {
         const condition = get(el, "show");
@@ -213,10 +203,6 @@
         option.setAttribute("aria-selected", "false");
       });
     }
-    /**
-     * @param {HTMLElement[]} options
-     * @param {number} index
-     */
     highlight(options, index) {
       options.forEach((option2, optionIndex) => {
         option2.setAttribute("aria-selected", String(optionIndex === index));
@@ -226,7 +212,6 @@
       this.input.setAttribute("aria-activedescendant", option.id);
       option.scrollIntoView?.({ block: "nearest" });
     }
-    /** @param {KeyboardEvent} event */
     onKeydown(event) {
       const options = this.options();
       const current = options.findIndex((option) => option.getAttribute("aria-selected") === "true");
@@ -249,23 +234,14 @@
     for (const el of within(root, sel("search"))) {
       if (mounted.has(el)) continue;
       mounted.add(el);
-      const input = (
-        /** @type {HTMLInputElement | null} */
-        el.querySelector(sel("search-input")) ?? el.querySelector("input")
-      );
-      const results = (
-        /** @type {HTMLElement | null} */
-        el.querySelector(sel("search-results"))
-      );
+      const input = el.querySelector(sel("search-input")) ?? el.querySelector("input");
+      const results = el.querySelector(sel("search-results"));
       if (input && results) new SearchBox(el, input, results);
     }
   }
 
-  // src/parts/search.js
-  var { Tether } = (
-    /** @type {Window & { Tether?: { __parts: Record<string, unknown> } }} */
-    window
-  );
+  // src/parts/search.ts
+  var { Tether } = window;
   if (!Tether) throw new Error("tether.search.js runs after the Tether script, which loads it");
-  Tether.__parts["search"] = search_exports;
+  Tether.__parts.search = search_exports;
 })();

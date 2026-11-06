@@ -1,4 +1,3 @@
-"use strict";
 (() => {
   var __defProp = Object.defineProperty;
   var __export = (target, all) => {
@@ -6,7 +5,7 @@
       __defProp(target, name, { get: all[name], enumerable: true });
   };
 
-  // src/extras.js
+  // src/extras.ts
   var extras_exports = {};
   __export(extras_exports, {
     addGroup: () => addGroup,
@@ -14,28 +13,30 @@
     writeVariantUrl: () => writeVariantUrl
   });
 
-  // tether-core:config.js
-  var m = window.Tether.__core["config.js"];
-  var { DEFAULTS, cfg, configure, isConfigured, log, reportError, resolveConfig, toMetafieldIdentifier, warn } = m;
+  // tether-core:config.ts
+  var m = window.Tether.__core["config.ts"];
+  var [cfg, isConfigured, log, MARKET_SOURCES, parseMarkets, reportError, warn] = m;
 
-  // tether-core:dom.js
-  var m2 = window.Tether.__core["dom.js"];
-  var { attr, busy, cdnUrl, emit, formatDate, formatMoney, formatPercent, get, has, hasTemplate, imageUrl, notifyLayoutChanged, parseJSONAttr, productUrl, qsa, repeat, repeatKeyed, sameImage, scoped, sel, setImage, setSelected, setStoreHtml, setText, setTextTracked, show, toAttributes, watchImages } = m2;
+  // tether-core:dom.ts
+  var m2 = window.Tether.__core["dom.ts"];
+  var [ANALYTICS_EVENTS, attr, attributesFromJson, emit, formatDate, formatMoney, get, has, hasTemplate, isOwnEvent, parseJSONAttr, productUrl, qsa, repeat, sel, setImage, setText, show] = m2;
 
-  // tether-core:product.js
-  var m3 = window.Tether.__core["product.js"];
-  var { ProductScope, rememberOptionNames, scopes } = m3;
+  // tether-core:product.ts
+  var m3 = window.Tether.__core["product.ts"];
+  var [scopes] = m3;
 
-  // tether-core:cart.js
-  var m4 = window.Tether.__core["cart.js"];
-  var { Cart, trapFocus } = m4;
+  // tether-core:cart.ts
+  var m4 = window.Tether.__core["cart.ts"];
+  var [Cart] = m4;
 
-  // src/extras.js
+  // server/src/shared/json.ts
+  function isRecord(value) {
+    return value !== null && typeof value === "object" && !Array.isArray(value);
+  }
+
+  // src/extras.ts
   function groupAttributes(group, name) {
-    const extra = toAttributes(
-      /** @type {Parameters<typeof toAttributes>[0]} */
-      parseJSONAttr(group, "line-attributes")
-    );
+    const extra = attributesFromJson(parseJSONAttr(group, "line-attributes"));
     return name ? [{ key: "_group", value: name }, ...extra] : extra;
   }
   async function addGroup(button) {
@@ -69,11 +70,8 @@
     } catch {
       return null;
     }
-    if (typeof value !== "object" || value === null) return null;
-    const { country, language, locale } = (
-      /** @type {Record<string, unknown>} */
-      value
-    );
+    if (!isRecord(value)) return null;
+    const { country, language, locale } = value;
     if (typeof country !== "string" || !country) return null;
     return {
       country,
@@ -90,13 +88,10 @@
     }
     if (event.key !== `${cfg.prefix}:market:${cfg.domain}` || !event.newValue) return;
     const market = parseStoredMarket(event.newValue);
-    const { Tether: Tether2 } = (
-      /** @type {Window & { Tether?: { setCountry: SetCountry } }} */
-      window
-    );
-    if (!market || !Tether2) return;
+    const tether = Reflect.get(window, "Tether");
+    if (!market || !tether) return;
     const options = { language: market.language, locale: market.locale, remember: false };
-    Tether2.setCountry(market.country, options).catch((error) => {
+    tether.setCountry(market.country, options).catch((error) => {
       reportError(error, "market from another tab");
     });
   }
@@ -122,11 +117,8 @@
     replaceUrlIfAllowed(url);
   }
 
-  // src/parts/extras.js
-  var { Tether } = (
-    /** @type {Window & { Tether?: { __parts: Record<string, unknown> } }} */
-    window
-  );
+  // src/parts/extras.ts
+  var { Tether } = window;
   if (!Tether) throw new Error("tether.extras.js runs after the Tether script, which loads it");
-  Tether.__parts["extras"] = extras_exports;
+  Tether.__parts.extras = extras_exports;
 })();

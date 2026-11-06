@@ -96,7 +96,7 @@ export type {
 /** The helpers for selling plans, `Tether.plans`. */
 export type SellingPlanHelpers = typeof plans;
 
-export const VERSION = '0.6.8';
+export const VERSION = '0.7.0';
 
 /** Milliseconds `observe` waits after the last added node, so a burst of additions mounts once. */
 const OBSERVE_DEBOUNCE_MS = 50;

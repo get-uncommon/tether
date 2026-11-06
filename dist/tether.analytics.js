@@ -1,4 +1,3 @@
-"use strict";
 (() => {
   var __defProp = Object.defineProperty;
   var __export = (target, all) => {
@@ -6,42 +5,41 @@
       __defProp(target, name, { get: all[name], enumerable: true });
   };
 
-  // src/analytics.js
+  // src/analytics.ts
   var analytics_exports = {};
   __export(analytics_exports, {
     startAnalytics: () => startAnalytics
   });
 
-  // tether-core:config.js
-  var m = window.Tether.__core["config.js"];
-  var { DEFAULTS, cfg, configure, isConfigured, log, reportError, resolveConfig, toMetafieldIdentifier, warn } = m;
+  // tether-core:config.ts
+  var m = window.Tether.__core["config.ts"];
+  var [cfg, isConfigured, log, MARKET_SOURCES, parseMarkets, reportError, warn] = m;
 
-  // tether-core:dom.js
-  var m2 = window.Tether.__core["dom.js"];
-  var { attr, busy, cdnUrl, emit, formatDate, formatMoney, formatPercent, get, has, hasTemplate, imageUrl, notifyLayoutChanged, parseJSONAttr, productUrl, qsa, repeat, repeatKeyed, sameImage, scoped, sel, setImage, setSelected, setStoreHtml, setText, setTextTracked, show, toAttributes, watchImages } = m2;
+  // tether-core:dom.ts
+  var m2 = window.Tether.__core["dom.ts"];
+  var [ANALYTICS_EVENTS, attr, attributesFromJson, emit, formatDate, formatMoney, get, has, hasTemplate, isOwnEvent, parseJSONAttr, productUrl, qsa, repeat, sel, setImage, setText, show] = m2;
 
-  // tether-core:cart.js
-  var m3 = window.Tether.__core["cart.js"];
-  var { Cart, trapFocus } = m3;
+  // tether-core:cart.ts
+  var m3 = window.Tether.__core["cart.ts"];
+  var [Cart] = m3;
 
-  // tether-core:client.js
-  var m4 = window.Tether.__core["client.js"];
-  var { TetherError, endpoint, gql, request, unwrap, withContext } = m4;
+  // tether-core:product.ts
+  var m4 = window.Tether.__core["product.ts"];
+  var [scopes] = m4;
 
-  // src/analytics-shopify.js
+  // tether-core:client.ts
+  var m5 = window.Tether.__core["client.ts"];
+  var [endpoint, gql, orNull, shaped, TetherError] = m5;
+
+  // src/analytics-shopify.ts
   var BUFFER_SIZE = 500;
   var CONSENT_SCRIPTS = {
     "default-banner": "https://cdn.shopify.com/shopifycloud/privacy-banner/storefront-banner.js",
     other: "https://cdn.shopify.com/shopifycloud/consent-tracking-api/v0.2/consent-tracking-api.js"
   };
   var ANALYTICS_SCRIPT = "https://cdn.shopify.com/storefront/analytics/shopify.js";
-  function shopifyGlobal() {
-    const shopify = Reflect.get(window, "Shopify");
-    return (
-      /** @type {ShopifyGlobal | undefined} */
-      shopify
-    );
-  }
+  var page = () => window;
+  var shopifyGlobal = () => page().Shopify;
   function shopifyOptions() {
     const shopify = cfg.analytics?.shopify;
     return typeof shopify === "object" ? shopify : {};
@@ -99,7 +97,12 @@
         deliver();
       },
       addDestination(spec) {
-        const destination = { name: spec.name, next: 0, subscribers: /* @__PURE__ */ new Map(), context: destinationContext(spec.name) };
+        const destination = {
+          name: spec.name,
+          next: 0,
+          subscribers: /* @__PURE__ */ new Map(),
+          context: destinationContext(spec.name)
+        };
         Promise.resolve(spec.setup?.({ subscribe: subscriberOf(destination), getConfig: bus2.getConfig })).then(() => {
           destinations.push(destination);
           deliver();
@@ -134,11 +137,17 @@
   async function startShopifyAnalytics(isProductPage) {
     const existing = shopifyGlobal();
     if (existing?.analytics) return existing.analytics;
-    const data = await gql("query TetherShopId { shop { id } }", {}, { context: false });
+    const data = await gql(
+      "query TetherShopId { shop { id } }",
+      {},
+      shaped({ shop: { id: "string" } }),
+      { context: false }
+    );
     const shopify = shopifyGlobal() ?? {};
-    Reflect.set(window, "Shopify", shopify);
-    shopify.country = (cfg.country || "US").toUpperCase();
-    shopify.locale = (cfg.locale || "en").split("-")[0]?.toLowerCase() ?? "en";
+    page().Shopify = shopify;
+    shopify.country = cfg.country ?? "US";
+    const [language = "en"] = (cfg.locale || "en").split("-");
+    shopify.locale = language.toLowerCase();
     shopify.shop = cfg.domain;
     shopify.routes = {
       root: "/",
@@ -158,7 +167,7 @@
     return bus2;
   }
 
-  // src/analytics.js
+  // src/analytics.ts
   var DEFAULT_VARIANT_TITLE = "Default Title";
   var CENTS_PER_UNIT = 100;
   var MAX_LIST_ITEMS = 200;
@@ -243,14 +252,10 @@
   function mainProduct() {
     const el = document.querySelector(sel("product"));
     if (!el || el.closest(`${sel("collection")},${sel("products")},${sel("recommendations")}`)) return null;
-    const tether = Reflect.get(window, "Tether");
-    return (
-      /** @type {{ getScope: (el: Element) => unknown }} */
-      tether.getScope(el)
-    );
+    return scopes.get(el) ?? null;
   }
   function onProductReady({ product, scope }) {
-    if (!scope || viewed.has(scope.root) || mainProduct() !== scope) return;
+    if (viewed.has(scope.root) || mainProduct() !== scope) return;
     viewed.add(scope.root);
     const variant = scope.variant ?? product.variants.nodes[0];
     const items = [itemFromVariant(product, variant)];
@@ -259,7 +264,7 @@
       products
     });
   }
-  function onListReady({ products = [], collection }) {
+  function onListReady({ products, collection }) {
     const items = products.slice(0, MAX_LIST_ITEMS).map((product, index) => itemFromVariant(product, product.variants.nodes[0], 1, index));
     const list = { item_list_id: collection?.handle || "products", item_list_name: collection?.title || "Products" };
     if (!collection) {
@@ -302,6 +307,7 @@
     send("view_cart", { currency: Cart.state?.cost.totalAmount.currencyCode, value: totalValue(items), items });
   }
   function onCheckout({ cart }) {
+    if (!cart) return;
     const items = cart.lines.nodes.map((line) => itemFromLine(line));
     const coupons = cart.discountCodes.filter((discount) => discount.applicable).map((discount) => discount.code);
     send("begin_checkout", {
@@ -311,55 +317,30 @@
       items
     });
   }
-  function handle(event) {
-    const name = event.type.slice(cfg.prefix.length + 1);
-    const detail = Reflect.get(event, "detail");
-    switch (name) {
-      case "product-ready":
-        onProductReady(
-          /** @type {ProductReadyDetail} */
-          detail
-        );
-        break;
-      case "list-ready":
-        onListReady(
-          /** @type {ListReadyDetail} */
-          detail
-        );
-        break;
-      case "cart-updated":
-        onCartUpdated(
-          /** @type {CartUpdatedDetail} */
-          detail
-        );
-        break;
-      case "cart-toggled":
-        if (
-          /** @type {{ open: boolean }} */
-          detail.open
-        ) onCartOpened();
-        break;
-      case "checkout":
-        onCheckout(
-          /** @type {{ cart: AnalyticsCart }} */
-          detail
-        );
-        break;
-      case "search": {
-        const { term } = (
-          /** @type {{ term: string }} */
-          detail
-        );
-        if (term) send("search", { search_term: term }, "search_viewed", { searchTerm: term });
-        break;
-      }
-      case "page":
-        viewed = /* @__PURE__ */ new WeakSet();
-        bus?.publish("page_viewed", {});
-        break;
-      default:
-        break;
+  var REPORTERS = {
+    "product-ready": onProductReady,
+    "list-ready": onListReady,
+    "cart-updated": onCartUpdated,
+    "cart-toggled": ({ open }) => {
+      if (open) onCartOpened();
+    },
+    checkout: onCheckout,
+    search: ({ term }) => {
+      if (term) send("search", { search_term: term }, "search_viewed", { searchTerm: term });
     }
+  };
+  function report(event, name) {
+    REPORTERS[name](event.detail);
+  }
+  function handle(event) {
+    if (event.type === "astro:page-load") {
+      viewed = /* @__PURE__ */ new WeakSet();
+      bus?.publish("page_viewed", {});
+      return;
+    }
+    ANALYTICS_EVENTS.forEach((name) => {
+      if (isOwnEvent(event, name)) report(event, name);
+    });
   }
   async function startAnalytics(queue) {
     if (cfg.analytics?.shopify) {
@@ -376,11 +357,8 @@
     };
   }
 
-  // src/parts/analytics.js
-  var { Tether } = (
-    /** @type {Window & { Tether?: { __parts: Record<string, unknown> } }} */
-    window
-  );
+  // src/parts/analytics.ts
+  var { Tether } = window;
   if (!Tether) throw new Error("tether.analytics.js runs after the Tether script, which loads it");
-  Tether.__parts["analytics"] = analytics_exports;
+  Tether.__parts.analytics = analytics_exports;
 })();

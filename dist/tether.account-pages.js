@@ -1,4 +1,3 @@
-"use strict";
 (() => {
   var __defProp = Object.defineProperty;
   var __export = (target, all) => {
@@ -6,7 +5,7 @@
       __defProp(target, name, { get: all[name], enumerable: true });
   };
 
-  // src/account-pages.js
+  // src/account-pages.ts
   var account_pages_exports = {};
   __export(account_pages_exports, {
     addresses: () => addresses,
@@ -22,226 +21,241 @@
     updateProfile: () => updateProfile
   });
 
-  // tether-core:config.js
-  var m = window.Tether.__core["config.js"];
-  var { DEFAULTS, cfg, configure, isConfigured, log, reportError, resolveConfig, toMetafieldIdentifier, warn } = m;
+  // tether-core:config.ts
+  var m = window.Tether.__core["config.ts"];
+  var [cfg, isConfigured, log, MARKET_SOURCES, parseMarkets, reportError, warn] = m;
 
-  // tether-core:dom.js
-  var m2 = window.Tether.__core["dom.js"];
-  var { attr, busy, cdnUrl, emit, formatDate, formatMoney, formatPercent, get, has, hasTemplate, imageUrl, notifyLayoutChanged, parseJSONAttr, productUrl, qsa, repeat, repeatKeyed, sameImage, scoped, sel, setImage, setSelected, setStoreHtml, setText, setTextTracked, show, toAttributes, watchImages } = m2;
+  // tether-core:dom.ts
+  var m2 = window.Tether.__core["dom.ts"];
+  var [ANALYTICS_EVENTS, attr, attributesFromJson, emit, formatDate, formatMoney, get, has, hasTemplate, isOwnEvent, parseJSONAttr, productUrl, qsa, repeat, sel, setImage, setText, show] = m2;
 
-  // tether-core:client.js
-  var m3 = window.Tether.__core["client.js"];
-  var { TetherError, endpoint, gql, request, unwrap, withContext } = m3;
+  // tether-core:client.ts
+  var m3 = window.Tether.__core["client.ts"];
+  var [endpoint, gql, orNull, shaped, TetherError] = m3;
 
-  // server/src/shared/account-ops.js
-  var InputError = class extends Error {
-    /**
-     * @param {string} message
-     * @param {{ status?: number, userErrors?: UserError[] }} [details]
-     */
-    constructor(message, { status = 400, userErrors = [] } = {}) {
-      super(message);
-      this.name = "InputError";
-      this.status = status;
-      this.userErrors = userErrors;
+  // server/src/shared/account-routes.ts
+  var OPERATION_ROUTES = {
+    order: { name: "order", method: "GET", path: "/order", fields: { id: true } },
+    addresses: { name: "addresses", method: "GET", path: "/addresses", fields: {} },
+    subscriptions: { name: "subscriptions", method: "GET", path: "/subscriptions", fields: {} },
+    profile: { name: "profile", method: "POST", path: "/profile", fields: { firstName: true, lastName: true } },
+    saveAddress: {
+      name: "saveAddress",
+      method: "POST",
+      path: "/address",
+      fields: { id: true, address: true, isDefault: true }
+    },
+    deleteAddress: { name: "deleteAddress", method: "POST", path: "/address/delete", fields: { id: true } },
+    subscription: { name: "subscription", method: "POST", path: "/subscription", fields: { id: true, action: true } },
+    requestReturn: { name: "requestReturn", method: "POST", path: "/return", fields: { orderId: true, lines: true } }
+  };
+  var ROUTE_BY_REQUEST = new Map(
+    Object.values(OPERATION_ROUTES).map((route) => [
+      `${route.method} ${route.path}`,
+      { ...route, fields: Object.keys(route.fields) }
+    ])
+  );
+  function operationRequest(name, input) {
+    const route = OPERATION_ROUTES[name];
+    if (route.method === "POST") return { method: "POST", path: route.path };
+    const values = input;
+    const query = new URLSearchParams();
+    for (const fieldName of Object.keys(route.fields)) {
+      const value = values[fieldName];
+      if (typeof value === "string" || typeof value === "number") query.set(fieldName, String(value));
     }
-  };
-  var MONEY = "amount currencyCode";
-  var ADDRESS = "id firstName lastName company address1 address2 city province zoneCode zip country countryCode phoneNumber formatted";
-  var USER_ERRORS = "userErrors { field message }";
-  var QUERIES = {
-    order: `query TetherOrder($id:ID!){order(id:$id){id name number processedAt cancelledAt financialStatus fulfillmentStatus statusPageUrl requiresShipping totalPrice{${MONEY}}subtotal{${MONEY}}totalShipping{${MONEY}}totalTax{${MONEY}}shippingAddress{${ADDRESS}}billingAddress{${ADDRESS}}lineItems(first:50){nodes{id name title variantTitle quantity sku image{url altText}price{${MONEY}}totalPrice{${MONEY}}suggestedReturnReasonDefinitions(first:10){nodes{id name handle}}}}fulfillments(first:10){nodes{id status createdAt estimatedDeliveryAt latestShipmentStatus trackingInformation{company number url}}}returnInformation{returnableLineItems(first:50){nodes{quantity lineItem{id}}}}returns(first:10){nodes{id status}}}}`,
-    addresses: `query TetherAddresses{customer{defaultAddress{id}addresses(first:20){nodes{${ADDRESS}}}}}`,
-    subscriptions: `query TetherSubscriptions{customer{subscriptionContracts(first:20,reverse:true){nodes{id status nextBillingDate currencyCode deliveryPrice{${MONEY}}deliveryPolicy{interval intervalCount{count}}lines(first:20){nodes{id name title variantTitle quantity sku currentPrice{${MONEY}}lineDiscountedPrice{${MONEY}}image{url altText}}}upcomingBillingCycles(first:3){nodes{cycleIndex skipped billingAttemptExpectedDate}}}}}}`,
-    contract: `query TetherContract($id:ID!){customer{subscriptionContract(id:$id){id status upcomingBillingCycles(first:3){nodes{cycleIndex skipped}}}}}`
-  };
-  var MUTATIONS = {
-    profile: `mutation TetherProfile($input:CustomerUpdateInput!){customerUpdate(input:$input){customer{firstName lastName}${USER_ERRORS}}}`,
-    addressCreate: `mutation TetherAddressCreate($address:CustomerAddressInput!,$default:Boolean){customerAddressCreate(address:$address,defaultAddress:$default){customerAddress{${ADDRESS}}${USER_ERRORS}}}`,
-    addressUpdate: `mutation TetherAddressUpdate($id:ID!,$address:CustomerAddressInput,$default:Boolean){customerAddressUpdate(addressId:$id,address:$address,defaultAddress:$default){customerAddress{${ADDRESS}}${USER_ERRORS}}}`,
-    addressDelete: `mutation TetherAddressDelete($id:ID!){customerAddressDelete(addressId:$id){deletedAddressId ${USER_ERRORS}}}`,
-    returnRequest: `mutation TetherReturn($orderId:ID!,$lines:[RequestedLineItemInput!]!){orderRequestReturn(orderId:$orderId,requestedLineItems:$lines){return{id status}${USER_ERRORS}}}`
-  };
-  var SUBSCRIPTION_ACTIONS = {
-    pause: {
-      document: `mutation TetherPause($id:ID!){subscriptionContractPause(subscriptionContractId:$id){contract{id status}${USER_ERRORS}}}`,
-      payload: "subscriptionContractPause",
-      input: "contract"
-    },
-    resume: {
-      document: `mutation TetherResume($id:ID!){subscriptionContractActivate(subscriptionContractId:$id){contract{id status}${USER_ERRORS}}}`,
-      payload: "subscriptionContractActivate",
-      input: "contract"
-    },
-    cancel: {
-      document: `mutation TetherCancel($id:ID!){subscriptionContractCancel(subscriptionContractId:$id){contract{id status}${USER_ERRORS}}}`,
-      payload: "subscriptionContractCancel",
-      input: "contract"
-    },
-    skip: {
-      document: `mutation TetherSkip($input:SubscriptionBillingCycleInput!){subscriptionBillingCycleSkip(billingCycleInput:$input){billingCycle{cycleIndex skipped}${USER_ERRORS}}}`,
-      payload: "subscriptionBillingCycleSkip",
-      input: "billingCycle"
-    },
-    unskip: {
-      document: `mutation TetherUnskip($input:SubscriptionBillingCycleInput!){subscriptionBillingCycleUnskip(billingCycleInput:$input){billingCycle{cycleIndex skipped}${USER_ERRORS}}}`,
-      payload: "subscriptionBillingCycleUnskip",
-      input: "billingCycle"
-    }
-  };
-  function isSubscriptionAction(value) {
-    return typeof value === "string" && Object.hasOwn(SUBSCRIPTION_ACTIONS, value);
+    const search = query.toString();
+    return { method: "GET", path: search ? `${route.path}?${search}` : route.path };
+  }
+
+  // server/src/shared/json.ts
+  function isRecord(value) {
+    return value !== null && typeof value === "object" && !Array.isArray(value);
   }
   function field(value, key) {
-    if (value === null || typeof value !== "object") return void 0;
-    return (
-      /** @type {Record<string, unknown>} */
-      value[key]
-    );
+    return isRecord(value) ? value[key] : void 0;
   }
-  function nodes(value) {
-    const list = field(value, "nodes");
-    return Array.isArray(list) ? list : [];
+  function asList(value) {
+    return Array.isArray(value) ? value : [];
   }
-  var NUMERIC_ID = /^\d{1,20}$/;
-  function idOf(type, value) {
-    const raw = typeof value === "string" || typeof value === "number" ? String(value) : "";
-    const id = NUMERIC_ID.test(raw) ? `gid://shopify/${type}/${raw}` : raw;
-    if (!new RegExp(`^gid://shopify/${type}/\\d+(\\?[\\w=&.-]{1,80})?$`).test(id)) throw new InputError(`${type} id`);
+  function textOrNull(value) {
+    return typeof value === "string" && value !== "" ? value : null;
+  }
+  var numberOrNull = (value) => typeof value === "number" && Number.isFinite(value) ? value : null;
+  var countOrZero = (value) => numberOrNull(value) ?? 0;
+  var listOf = (value, read) => asList(value).map((item) => read(item));
+  var nodesOf = (connection, read) => ({
+    nodes: listOf(field(connection, "nodes"), read)
+  });
+  var textList = (value) => listOf(value, textOrNull).filter((line) => line !== null);
+
+  // server/src/shared/account-orders.ts
+  function moneyOrNull(value) {
+    const amount = textOrNull(field(value, "amount"));
+    const currencyCode = textOrNull(field(value, "currencyCode"));
+    return amount === null || currencyCode === null ? null : { amount, currencyCode };
+  }
+  function imageOrNull(value) {
+    const url = textOrNull(field(value, "url"));
+    return url === null ? null : { url, altText: textOrNull(field(value, "altText")) };
+  }
+  var toOrderLine = (value) => ({
+    title: textOrNull(field(value, "title")),
+    variantTitle: textOrNull(field(value, "variantTitle")),
+    quantity: countOrZero(field(value, "quantity")),
+    image: imageOrNull(field(value, "image"))
+  });
+
+  // src/account/answers.ts
+  var unexpected = (what) => new TetherError(`Customer accounts: the answer has no ${what}`);
+  function requiredId(value, what) {
+    const id = textOrNull(value);
+    if (!id) throw unexpected(what);
     return id;
   }
-  var CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/g;
-  function text(value, maxLength = 255) {
-    if (value === null || value === void 0 || value === "") return void 0;
-    if (typeof value !== "string" && typeof value !== "number") throw new InputError("text");
-    const clean = String(value).replace(CONTROL_CHARACTERS, "").trim();
-    if (clean.length > maxLength) throw new InputError("too long");
-    return clean;
-  }
-  var ADDRESS_FIELDS = [
-    "firstName",
-    "lastName",
-    "company",
-    "address1",
-    "address2",
-    "city",
-    "zip",
-    "zoneCode",
-    "phoneNumber"
-  ];
-  function addressInput(address, { clear = false } = {}) {
-    if (address === null || typeof address !== "object" || Array.isArray(address)) throw new InputError("address");
-    const source = (
-      /** @type {Record<string, unknown>} */
-      address
-    );
-    const out = {};
-    for (const key of ADDRESS_FIELDS) {
-      const value = text(source[key]);
-      if (value !== void 0) out[key] = value;
-      else if (clear && key in source && (source[key] === "" || source[key] === null)) out[key] = "";
-    }
-    const country = text(source["countryCode"]);
-    if (country !== void 0) {
-      const code = country.toUpperCase();
-      if (!/^[A-Z]{2}$/.test(code)) throw new InputError("countryCode");
-      out["countryCode"] = code;
-    }
-    return out;
-  }
-  function payloadOf(data, name) {
-    const payload = field(data, name);
-    const errors = field(payload, "userErrors");
-    if (Array.isArray(errors) && errors.length) {
-      const userErrors = (
-        /** @type {UserError[]} */
-        errors
-      );
-      throw new InputError(userErrors.map((error) => error.message).join(" | "), { userErrors });
-    }
-    return payload;
-  }
-  var ops = {
-    async order(ask, { id }) {
-      const data = await ask(QUERIES.order, { id: idOf("Order", id) });
-      return { order: field(data, "order") ?? null };
-    },
-    async profile(ask, { firstName, lastName }) {
-      const input = {};
-      if (firstName !== void 0) input["firstName"] = text(firstName, 100) ?? "";
-      if (lastName !== void 0) input["lastName"] = text(lastName, 100) ?? "";
-      if (!Object.keys(input).length) throw new InputError("nothing to change");
-      const payload = payloadOf(await ask(MUTATIONS.profile, { input }), "customerUpdate");
-      return { customer: field(payload, "customer") };
-    },
-    async addresses(ask) {
-      const customer = field(await ask(QUERIES.addresses, {}), "customer");
-      const defaultId = field(field(customer, "defaultAddress"), "id") ?? null;
-      const addresses2 = nodes(field(customer, "addresses")).map((address) => ({
-        .../** @type {object} */
-        address,
-        isDefault: field(address, "id") === defaultId
-      }));
-      return { addresses: addresses2 };
-    },
-    async saveAddress(ask, { id, address, isDefault }) {
-      const fields = addressInput(address ?? {}, { clear: Boolean(id) });
-      const makeDefault = isDefault === true;
-      if (!id) {
-        const created = await ask(MUTATIONS.addressCreate, { address: fields, default: makeDefault });
-        return { address: field(payloadOf(created, "customerAddressCreate"), "customerAddress") };
-      }
-      const updated = await ask(MUTATIONS.addressUpdate, {
-        id: idOf("CustomerAddress", id),
-        address: Object.keys(fields).length ? fields : null,
-        default: makeDefault ? true : null
-      });
-      return { address: field(payloadOf(updated, "customerAddressUpdate"), "customerAddress") };
-    },
-    async deleteAddress(ask, { id }) {
-      const data = await ask(MUTATIONS.addressDelete, { id: idOf("CustomerAddress", id) });
-      return { deleted: field(payloadOf(data, "customerAddressDelete"), "deletedAddressId") };
-    },
-    async subscriptions(ask) {
-      const contracts = field(field(await ask(QUERIES.subscriptions, {}), "customer"), "subscriptionContracts");
-      return { subscriptions: nodes(contracts) };
-    },
-    async subscription(ask, { id, action }) {
-      if (!isSubscriptionAction(action)) throw new InputError("action");
-      const contractId = idOf("SubscriptionContract", id);
-      const contract = field(field(await ask(QUERIES.contract, { id: contractId }), "customer"), "subscriptionContract");
-      if (!contract) throw new InputError("not found", { status: 404 });
-      const { document: document2, payload, input } = SUBSCRIPTION_ACTIONS[action];
-      if (input === "contract") {
-        return { contract: field(payloadOf(await ask(document2, { id: contractId }), payload), "contract") };
-      }
-      const cycles = nodes(field(contract, "upcomingBillingCycles"));
-      const wantSkipped = action === "unskip";
-      const cycle = cycles.find((candidate) => Boolean(field(candidate, "skipped")) === wantSkipped);
-      if (!cycle) throw new InputError(wantSkipped ? "nothing skipped" : "no upcoming delivery to skip");
-      const variables = { input: { contractId, selector: { index: field(cycle, "cycleIndex") } } };
-      return { billingCycle: field(payloadOf(await ask(document2, variables), payload), "billingCycle") };
-    },
-    async requestReturn(ask, { orderId, lines }) {
-      const order2 = idOf("Order", orderId);
-      if (!Array.isArray(lines) || !lines.length || lines.length > 50) throw new InputError("lines");
-      const requested = lines.map((line) => {
-        const quantity = Number(field(line, "quantity"));
-        if (!Number.isInteger(quantity) || quantity < 1 || quantity > 1e3) throw new InputError("quantity");
-        const out = { lineItemId: idOf("LineItem", field(line, "lineItemId")), quantity };
-        const reason = field(line, "reasonId");
-        if (reason) out["returnReasonDefinitionId"] = idOf("ReturnReasonDefinition", reason);
-        const note = text(field(line, "note"), 300);
-        if (note) out["customerNote"] = note;
-        return out;
-      });
-      const data = await ask(MUTATIONS.returnRequest, { orderId: order2, lines: requested });
-      return { return: field(payloadOf(data, "orderRequestReturn"), "return") };
-    }
-  };
 
-  // src/account/operations.js
+  // src/account/page-answers.ts
+  function toMailingAddress(value) {
+    const text = (name) => textOrNull(field(value, name));
+    return {
+      id: text("id"),
+      firstName: text("firstName"),
+      lastName: text("lastName"),
+      company: text("company"),
+      address1: text("address1"),
+      address2: text("address2"),
+      city: text("city"),
+      province: text("province"),
+      zoneCode: text("zoneCode"),
+      zip: text("zip"),
+      country: text("country"),
+      countryCode: text("countryCode"),
+      phoneNumber: text("phoneNumber"),
+      formatted: textList(field(value, "formatted"))
+    };
+  }
+  var mailingAddressOrNull = (value) => isRecord(value) ? toMailingAddress(value) : null;
+  var toAccountAddress = (value) => ({
+    ...toMailingAddress(value),
+    id: requiredId(field(value, "id"), "address id")
+  });
+  var toCustomerAddresses = (value) => listOf(value, (address) => ({ ...toAccountAddress(address), isDefault: field(address, "isDefault") === true }));
+  var toOrderDetailLine = (value) => ({
+    ...toOrderLine(value),
+    id: requiredId(field(value, "id"), "line item id"),
+    name: textOrNull(field(value, "name")),
+    sku: textOrNull(field(value, "sku")),
+    price: moneyOrNull(field(value, "price")),
+    totalPrice: moneyOrNull(field(value, "totalPrice")),
+    suggestedReturnReasonDefinitions: nodesOf(field(value, "suggestedReturnReasonDefinitions"), (reason) => ({
+      id: requiredId(field(reason, "id"), "return reason id"),
+      name: textOrNull(field(reason, "name")),
+      handle: textOrNull(field(reason, "handle"))
+    }))
+  });
+  var toFulfillment = (value) => ({
+    id: textOrNull(field(value, "id")),
+    status: textOrNull(field(value, "status")),
+    createdAt: textOrNull(field(value, "createdAt")),
+    estimatedDeliveryAt: textOrNull(field(value, "estimatedDeliveryAt")),
+    latestShipmentStatus: textOrNull(field(value, "latestShipmentStatus")),
+    trackingInformation: listOf(field(value, "trackingInformation"), (tracking) => ({
+      company: textOrNull(field(tracking, "company")),
+      number: textOrNull(field(tracking, "number")),
+      url: textOrNull(field(tracking, "url"))
+    }))
+  });
+  function toReturnableLine(value) {
+    const lineId = textOrNull(field(field(value, "lineItem"), "id"));
+    return { quantity: countOrZero(field(value, "quantity")), lineItem: lineId === null ? null : { id: lineId } };
+  }
+  function toReturnInformation(value) {
+    if (!isRecord(value)) return null;
+    return { returnableLineItems: nodesOf(value["returnableLineItems"], toReturnableLine) };
+  }
+  function toOrderDetail(value) {
+    if (!isRecord(value)) return null;
+    const text = (name) => textOrNull(value[name]);
+    const money = (name) => moneyOrNull(value[name]);
+    const requiresShipping = value["requiresShipping"];
+    return {
+      id: requiredId(value["id"], "order id"),
+      name: text("name"),
+      number: numberOrNull(value["number"]),
+      processedAt: text("processedAt"),
+      cancelledAt: text("cancelledAt"),
+      financialStatus: text("financialStatus"),
+      fulfillmentStatus: text("fulfillmentStatus"),
+      statusPageUrl: text("statusPageUrl"),
+      requiresShipping: typeof requiresShipping === "boolean" ? requiresShipping : null,
+      totalPrice: money("totalPrice"),
+      subtotal: money("subtotal"),
+      totalShipping: money("totalShipping"),
+      totalTax: money("totalTax"),
+      shippingAddress: mailingAddressOrNull(value["shippingAddress"]),
+      billingAddress: mailingAddressOrNull(value["billingAddress"]),
+      lineItems: nodesOf(value["lineItems"], toOrderDetailLine),
+      fulfillments: nodesOf(value["fulfillments"], toFulfillment),
+      returnInformation: toReturnInformation(value["returnInformation"]),
+      returns: nodesOf(value["returns"], toReturn)
+    };
+  }
+  var toSubscriptionLine = (value) => ({
+    id: textOrNull(field(value, "id")),
+    name: textOrNull(field(value, "name")),
+    title: textOrNull(field(value, "title")),
+    variantTitle: textOrNull(field(value, "variantTitle")),
+    quantity: countOrZero(field(value, "quantity")),
+    sku: textOrNull(field(value, "sku")),
+    currentPrice: moneyOrNull(field(value, "currentPrice")),
+    lineDiscountedPrice: moneyOrNull(field(value, "lineDiscountedPrice")),
+    image: imageOrNull(field(value, "image"))
+  });
+  var toBillingCycle = (value) => ({
+    cycleIndex: numberOrNull(field(value, "cycleIndex")),
+    skipped: field(value, "skipped") === true,
+    billingAttemptExpectedDate: textOrNull(field(value, "billingAttemptExpectedDate"))
+  });
+  function toDeliveryPolicy(value) {
+    if (!isRecord(value)) return null;
+    const intervalCount = value["intervalCount"];
+    return {
+      interval: textOrNull(value["interval"]),
+      intervalCount: isRecord(intervalCount) ? { count: countOrZero(intervalCount["count"]) } : null
+    };
+  }
+  var toSubscriptionContract = (value) => ({
+    id: requiredId(field(value, "id"), "subscription id"),
+    status: textOrNull(field(value, "status")),
+    nextBillingDate: textOrNull(field(value, "nextBillingDate")),
+    currencyCode: textOrNull(field(value, "currencyCode")),
+    deliveryPrice: moneyOrNull(field(value, "deliveryPrice")),
+    deliveryPolicy: toDeliveryPolicy(field(value, "deliveryPolicy")),
+    lines: nodesOf(field(value, "lines"), toSubscriptionLine),
+    upcomingBillingCycles: nodesOf(field(value, "upcomingBillingCycles"), toBillingCycle)
+  });
+  var toSubscriptionContracts = (value) => listOf(value, toSubscriptionContract);
+  function toSubscriptionChange(result) {
+    const { contract, billingCycle } = result;
+    if (isRecord(contract)) {
+      return { contract: { id: textOrNull(contract["id"]), status: textOrNull(contract["status"]) } };
+    }
+    if (isRecord(billingCycle)) {
+      const { cycleIndex, skipped } = toBillingCycle(billingCycle);
+      return { billingCycle: { cycleIndex, skipped } };
+    }
+    throw unexpected("changed subscription");
+  }
+  function toReturn(value) {
+    return { id: requiredId(field(value, "id"), "return id"), status: textOrNull(field(value, "status")) };
+  }
+  var toDeletedId = (value) => requiredId(value, "deleted address id");
+  var toProfile = (value) => ({
+    firstName: textOrNull(field(value, "firstName")),
+    lastName: textOrNull(field(value, "lastName"))
+  });
+
+  // src/account/operations.ts
   var context = null;
   function setup(shared) {
     context = shared;
@@ -250,38 +264,12 @@
     if (!context) throw new Error("account-pages: loaded without the account part");
     return context;
   }
-  var ROUTE = {
-    order: (input) => ["GET", `/order?id=${encodeURIComponent(String(input["id"]))}`],
-    addresses: () => ["GET", "/addresses"],
-    subscriptions: () => ["GET", "/subscriptions"],
-    profile: () => ["POST", "/profile"],
-    saveAddress: () => ["POST", "/address"],
-    deleteAddress: () => ["POST", "/address/delete"],
-    subscription: () => ["POST", "/subscription"],
-    requestReturn: () => ["POST", "/return"]
-  };
-  async function run(name, input = {}) {
-    const { serverBase, serverFetch, query } = pagesContext();
-    if (serverBase()) {
-      const [method, path] = ROUTE[name](input);
-      const answer = await serverFetch(path, method === "POST" ? { method, body: input } : {});
-      if (answer.kind === "logged-out") throw new TetherError("Not logged in", { code: "NOT_LOGGED_IN", status: 401 });
-      return answer.data;
-    }
-    const operation = ops[name];
-    if (!operation) throw new TetherError(`Customer accounts: no operation ${name}`);
-    try {
-      return await operation(
-        async (document2, variables) => (
-          /** @type {Record<string, unknown> | null} */
-          await query(document2, variables)
-        ),
-        input
-      );
-    } catch (error) {
-      if (!(error instanceof InputError)) throw error;
-      throw new TetherError(error.message, { code: "INVALID", userErrors: error.userErrors });
-    }
+  async function run(name, input) {
+    const { serverFetch } = pagesContext();
+    const { method, path } = operationRequest(name, input);
+    const answer = await serverFetch(path, method === "POST" ? { method, body: input } : {});
+    if (answer.kind === "logged-out") throw new TetherError("Not logged in", { code: "NOT_LOGGED_IN", status: 401 });
+    return answer.data;
   }
   function changed(what) {
     pagesContext().reset();
@@ -289,78 +277,50 @@
   }
   async function order(id) {
     const result = await run("order", { id });
-    return (
-      /** @type {OrderDetail | null} */
-      result["order"] ?? null
-    );
+    return toOrderDetail(result["order"]);
   }
-  async function updateProfile({ firstName, lastName } = {}) {
+  async function updateProfile({
+    firstName,
+    lastName
+  } = {}) {
     const result = await run("profile", { firstName, lastName });
     changed("profile");
-    return (
-      /** @type {{ firstName: string | null, lastName: string | null }} */
-      result["customer"]
-    );
+    return toProfile(result["customer"]);
   }
   async function addresses() {
-    const result = await run("addresses");
-    return (
-      /** @type {CustomerAddress[]} */
-      result["addresses"]
-    );
+    const result = await run("addresses", {});
+    return toCustomerAddresses(result["addresses"]);
   }
   async function saveAddress(address, { id, isDefault } = {}) {
     const result = await run("saveAddress", { id, address, isDefault });
     changed("addresses");
-    return (
-      /** @type {CustomerAddress} */
-      result["address"]
-    );
+    return toAccountAddress(result["address"]);
   }
   async function deleteAddress(id) {
     const result = await run("deleteAddress", { id });
     changed("addresses");
-    return (
-      /** @type {string} */
-      result["deleted"]
-    );
+    return toDeletedId(result["deleted"]);
   }
   async function subscriptions() {
-    const result = await run("subscriptions");
-    return (
-      /** @type {SubscriptionContract[]} */
-      result["subscriptions"]
-    );
+    const result = await run("subscriptions", {});
+    return toSubscriptionContracts(result["subscriptions"]);
   }
   async function subscriptionAction(id, action) {
     const result = await run("subscription", { id, action });
     changed("subscriptions");
-    return result;
+    return toSubscriptionChange(result);
   }
   async function requestReturn(orderId, lines) {
     const result = await run("requestReturn", { orderId, lines });
     changed("orders");
-    return (
-      /** @type {{ id: string, status: string }} */
-      result["return"]
-    );
+    return toReturn(result["return"]);
   }
 
-  // tether-core:shopify-values.js
-  var m4 = window.Tether.__core["shopify-values.js"];
-  var { STORE_ENV_NAMES, formatMoney: formatMoney2, isHttpsUrl, isSecretShopifyToken, productKey, productUrl: productUrl2 } = m4;
+  // tether-core:shopify-values.ts
+  var m4 = window.Tether.__core["shopify-values.ts"];
+  var [isHttpsUrl] = m4;
 
-  // src/account-links.js
-  function localDate(iso) {
-    try {
-      return new Date(iso).toLocaleDateString(cfg.locale);
-    } catch (error) {
-      if (error instanceof RangeError) return iso;
-      throw error;
-    }
-  }
-
-  // src/account/markup.js
+  // src/account/markup.ts
   function showIn(root, name, conditions) {
     qsa(root, sel(name)).forEach((el) => {
       const key = get(el, name) ?? "";
@@ -372,9 +332,9 @@
   var addressText = (address) => (address?.formatted ?? []).join(", ");
   var ownValue = (values, key) => Object.hasOwn(values, key) ? values[key] : void 0;
 
-  // src/account/order-lines.js
+  // src/account/order-lines.ts
   var lineTexts = (line, returnable) => ({
-    title: line.title || line.name,
+    title: line.title || line.name || "",
     "variant-title": line.variantTitle || "",
     quantity: String(line.quantity),
     price: formatMoney(line.price),
@@ -396,7 +356,7 @@
       if (select.dataset["tetherFilled"] === line.id) return;
       select.dataset["tetherFilled"] = line.id;
       (line.suggestedReturnReasonDefinitions?.nodes ?? []).forEach((reason) => {
-        select.appendChild(new Option(reason.name, reason.id));
+        select.appendChild(new Option(reason.name ?? "", reason.id));
       });
     });
   }
@@ -409,17 +369,17 @@
       bindsIn(row, "order-line").forEach((el) => {
         const key = get(el, "order-line") ?? "";
         if (key === "image") {
-          if (line.image) setImage(el, line.image.url, line.image.altText || line.title);
+          if (line.image) setImage(el, line.image.url, line.image.altText || line.title || "");
           return;
         }
-        const text2 = ownValue(texts, key);
-        if (text2 !== void 0) setText(el, text2);
+        const text = ownValue(texts, key);
+        if (text !== void 0) setText(el, text);
       });
       if (id && returnable !== null) fillReturnControls(row, { ...line, id }, returnable);
     });
   }
 
-  // src/account/order-page.js
+  // src/account/order-page.ts
   function orderKey(el) {
     const raw = get(el, "order") || "";
     if (!raw.startsWith("url:")) return raw;
@@ -435,8 +395,8 @@
     });
   }
   var orderTexts = (detail) => ({
-    name: detail.name,
-    date: localDate(detail.processedAt),
+    name: detail.name ?? "",
+    date: formatDate(detail.processedAt),
     total: formatMoney(detail.totalPrice),
     subtotal: formatMoney(detail.subtotal),
     shipping: formatMoney(detail.totalShipping),
@@ -445,29 +405,29 @@
     fulfillment: enumText(detail.fulfillmentStatus),
     "shipping-address": addressText(detail.shippingAddress),
     "billing-address": addressText(detail.billingAddress),
-    items: detail.lineItems.nodes.map((line) => `${line.quantity}\xD7 ${line.title || line.name}`).join(", "),
-    cancelled: detail.cancelledAt ? localDate(detail.cancelledAt) : ""
+    items: detail.lineItems.nodes.map((line) => `${String(line.quantity)}\xD7 ${line.title || line.name || ""}`).join(", "),
+    cancelled: formatDate(detail.cancelledAt)
   });
   function fillFulfillment(row, fulfillment) {
     const tracking = fulfillment.trackingInformation[0];
     const texts = {
       status: enumText(fulfillment.latestShipmentStatus || fulfillment.status),
-      date: localDate(fulfillment.createdAt),
-      eta: fulfillment.estimatedDeliveryAt ? localDate(fulfillment.estimatedDeliveryAt) : "",
+      date: formatDate(fulfillment.createdAt),
+      eta: formatDate(fulfillment.estimatedDeliveryAt),
       company: tracking?.company || "",
       number: tracking?.number || ""
     };
     bindsIn(row, "fulfillment-bind").forEach((el) => {
       const key = get(el, "fulfillment-bind") ?? "";
       if (key === "url") {
-        const url = tracking?.url;
-        const linked = isHttpsUrl(url);
-        if (linked && url) el.setAttribute("href", url);
+        const url = tracking?.url ?? null;
+        const linked = url !== null && isHttpsUrl(url);
+        if (linked) el.setAttribute("href", url);
         show(el, linked);
         return;
       }
-      const text2 = ownValue(texts, key);
-      if (text2 !== void 0) setText(el, text2);
+      const text = ownValue(texts, key);
+      if (text !== void 0) setText(el, text);
     });
   }
   function fillOrder(el, detail) {
@@ -482,11 +442,12 @@
     qsa(el, sel("order-bind")).forEach((bind) => {
       const key = get(bind, "order-bind") ?? "";
       if (key === "url") {
-        if (detail.statusPageUrl && isHttpsUrl(detail.statusPageUrl)) bind.setAttribute("href", detail.statusPageUrl);
+        const statusPage = detail.statusPageUrl;
+        if (statusPage !== null && isHttpsUrl(statusPage)) bind.setAttribute("href", statusPage);
         return;
       }
-      const text2 = ownValue(texts, key);
-      if (text2 !== void 0) setText(bind, text2);
+      const text = ownValue(texts, key);
+      if (text !== void 0) setText(bind, text);
     });
     qsa(el, sel("order-lines")).forEach((box) => {
       fillLines(box, detail.lineItems.nodes, returnable);
@@ -532,7 +493,7 @@
     fillOrder(el, detail);
   }
 
-  // src/account/addresses-view.js
+  // src/account/addresses-view.ts
   var shown = [];
   var shownAddress = (id) => shown.find((address) => address.id === id);
   var addressTexts = (address) => ({
@@ -551,8 +512,8 @@
     row.dataset["tetherAddress"] = address.id;
     const texts = addressTexts(address);
     bindsIn(row, "address-bind").forEach((el) => {
-      const text2 = ownValue(texts, get(el, "address-bind") ?? "");
-      if (text2 !== void 0) setText(el, text2);
+      const text = ownValue(texts, get(el, "address-bind") ?? "");
+      if (text !== void 0) setText(el, text);
     });
     showIn(row, "address-show", { default: address.isDefault, "not-default": !address.isDefault });
   }
@@ -575,7 +536,7 @@
     });
   }
 
-  // src/account/subscriptions-view.js
+  // src/account/subscriptions-view.ts
   function conditionsOf(contract) {
     const next = contract.upcomingBillingCycles.nodes[0];
     const status = contract.status;
@@ -598,23 +559,25 @@
     const unit = enumText(contract.deliveryPolicy?.interval);
     if (!unit) return "";
     const count = contract.deliveryPolicy?.intervalCount?.count ?? 1;
-    return count <= 1 ? unit : `${count} ${unit}s`;
+    return count <= 1 ? unit : `${String(count)} ${unit}s`;
   }
   function contractTexts(contract) {
     const lines = contract.lines.nodes;
     const total = lines.reduce((sum, line) => sum + Number.parseFloat(line.lineDiscountedPrice?.amount ?? "0"), 0);
     return {
       status: enumText(contract.status),
-      next: contract.nextBillingDate ? localDate(contract.nextBillingDate) : "",
+      next: formatDate(contract.nextBillingDate),
       interval: intervalText(contract),
-      products: lines.map((line) => `${line.quantity}\xD7 ${line.title}`).join(", "),
-      total: lines.length ? formatMoney({ amount: String(total), currencyCode: contract.currencyCode }) : "",
+      products: lines.map((line) => `${String(line.quantity)}\xD7 ${line.title ?? ""}`).join(", "),
+      total: formatMoney(
+        lines.length && contract.currencyCode ? { amount: String(total), currencyCode: contract.currencyCode } : null
+      ),
       delivery: formatMoney(contract.deliveryPrice)
     };
   }
   function fillLine(row, line) {
     const texts = {
-      title: line.title,
+      title: line.title ?? "",
       "variant-title": line.variantTitle || "",
       quantity: String(line.quantity),
       price: formatMoney(line.currentPrice)
@@ -622,11 +585,11 @@
     bindsIn(row, "subscription-line").forEach((el) => {
       const key = get(el, "subscription-line") ?? "";
       if (key === "image") {
-        if (line.image) setImage(el, line.image.url, line.image.altText || line.title);
+        if (line.image) setImage(el, line.image.url, line.image.altText || line.title || "");
         return;
       }
-      const text2 = ownValue(texts, key);
-      if (text2 !== void 0) setText(el, text2);
+      const text = ownValue(texts, key);
+      if (text !== void 0) setText(el, text);
     });
   }
   function fillContract(row, contract) {
@@ -634,8 +597,8 @@
     row.setAttribute(attr("subscription-status"), enumText(contract.status));
     const texts = contractTexts(contract);
     qsa(row, sel("subscription-bind")).forEach((el) => {
-      const text2 = ownValue(texts, get(el, "subscription-bind") ?? "");
-      if (text2 !== void 0) setText(el, text2);
+      const text = ownValue(texts, get(el, "subscription-bind") ?? "");
+      if (text !== void 0) setText(el, text);
     });
     qsa(row, sel("subscription-lines")).forEach((box) => {
       repeat(box, contract.lines.nodes, fillLine);
@@ -670,30 +633,26 @@
     });
   }
 
-  // src/account/page-events.js
-  var SUBSCRIPTION_ACTIONS2 = ["pause", "resume", "skip", "unskip", "cancel"];
-  var isSubscriptionAction2 = (value) => SUBSCRIPTION_ACTIONS2.some((action) => action === value);
-  var isInput2 = (el) => el.tagName === "INPUT";
-  var isForm = (el) => el.tagName === "FORM";
+  // src/account/page-events.ts
+  var SUBSCRIPTION_ACTIONS = ["pause", "resume", "skip", "unskip", "cancel"];
+  var isSubscriptionAction = (value) => SUBSCRIPTION_ACTIONS.some((action) => action === value);
+  var isField = (el) => el instanceof window.HTMLInputElement || el instanceof window.HTMLSelectElement || el instanceof window.HTMLTextAreaElement;
+  var isForm = (el) => el instanceof window.HTMLFormElement;
   function fieldsOf(form) {
     const fields = {};
     for (const field2 of form.elements) {
-      if (!isInput2(field2) && field2.tagName !== "SELECT" && field2.tagName !== "TEXTAREA") continue;
-      const input = (
-        /** @type {HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement} */
-        field2
-      );
-      if (!input.name || input.type === "submit" || input.type === "button" || input.type === "checkbox") continue;
-      fields[input.name] = input.value;
+      if (!isField(field2)) continue;
+      if (!field2.name || field2.type === "submit" || field2.type === "button" || field2.type === "checkbox") continue;
+      fields[field2.name] = field2.value;
     }
     return fields;
   }
-  function messageOf(error) {
+  function customerMessage(error) {
     const userErrors = error instanceof TetherError ? error.userErrors ?? [] : [];
     const message = userErrors.map((userError) => userError.message).join(" ");
     if (message) return message;
-    const text2 = error instanceof Error && error.message ? error.message : "Something went wrong";
-    return text2.replace(/^Customer accounts: /, "");
+    const text = error instanceof Error && error.message ? error.message : "Something went wrong";
+    return text.replace(/^Customer accounts: /, "");
   }
   async function act(el, change) {
     if (el.getAttribute("aria-busy") === "true") return "busy";
@@ -711,7 +670,7 @@
     } catch (error) {
       el.setAttribute(attr("form-state"), "error");
       errorBoxes.forEach((box) => {
-        setText(box, messageOf(error));
+        setText(box, customerMessage(error));
       });
       return "error";
     } finally {
@@ -753,16 +712,14 @@
     const form = document.querySelector(sel("address-form"));
     if (!address || !form || !isForm(form)) return;
     form.dataset["tetherAddressId"] = address.id;
+    const valuesByName = { ...address };
     for (const field2 of form.elements) {
-      if (!isInput2(field2) && field2.tagName !== "SELECT" && field2.tagName !== "TEXTAREA") continue;
-      const input = (
-        /** @type {HTMLInputElement} */
-        field2
-      );
-      if (input.name === "isDefault") input.checked = address.isDefault;
-      else if (input.name && Object.hasOwn(address, input.name)) {
-        const value = Object.entries(address).find(([key]) => key === input.name)?.[1];
-        input.value = typeof value === "string" ? value : "";
+      if (!isField(field2)) continue;
+      if (field2.name === "isDefault") {
+        if (field2 instanceof window.HTMLInputElement) field2.checked = address.isDefault;
+      } else if (field2.name && Object.hasOwn(valuesByName, field2.name)) {
+        const value = valuesByName[field2.name];
+        field2.value = typeof value === "string" ? value : "";
       }
     }
     form.scrollIntoView({ block: "nearest" });
@@ -802,7 +759,7 @@
     const row = button.closest("[data-tether-subscription]");
     const action = get(button, "subscription-action");
     const disabled = "disabled" in button && button.disabled === true || button.classList.contains("is-disabled");
-    if (!(row instanceof window.HTMLElement) || !isSubscriptionAction2(action) || disabled || !confirmed(button)) return;
+    if (!(row instanceof window.HTMLElement) || !isSubscriptionAction(action) || disabled || !confirmed(button)) return;
     const id = row.dataset["tetherSubscription"] ?? "";
     row.setAttribute(attr("subscription-state"), "pending");
     void act(row, async () => {
@@ -820,7 +777,10 @@
     const reason = row.querySelector(sel("return-reason"));
     const note = row.querySelector(sel("return-note"));
     const valueOf = (field2) => field2 && "value" in field2 && typeof field2.value === "string" ? field2.value : "";
-    const line = { lineItemId: row.dataset["tetherLine"] ?? "", quantity: Number.parseInt(valueOf(quantity) || "0", 10) };
+    const line = {
+      lineItemId: row.dataset["tetherLine"] ?? "",
+      quantity: Number.parseInt(valueOf(quantity) || "0", 10)
+    };
     const reasonId = valueOf(reason);
     if (reasonId) line.reasonId = reasonId;
     const noteText = valueOf(note);
@@ -867,21 +827,19 @@
     document.addEventListener("click", onClick);
   }
 
-  // src/account-pages.js
-  var PROFILE_FIELDS = (
-    /** @type {const} */
-    ["firstName", "lastName"]
-  );
+  // src/account-pages.ts
+  var PROFILE_FIELDS = ["firstName", "lastName"];
   async function renderProfile(form) {
-    const customer = await pagesContext().customer().catch((error) => {
+    if (!(form instanceof window.HTMLFormElement)) return;
+    let customer;
+    try {
+      customer = await pagesContext().customer();
+    } catch (error) {
       reportError(error, "account");
-      return null;
-    });
-    if (!customer || form.tagName !== "FORM") return;
-    const fields = (
-      /** @type {HTMLFormElement} */
-      form.elements
-    );
+      return;
+    }
+    if (!customer) return;
+    const fields = form.elements;
     PROFILE_FIELDS.forEach((name) => {
       const input = fields.namedItem(name);
       const isTextField = input instanceof window.HTMLInputElement || input instanceof window.HTMLTextAreaElement;
@@ -913,11 +871,8 @@
     });
   }
 
-  // src/parts/account-pages.js
-  var { Tether } = (
-    /** @type {Window & { Tether?: { __parts: Record<string, unknown> } }} */
-    window
-  );
+  // src/parts/account-pages.ts
+  var { Tether } = window;
   if (!Tether) throw new Error("tether.account-pages.js runs after the Tether script, which loads it");
   Tether.__parts["account-pages"] = account_pages_exports;
 })();

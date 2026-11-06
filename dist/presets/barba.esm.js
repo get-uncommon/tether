@@ -1,4 +1,4 @@
-// src/presets/barba.js
+// src/presets/barba.ts
 var LINE_DURATION_SECONDS = 0.3;
 var collapsed = () => ({
   height: 0,
@@ -10,31 +10,27 @@ var collapsed = () => ({
 });
 var ANIMATED_PROPS = "height,paddingTop,paddingBottom,borderBottomWidth,opacity,overflow";
 var reducedMotion = () => typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-function current(option) {
-  if (typeof option !== "function") return option;
-  const getter = (
-    /** @type {() => unknown} */
-    option
-  );
-  return getter();
+var GETTER_OPTIONS = ["gsap", "lenis", "scrollTrigger"];
+function checkGetters(options) {
+  for (const name of GETTER_OPTIONS) {
+    const option = options[name];
+    if (option !== void 0 && option !== null && typeof option !== "function") {
+      throw new TypeError(`barbaPreset: ${name} must be a function that returns it, such as () => ${name}`);
+    }
+  }
 }
 function callIfPresent(target, method) {
-  if (typeof target !== "object" || target === null) return;
+  if (typeof target !== "object" && typeof target !== "function" || target === null) return;
   const fn = Reflect.get(target, method);
   if (typeof fn === "function") fn.call(target);
 }
 var isGsap = (value) => typeof value === "object" && value !== null && typeof Reflect.get(value, "fromTo") === "function" && typeof Reflect.get(value, "to") === "function";
 function barbaPreset(options = {}) {
+  checkGetters(options);
   const {
-    gsap = () => (
-      /** @type {unknown} */
-      Reflect.get(window, "gsap")
-    ),
+    gsap = () => Reflect.get(window, "gsap"),
     lenis = null,
-    scrollTrigger = () => (
-      /** @type {unknown} */
-      Reflect.get(window, "ScrollTrigger")
-    ),
+    scrollTrigger = () => Reflect.get(window, "ScrollTrigger"),
     lockScroll = null,
     unlockScroll = null,
     onResize = null,
@@ -45,23 +41,23 @@ function barbaPreset(options = {}) {
   let locked = false;
   const animator = (node) => {
     if (!animateLines || reducedMotion() || node.offsetHeight <= 0) return null;
-    const animation = current(gsap);
+    const animation = gsap();
     return isGsap(animation) ? animation : null;
   };
   return {
     autoMount: false,
     onLayoutChange() {
-      callIfPresent(current(lenis), "resize");
-      callIfPresent(current(scrollTrigger), "refresh");
+      callIfPresent(lenis?.(), "resize");
+      callIfPresent(scrollTrigger(), "refresh");
     },
     onCartOpen(drawers) {
       const drawer = drawers[0];
-      if (locked || typeof lockScroll !== "function" || !drawer) return;
+      if (locked || !lockScroll || !drawer) return;
       lockScroll(drawer);
       locked = true;
     },
     onCartClose() {
-      if (locked && typeof unlockScroll === "function") unlockScroll();
+      if (locked && unlockScroll) unlockScroll();
       locked = false;
     },
     onLineEnter(node) {
@@ -94,7 +90,7 @@ function barbaPreset(options = {}) {
         }
       });
     },
-    onValueChange: typeof onValueChange === "function" ? onValueChange : null
+    onValueChange
   };
 }
 var barba_default = barbaPreset;

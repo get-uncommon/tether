@@ -1,28 +1,231 @@
-"use strict";
 (() => {
   var __defProp = Object.defineProperty;
+  var __defNormalProp = (obj, key, value) => key in obj ? __defProp(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
   var __export = (target, all) => {
     for (var name in all)
       __defProp(target, name, { get: all[name], enumerable: true });
   };
+  var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "symbol" ? key + "" : key, value);
 
-  // src/config.js
-  var config_exports = {};
-  __export(config_exports, {
-    DEFAULTS: () => DEFAULTS,
-    cfg: () => cfg,
-    configure: () => configure,
-    isConfigured: () => isConfigured,
-    log: () => log,
-    reportError: () => reportError,
-    resolveConfig: () => resolveConfig,
-    toMetafieldIdentifier: () => toMetafieldIdentifier,
-    warn: () => warn
-  });
+  // server/src/shared/api-versions.ts
+  var STOREFRONT_API_VERSION = "2026-07";
+
+  // src/api-version.ts
+  var QUARTERLY_VERSION = /^(\d{4})-(01|04|07|10)$/;
+  var AVERAGE_MONTH_MS = 30.44 * 24 * 3600 * 1e3;
+  function parseVersion(version) {
+    const match = QUARTERLY_VERSION.exec(typeof version === "string" ? version : "");
+    if (!match) return null;
+    return { year: Number(match[1]), month: Number(match[2]) };
+  }
+  var isQuarterlyVersion = (version) => parseVersion(version) !== null;
+
+  // server/src/shared/json.ts
+  function isRecord(value) {
+    return value !== null && typeof value === "object" && !Array.isArray(value);
+  }
+  function field(value, key) {
+    return isRecord(value) ? value[key] : void 0;
+  }
+
+  // src/config-sections.ts
+  var METAFIELD_PART = /^[A-Za-z0-9_.-]+$/;
+  var METAFIELD_NAMESPACE = /^(\$app(:[A-Za-z0-9_-]+)?|[A-Za-z0-9_.-]+)$/;
+  var HOSTNAME = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/i;
+  var COOKIE_NAME = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
+  var GLOBAL_NAME = /^[A-Za-z_$][\w$]*$/;
+  var SITE_ORIGIN = "https://site.invalid";
+  var LOOPBACK_HOSTS = /* @__PURE__ */ new Set(["localhost", "127.0.0.1", "[::1]"]);
+  var MARKET_SOURCES = ["saved", "server", "webflow"];
+  var CONSENT_MODES = [
+    "no-banner",
+    "default-banner",
+    "custom-banner"
+  ];
+  var isText = (value) => typeof value === "string" && value !== "";
+  var isFunction = (value) => typeof value === "function";
+  function domainOption(value, invalid) {
+    if (typeof value !== "string" || !value) return "";
+    const host = value.replace(/^https?:\/\//, "").replace(/\/.*$/, "");
+    if (isHostname(host)) return host;
+    invalid("domain", value);
+    return "";
+  }
+  function isSiteOrHttpsUrl(value) {
+    if (!isText(value)) return false;
+    try {
+      const url2 = new URL(value, `${SITE_ORIGIN}/`);
+      if (url2.origin === SITE_ORIGIN) return true;
+      return url2.protocol === "https:" || url2.protocol === "http:" && LOOPBACK_HOSTS.has(url2.hostname);
+    } catch {
+      return false;
+    }
+  }
+  function partsUrlOption(value, invalid) {
+    if (value === void 0 || value === null || value === "") return null;
+    if (typeof value === "string" && (isSiteOrHttpsUrl(value) || isPageOrigin(value))) return value;
+    invalid("partsUrl", value);
+    return null;
+  }
+  function isPageOrigin(value) {
+    if (typeof location === "undefined") return false;
+    try {
+      return new URL(value).origin === location.origin;
+    } catch {
+      return false;
+    }
+  }
+  function toHttpsOrigin(value) {
+    if (typeof value !== "string") return null;
+    try {
+      const url2 = new URL(value);
+      return url2.protocol === "https:" && url2.href === new URL(url2.origin).href ? url2.origin : null;
+    } catch {
+      return null;
+    }
+  }
+  function embedOriginsOption(value, invalid) {
+    if (!Array.isArray(value)) {
+      invalid("embedOrigins", value);
+      return [];
+    }
+    const origins = [];
+    const entries = value;
+    for (const entry of entries) {
+      const origin = toHttpsOrigin(entry);
+      if (origin) origins.push(origin);
+      else invalid("embedOrigin", entry);
+    }
+    return origins;
+  }
+  function toMetafieldIdentifier(ref) {
+    let namespace;
+    let key;
+    if (typeof ref === "string") {
+      const dot = ref.indexOf(".");
+      namespace = dot > 0 ? ref.slice(0, dot) : "";
+      key = ref.slice(dot + 1);
+    } else if (typeof ref === "object" && ref !== null) {
+      namespace = Reflect.get(ref, "namespace");
+      key = Reflect.get(ref, "key");
+    }
+    if (typeof namespace !== "string" || typeof key !== "string") return null;
+    return METAFIELD_NAMESPACE.test(namespace) && METAFIELD_PART.test(key) ? { namespace, key } : null;
+  }
+  function metafieldsOption(value, invalid) {
+    if (!Array.isArray(value)) {
+      invalid("metafields", value);
+      return [];
+    }
+    const refs = [];
+    const entries = value;
+    for (const ref of entries) {
+      const identifier = toMetafieldIdentifier(ref);
+      if (identifier) refs.push(typeof ref === "string" ? ref : identifier);
+      else invalid("metafield", ref);
+    }
+    return refs;
+  }
+  var when = (check) => (value) => check(value) ? value : void 0;
+  var isHostname = (value) => isText(value) && HOSTNAME.test(value);
+  var isCookieName = (value) => isText(value) && COOKIE_NAME.test(value);
+  var isDataLayer = (value) => typeof value === "boolean" || isText(value) && GLOBAL_NAME.test(value);
+  var url = when(isSiteOrHttpsUrl);
+  var text = when(isText);
+  var flag = when((value) => typeof value === "boolean");
+  var hook = when(isFunction);
+  function sectionOption(name, value, schema, invalid) {
+    if (value === null || value === void 0) return null;
+    if (!isRecord(value)) {
+      invalid(name, value);
+      return null;
+    }
+    const section = {};
+    const readers = schema;
+    for (const [key, read] of Object.entries(readers)) {
+      const field2 = value[key];
+      if (field2 === void 0) continue;
+      const parsed = read(field2);
+      if (parsed === void 0) invalid(`${name}.${key}`, field2);
+      else section[key] = parsed;
+    }
+    return section;
+  }
+  var ACCOUNT = {
+    server: url,
+    orderUrl: url,
+    subscriptionsUrl: url,
+    paymentUrl: url,
+    logoutUrl: url,
+    locale: text,
+    navigate: hook
+  };
+  var ACCOUNT_NEEDS_SERVER = "customer accounts need the Worker since 0.7.0: set account.server";
+  var LOCALE_MARKET = { country: text, language: text, locale: text };
+  var MARKETS = {
+    // A single source name counts as a list of one.
+    detect: (value) => {
+      if (typeof value === "boolean") return value;
+      const names = Array.isArray(value) ? value : [value];
+      return typeof value === "string" || Array.isArray(value) ? MARKET_SOURCES.filter((source) => names.includes(source)) : void 0;
+    },
+    locales: (value) => {
+      if (!isRecord(value)) return void 0;
+      const locales = {};
+      for (const [locale, entry] of Object.entries(value)) {
+        const market = sectionOption(`markets.locales.${locale}`, entry, LOCALE_MARKET, () => void 0);
+        if (market) locales[locale] = market;
+      }
+      return locales;
+    },
+    cookie: when(isCookieName),
+    remember: flag,
+    strict: flag
+  };
+  var SHOPIFY_ANALYTICS = {
+    consent: (value) => CONSENT_MODES.find((mode) => mode === value),
+    proxy: (value) => value !== void 0 && Boolean(value)
+  };
+  var ANALYTICS = {
+    dataLayer: when(isDataLayer),
+    shopify: (value) => typeof value === "boolean" ? value : sectionOption("analytics.shopify", value, SHOPIFY_ANALYTICS, () => void 0) ?? void 0,
+    onEvent: hook
+  };
+  function accountOption(value, invalid, warn2) {
+    const account = sectionOption("account", value, ACCOUNT, invalid);
+    if (account === null) return null;
+    const { server } = account;
+    if (server === void 0) {
+      warn2(ACCOUNT_NEEDS_SERVER);
+      return null;
+    }
+    return { ...account, server };
+  }
+  var marketsOption = (value, invalid) => sectionOption("markets", value, MARKETS, invalid);
+  var analyticsOption = (value, invalid) => sectionOption("analytics", value, ANALYTICS, invalid);
+
+  // server/src/shared/market-codes.ts
+  var COUNTRY = /^[A-Z]{2}$/;
+  var NOT_A_COUNTRY = /* @__PURE__ */ new Set(["XX", "T1"]);
+  var REGIONAL_LANGUAGES = /* @__PURE__ */ new Set(["PT_BR", "PT_PT", "ZH_CN", "ZH_TW"]);
+  var LANGUAGE = /^[A-Z]{2,3}$/;
+  function toCountry(value) {
+    const code = (typeof value === "string" ? value : "").trim().toUpperCase();
+    if (!COUNTRY.test(code) || NOT_A_COUNTRY.has(code)) return null;
+    return code;
+  }
+  function toLanguage(value) {
+    const raw = (typeof value === "string" ? value : "").trim().replace("-", "_").toUpperCase();
+    if (REGIONAL_LANGUAGES.has(raw)) return raw;
+    const primary = raw.split("_")[0] ?? "";
+    return LANGUAGE.test(primary) ? primary : null;
+  }
+
+  // src/config.ts
   var DEFAULTS = {
     domain: "",
     token: "",
-    apiVersion: "2026-07",
+    apiVersion: STOREFRONT_API_VERSION,
     country: void 0,
     language: void 0,
     locale: void 0,
@@ -31,6 +234,7 @@
     productPath: "/product",
     collectionPath: "/collection",
     metafields: [],
+    embedOrigins: [],
     imagesFirst: 25,
     variantsFirst: 100,
     sellingPlanGroupsFirst: 10,
@@ -66,9 +270,34 @@
     debug: false
   };
   var cfg = { ...DEFAULTS };
+  function readOnlyView(target) {
+    const refuse = (key) => {
+      warn(`Tether.config is read-only (${String(key)}): pass options to Tether.init() instead`);
+      return false;
+    };
+    return new Proxy(target, {
+      get(object, key) {
+        const value = Reflect.get(object, key);
+        return typeof value === "object" && value !== null ? readOnlyView(value) : value;
+      },
+      set: (_object, key) => refuse(key),
+      deleteProperty: (_object, key) => refuse(key),
+      defineProperty: (_object, key) => refuse(key)
+    });
+  }
+  var configView = readOnlyView(cfg);
   var PREFIX = /^[a-z][a-z0-9-]*$/;
-  var METAFIELD_PART = /^[A-Za-z0-9_.-]+$/;
-  var METAFIELD_NAMESPACE = /^(\$app(:[A-Za-z0-9_-]+)?|[A-Za-z0-9_.-]+)$/;
+  var SWITCH_OPTIONS = [
+    "revalidate",
+    "openCartOnAdd",
+    "cartFocus",
+    "variantUrl",
+    "autoMount",
+    "observe",
+    "astro",
+    "debug"
+  ];
+  var TEXT_OPTIONS = ["token", "productPath", "collectionPath", "cartDrawerOpenClass"];
   var COUNT_OPTIONS = [
     "imagesFirst",
     "variantsFirst",
@@ -77,7 +306,8 @@
     "collectionFirst",
     "retries",
     "maxAge",
-    "lowStock"
+    "lowStock",
+    "searchDelay"
   ];
   var HOOK_OPTIONS = [
     "warningText",
@@ -94,65 +324,86 @@
     if (value !== void 0) warn(`invalid ${name} ${JSON.stringify(value)}: using ${JSON.stringify(fallback)}`);
     return fallback;
   }
+  function dropped(name, value) {
+    warn(`invalid ${name} ${JSON.stringify(value)}: ignored`);
+  }
+  function warnUnknownKeys(options) {
+    for (const key of Object.keys(options)) {
+      if (!(key in DEFAULTS)) warn(`unknown option ${JSON.stringify(key)}: ignored`);
+    }
+  }
+  function hookOption(value) {
+    return typeof value === "function" ? value : null;
+  }
+  function hookOptions(options) {
+    const hooks = Object.fromEntries(HOOK_OPTIONS.map((name) => [name, hookOption(options[name])]));
+    return hooks;
+  }
   function countOption(name, value) {
     if (typeof value === "number" && Number.isInteger(value) && value >= 0) return value;
     return invalidOption(name, value, DEFAULTS[name]);
   }
+  function switchOption(name, value) {
+    return typeof value === "boolean" ? value : invalidOption(name, value, DEFAULTS[name]);
+  }
+  function textOption(name, value) {
+    return typeof value === "string" ? value : invalidOption(name, value, DEFAULTS[name]);
+  }
+  function localeOption(value) {
+    if (value === void 0 || value === null || value === "") return void 0;
+    try {
+      if (typeof value === "string" && Intl.getCanonicalLocales(value).length) return value;
+    } catch {
+    }
+    dropped("locale", value);
+    return void 0;
+  }
   function choiceOption(name, value, choices) {
     return choices.find((choice) => choice === value) ?? invalidOption(name, value, choices[0]);
   }
-  function domainOption(value) {
-    if (typeof value !== "string") return "";
-    return value.replace(/^https?:\/\//, "").replace(/\/.*$/, "");
-  }
-  function toMetafieldIdentifier(ref) {
-    let namespace;
-    let key;
-    if (typeof ref === "string") {
-      const dot = ref.indexOf(".");
-      namespace = dot > 0 ? ref.slice(0, dot) : "";
-      key = ref.slice(dot + 1);
-    } else if (typeof ref === "object" && ref !== null) {
-      namespace = Reflect.get(ref, "namespace");
-      key = Reflect.get(ref, "key");
+  function apiVersionOption(value) {
+    if (value === "unstable") {
+      warn('apiVersion "unstable" changes without notice. Pin a dated version (e.g. 2026-07).');
+      return value;
     }
-    if (typeof namespace !== "string" || typeof key !== "string") return null;
-    return METAFIELD_NAMESPACE.test(namespace) && METAFIELD_PART.test(key) ? { namespace, key } : null;
+    return isQuarterlyVersion(value) ? value : invalidOption("apiVersion", value, DEFAULTS.apiVersion);
   }
-  function metafieldsOption(value) {
-    if (!Array.isArray(value)) return invalidOption("metafields", value, []);
-    const refs = [];
-    for (
-      const ref of
-      /** @type {unknown[]} */
-      value
-    ) {
-      const identifier = toMetafieldIdentifier(ref);
-      if (identifier) refs.push(typeof ref === "string" ? ref : identifier);
-      else invalidOption("metafield", ref, null);
-    }
-    return refs;
+  function codeOption(name, value, parse) {
+    if (value === void 0 || value === null || value === "") return void 0;
+    const code = parse(value);
+    if (code !== null) return code;
+    dropped(name, value);
+    return void 0;
   }
   function resolveConfig(options) {
-    const domain = domainOption(options.domain);
+    warnUnknownKeys(options);
+    const domain = domainOption(options.domain, dropped);
     const prefix = typeof options.prefix === "string" && PREFIX.test(options.prefix) ? options.prefix : invalidOption("prefix", options.prefix, DEFAULTS.prefix);
     const resolved = {
       ...DEFAULTS,
-      ...options,
+      ...hookOptions(options),
       domain,
+      apiVersion: apiVersionOption(options.apiVersion),
+      country: codeOption("country", options.country, toCountry),
+      locale: localeOption(options.locale),
+      partsUrl: partsUrlOption(options.partsUrl, dropped),
+      language: codeOption("language", options.language, toLanguage),
+      markets: marketsOption(options.markets, dropped),
+      analytics: analyticsOption(options.analytics, dropped),
+      account: accountOption(options.account, dropped, warn),
       prefix,
-      storageKey: options.storageKey || `${prefix}:cart:${domain}`,
-      metafields: metafieldsOption(options.metafields ?? []),
+      storageKey: typeof options.storageKey === "string" && options.storageKey ? options.storageKey : `${prefix}:cart:${domain}`,
+      metafields: metafieldsOption(options.metafields ?? [], dropped),
+      embedOrigins: embedOriginsOption(options.embedOrigins ?? [], dropped),
       checkoutTarget: choiceOption("checkoutTarget", options.checkoutTarget, ["_self", "_blank"]),
       defaultPurchase: choiceOption("defaultPurchase", options.defaultPurchase, ["one-time", "subscription"])
     };
     for (const name of COUNT_OPTIONS) resolved[name] = countOption(name, options[name]);
-    for (const name of HOOK_OPTIONS) if (typeof resolved[name] !== "function") resolved[name] = null;
-    if (resolved.apiVersion === "unstable") {
-      warn('apiVersion "unstable" changes without notice. Pin a dated version (e.g. 2026-07).');
-    }
+    for (const name of SWITCH_OPTIONS) resolved[name] = switchOption(name, options[name]);
+    for (const name of TEXT_OPTIONS) resolved[name] = textOption(name, options[name]);
     return resolved;
   }
+  var parseMarkets = (value) => marketsOption(value, dropped);
   function configure(options = {}) {
     const resolved = resolveConfig(options);
     for (const key of Object.keys(cfg)) {
@@ -177,83 +428,73 @@
     }
   }
 
-  // src/client.js
-  var client_exports = {};
-  __export(client_exports, {
-    TetherError: () => TetherError,
-    endpoint: () => endpoint,
-    gql: () => gql,
-    request: () => request,
-    unwrap: () => unwrap,
-    withContext: () => withContext
-  });
-
-  // src/market-codes.js
-  var market_codes_exports = {};
-  __export(market_codes_exports, {
-    toCountry: () => toCountry,
-    toLanguage: () => toLanguage
-  });
-  var COUNTRY = /^[A-Z]{2}$/;
-  var NOT_A_COUNTRY = /* @__PURE__ */ new Set(["XX", "T1"]);
-  var REGIONAL_LANGUAGES = /* @__PURE__ */ new Set(["PT_BR", "PT_PT", "ZH_CN", "ZH_TW"]);
-  var LANGUAGE = /^[A-Z]{2,3}$/;
-  function toCountry(value) {
-    const code = (typeof value === "string" ? value : "").trim().toUpperCase();
-    if (!COUNTRY.test(code) || NOT_A_COUNTRY.has(code)) return null;
-    return (
-      /** @type {CountryCode} */
-      code
-    );
-  }
-  function toLanguage(value) {
-    const raw = (typeof value === "string" ? value : "").trim().replace("-", "_").toUpperCase();
-    if (REGIONAL_LANGUAGES.has(raw)) return (
-      /** @type {LanguageCode} */
-      raw
-    );
-    const primary = raw.split("_")[0] ?? "";
-    return LANGUAGE.test(primary) ? (
-      /** @type {LanguageCode} */
-      primary
-    ) : null;
+  // server/src/shared/error-message.ts
+  function messageOf(error) {
+    return error instanceof Error ? error.message : String(error);
   }
 
-  // src/client.js
+  // src/client.ts
   var TetherError = class extends Error {
-    /**
-     * @param {string} message
-     * @param {TetherErrorDetails} [details]
-     */
     constructor(message, { status: status2, errors, userErrors, code } = {}) {
       super(message);
-      this.name = "TetherError";
+      __publicField(this, "name", "TetherError");
+      __publicField(this, "code");
+      __publicField(this, "status");
+      __publicField(this, "errors");
+      __publicField(this, "userErrors");
       this.code = code ?? (status2 ? `HTTP_${status2}` : "ERROR");
       this.status = status2;
       this.errors = errors;
       this.userErrors = userErrors;
     }
   };
+  function matches(value, shape) {
+    if (typeof shape === "function") return shape(value);
+    if (typeof shape === "string") return shape === "object" ? isRecord(value) : typeof value === shape;
+    if (isShapeList(shape)) return Array.isArray(value) && value.every((item) => matches(item, shape[0]));
+    return isRecord(value) && Object.entries(shape).every(([key, inner]) => matches(value[key], inner));
+  }
+  var isShapeList = (shape) => Array.isArray(shape);
+  var orNull = (shape) => (value) => value === null || matches(value, shape);
+  var shaped = (shape) => (data) => matches(data, shape);
   function endpoint(conf = cfg) {
     return `https://${conf.domain}/api/${conf.apiVersion}/graphql.json`;
   }
-  function withContext(query, ctx = cfg) {
+  var STRINGS_AND_COMMENTS = /"(?:\\.|[^"\\\n])*"|#[^\n]*/g;
+  var OPERATION_START = /^\s*(?:query|mutation)(?:\s+\w+)?\s*(?:\([^)]*\))?/;
+  function inContext(query2, { country, language }) {
     const args = [];
-    const country = toCountry(ctx.country);
-    const language = toLanguage(ctx.language);
     if (country) args.push(`country: ${country}`);
     if (language) args.push(`language: ${language}`);
-    if (!args.length || query.includes("@inContext")) return query;
+    if (!args.length) return query2;
     const tag = `@inContext(${args.join(", ")})`;
-    if (/^\s*\{/.test(query)) return `query ${tag} ${query.trimStart()}`;
-    return query.replace(/^(\s*(?:query|mutation)(?:\s+\w+)?\s*(?:\([^)]*\))?)/, `$1 ${tag}`);
+    const blanked = query2.replace(STRINGS_AND_COMMENTS, (text2) => " ".repeat(text2.length));
+    const selectionStart = blanked.indexOf("{");
+    if (blanked.slice(0, selectionStart).includes("@inContext")) return query2;
+    if (blanked.trimStart().startsWith("{")) return `query ${tag} ${query2.slice(selectionStart)}`;
+    const header = OPERATION_START.exec(blanked);
+    if (!header) return query2;
+    const end = header[0].length;
+    return `${query2.slice(0, end).trimEnd()} ${tag} ${query2.slice(end).trimStart()}`;
+  }
+  function withContext(query2, ctx = cfg) {
+    const country = toCountry(ctx.country) ?? void 0;
+    const language = toLanguage(ctx.language) ?? void 0;
+    return inContext(query2, { country, language });
   }
   var RETRY_BACKOFF_MS = 300;
   var THROTTLE_BACKOFF_MS = 500;
   var SECURITY_REJECTION = 430;
+  var MS_PER_SECOND = 1e3;
   var INVENTORY_FIELD = "quantityAvailable";
   var storesWithoutInventory = /* @__PURE__ */ new Set();
   var storeOf = (conf) => `${conf.domain} ${conf.apiVersion} ${conf.token}`;
+  function queryText(conf, query2, access, context) {
+    const written = typeof query2 === "string" ? query2 : query2(access);
+    const text2 = context ? inContext(written, conf) : written;
+    if (conf.maxAge <= 0 || /^\s*mutation\b/.test(text2)) return text2;
+    return `${text2} #${Math.floor(Date.now() / (conf.maxAge * MS_PER_SECOND))}`;
+  }
   var sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   function statusText(status2, conf) {
     if (status2 === 401 || status2 === 403) {
@@ -265,23 +506,40 @@
     }
     return `HTTP ${status2} from ${conf.domain}`;
   }
+  function toGraphQLError(value) {
+    const message = field(value, "message");
+    const code = field(field(value, "extensions"), "code");
+    const text2 = typeof message === "string" ? message : "";
+    return typeof code === "string" ? { message: text2, extensions: { code } } : { message: text2 };
+  }
+  function toGraphQLResponse(json) {
+    if (!isRecord(json)) return null;
+    const { data, errors } = json;
+    if (errors === void 0 || errors === null) return { data };
+    if (!Array.isArray(errors)) return null;
+    return { data, errors: errors.map(toGraphQLError) };
+  }
+  function invalidResponse(res, conf) {
+    const text2 = res.ok ? `Invalid response (${res.status})` : statusText(res.status, conf);
+    return new TetherError(text2, { status: res.status });
+  }
   function graphQLFailure(res, errors, conf) {
     const message = errors.map((error) => error.message).filter(Boolean).join(" | ");
-    let text = message || "Storefront API error";
-    if (!res.ok) text = res.status === 401 || res.status === 403 || !message ? statusText(res.status, conf) : message;
-    return new TetherError(text, { status: res.status, errors });
+    let text2 = message || "Storefront API error";
+    if (!res.ok) text2 = res.status === 401 || res.status === 403 || !message ? statusText(res.status, conf) : message;
+    return new TetherError(text2, { status: res.status, errors });
   }
-  async function attempt(conf, query, variables, canRetry) {
+  async function attempt(conf, query2, variables, isData, canRetry) {
     let res;
     try {
       res = await (conf.fetch ?? fetch)(endpoint(conf), {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-Shopify-Storefront-Access-Token": conf.token },
-        body: JSON.stringify({ query, variables })
+        body: JSON.stringify({ query: query2, variables })
       });
     } catch (error) {
       if (canRetry) return { kind: "retry", backoffMs: RETRY_BACKOFF_MS };
-      throw new TetherError(`Network error: ${error instanceof Error ? error.message : String(error)}`, {
+      throw new TetherError(`Network error: ${messageOf(error)}`, {
         code: "NETWORK"
       });
     }
@@ -295,16 +553,14 @@
     try {
       json = await res.json();
     } catch {
-      const text = res.ok ? `Invalid response (${res.status})` : statusText(res.status, conf);
-      throw new TetherError(text, { status: res.status });
+      throw invalidResponse(res, conf);
     }
-    const { data, errors = [] } = (
-      /** @type {GraphQLResponse | null} */
-      json ?? {}
-    );
+    const body = toGraphQLResponse(json);
+    if (!body) throw invalidResponse(res, conf);
+    const { data, errors = [] } = body;
     if (errors.length) {
-      if (query.includes(INVENTORY_FIELD) && errors.some((error) => error.message.includes(INVENTORY_FIELD))) {
-        return { kind: "inventory-refused" };
+      if (query2.includes(INVENTORY_FIELD) && errors.some((error) => error.message.includes(INVENTORY_FIELD))) {
+        return { kind: "inventory-refused", error: graphQLFailure(res, errors, conf) };
       }
       if (canRetry && errors.some((error) => error.extensions?.code === "THROTTLED")) {
         return { kind: "retry", backoffMs: THROTTLE_BACKOFF_MS };
@@ -312,28 +568,23 @@
       throw graphQLFailure(res, errors, conf);
     }
     if (!res.ok) throw new TetherError(statusText(res.status, conf), { status: res.status });
+    if (!isData(data)) throw invalidResponse(res, conf);
     return { kind: "data", data };
   }
-  async function request(conf, query, variables = {}, { context = true } = {}) {
+  async function request(conf, query2, variables, isData, { context = true } = {}) {
     if (!conf.domain || !conf.token) {
       throw new TetherError("Tether is not configured: domain and token are required", { code: "NOT_CONFIGURED" });
-    }
-    let text = context ? withContext(query, conf) : query;
-    if (conf.maxAge > 0 && !/^\s*mutation\b/.test(text)) {
-      text += ` #${Math.floor(Date.now() / (conf.maxAge * 1e3))}`;
     }
     const store = storeOf(conf);
     let retries = 0;
     for (; ; ) {
-      const sent = storesWithoutInventory.has(store) ? text.replaceAll(INVENTORY_FIELD, "") : text;
-      const outcome = await attempt(conf, sent, variables, retries < conf.retries);
+      const sent = queryText(conf, query2, { inventory: !storesWithoutInventory.has(store) }, context);
+      const outcome = await attempt(conf, sent, variables, isData, retries < conf.retries);
       switch (outcome.kind) {
         case "data":
-          return (
-            /** @type {T} */
-            outcome.data
-          );
+          return outcome.data;
         case "inventory-refused":
+          if (typeof query2 === "string") throw outcome.error;
           log(`the token can't read inventory: ${INVENTORY_FIELD} is left out from now on`);
           storesWithoutInventory.add(store);
           break;
@@ -345,7 +596,13 @@
       }
     }
   }
-  var gql = (query, variables, options) => request(cfg, query, variables, options);
+  function gql(query2, variables, isData, options) {
+    return request(cfg, query2, variables, isData, options);
+  }
+  var hasData = (data) => typeof data === "object" && data !== null;
+  function query(text2, variables = {}, options) {
+    return gql(text2, variables, hasData, options);
+  }
   function unwrap(payload, name) {
     if (!payload) throw new TetherError(`${name}: empty response`);
     const userErrors = payload.userErrors ?? [];
@@ -355,132 +612,236 @@
     return payload;
   }
 
-  // src/cart.js
-  var cart_exports = {};
-  __export(cart_exports, {
-    Cart: () => Cart,
-    trapFocus: () => trapFocus
-  });
-
-  // src/dom.js
-  var dom_exports = {};
-  __export(dom_exports, {
-    attr: () => attr,
-    busy: () => busy,
-    cdnUrl: () => cdnUrl,
-    emit: () => emit,
-    formatDate: () => formatDate,
-    formatMoney: () => formatMoney2,
-    formatPercent: () => formatPercent,
-    get: () => get,
-    has: () => has,
-    hasTemplate: () => hasTemplate,
-    imageUrl: () => imageUrl,
-    notifyLayoutChanged: () => notifyLayoutChanged,
-    parseJSONAttr: () => parseJSONAttr,
-    productUrl: () => productUrl2,
-    qsa: () => qsa,
-    repeat: () => repeat,
-    repeatKeyed: () => repeatKeyed,
-    sameImage: () => sameImage,
-    scoped: () => scoped,
-    sel: () => sel,
-    setImage: () => setImage,
-    setSelected: () => setSelected,
-    setStoreHtml: () => setStoreHtml,
-    setText: () => setText,
-    setTextTracked: () => setTextTracked,
-    show: () => show,
-    toAttributes: () => toAttributes,
-    watchImages: () => watchImages
-  });
-
-  // src/markup.js
+  // src/markup.ts
   var attr = (name) => `${cfg.prefix}-${name}`;
   var sel = (name, value) => value === void 0 ? `[${attr(name)}]` : `[${attr(name)}="${value}"]`;
   var get = (el, name) => el.getAttribute(attr(name));
   var has = (el, name) => el.hasAttribute(attr(name));
   function qsa(root, selector) {
     if (!root) return [];
-    return [.../** @type {NodeListOf<HTMLElement>} */
-    root.querySelectorAll(selector)];
+    return [...root.querySelectorAll(selector)];
   }
   var scoped = (root, selector, scopeSelector) => qsa(root, selector).filter((el) => el.closest(scopeSelector) === root);
+  var ANALYTICS_EVENTS = [
+    "product-ready",
+    "list-ready",
+    "cart-updated",
+    "cart-toggled",
+    "checkout",
+    "search"
+  ];
+  var ownEvents = /* @__PURE__ */ new WeakMap();
+  function ownEvent(name, detail) {
+    const event = new CustomEvent(`${cfg.prefix}:${name}`, { detail, bubbles: true });
+    ownEvents.set(event, name);
+    return event;
+  }
+  function isOwnEvent(event, name) {
+    return ownEvents.get(event) === name;
+  }
   function emit(name, detail, target = document) {
-    target.dispatchEvent(new CustomEvent(`${cfg.prefix}:${name}`, { detail, bubbles: true }));
+    target.dispatchEvent(ownEvent(name, detail));
   }
 
-  // src/store-html.js
-  var store_html_exports = {};
-  __export(store_html_exports, {
-    storeHtmlFragment: () => storeHtmlFragment
-  });
-  var BLOCKED_ELEMENTS = /* @__PURE__ */ new Set([
-    "SCRIPT",
-    "OBJECT",
-    "EMBED",
-    "BASE",
-    "META",
-    "LINK",
-    "NOSCRIPT",
-    "TEMPLATE",
-    // SVG animation can set an attribute such as href to a script URL after the attributes were checked.
-    "ANIMATE",
-    "SET"
+  // src/store-html.ts
+  var HTML_NAMESPACE = "http://www.w3.org/1999/xhtml";
+  var ALLOWED_ELEMENTS = /* @__PURE__ */ new Set([
+    ...["h1", "h2", "h3", "h4", "h5", "h6", "p", "span", "div", "br", "hr", "blockquote", "code", "pre"],
+    ...["strong", "em", "b", "i", "u", "s", "small", "sub", "sup"],
+    ...["ul", "ol", "li", "dl", "dt", "dd"],
+    ...["table", "caption", "colgroup", "col", "thead", "tbody", "tfoot", "tr", "th", "td"],
+    ...["a", "img", "picture", "source", "video", "figure", "figcaption", "iframe"]
   ]);
-  var URL_ATTRIBUTES = /* @__PURE__ */ new Set(["href", "src", "action", "formaction", "xlink:href", "poster", "data", "background"]);
-  var SCRIPT_URL = /^\s*(javascript|vbscript|data):/i;
-  var DATA_IMAGE = /^\s*data:image\/(png|gif|jpeg|webp|avif);/i;
-  var IGNORED_IN_SCHEME = /[ - ]/g;
-  function isUnsafeAttribute(element, attribute) {
-    const name = attribute.name.toLowerCase();
-    if (name.startsWith("on") || name === "srcdoc") return true;
-    const url = attribute.value.replace(IGNORED_IN_SCHEME, "");
-    if (!URL_ATTRIBUTES.has(name) || !SCRIPT_URL.test(url)) return false;
-    return !(element.tagName === "IMG" && name === "src" && DATA_IMAGE.test(url));
+  var REMOVED_WITH_CONTENT = /* @__PURE__ */ new Set(["script", "style", "template", "noscript", "textarea", "select", "title"]);
+  var GLOBAL_ATTRIBUTES = /* @__PURE__ */ new Set(["style", "title", "lang", "dir", "role", "align", "width", "height"]);
+  var ELEMENT_ATTRIBUTES = /* @__PURE__ */ new Map([
+    ["a", /* @__PURE__ */ new Set(["href", "target", "rel", "hreflang"])],
+    ["img", /* @__PURE__ */ new Set(["src", "srcset", "sizes", "alt", "loading", "decoding"])],
+    ["source", /* @__PURE__ */ new Set(["src", "srcset", "sizes", "type", "media"])],
+    ["video", /* @__PURE__ */ new Set(["src", "poster", "controls", "autoplay", "muted", "loop", "playsinline", "preload"])],
+    ["iframe", /* @__PURE__ */ new Set(["src", "allow", "allowfullscreen", "frameborder", "loading"])],
+    ["blockquote", /* @__PURE__ */ new Set(["cite"])],
+    ["ol", /* @__PURE__ */ new Set(["start", "type", "reversed"])],
+    ["li", /* @__PURE__ */ new Set(["value"])],
+    ["table", /* @__PURE__ */ new Set(["border", "cellpadding", "cellspacing", "summary"])],
+    ["col", /* @__PURE__ */ new Set(["span"])],
+    ["colgroup", /* @__PURE__ */ new Set(["span"])],
+    ["th", /* @__PURE__ */ new Set(["colspan", "rowspan", "headers", "scope", "valign"])],
+    ["td", /* @__PURE__ */ new Set(["colspan", "rowspan", "headers", "valign"])]
+  ]);
+  var URL_ATTRIBUTES = /* @__PURE__ */ new Set(["href", "src", "poster", "cite"]);
+  var SCRIPT_URL = /^(javascript|vbscript|data):/i;
+  var DATA_IMAGE = /^data:image\/(png|gif|jpeg|webp|avif);/i;
+  var OUT_OF_PLACE_PROPERTIES = /* @__PURE__ */ new Set([
+    "position",
+    "top",
+    "right",
+    "bottom",
+    "left",
+    "z-index",
+    "-webkit-box-reflect"
+  ]);
+  var OUT_OF_PLACE_PREFIXES = ["inset", "transform", "translate", "rotate", "scale", "offset"];
+  var VIEWPORT_LENGTH = /\d(?:[sld]?v|cq)(?:w|h|i|b|min|max)\b/i;
+  var PAINTS_BEYOND = /^(?:outline|box-shadow|text-shadow|filter|text-decoration|text-underline-offset|text-stroke)|^(?:border-image|mask-border|mask-box-image)(?:-outset)?$/;
+  var MAX_PAINT_PX = 40;
+  var NEGATIVE_LIMITS = /* @__PURE__ */ new Map([
+    ["letter-spacing", { px: 4, em: 0.25 }],
+    ["word-spacing", { px: 4, em: 0.25 }],
+    ["text-indent", { px: MAX_PAINT_PX }]
+  ]);
+  var NUMBER = /(?<![\w#.-])[+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?(%|[a-z]+)?/gi;
+  var NON_LENGTH_FUNCTION = /(?<![\w-])(?!drop-shadow\(|blur\()[\w-]+\([^()]*\)/g;
+  var COMPUTED_VALUE = /(?:var|calc|min|max|clamp|env|attr)\(/i;
+  var FETCHING_VALUE = /url\(|expression\(|@import/i;
+  var IGNORED_IN_SCHEME = /[\u0000- ]/g;
+  var IFRAME_SANDBOX = "allow-scripts allow-same-origin allow-popups allow-presentation";
+  var IFRAME_FEATURES = /* @__PURE__ */ new Set([
+    ...["autoplay", "encrypted-media", "picture-in-picture", "fullscreen", "clipboard-write"],
+    ...["accelerometer", "gyroscope", "web-share"]
+  ]);
+  var IFRAME_REFERRER_POLICY = "strict-origin-when-cross-origin";
+  var EMBED_ORIGINS = [
+    "https://www.youtube.com",
+    "https://www.youtube-nocookie.com",
+    "https://player.vimeo.com",
+    "https://www.loom.com",
+    "https://fast.wistia.net"
+  ];
+  function isAllowedAttribute(tag, name) {
+    return GLOBAL_ATTRIBUTES.has(name) || name.startsWith("aria-") || (ELEMENT_ATTRIBUTES.get(tag)?.has(name) ?? false);
   }
-  function clean(root) {
-    for (const element of [...root.querySelectorAll("*")]) {
-      if (BLOCKED_ELEMENTS.has(element.tagName.toUpperCase())) {
-        element.remove();
-        continue;
-      }
-      for (const attribute of [...element.attributes]) {
-        if (isUnsafeAttribute(element, attribute)) element.removeAttribute(attribute.name);
-      }
+  function isSafeUrl(tag, name, value) {
+    const url2 = value.replace(IGNORED_IN_SCHEME, "");
+    if (!SCRIPT_URL.test(url2)) return true;
+    return tag === "img" && name === "src" && DATA_IMAGE.test(url2);
+  }
+  function urlOrNull(value, base) {
+    try {
+      return new URL(value, base);
+    } catch {
+      return null;
     }
   }
-  function storeHtmlFragment(html, document2 = globalThis.document) {
+  function pageOf(document2, styleParser, embedOrigins) {
+    const baseUrl = document2.baseURI;
+    const origin = urlOrNull(baseUrl)?.origin ?? "null";
+    return {
+      origin: origin === "null" ? null : origin,
+      baseUrl,
+      styleParser,
+      embedOrigins: /* @__PURE__ */ new Set([...EMBED_ORIGINS, ...embedOrigins])
+    };
+  }
+  function isAllowedEmbed(value, page) {
+    const url2 = urlOrNull(value.trim(), page.baseUrl);
+    return url2 !== null && url2.origin !== page.origin && page.embedOrigins.has(url2.origin);
+  }
+  function allowedFeatures(value) {
+    const features = value.split(";").map((directive) => directive.trim().split(/\s+/)[0]?.toLowerCase() ?? "");
+    return [...new Set(features.filter((feature) => IFRAME_FEATURES.has(feature)))].join("; ");
+  }
+  function isOutOfPlace(property, value) {
+    if (OUT_OF_PLACE_PROPERTIES.has(property) || OUT_OF_PLACE_PREFIXES.some((prefix) => property.startsWith(prefix))) {
+      return true;
+    }
+    if (VIEWPORT_LENGTH.test(value)) return true;
+    const limits = NEGATIVE_LIMITS.get(property);
+    if (limits) return COMPUTED_VALUE.test(value) || movesBackTooFar(value, limits);
+    return property.startsWith("margin") && value.includes("-");
+  }
+  function movesBackTooFar(value, limits) {
+    return [...value.matchAll(NUMBER)].some(([number = "", unit = ""]) => {
+      const amount = parseFloat(number);
+      if (amount >= 0) return false;
+      const limit = limits[unit.toLowerCase()];
+      return limit === void 0 || -amount > limit;
+    });
+  }
+  function paintsTooFar(property, value) {
+    if (!PAINTS_BEYOND.test(property.replace(/^-webkit-/, ""))) return false;
+    if (COMPUTED_VALUE.test(value)) return true;
+    return [...value.replace(NON_LENGTH_FUNCTION, "").matchAll(NUMBER)].some(([number = "", unit = ""]) => {
+      const amount = Math.abs(parseFloat(number));
+      return amount !== 0 && (unit.toLowerCase() !== "px" || amount > MAX_PAINT_PX);
+    });
+  }
+  function cleanStyle(value, styleParser) {
+    const style = styleParser.style;
+    style.cssText = value;
+    const properties = Array.from({ length: style.length }, (_, index) => style.item(index));
+    for (const property of properties) {
+      const value2 = style.getPropertyValue(property);
+      const remove = isOutOfPlace(property, value2) || paintsTooFar(property, value2) || FETCHING_VALUE.test(value2);
+      if (remove) style.removeProperty(property);
+    }
+    const cleaned = style.cssText;
+    styleParser.removeAttribute("style");
+    return cleaned;
+  }
+  function cleanAttributes(element, page) {
+    const tag = element.localName;
+    for (const attribute of [...element.attributes]) {
+      const name = attribute.name.toLowerCase();
+      const isUrl = URL_ATTRIBUTES.has(name);
+      const keep = isAllowedAttribute(tag, name) && (!isUrl || isSafeUrl(tag, name, attribute.value));
+      if (!keep) element.removeAttribute(attribute.name);
+    }
+    const style = element.getAttribute("style");
+    if (style === null) return;
+    const cleaned = cleanStyle(style, page.styleParser);
+    if (cleaned === "") element.removeAttribute("style");
+    else element.setAttribute("style", cleaned);
+  }
+  function hardenEmbedsAndLinks(element) {
+    if (element.localName === "iframe") {
+      const allow = allowedFeatures(element.getAttribute("allow") ?? "");
+      if (allow === "") element.removeAttribute("allow");
+      else element.setAttribute("allow", allow);
+      element.setAttribute("sandbox", IFRAME_SANDBOX);
+      element.setAttribute("referrerpolicy", IFRAME_REFERRER_POLICY);
+      return;
+    }
+    if (element.localName !== "a" || element.getAttribute("target")?.toLowerCase() !== "_blank") return;
+    const rel = new Set((element.getAttribute("rel") ?? "").split(/\s+/).filter(Boolean));
+    rel.add("noopener");
+    rel.add("noreferrer");
+    element.setAttribute("rel", [...rel].join(" "));
+  }
+  function cleanElement(element, page) {
+    const tag = element.localName;
+    const isHtml = element.namespaceURI === HTML_NAMESPACE;
+    if (isHtml && REMOVED_WITH_CONTENT.has(tag)) {
+      element.remove();
+      return;
+    }
+    if (!isHtml || !ALLOWED_ELEMENTS.has(tag)) {
+      element.replaceWith(...element.childNodes);
+      return;
+    }
+    if (tag === "iframe" && !isAllowedEmbed(element.getAttribute("src") ?? "", page)) {
+      element.remove();
+      return;
+    }
+    cleanAttributes(element, page);
+    hardenEmbedsAndLinks(element);
+  }
+  function storeHtmlFragment(html, document2 = globalThis.document, embedOrigins = []) {
     const template = document2.createElement("template");
     template.innerHTML = html ?? "";
-    clean(template.content);
+    const page = pageOf(document2, template, embedOrigins);
+    for (const element of [...template.content.querySelectorAll("*")]) cleanElement(element, page);
     return template.content;
   }
 
-  // src/shopify-values.js
-  var shopify_values_exports = {};
-  __export(shopify_values_exports, {
-    STORE_ENV_NAMES: () => STORE_ENV_NAMES,
-    formatMoney: () => formatMoney,
-    isHttpsUrl: () => isHttpsUrl,
-    isSecretShopifyToken: () => isSecretShopifyToken,
-    productKey: () => productKey,
-    productUrl: () => productUrl
-  });
-  var STORE_ENV_NAMES = {
-    domain: ["PUBLIC_SHOPIFY_DOMAIN", "PUBLIC_SHOPIFY_STORE_DOMAIN", "SHOPIFY_DOMAIN"],
-    token: ["PUBLIC_SHOPIFY_STOREFRONT_TOKEN", "PUBLIC_SHOPIFY_STOREFRONT_ACCESS_TOKEN", "SHOPIFY_STOREFRONT_TOKEN"]
-  };
-  function isHttpsUrl(url) {
-    if (typeof url !== "string") return false;
+  // src/shopify-values.ts
+  function isHttpsUrl(url2) {
+    if (typeof url2 !== "string") return false;
     try {
-      return new URL(url).protocol === "https:";
+      return new URL(url2).protocol === "https:";
     } catch {
       return false;
     }
-  }
-  function isSecretShopifyToken(token) {
-    return /^shp[a-z]{2}_/.test(token.trim());
   }
   function formatMoney(money, locale) {
     if (!money) return "";
@@ -495,8 +856,12 @@
     }
   }
   function productUrl(productPath, handle, id) {
-    if (!/\{(handle|id)\}/.test(productPath)) return `${productPath.replace(/\/$/, "")}/${handle ?? String(handle)}`;
-    const numericId2 = id ? id.split("/").pop() ?? "" : "";
+    if (!/\{(handle|id)\}/.test(productPath)) {
+      return handle ? `${productPath.replace(/\/$/, "")}/${encodeURIComponent(handle)}` : null;
+    }
+    const numericId2 = id ? id.split("/").at(-1) ?? "" : "";
+    if (productPath.includes("{handle}") && !handle) return null;
+    if (productPath.includes("{id}") && !numericId2) return null;
     return productPath.replace(/\{handle\}/g, encodeURIComponent(handle ?? "")).replace(/\{id\}/g, encodeURIComponent(numericId2));
   }
   function productKey(raw) {
@@ -507,43 +872,44 @@
     return /\/products\/([^/?#]+)/.exec(value)?.[1] ?? value;
   }
 
-  // src/images.js
-  function imageUrl(url, { width, height, crop } = {}) {
-    if (!url) return url;
+  // src/images.ts
+  function imageUrl(url2, { width, height, crop } = {}) {
+    if (!url2) return url2;
     let parsed;
     try {
-      parsed = new URL(url);
+      parsed = new URL(url2);
     } catch (error) {
-      if (error instanceof TypeError) return url;
+      if (error instanceof TypeError) return url2;
       throw error;
     }
     if (width) parsed.searchParams.set("width", String(width));
     if (height) parsed.searchParams.set("height", String(height));
     if (crop) parsed.searchParams.set("crop", crop);
-    return (
-      /** @type {Url} */
-      parsed.toString()
-    );
+    return parsed.toString();
   }
   function sizeAttribute(el, name) {
     return el.getAttribute(name) ?? el.getAttribute(attr(name)) ?? el.getAttribute(`data-${name}`);
   }
-  function cdnUrl(url, el) {
-    if (!url || !el) return url;
+  function cdnUrl(url2, el) {
+    if (!url2 || !el) return url2;
     const width = sizeAttribute(el, "max-width");
     const height = sizeAttribute(el, "max-height");
-    return imageUrl(url, { width, height, crop: width || height ? sizeAttribute(el, "crop") : null });
+    return imageUrl(url2, { width, height, crop: width || height ? sizeAttribute(el, "crop") : null });
   }
-  var sameImage = (a, b) => Boolean(a && b) && a?.split("?")[0] === b?.split("?")[0];
-  function cssUrl(url) {
-    const hasScheme = /^\s*[a-z][a-z0-9+.-]*:/i.test(url);
-    if (hasScheme && !/^\s*(https?:|data:image\/)/i.test(url)) return "none";
-    const escaped = url.replace(/["\\\n\r\f]/g, (char) => `\\${char.charCodeAt(0).toString(16)} `);
+  var withoutQuery = (url2) => url2.replace(/\?.*$/, "");
+  function sameImage(a, b) {
+    if (!a || !b) return false;
+    return withoutQuery(a) === withoutQuery(b);
+  }
+  function cssUrl(url2) {
+    const hasScheme = /^\s*[a-z][a-z0-9+.-]*:/i.test(url2);
+    if (hasScheme && !/^\s*(https?:|data:image\/)/i.test(url2)) return "none";
+    const escaped = url2.replace(/["\\\n\r\f]/g, (char) => `\\${char.charCodeAt(0).toString(16)} `);
     return `url("${escaped}")`;
   }
-  function setImage(el, url, alt) {
-    if (!url) return;
-    const src = cdnUrl(url, el);
+  function setImage(el, url2, alt) {
+    if (!url2) return;
+    const src = cdnUrl(url2, el);
     if (el.tagName !== "IMG") {
       el.style.backgroundImage = cssUrl(src);
       return;
@@ -559,21 +925,15 @@
     if (!el.getAttribute("loading")) el.setAttribute("loading", "lazy");
   }
 
-  // src/repeaters.js
+  // src/repeaters.ts
   var templates = /* @__PURE__ */ new WeakMap();
   var hasTemplate = (container) => Boolean(templates.get(container));
-  var copyOf = (template) => (
-    /** @type {HTMLElement} */
-    template.cloneNode(true)
-  );
+  var copyOf = (template) => template.cloneNode(true);
   function templateOf(container) {
     const known = templates.get(container);
     if (known !== void 0) return known;
     const first = container.firstElementChild;
-    const template = first ? copyOf(
-      /** @type {HTMLElement} */
-      first
-    ) : null;
+    const template = first ? copyOf(first) : null;
     templates.set(container, template);
     container.replaceChildren();
     return template;
@@ -628,8 +988,7 @@
     }
     const keyAttribute = `data-${cfg.prefix}-key`;
     const leavingAttribute = `data-${cfg.prefix}-leaving`;
-    const live = () => [.../** @type {HTMLCollectionOf<HTMLElement>} */
-    container.children].filter(
+    const live = () => [...container.children].filter(
       (node) => node.hasAttribute(keyAttribute) && !node.hasAttribute(leavingAttribute)
     );
     const existing = new Map(live().map((node) => [node.getAttribute(keyAttribute), node]));
@@ -667,7 +1026,7 @@
     });
   }
 
-  // src/dom.js
+  // src/dom.ts
   var SEEN = "data-tether-seen";
   var SHOWN = "data-tether-shown";
   var PREVIOUS_DISPLAY = "data-tether-prev-display";
@@ -698,14 +1057,14 @@
     return formatOr(() => new Date(iso).toLocaleDateString(cfg.locale || void 0), "");
   }
   function setStoreHtml(el, html) {
-    el.replaceChildren(storeHtmlFragment(html, el.ownerDocument));
+    el.replaceChildren(storeHtmlFragment(html, el.ownerDocument, cfg.embedOrigins));
   }
   var isTextField = (el) => el.tagName === "INPUT" || el.tagName === "TEXTAREA";
   var isInput = (el) => el.tagName === "INPUT";
   function setText(el, value) {
-    const text = value == null ? "" : String(value);
-    if (isTextField(el)) el.value = text;
-    else el.textContent = text;
+    const text2 = value == null ? "" : String(value);
+    if (isTextField(el)) el.value = text2;
+    else el.textContent = text2;
   }
   var readText = (el) => isTextField(el) ? el.value : el.textContent;
   function setTextTracked(el, value) {
@@ -754,15 +1113,22 @@
     if (input && isInput(input)) input.checked = selected;
   }
   var layoutTimer;
+  var pageGlobal = (name) => Reflect.get(window, name);
+  function refreshScrollTrigger() {
+    const scrollTrigger = pageGlobal("ScrollTrigger");
+    if (typeof scrollTrigger !== "function") return;
+    const refresh = Reflect.get(scrollTrigger, "refresh");
+    if (typeof refresh === "function") Reflect.apply(refresh, scrollTrigger, []);
+  }
   function notifyLayoutChanged(reason) {
     clearTimeout(layoutTimer);
     layoutTimer = setTimeout(() => {
-      const { ScrollTrigger } = (
-        /** @type {Window & { ScrollTrigger?: { refresh?: () => void } }} */
-        window
-      );
-      if (cfg.onLayoutChange) cfg.onLayoutChange(reason);
-      else ScrollTrigger?.refresh?.();
+      try {
+        if (cfg.onLayoutChange) cfg.onLayoutChange(reason);
+        else refreshScrollTrigger();
+      } catch (error) {
+        reportError(error, "layout-changed");
+      }
       emit("layout-changed", { reason });
     }, LAYOUT_DEBOUNCE_MS);
   }
@@ -789,14 +1155,26 @@
     const raw = el ? get(el, name) : null;
     if (!raw) return null;
     try {
-      return (
-        /** @type {unknown} */
-        JSON.parse(raw)
-      );
+      const json = JSON.parse(raw);
+      return json;
     } catch {
       warn(`invalid JSON in ${attr(name)}`, el);
       return null;
     }
+  }
+  function attributeText(value) {
+    if (value === null || value === void 0) return "";
+    if (typeof value === "string") return value;
+    if (typeof value === "number" || typeof value === "boolean") return String(value);
+    return JSON.stringify(value);
+  }
+  function attributesFromJson(json) {
+    if (Array.isArray(json)) {
+      const entries = json;
+      return entries.filter(isRecord).map((entry) => ({ key: attributeText(entry["key"]), value: attributeText(entry["value"]) }));
+    }
+    if (!isRecord(json)) return [];
+    return Object.entries(json).map(([key, value]) => ({ key, value: attributeText(value) }));
   }
   function toAttributes(attributes) {
     if (!attributes) return [];
@@ -806,14 +1184,10 @@
     return Object.entries(attributes).map(([key, value]) => ({ key, value: String(value ?? "") }));
   }
 
-  // src/fragments.js
-  var fragments_exports = {};
-  __export(fragments_exports, {
-    cartFragment: () => cartFragment,
-    collectionFields: () => collectionFields,
-    productFragment: () => productFragment
-  });
+  // src/fragments.ts
   var MONEY = "amount currencyCode";
+  var FULL_ACCESS = { inventory: true };
+  var inventoryField = (access) => access.inventory ? "quantityAvailable" : "";
   var IMAGE = "url altText width height";
   function metafieldsField(metafields) {
     const identifiers = [];
@@ -827,11 +1201,11 @@
   }
   var SELLING_PLAN_FIELDS = ` id name description recurringDeliveries options{name value}priceAdjustments{orderCount adjustmentValue{__typename ... on SellingPlanPercentagePriceAdjustment{adjustmentPercentage}... on SellingPlanFixedAmountPriceAdjustment{adjustmentAmount{${MONEY}}}... on SellingPlanFixedPriceAdjustment{price{${MONEY}}}}}`;
   var ALLOCATION_FIELDS = ` sellingPlan{id}checkoutChargeAmount{${MONEY}}remainingBalanceChargeAmount{${MONEY}}priceAdjustments{price{${MONEY}}compareAtPrice{${MONEY}}perDeliveryPrice{${MONEY}}unitPrice{${MONEY}}}`;
-  function productFragment(o = cfg) {
-    return ` fragment TetherProduct on Product{id handle title description descriptionHtml productType vendor tags availableForSale publishedAt onlineStoreUrl requiresSellingPlan seo{title description}featuredImage{${IMAGE}}images(first:${o.imagesFirst}){nodes{${IMAGE}}}options{name optionValues{name swatch{color image{previewImage{${IMAGE}}}}}}priceRange{minVariantPrice{${MONEY}}maxVariantPrice{${MONEY}}}compareAtPriceRange{minVariantPrice{${MONEY}}maxVariantPrice{${MONEY}}}${metafieldsField(o.metafields)} sellingPlanGroups(first:${o.sellingPlanGroupsFirst}){nodes{name appName options{name values}sellingPlans(first:${o.sellingPlansFirst}){nodes{${SELLING_PLAN_FIELDS}}}}}variants(first:${o.variantsFirst}){nodes{id title availableForSale currentlyNotInStock quantityAvailable sku barcode selectedOptions{name value}image{${IMAGE}}price{${MONEY}}compareAtPrice{${MONEY}}unitPrice{${MONEY}}sellingPlanAllocations(first:${o.sellingPlansFirst}){nodes{${ALLOCATION_FIELDS}}}}}}`;
+  function productFragment(o = cfg, access = FULL_ACCESS) {
+    return ` fragment TetherProduct on Product{id handle title description descriptionHtml productType vendor tags availableForSale publishedAt onlineStoreUrl requiresSellingPlan seo{title description}featuredImage{${IMAGE}}images(first:${o.imagesFirst}){nodes{${IMAGE}}}options{name optionValues{name swatch{color image{previewImage{${IMAGE}}}}}}priceRange{minVariantPrice{${MONEY}}maxVariantPrice{${MONEY}}}compareAtPriceRange{minVariantPrice{${MONEY}}maxVariantPrice{${MONEY}}}${metafieldsField(o.metafields)} sellingPlanGroups(first:${o.sellingPlanGroupsFirst}){nodes{name appName options{name values}sellingPlans(first:${o.sellingPlansFirst}){nodes{${SELLING_PLAN_FIELDS}}}}}variants(first:${o.variantsFirst}){nodes{id title availableForSale currentlyNotInStock ${inventoryField(access)} sku barcode selectedOptions{name value}image{${IMAGE}}price{${MONEY}}compareAtPrice{${MONEY}}unitPrice{${MONEY}}sellingPlanAllocations(first:${o.sellingPlansFirst}){nodes{${ALLOCATION_FIELDS}}}}}}`;
   }
-  function cartFragment() {
-    return ` fragment TetherCart on Cart{id checkoutUrl totalQuantity note createdAt updatedAt attributes{key value}buyerIdentity{countryCode email}discountCodes{code applicable}cost{subtotalAmount{${MONEY}}totalAmount{${MONEY}}checkoutChargeAmount{${MONEY}}}lines(first:100){nodes{id quantity attributes{key value}cost{totalAmount{${MONEY}}subtotalAmount{${MONEY}}amountPerQuantity{${MONEY}}compareAtAmountPerQuantity{${MONEY}}}discountAllocations{discountedAmount{${MONEY}}}sellingPlanAllocation{sellingPlan{id name description recurringDeliveries options{name value}}checkoutChargeAmount{${MONEY}}priceAdjustments{price{${MONEY}}compareAtPrice{${MONEY}}perDeliveryPrice{${MONEY}}}}merchandise{... on ProductVariant{id title sku availableForSale requiresShipping quantityAvailable image{${IMAGE}}price{${MONEY}}compareAtPrice{${MONEY}}selectedOptions{name value}product{id title handle vendor featuredImage{${IMAGE}}}}}... on ComponentizableCartLine{lineComponents{id quantity merchandise{... on ProductVariant{id title product{title handle}}}}}}}}`;
+  function cartFragment(access = FULL_ACCESS) {
+    return ` fragment TetherCart on Cart{id checkoutUrl totalQuantity note createdAt updatedAt attributes{key value}buyerIdentity{countryCode email}discountCodes{code applicable}cost{subtotalAmount{${MONEY}}totalAmount{${MONEY}}checkoutChargeAmount{${MONEY}}}lines(first:100){nodes{id quantity attributes{key value}cost{totalAmount{${MONEY}}subtotalAmount{${MONEY}}amountPerQuantity{${MONEY}}compareAtAmountPerQuantity{${MONEY}}}discountAllocations{discountedAmount{${MONEY}}}sellingPlanAllocation{sellingPlan{id name description recurringDeliveries options{name value}}checkoutChargeAmount{${MONEY}}priceAdjustments{price{${MONEY}}compareAtPrice{${MONEY}}perDeliveryPrice{${MONEY}}}}merchandise{... on ProductVariant{id title sku availableForSale requiresShipping ${inventoryField(access)} image{${IMAGE}}price{${MONEY}}compareAtPrice{${MONEY}}selectedOptions{name value}product{id title handle vendor featuredImage{${IMAGE}}}}}... on ComponentizableCartLine{lineComponents{id quantity merchandise{... on ProductVariant{id title product{title handle}}}}}}}}`;
   }
   function collectionFields() {
     return `
@@ -840,7 +1214,7 @@
   seo { title description }`;
   }
 
-  // src/selling-plans.js
+  // src/selling-plans.ts
   var selling_plans_exports = {};
   __export(selling_plans_exports, {
     GID: () => GID,
@@ -855,19 +1229,59 @@
     plansForVariant: () => plansForVariant,
     toGid: () => toGid
   });
+
+  // src/amounts.ts
+  var DECIMAL = /^(-?)(\d+)(?:\.(\d+))?$/;
+  function toScaledInteger(amount, fractionDigits) {
+    const match = DECIMAL.exec(amount.trim());
+    if (!match) return null;
+    const [, sign = "", whole = "0", fraction = ""] = match;
+    const digits = BigInt(`${whole}${fraction.padEnd(fractionDigits, "0")}`);
+    return sign === "-" ? -digits : digits;
+  }
+  var fractionLength = (amount) => amount.split(".")[1]?.length ?? 0;
+  function isGreaterAmount(amount, other) {
+    if (amount == null || other == null) return false;
+    const fractionDigits = Math.max(fractionLength(amount.trim()), fractionLength(other.trim()));
+    const scaled = toScaledInteger(amount, fractionDigits);
+    const scaledOther = toScaledInteger(other, fractionDigits);
+    if (scaled === null || scaledOther === null) return false;
+    return scaled > scaledOther;
+  }
+  var DEFAULT_FRACTION_DIGITS = 2;
+  var fractionDigitsByCurrency = /* @__PURE__ */ new Map();
+  function currencyFractionDigits(currencyCode) {
+    const known = fractionDigitsByCurrency.get(currencyCode);
+    if (known !== void 0) return known;
+    let digits = DEFAULT_FRACTION_DIGITS;
+    try {
+      const format = new Intl.NumberFormat("en", { style: "currency", currency: currencyCode });
+      digits = format.resolvedOptions().maximumFractionDigits ?? DEFAULT_FRACTION_DIGITS;
+    } catch {
+    }
+    fractionDigitsByCurrency.set(currencyCode, digits);
+    return digits;
+  }
+  function toMinorUnits(money) {
+    return Math.round(parseFloat(money.amount) * 10 ** currencyFractionDigits(money.currencyCode));
+  }
+  function fromMinorUnits(minorUnits, currencyCode) {
+    const digits = currencyFractionDigits(currencyCode);
+    return { amount: (minorUnits / 10 ** digits).toFixed(digits), currencyCode };
+  }
+
+  // src/selling-plans.ts
+  var PERCENT = 100;
   function toGid(value, type) {
-    const text = typeof value === "string" || typeof value === "number" ? String(value).trim() : "";
-    if (!text) return null;
-    if (text.startsWith("gid://")) return text;
-    if (/^\d+$/.test(text)) return `gid://shopify/${type}/${text}`;
-    return text;
+    const text2 = typeof value === "string" || typeof value === "number" ? String(value).trim() : "";
+    if (!text2) return null;
+    if (text2.startsWith("gid://")) return text2;
+    if (/^\d+$/.test(text2)) return `gid://shopify/${type}/${text2}`;
+    return text2;
   }
   var GID = {
-    /** @param {unknown} value */
     product: (value) => toGid(value, "Product"),
-    /** @param {unknown} value */
     variant: (value) => toGid(value, "ProductVariant"),
-    /** @param {unknown} value */
     sellingPlan: (value) => toGid(value, "SellingPlan")
   };
   function allPlans(product) {
@@ -894,14 +1308,17 @@
     return allocation?.checkoutChargeAmount ?? allocation?.priceAdjustments[0]?.price ?? variant?.price ?? null;
   }
   function planSavings(variant, planId) {
-    const oneTime = parseFloat(variant?.price.amount ?? "");
-    const onPlan = parseFloat(planPrice(variant, planId)?.amount ?? "");
-    if (!variant || !Number.isFinite(oneTime) || !Number.isFinite(onPlan) || oneTime <= 0 || onPlan >= oneTime) {
+    const onPlanPrice = planPrice(variant, planId);
+    if (!variant || !onPlanPrice) return { amount: null, percentage: 0 };
+    const oneTime = parseFloat(variant.price.amount);
+    const onPlan = parseFloat(onPlanPrice.amount);
+    if (!Number.isFinite(oneTime) || !Number.isFinite(onPlan) || oneTime <= 0 || onPlan >= oneTime) {
       return { amount: null, percentage: 0 };
     }
+    const saved = toMinorUnits(variant.price) - toMinorUnits(onPlanPrice);
     return {
-      amount: { amount: (oneTime - onPlan).toFixed(2), currencyCode: variant.price.currencyCode },
-      percentage: Math.round((1 - onPlan / oneTime) * 100)
+      amount: fromMinorUnits(saved, variant.price.currencyCode),
+      percentage: Math.round((1 - onPlan / oneTime) * PERCENT)
     };
   }
   function planAdjustment(plan) {
@@ -926,7 +1343,40 @@
     return plans.find((plan) => plan.id === gid) ?? plans.find((plan) => plan.name.toLowerCase() === needle) ?? plans.find((plan) => plan.options.some((option) => option.value.toLowerCase() === needle)) ?? null;
   }
 
-  // src/cart/drawer.js
+  // src/product-shape.ts
+  var MONEY2 = { amount: "string", currencyCode: "string" };
+  var PRODUCT = {
+    id: "string",
+    handle: "string",
+    title: "string",
+    options: ["object"],
+    images: { nodes: ["object"] },
+    priceRange: { minVariantPrice: MONEY2, maxVariantPrice: MONEY2 },
+    variants: { nodes: [{ id: "string", price: MONEY2, selectedOptions: ["object"] }] }
+  };
+  var PRODUCT_CONNECTION = { nodes: [PRODUCT], pageInfo: { hasNextPage: "boolean" } };
+  var isProductShape = (value) => field(value, "id") !== "" && field(value, "handle") !== "" && matches(value, PRODUCT);
+  var PRODUCT_NODE = (node) => isRecord(node) && (node["id"] === void 0 || matches(node, PRODUCT));
+
+  // src/cart/cart-shape.ts
+  var LINE = {
+    id: "string",
+    quantity: "number",
+    attributes: ["object"],
+    cost: { totalAmount: MONEY2, subtotalAmount: MONEY2, amountPerQuantity: MONEY2 },
+    merchandise: { id: "string", selectedOptions: ["object"], product: "object" }
+  };
+  var CART = {
+    id: "string",
+    checkoutUrl: "string",
+    totalQuantity: "number",
+    attributes: ["object"],
+    discountCodes: ["object"],
+    cost: { totalAmount: MONEY2, subtotalAmount: MONEY2 },
+    lines: { nodes: [LINE] }
+  };
+
+  // src/cart/drawer.ts
   var FOCUSABLE = 'a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
   var FOCUS_AFTER_OPEN_MS = 60;
   var openWithoutDrawer = false;
@@ -1014,19 +1464,7 @@
     (event.shiftKey ? last : first).focus();
   }
 
-  // src/loader.js
-  var loader_exports = {};
-  __export(loader_exports, {
-    clearProductCache: () => clearProductCache,
-    getProduct: () => getProduct,
-    getProducts: () => getProducts,
-    getRecommendations: () => getRecommendations,
-    hydrateProducts: () => hydrateProducts,
-    normalizeProductKey: () => normalizeProductKey,
-    primeProduct: () => primeProduct,
-    refreshProducts: () => refreshProducts,
-    takeStale: () => takeStale
-  });
+  // src/loader.ts
   var MISS_CACHE_MS = 1e4;
   var FRESH_MS = 6e4;
   var productCache = /* @__PURE__ */ new Map();
@@ -1060,6 +1498,7 @@
     productCache.set(key, loading);
     return loading;
   }
+  var withProductFragment = (operation) => (access) => `${operation}${productFragment(cfg, access)}`;
   function batchQuery(keys) {
     const ids = keys.filter(isGid);
     const handles = keys.filter((key) => !isGid(key));
@@ -1076,8 +1515,8 @@
       variables[`h${index}`] = handle;
       selections.push(`h${index}: product(handle: $h${index}) { ...TetherProduct }`);
     });
-    const query = `query TetherProducts(${definitions.join(",")}){${selections.join(" ")}}${productFragment()}`;
-    return { query, variables, handles };
+    const query2 = withProductFragment(`query TetherProducts(${definitions.join(",")}){${selections.join(" ")}}`);
+    return { query: query2, variables, handles };
   }
   function settleWaiting(key, settle) {
     const waiter = waiting.get(key);
@@ -1091,16 +1530,21 @@
       if (productCache.get(key) === miss) productCache.delete(key);
     }, MISS_CACHE_MS);
   }
+  function isBatchData(data) {
+    if (!isRecord(data)) return false;
+    const { byId = [], ...byHandle } = data;
+    return matches(byId, [orNull(PRODUCT_NODE)]) && Object.values(byHandle).every(orNull(PRODUCT));
+  }
   async function flush() {
     flushScheduled = false;
     const batchGeneration = generation;
     const keys = pending.splice(0);
     if (!keys.length) return;
-    const { query, variables, handles } = batchQuery(keys);
+    const { query: query2, variables, handles } = batchQuery(keys);
     log("fetch products", keys);
     let data;
     try {
-      data = await gql(query, variables);
+      data = await gql(query2, variables, isBatchData);
     } catch (error) {
       keys.forEach((key) => {
         settleWaiting(key, (waiter) => {
@@ -1111,7 +1555,7 @@
       return;
     }
     const found = /* @__PURE__ */ new Map();
-    for (const product of data.byId ?? []) if (product) found.set(product.id, product);
+    for (const product of data.byId ?? []) if (product?.id) found.set(product.id, product);
     handles.forEach((handle, index) => {
       const product = data[`h${index}`];
       if (product) found.set(handle, product);
@@ -1157,51 +1601,57 @@
     void productCache.get(key)?.then((product) => {
       stale.delete(product.handle);
       stale.delete(product.id);
-    });
+    }, failureIsReportedByTheRender);
     return true;
   }
-  function refreshProducts(keys) {
-    for (const key of keys) {
-      const normalized = normalizeProductKey(key);
-      if (normalized) productCache.delete(normalized);
-    }
-    return keys.map((key) => getProduct(key));
+  function failureIsReportedByTheRender() {
   }
+  function refreshProduct(key) {
+    const normalized = normalizeProductKey(key);
+    if (normalized) productCache.delete(normalized);
+    return getProduct(key);
+  }
+  var isCollectionAnswer = shaped({
+    collection: orNull({ handle: "string", products: PRODUCT_CONNECTION })
+  });
+  var isSearchAnswer = shaped({ products: PRODUCT_CONNECTION });
+  var isRecommendationsAnswer = shaped({
+    productRecommendations: orNull([PRODUCT])
+  });
   var COLLECTION_QUERY = `query TetherCollection($handle:String!,$first:Int!,$after:String,$sortKey:ProductCollectionSortKeys,$reverse:Boolean,$filters:[ProductFilter!]){collection(handle:$handle){${collectionFields()} products(first:$first,after:$after,sortKey:$sortKey,reverse:$reverse,filters:$filters){nodes{...TetherProduct}pageInfo{hasNextPage endCursor}}}}`;
   var SEARCH_QUERY = `query TetherSearch($first:Int!,$after:String,$query:String,$sortKey:ProductSortKeys,$reverse:Boolean){products(first:$first,after:$after,query:$query,sortKey:$sortKey,reverse:$reverse){nodes{...TetherProduct}pageInfo{hasNextPage endCursor}}}`;
   async function getProducts({
     collection,
-    query,
+    query: query2,
     first = cfg.collectionFirst,
     after = null,
     sortKey,
     reverse = false,
     filters
   } = {}) {
-    const fragment = productFragment();
     if (collection) {
-      const data2 = await gql(`${COLLECTION_QUERY}
-${fragment}`, {
-        handle: collection,
-        first,
-        after,
-        sortKey: sortKey || void 0,
-        reverse,
-        filters: filters ?? void 0
-      });
+      const data2 = await gql(
+        withProductFragment(COLLECTION_QUERY),
+        {
+          handle: collection,
+          first,
+          after,
+          sortKey: sortKey || void 0,
+          reverse,
+          filters: filters ?? void 0
+        },
+        isCollectionAnswer
+      );
       if (!data2.collection) throw new TetherError(`Collection not found: ${collection}`, { code: "NOT_FOUND" });
       const { products, ...rest } = data2.collection;
       products.nodes.forEach(primeProduct);
       return { collection: rest, products: products.nodes, pageInfo: products.pageInfo };
     }
-    const data = await gql(`${SEARCH_QUERY}
-${fragment}`, {
-      first,
-      after,
-      query: query || void 0,
-      sortKey: sortKey || void 0,
-      reverse
-    });
+    const data = await gql(
+      withProductFragment(SEARCH_QUERY),
+      { first, after, query: query2 || void 0, sortKey: sortKey || void 0, reverse },
+      isSearchAnswer
+    );
     data.products.nodes.forEach(primeProduct);
     return { collection: null, products: data.products.nodes, pageInfo: data.products.pageInfo };
   }
@@ -1209,45 +1659,30 @@ ${fragment}`, {
     const key = normalizeProductKey(typeof product === "object" ? product?.id : product);
     const byId = key?.startsWith("gid://") ?? false;
     const data = await gql(
-      `query TetherRecs(${byId ? "$id: ID!" : "$handle: String!"},$intent:ProductRecommendationIntent){productRecommendations(${byId ? "productId: $id" : "productHandle: $handle"},intent:$intent){...TetherProduct}}${productFragment()}`,
-      byId ? { id: key, intent } : { handle: key, intent }
+      withProductFragment(
+        `query TetherRecs(${byId ? "$id: ID!" : "$handle: String!"},$intent:ProductRecommendationIntent){productRecommendations(${byId ? "productId: $id" : "productHandle: $handle"},intent:$intent){...TetherProduct}}`
+      ),
+      byId ? { id: key, intent } : { handle: key, intent },
+      isRecommendationsAnswer
     );
     const list = data.productRecommendations ?? [];
     list.forEach(primeProduct);
     return list;
   }
 
-  // src/amounts.js
-  var DECIMAL = /^(-?)(\d+)(?:\.(\d+))?$/;
-  function toScaledInteger(amount, fractionDigits) {
-    const match = DECIMAL.exec(amount.trim());
-    if (!match) return null;
-    const [, sign = "", whole = "0", fraction = ""] = match;
-    const digits = BigInt(`${whole}${fraction.padEnd(fractionDigits, "0")}`);
-    return sign === "-" ? -digits : digits;
-  }
-  var fractionLength = (amount) => amount.split(".")[1]?.length ?? 0;
-  function isGreaterAmount(amount, other) {
-    if (amount == null || other == null) return false;
-    const fractionDigits = Math.max(fractionLength(amount.trim()), fractionLength(other.trim()));
-    const scaled = toScaledInteger(amount, fractionDigits);
-    const scaledOther = toScaledInteger(other, fractionDigits);
-    if (scaled === null || scaledOther === null) return false;
-    return scaled > scaledOther;
-  }
-
-  // src/cart/render.js
+  // src/cart/render.ts
   var DEFAULT_TITLE = "Default Title";
   var quantityOf = (line, pending2) => pending2.get(line.id)?.quantity ?? line.quantity;
   var numericId = (gid) => gid.split("/").pop() ?? gid;
   function lineUrl(line) {
     const variant = line.merchandise;
     const base = productUrl2(variant.product.handle, variant.product.id);
-    const query = new URLSearchParams();
-    query.set("variant", numericId(variant.id));
+    if (!base) return null;
+    const query2 = new URLSearchParams();
+    query2.set("variant", numericId(variant.id));
     const planId = line.sellingPlanAllocation?.sellingPlan.id;
-    if (planId) query.set("selling_plan", numericId(planId));
-    return `${base}${base.includes("?") ? "&" : "?"}${query.toString()}`;
+    if (planId) query2.set("selling_plan", numericId(planId));
+    return `${base}${base.includes("?") ? "&" : "?"}${query2.toString()}`;
   }
   var productTitle = (line) => line.merchandise.product.title;
   var LINE_TEXT = {
@@ -1305,19 +1740,17 @@ ${fragment}`, {
     qsa(node, sel("line", "warning")).forEach((el) => {
       setTextTracked(el, warning?.message ?? "");
     });
-    const conditions = {
-      subscription: isSubscription,
-      "one-time": !isSubscription,
-      "on-sale": isGreaterAmount(line.cost.compareAtAmountPerQuantity?.amount, line.cost.amountPerQuantity.amount),
-      "has-components": (line.lineComponents ?? []).length > 0,
-      warning: Boolean(warning)
-    };
+    const conditions = /* @__PURE__ */ new Map([
+      ["subscription", isSubscription],
+      ["one-time", !isSubscription],
+      ["on-sale", isGreaterAmount(line.cost.compareAtAmountPerQuantity?.amount, line.cost.amountPerQuantity.amount)],
+      ["has-components", (line.lineComponents ?? []).length > 0],
+      ["warning", Boolean(warning)]
+    ]);
     qsa(node, sel("line-show")).forEach((el) => {
       const key = get(el, "line-show");
-      if (key !== null && Object.hasOwn(conditions, key)) show(el, conditions[
-        /** @type {keyof conditions} */
-        key
-      ]);
+      const visible = key === null ? void 0 : conditions.get(key);
+      if (visible !== void 0) show(el, visible);
     });
   }
   function renderLine(node, line, view) {
@@ -1330,7 +1763,8 @@ ${fragment}`, {
         return;
       }
       if (key === "url") {
-        el.setAttribute("href", lineUrl(line));
+        const url2 = lineUrl(line);
+        if (url2) el.setAttribute("href", url2);
         return;
       }
       const value = lineValue(line, key, view);
@@ -1339,12 +1773,7 @@ ${fragment}`, {
     renderLineState(node, line, view);
     qsa(node, `select${sel("line-plan")}`).forEach((select) => {
       getProduct(variant.product.handle).then((product) => {
-        fillPlanSelect(
-          /** @type {HTMLSelectElement} */
-          select,
-          line,
-          product
-        );
+        fillPlanSelect(select, line, product);
       }).catch((error) => {
         reportError(error, "line plan options");
       });
@@ -1353,22 +1782,20 @@ ${fragment}`, {
   function renderConditions(cart, view) {
     const count = cart?.totalQuantity ?? 0;
     const hasSubscription = (cart?.lines.nodes ?? []).some((line) => line.sellingPlanAllocation);
-    const conditions = {
-      "cart-empty": count === 0,
-      "cart-filled": count > 0,
-      "cart-has-subscription": hasSubscription,
-      "cart-no-subscription": !hasSubscription,
-      "cart-has-discount": (cart?.discountCodes ?? []).some((code) => code.applicable),
-      "cart-error": view.failed,
-      "cart-warning": view.warnings.length > 0
-    };
+    const conditions = /* @__PURE__ */ new Map([
+      ["cart-empty", count === 0],
+      ["cart-filled", count > 0],
+      ["cart-has-subscription", hasSubscription],
+      ["cart-no-subscription", !hasSubscription],
+      ["cart-has-discount", (cart?.discountCodes ?? []).some((code) => code.applicable)],
+      ["cart-error", view.failed],
+      ["cart-warning", view.warnings.length > 0]
+    ]);
     qsa(document, sel("show")).forEach((el) => {
       const key = get(el, "show");
-      if (key === null || !Object.hasOwn(conditions, key) || el.closest(sel("product"))) return;
-      show(el, conditions[
-        /** @type {keyof conditions} */
-        key
-      ]);
+      const visible = key === null ? void 0 : conditions.get(key);
+      if (visible === void 0 || el.closest(sel("product"))) return;
+      show(el, visible);
     });
     qsa(document, sel("checkout")).forEach((el) => {
       el.classList.toggle("is-disabled", !count);
@@ -1424,15 +1851,35 @@ ${fragment}`, {
   }
   function showSavedCount(count) {
     qsa(document, sel("cart-count")).forEach((el) => {
-      if (/^\s*0?\s*$/.test(el.textContent)) el.textContent = count;
+      if (/^\s*0?\s*$/.test(el.textContent)) el.textContent = String(count);
     });
   }
 
-  // src/cart/store.js
+  // src/storage.ts
+  function getStored(key, area = "localStorage") {
+    try {
+      return window[area].getItem(key);
+    } catch {
+      return null;
+    }
+  }
+  function setStored(key, value, area = "localStorage") {
+    try {
+      window[area].setItem(key, value);
+    } catch {
+    }
+  }
+  function removeStored(key, area = "localStorage") {
+    try {
+      window[area].removeItem(key);
+    } catch {
+    }
+  }
+
+  // src/cart/store.ts
   var status = { kind: "unknown" };
   var warnings = [];
   var pendingQuantities = /* @__PURE__ */ new Map();
-  var customer = { accessToken: null, beforeCheckout: null };
   var cartStatus = () => status;
   function currentCart() {
     switch (status.kind) {
@@ -1447,27 +1894,13 @@ ${fragment}`, {
   var currentWarnings = () => warnings;
   var statusOf = (cart) => cart ? { kind: "ready", cart } : { kind: "empty" };
   var seenKey = () => `${cfg.storageKey}:seen`;
-  function readStorageIfAllowed(key) {
-    try {
-      return localStorage.getItem(key);
-    } catch {
-      return null;
-    }
-  }
-  function writeStorageIfAllowed(key, value) {
-    try {
-      if (value === null) localStorage.removeItem(key);
-      else localStorage.setItem(key, value);
-    } catch {
-    }
-  }
-  var savedCartId = () => readStorageIfAllowed(cfg.storageKey) || null;
+  var savedCartId = () => getStored(cfg.storageKey) || null;
   function forgetSavedCart() {
-    writeStorageIfAllowed(cfg.storageKey, null);
+    removeStored(cfg.storageKey);
   }
   function keepQuietly(cart) {
     status = statusOf(cart);
-    if (cart) writeStorageIfAllowed(cfg.storageKey, cart.id);
+    if (cart) setStored(cfg.storageKey, cart.id);
   }
   function render() {
     renderCart({
@@ -1483,7 +1916,7 @@ ${fragment}`, {
   }
   function commit(cart, reason) {
     keepQuietly(cart);
-    writeStorageIfAllowed(seenKey(), `${Date.now()}|${cart?.totalQuantity ?? 0}`);
+    setStored(seenKey(), `${Date.now()}|${cart?.totalQuantity ?? 0}`);
     announce(reason);
     return cart;
   }
@@ -1491,14 +1924,15 @@ ${fragment}`, {
     status = outcome.kind === "loaded" ? statusOf(outcome.cart) : { kind: "error", error: outcome.error, cart: null };
     announce("load");
   }
-  function setFailure(error) {
-    const cart = currentCart();
-    status = error == null ? statusOf(cart) : { kind: "error", error, cart };
+  function lastKnownCount() {
+    const text2 = getStored(seenKey())?.split("|")[1] ?? "";
+    const count = Number(text2);
+    return /^\d+$/.test(text2) && Number.isSafeInteger(count) ? count : null;
   }
   function showLastKnownCount() {
     if (status.kind !== "unknown") return;
-    const count = readStorageIfAllowed(seenKey())?.split("|")[1];
-    if (count) showSavedCount(count);
+    const count = lastKnownCount();
+    if (count !== null) showSavedCount(count);
   }
   function setWarnings(notes) {
     warnings = notes.filter((note, index) => notes.findIndex((other) => other.message === note.message) === index).map((note) => ({ ...note, message: cfg.warningText?.(note) || note.message }));
@@ -1536,7 +1970,7 @@ ${fragment}`, {
     open: isOpen(),
     count: currentCart()?.totalQuantity ?? 0,
     loaded: status.kind !== "unknown",
-    warnings
+    warnings: [...warnings]
   });
   function subscribe(listener) {
     const events = ["cart-updated", "cart-toggled"].map((name) => `${cfg.prefix}:${name}`);
@@ -1554,15 +1988,16 @@ ${fragment}`, {
     };
   }
 
-  // src/cart/mutations.js
+  // src/cart/mutations.ts
   var UNKNOWN_CART_MESSAGE = /does not exist|not found|invalid id/i;
+  var isPayloadOf = (name) => shaped({ [name]: orNull({ cart: orNull(CART) }) });
   function isCartGone(error) {
     if (!(error instanceof TetherError)) return false;
     if (error.userErrors?.some((userError) => userError.field?.[0] === "cartId")) return true;
     return (error.errors ?? []).some((graphQLError) => UNKNOWN_CART_MESSAGE.test(graphQLError.message));
   }
   function toLineInput(input, quantity = 1, options = {}) {
-    const spec = typeof input === "object" && input !== null ? input : { ...options, variantId: input, quantity };
+    const spec = typeof input === "object" && input !== null ? input : { ...options, quantity, ...input === null || input === void 0 ? {} : { variantId: input } };
     const merchandiseId = GID.variant(spec.merchandiseId || spec.variantId || spec.id);
     if (!merchandiseId) throw new TetherError("add(): variantId is required");
     const asked = parseInt(String(spec.quantity ?? 1), 10);
@@ -1574,23 +2009,25 @@ ${fragment}`, {
     return line;
   }
   function mutationText(name, args, inner) {
-    return `mutation Tether_${name}(${args}){${name}(${inner}){cart{...TetherCart}userErrors{field message}warnings{code message target}}}${cartFragment()}`;
+    return (access) => `mutation Tether_${name}(${args}){${name}(${inner}){cart{...TetherCart}userErrors{field message}warnings{code message target}}}${cartFragment(access)}`;
   }
   async function send(name, args, inner, variables) {
-    const data = await gql(mutationText(name, args, inner), variables);
+    const data = await gql(mutationText(name, args, inner), variables, isPayloadOf(name));
     const payload = unwrap(data[name], name);
     setWarnings(payload.warnings ?? []);
     return payload.cart;
   }
   function createCart(input) {
-    const buyerIdentity = {
-      ...cfg.country ? { countryCode: cfg.country.toUpperCase() } : {},
-      ...customer.accessToken ? { customerAccessToken: customer.accessToken } : {}
-    };
-    const withIdentity = Object.keys(buyerIdentity).length ? { buyerIdentity, ...input } : input;
+    const withIdentity = cfg.country ? { buyerIdentity: { countryCode: cfg.country }, ...input } : input;
     return send("cartCreate", "$input: CartInput!", "input: $input", { input: withIdentity });
   }
-  async function mutateCart({ name, args, inner, variables, createInput }) {
+  async function mutateCart({
+    name,
+    args,
+    inner,
+    variables,
+    createInput
+  }) {
     const cartId = savedCartId();
     if (!cartId) return createInput ? createCart(createInput) : null;
     try {
@@ -1604,11 +2041,19 @@ ${fragment}`, {
     }
   }
   async function fetchCart(id) {
-    const data = await gql(`query TetherCart($id:ID!){cart(id:$id){...TetherCart}}${cartFragment()}`, { id });
+    const data = await gql(
+      (access) => `query TetherCart($id:ID!){cart(id:$id){...TetherCart}}${cartFragment(access)}`,
+      { id },
+      shaped({ cart: orNull(CART) })
+    );
     return data.cart;
   }
   async function fetchCheckoutUrl(id) {
-    const data = await gql("query TetherCheckout($id: ID!) { cart(id: $id) { checkoutUrl } }", { id });
+    const data = await gql(
+      "query TetherCheckout($id: ID!) { cart(id: $id) { checkoutUrl } }",
+      { id },
+      shaped({ cart: orNull({ checkoutUrl: "string" }) })
+    );
     return data.cart?.checkoutUrl ?? null;
   }
   function toLineUpdate(lineId, patch) {
@@ -1638,21 +2083,20 @@ ${fragment}`, {
   });
   var setLineQuantity = (lineId, target) => target > 0 ? updateLines([{ id: lineId, quantity: target }]) : removeLines([lineId]);
 
-  // src/cart/checkout.js
+  // src/cart/checkout.ts
+  var resolveAccountCheckout = null;
+  function setCheckoutResolver(resolver) {
+    resolveAccountCheckout = resolver;
+  }
   var askCheckoutUrl = (cartId) => fetchCheckoutUrl(cartId).then(
-    (url) => ({ kind: (
-      /** @type {const} */
-      "url"
-    ), url }),
-    (error) => ({ kind: (
-      /** @type {const} */
-      "failed"
-    ), error })
+    (url2) => ({ kind: "url", url: url2 }),
+    (error) => ({ kind: "failed", error })
   );
   async function accountCheckoutUrl() {
-    if (!customer.beforeCheckout) return null;
+    if (!resolveAccountCheckout) return null;
     try {
-      return await customer.beforeCheckout();
+      const url2 = await resolveAccountCheckout();
+      return url2 && `${url2}${url2.includes("?") ? "&" : "?"}logged_in=true`;
     } catch (error) {
       reportError(error, "account checkout");
       return null;
@@ -1660,15 +2104,12 @@ ${fragment}`, {
   }
   async function checkoutUrl(cartId) {
     const cartAnswer = askCheckoutUrl(cartId);
-    let url = await accountCheckoutUrl();
-    if (!url) {
-      const answer = await cartAnswer;
-      if (answer.kind === "failed") throw answer.error;
-      url = answer.url;
-    }
-    if (!url) throw new TetherError("No checkoutUrl (cart empty or expired)");
-    if (!customer.accessToken) return url;
-    return `${url}${url.includes("?") ? "&" : "?"}logged_in=true`;
+    const accountUrl = await accountCheckoutUrl();
+    if (accountUrl) return accountUrl;
+    const answer = await cartAnswer;
+    if (answer.kind === "failed") throw answer.error;
+    if (!answer.url) throw new TetherError("No checkoutUrl (cart empty or expired)");
+    return answer.url;
   }
   function detachOpenerIfAllowed(tab) {
     try {
@@ -1683,12 +2124,12 @@ ${fragment}`, {
     const tab = target === "_blank" ? window.open("", "_blank") : null;
     if (tab) detachOpenerIfAllowed(tab);
     try {
-      const url = await checkoutUrl(cartId);
-      if (!isHttpsUrl(url)) throw new TetherError("The checkout URL is not https: not opened");
-      emit("checkout", { url, cart: currentCart() });
-      if (tab && !tab.closed) tab.location.href = url;
-      else window.location.href = url;
-      return url;
+      const url2 = await checkoutUrl(cartId);
+      if (!isHttpsUrl(url2)) throw new TetherError("The checkout URL is not https: not opened");
+      emit("checkout", { url: url2, cart: currentCart() });
+      if (tab && !tab.closed) tab.location.href = url2;
+      else window.location.href = url2;
+      return url2;
     } catch (error) {
       tab?.close();
       reportError(error, "checkout failed");
@@ -1696,7 +2137,7 @@ ${fragment}`, {
     }
   }
 
-  // src/cart.js
+  // src/cart.ts
   var currentLines = () => currentCart()?.lines.nodes ?? [];
   function changeQuantity(lineId, delta) {
     const line = currentLines().find((candidate) => candidate.id === lineId);
@@ -1753,83 +2194,67 @@ ${fragment}`, {
   }
   var Cart = {
     init,
-    /** @returns {string | null} The saved cart's id. */
+    /** The saved cart's id. */
     id: savedCartId,
-    /** @returns {CartStatus} */
     get status() {
       return cartStatus();
     },
-    /** @returns {ShopifyCart | null} */
     get state() {
       return currentCart();
     },
-    /** @returns {readonly ShopifyCartLine[]} */
+    /** The cart's lines, a copy: changing it changes nothing in the cart. */
     get lines() {
-      return currentLines();
+      return [...currentLines()];
     },
-    /** @returns {number} */
     get count() {
       return currentCart()?.totalQuantity ?? 0;
     },
-    /** @returns {boolean} True once the saved cart, or that there is none, is known. */
+    /** True once the saved cart, or that there is none, is known. */
     get loaded() {
       return cartStatus().kind !== "unknown";
     },
-    /** @returns {unknown} The failure of the last load or change, until a change succeeds. */
+    /**
+     * The failure of the last load or change, until a change succeeds. Requests fail with an `Error`; anything else
+     * thrown is wrapped, so the public type holds.
+     */
     get lastError() {
       const current = cartStatus();
-      return current.kind === "error" ? current.error : null;
+      if (current.kind !== "error") return null;
+      return current.error instanceof Error ? current.error : new Error(String(current.error));
     },
-    set lastError(error) {
-      setFailure(error);
-    },
-    /** @returns {readonly CartWarning[]} Shopify's notes on the last change. */
+    /** Shopify's notes on the last change, a copy. */
     get warnings() {
-      return currentWarnings();
+      return [...currentWarnings()];
     },
-    /** @returns {ReadonlyMap<string, { quantity: number }>} Line id → the quantity quick clicks asked for. */
+    /** Line id → the quantity quick clicks asked for. */
     get pendingQty() {
       return pendingQuantities;
     },
-    /** @returns {string | null} The logged-in customer's Customer Account API token (set by the account part). */
-    get customerAccessToken() {
-      return customer.accessToken;
-    },
-    set customerAccessToken(token) {
-      customer.accessToken = token || null;
-    },
-    /** @returns {(() => Promise<string | null>) | null} The account's own checkout URL (set by the account part). */
-    get beforeCheckout() {
-      return customer.beforeCheckout;
-    },
-    set beforeCheckout(fetchUrl) {
-      customer.beforeCheckout = typeof fetchUrl === "function" ? fetchUrl : null;
-    },
     /**
-     * Links the cart to a logged-in customer, or unlinks it with `null`s. Carts created from now on belong to the
-     * customer; `beforeCheckout` gives the checkout URL (`null` from it uses the cart's).
-     *
-     * @param {Partial<CustomerLink>} link Fields left out keep their value.
+     * Sets where a logged-in customer checks out, or clears it with `null`: the account part's resolver answers the
+     * customer's checkout URL for the cart (`null` uses the cart's own).
      */
-    setCustomer(link) {
-      if (link.accessToken !== void 0) customer.accessToken = link.accessToken;
-      if (link.beforeCheckout !== void 0) customer.beforeCheckout = link.beforeCheckout;
+    setCheckoutResolver,
+    /**
+     * Forgets the saved cart on this device, as if there were none: the page shows an empty cart and
+     * `tether:cart-updated` fires with reason `load`. The next add starts a new cart.
+     */
+    forgetSaved() {
+      forgetSavedCart();
+      settleLoad({ kind: "loaded", cart: null });
     },
-    /** Keeps a cart and shows it, as a change does; tests seed the cart with it. */
-    _commit: commit,
     render,
     subscribe,
     /**
      * `add(variantId, 2)`, `add({ variantId, quantity, sellingPlanId, attributes })`, or `add([line, line])` for
      * bundles in one request. Creates the cart when there is none.
      *
-     * @param {string | number | LineSpec | (string | number | LineSpec)[]} input
-     * @param {number} [quantity]
-     * @param {Omit<LineSpec, 'variantId' | 'quantity'>} [options]
-     * @returns {Promise<ShopifyCart | null>}
+     * @throws {TetherError} (rejected) When the add fails, or Shopify answers it without a cart.
      */
     add(input, quantity = 1, options = {}) {
-      const lines = (Array.isArray(input) ? input : [input]).map((line) => toLineInput(line, quantity, options));
+      const lines = (Array.isArray(input) ? input : [input]).map(
+        (line) => toLineInput(line, quantity, options)
+      );
       return enqueue(async () => {
         const cart = await mutateCart({
           name: "cartLinesAdd",
@@ -1838,6 +2263,7 @@ ${fragment}`, {
           variables: { lines },
           createInput: { lines }
         });
+        if (!cart) throw new TetherError("Shopify answered the add without a cart");
         commit(cart, "add");
         emit("added", { cart, lines });
         if (cfg.openCartOnAdd) openCart();
@@ -1847,9 +2273,7 @@ ${fragment}`, {
     /**
      * `updateLine(lineId, 3)` or `updateLine(lineId, { quantity, sellingPlanId, attributes })`.
      *
-     * @param {string} lineId
-     * @param {number | LinePatch} patch A quantity of 0 or less removes the line.
-     * @returns {Promise<ShopifyCart | null>}
+     * @param patch A quantity of 0 or less removes the line.
      */
     updateLine(lineId, patch) {
       const quantity = typeof patch === "number" ? patch : patch.quantity;
@@ -1858,29 +2282,17 @@ ${fragment}`, {
       return enqueue(async () => commit(await updateLines([line]), "update"));
     },
     changeQuantity,
-    /**
-     * @param {ShopifyCartLine} line
-     * @returns {number} The quantity to show: the one asked for while an update is on its way.
-     */
+    /** The quantity to show: the one asked for while an update is on its way. */
     quantityOf: pendingQuantityOf,
-    /**
-     * @param {string | string[]} lineIds
-     * @returns {Promise<ShopifyCart | null>}
-     */
     removeLine(lineIds) {
       const ids = Array.isArray(lineIds) ? lineIds : [lineIds];
       return enqueue(async () => commit(await removeLines(ids), "remove"));
     },
-    /** @returns {Promise<ShopifyCart | null>} */
     clear() {
       const ids = currentLines().map((line) => line.id);
       if (!ids.length) return Promise.resolve(currentCart());
       return Cart.removeLine(ids);
     },
-    /**
-     * @param {string | null | undefined} note
-     * @returns {Promise<ShopifyCart | null>}
-     */
     setNote(note) {
       const variables = { note: note ?? "" };
       return enqueue(
@@ -1899,8 +2311,7 @@ ${fragment}`, {
     /**
      * Cart attributes, merged with the cart's (as it is when the change runs, so quick calls don't drop each other).
      *
-     * @param {Attributes} attributes The value `''` removes a key.
-     * @returns {Promise<ShopifyCart | null>}
+     * @param attributes The value `''` removes a key.
      */
     setAttributes(attributes) {
       return enqueue(async () => {
@@ -1915,12 +2326,7 @@ ${fragment}`, {
         return commit(cart, "attributes");
       });
     },
-    /**
-     * Replaces the discount codes; `[]` removes them all.
-     *
-     * @param {string[] | string | ((current: string[]) => string[])} codes
-     * @returns {Promise<ShopifyCart | null>}
-     */
+    /** Replaces the discount codes; `[]` removes them all. */
     setDiscountCodes(codes) {
       return enqueue(async () => {
         const variables = { discountCodes: discountCodesFrom(codes) };
@@ -1937,8 +2343,6 @@ ${fragment}`, {
     /**
      * Adds a code. A code Shopify doesn't accept is removed again, so it doesn't warn on every later change.
      *
-     * @param {string} code
-     * @returns {Promise<ShopifyCart | null>}
      * @throws {TetherError} `INVALID_DISCOUNT` (rejected) when Shopify doesn't accept the code.
      */
     async applyDiscount(code) {
@@ -1953,10 +2357,6 @@ ${fragment}`, {
       }
       throw new TetherError(`Discount code not valid: ${code}`, { code: "INVALID_DISCOUNT" });
     },
-    /**
-     * @param {string} code
-     * @returns {Promise<ShopifyCart | null>}
-     */
     removeDiscount(code) {
       const unwanted = code.toLowerCase();
       return Cart.setDiscountCodes((current) => current.filter((existing) => existing.toLowerCase() !== unwanted));
@@ -1964,9 +2364,7 @@ ${fragment}`, {
     /**
      * Sets who is buying; a country changes the cart's currency and prices to that market's.
      *
-     * @param {{ countryCode?: string, email?: string, phone?: string, customerAccessToken?: string | null }} buyerIdentity
-     * @param {{ create?: boolean }} [options] `create: false` forgets an expired cart instead of creating an empty one.
-     * @returns {Promise<ShopifyCart | null>}
+     * @param options `create: false` forgets an expired cart instead of creating an empty one.
      */
     setBuyerIdentity(buyerIdentity, { create = true } = {}) {
       return enqueue(async () => {
@@ -1991,22 +2389,8 @@ ${fragment}`, {
     toggle: toggleCart
   };
 
-  // src/product.js
-  var product_exports = {};
-  __export(product_exports, {
-    ProductScope: () => ProductScope,
-    rememberOptionNames: () => rememberOptionNames,
-    scopes: () => scopes
-  });
-
-  // src/product-state.js
-  var MINOR_UNITS_PER_UNIT = 100;
-  var PERCENT = 100;
-  var toMinorUnits = (money) => Math.round(parseFloat(money.amount) * MINOR_UNITS_PER_UNIT);
-  var fromMinorUnits = (minorUnits, currencyCode) => ({
-    amount: (minorUnits / MINOR_UNITS_PER_UNIT).toFixed(2),
-    currencyCode
-  });
+  // src/product-state.ts
+  var PERCENT2 = 100;
   var timesQuantity = (money, quantity) => fromMinorUnits(toMinorUnits(money) * quantity, money.currencyCode);
   var selectionOf = (variant) => Object.fromEntries(variant.selectedOptions.map((option) => [option.name, option.value]));
   function findVariant(product, selected) {
@@ -2021,14 +2405,18 @@ ${fragment}`, {
       )
     );
   }
-  function normalisePurchase(product, variant, wanted) {
+  var purchasePlanId = (purchase) => purchase.kind === "subscription" ? purchase.planId : purchase.offeredPlanId;
+  function linePurchase(purchase, variant) {
+    if (purchase.kind === "subscription" && allocationFor(variant, purchase.planId)) return purchase;
+    return { kind: "one-time" };
+  }
+  function normalisePurchase(product, variant, kind, preferredPlanId) {
     const plans = allPlans(product);
-    const known = plans.find((plan) => plan.id === wanted.planId) ?? plans[0];
-    if (!known) return { kind: "one-time", planId: null };
+    const known = plans.find((plan) => plan.id === preferredPlanId) ?? plans[0];
+    if (!known) return { kind: "one-time", offeredPlanId: null };
     const onVariant = allocationFor(variant, known.id) ? known : plans.find((plan) => allocationFor(variant, plan.id)) ?? known;
-    if (product.requiresSellingPlan || wanted.kind === "subscription")
-      return { kind: "subscription", planId: onVariant.id };
-    return { kind: "one-time", planId: onVariant.id };
+    if (product.requiresSellingPlan || kind === "subscription") return { kind: "subscription", planId: onVariant.id };
+    return { kind: "one-time", offeredPlanId: onVariant.id };
   }
   function initialChoice(product, { variant, sellingPlan, defaultPlan, defaultPurchase }) {
     const variants = product.variants.nodes;
@@ -2039,13 +2427,14 @@ ${fragment}`, {
     const kind = fromUrl || defaultPurchase === "subscription" ? "subscription" : "one-time";
     return {
       selected: start ? selectionOf(start) : {},
-      purchase: normalisePurchase(product, start, { kind, planId: offered?.id ?? null })
+      purchase: normalisePurchase(product, start, kind, offered?.id ?? null)
     };
   }
   function showConditions(variant, lowStock, variantCount, sale, requiresSellingPlan) {
     const stock = variant.quantityAvailable;
     const low = stock != null && stock > 0 && stock <= lowStock;
     const onSale = sale.compareAtPrice !== null;
+    const onPlan = sale.line.kind === "subscription";
     return {
       "in-stock": variant.availableForSale,
       "out-of-stock": !variant.availableForSale,
@@ -2060,23 +2449,24 @@ ${fragment}`, {
       "subscription-unavailable": !sale.subscriptionAvailable,
       "subscription-only": requiresSellingPlan,
       "one-time-available": !requiresSellingPlan,
-      "subscription-selected": sale.isSubscription,
-      "one-time-selected": !sale.isSubscription,
-      "has-savings": sale.isSubscription ? sale.savings.percentage > 0 : onSale
+      "subscription-selected": onPlan,
+      "one-time-selected": !onPlan,
+      "has-savings": onPlan ? sale.savings.percentage > 0 : onSale
     };
   }
   function productView(product, choice, lowStock) {
     const exact = findVariant(product, choice.selected);
     const variant = exact ?? product.variants.nodes[0];
     if (!variant) return null;
-    const purchase = normalisePurchase(product, variant, choice.purchase);
-    const { planId } = purchase;
+    const purchase = normalisePurchase(product, variant, choice.purchase.kind, purchasePlanId(choice.purchase));
+    const planId = purchasePlanId(purchase);
     const plans = allPlans(product);
-    const allocation = purchase.kind === "subscription" ? allocationFor(variant, planId) : null;
+    const line = linePurchase(purchase, variant);
+    const allocation = line.kind === "subscription" ? allocationFor(variant, line.planId) : null;
     const price = allocation ? planPrice(variant, planId) ?? variant.price : variant.price;
     const compareAt = allocation?.priceAdjustments[0]?.compareAtPrice ?? variant.compareAtPrice;
     const sale = {
-      isSubscription: allocation !== null,
+      line,
       subscriptionAvailable: plans.some((plan) => allocationFor(variant, plan.id)),
       compareAtPrice: compareAt && parseFloat(compareAt.amount) > parseFloat(price.amount) ? compareAt : null,
       savings: planSavings(variant, planId)
@@ -2094,15 +2484,15 @@ ${fragment}`, {
   }
   function variantBindTexts(view, format) {
     const { variant, plan, price, compareAtPrice, quantity } = view;
-    const planId = view.purchase.planId;
+    const planId = purchasePlanId(view.purchase);
     const forQuantity = (money) => timesQuantity(money, Math.max(1, quantity));
     const checkoutCharge = () => {
-      const charge = view.isSubscription ? planCheckoutCharge(variant, planId) ?? price : price;
+      const charge = view.line.kind === "subscription" ? planCheckoutCharge(variant, planId) ?? price : price;
       return format.money(forQuantity(charge));
     };
     const discountPercentage = () => {
       if (!compareAtPrice) return "0%";
-      return `${Math.round((1 - parseFloat(price.amount) / parseFloat(compareAtPrice.amount)) * PERCENT)}%`;
+      return `${Math.round((1 - parseFloat(price.amount) / parseFloat(compareAtPrice.amount)) * PERCENT2)}%`;
     };
     const discountAmount = () => {
       if (!compareAtPrice) return "";
@@ -2151,7 +2541,7 @@ ${fragment}`, {
     return new Map(Object.entries(texts));
   }
 
-  // src/product-render.js
+  // src/product-render.ts
   var NTH_IMAGE_BIND = /^image:(\d+)$/;
   var METAFIELD_BIND = "metafield:";
   var MULTI_LINE_METAFIELD = /^(rich_text|multi_line_text)_field$/;
@@ -2172,7 +2562,7 @@ ${fragment}`, {
     const dot = ref.indexOf(".");
     const namespace = ref.slice(0, dot);
     const key = ref.slice(dot + 1);
-    const metafield = (product.metafields ?? []).find((field) => field?.namespace === namespace && field.key === key);
+    const metafield = (product.metafields ?? []).find((field2) => field2?.namespace === namespace && field2.key === key);
     if (!metafield) {
       setText(el, "");
       return;
@@ -2205,9 +2595,9 @@ ${fragment}`, {
     });
   }
   function renderProductBind(el, key, product) {
-    const text = PRODUCT_TEXTS.get(key);
-    if (text) {
-      setText(el, text(product));
+    const text2 = PRODUCT_TEXTS.get(key);
+    if (text2) {
+      setText(el, text2(product));
       return;
     }
     switch (key) {
@@ -2218,10 +2608,12 @@ ${fragment}`, {
         setImage(el, product.featuredImage?.url, product.featuredImage?.altText || product.title);
         break;
       case "url":
-      case "link":
-        el.setAttribute("href", productUrl2(product.handle, product.id));
+      case "link": {
+        const url2 = productUrl2(product.handle, product.id);
+        if (url2) el.setAttribute("href", url2);
         if (key === "url" && !el.firstElementChild && !el.textContent.trim()) setText(el, product.title);
         break;
+      }
       case "images":
         renderGallery(el, product);
         break;
@@ -2252,14 +2644,11 @@ ${fragment}`, {
       }
       repeat(container, option.optionValues, (node, value) => {
         node.setAttribute(attr("option-value"), value.name);
-        const text = qsa(node, sel("bind", "option-value"))[0];
-        if (text) setText(text, value.name);
+        const text2 = qsa(node, sel("bind", "option-value"))[0];
+        if (text2) setText(text2, value.name);
         else if (!node.firstElementChild) setText(node, value.name);
         const swatchEl = qsa(node, sel("bind", "swatch"))[0];
-        const swatch = (
-          /** @type {Swatch} */
-          value.swatch
-        );
+        const { swatch } = value;
         if (!swatchEl || !swatch) return;
         if (swatch.color) swatchEl.style.backgroundColor = swatch.color;
         if (swatch.image?.previewImage) setImage(swatchEl, swatch.image.previewImage.url, value.name);
@@ -2306,16 +2695,7 @@ ${fragment}`, {
     renderPlanLists(scope);
   }
 
-  // src/status.js
-  var status_exports = {};
-  __export(status_exports, {
-    STATUS_KEYS: () => STATUS_KEYS,
-    boundary: () => boundary,
-    isNotFound: () => isNotFound,
-    ownedBy: () => ownedBy,
-    resolveProductKey: () => resolveProductKey,
-    setScopeStatus: () => setScopeStatus
-  });
+  // src/status.ts
   var URL_SOURCE = "url:";
   function decodePathSegment(segment) {
     try {
@@ -2325,17 +2705,17 @@ ${fragment}`, {
       throw error;
     }
   }
-  function resolveProductKey(el, location = window.location, name = "product") {
+  function resolveProductKey(el, location2 = window.location, name = "product") {
     const raw = (get(el, name) ?? "").trim();
     if (!raw.toLowerCase().startsWith(URL_SOURCE)) return { key: raw || null, fromUrl: false, raw };
     const source = raw.slice(URL_SOURCE.length).trim();
     let key;
     if (source.toLowerCase() === "path") {
-      const segments = location.pathname.split("/").filter(Boolean);
+      const segments = location2.pathname.split("/").filter(Boolean);
       const segment = segments[segments.length - 1];
       key = segment === void 0 ? null : decodePathSegment(segment);
     } else {
-      key = new URLSearchParams(location.search).get(source || "handle");
+      key = new URLSearchParams(location2.search).get(source || "handle");
     }
     return { key: key?.trim() || null, fromUrl: true, raw };
   }
@@ -2367,7 +2747,7 @@ ${fragment}`, {
     });
   }
 
-  // src/variant-render.js
+  // src/variant-render.ts
   var FORMAT = { money: formatMoney2, percent: formatPercent };
   var isInput2 = (el) => el.tagName === "INPUT";
   function addButtonLabel(button) {
@@ -2400,7 +2780,7 @@ ${fragment}`, {
     });
   }
   function renderPurchaseStates(scope, view) {
-    const { variant, purchase, isSubscription } = view;
+    const { variant, purchase, line } = view;
     scope.$(sel("purchase")).forEach((el) => {
       if (isSelect(el)) {
         el.value = purchase.kind;
@@ -2413,17 +2793,17 @@ ${fragment}`, {
     });
     scope.$(sel("plan-value")).forEach((node) => {
       const planId = get(node, "plan-value") ?? "";
-      setSelected(node, isSubscription && planId === purchase.planId);
+      setSelected(node, line.kind === "subscription" && planId === line.planId);
       node.classList.toggle("is-unavailable", !allocationFor(variant, planId));
       const plan = scope.plans.find((candidate) => candidate.id === planId);
       const texts = planBindTexts(variant, planId, plan, FORMAT);
       qsa(node, sel("plan-bind")).forEach((el) => {
-        const text = texts.get(get(el, "plan-bind") ?? "");
-        if (text) setText(el, text());
+        const text2 = texts.get(get(el, "plan-bind") ?? "");
+        if (text2) setText(el, text2());
       });
     });
     selectsIn(scope, sel("plan")).forEach((select) => {
-      select.value = isSubscription ? purchase.planId ?? "" : "";
+      select.value = line.kind === "subscription" ? line.planId : "";
     });
   }
   function renderConditions2(scope, view) {
@@ -2447,10 +2827,10 @@ ${fragment}`, {
       const subscribeText = get(button, "subscribe-text");
       if (!soldOutText && !subscribeText) return;
       const { label, original } = addButtonLabel(button);
-      let text = original;
-      if (view.isSubscription && subscribeText) text = subscribeText;
-      if (disabled && soldOutText) text = soldOutText;
-      if (button.getAttribute("aria-busy") !== "true") setText(label, text);
+      let text2 = original;
+      if (view.line.kind === "subscription" && subscribeText) text2 = subscribeText;
+      if (disabled && soldOutText) text2 = soldOutText;
+      if (button.getAttribute("aria-busy") !== "true") setText(label, text2);
     });
   }
   function writeVariant(scope, view) {
@@ -2463,32 +2843,29 @@ ${fragment}`, {
         setImage(el, variant.image?.url || product.featuredImage?.url, variant.image?.altText || product.title);
         return;
       }
-      const text = texts.get(key);
-      if (text) setText(el, text());
+      const text2 = texts.get(key);
+      if (text2) setText(el, text2());
     });
     renderOptionStates(scope, view);
     renderPurchaseStates(scope, view);
     renderConditions2(scope, view);
-    scope.root.classList.toggle("is-subscription", view.isSubscription);
-    scope.root.setAttribute(attr("purchase-mode"), view.isSubscription ? "subscription" : "one-time");
+    scope.root.classList.toggle("is-subscription", view.line.kind === "subscription");
+    scope.root.setAttribute(attr("purchase-mode"), view.line.kind);
     renderAddButtons(scope, view);
   }
 
-  // src/product-events.js
+  // src/product-events.ts
   var productSelector = () => sel("product");
   var isField = (el) => el.tagName === "INPUT" || el.tagName === "SELECT" || el.tagName === "TEXTAREA";
   var isElement = (target) => target instanceof window.Element;
   function closestOwn(scope, target, selector) {
-    const el = (
-      /** @type {HTMLElement | null} */
-      target.closest(selector)
-    );
+    const el = target.closest(selector);
     return el?.closest(productSelector()) === scope.root ? el : null;
   }
   function onAddClick(scope, button) {
     const { label, original } = addButtonLabel(button);
     const addingText = get(button, "adding-text");
-    void busy(button, async () => {
+    busy(button, async () => {
       if (addingText) setText(label, addingText);
       try {
         await scope.addToCart();
@@ -2500,6 +2877,8 @@ ${fragment}`, {
       }
     }).then(() => {
       scope.renderVariant();
+    }).catch((error) => {
+      reportError(error, "add to cart render");
     });
   }
   function onClick(scope, event, target) {
@@ -2519,7 +2898,7 @@ ${fragment}`, {
     const purchase = closestOwn(scope, target, `${sel("purchase")}:not(select)`);
     if (purchase) {
       if (purchase.tagName !== "INPUT") event.preventDefault();
-      scope.setPurchase(get(purchase, "purchase"));
+      scope.setPurchase(purchaseKind(get(purchase, "purchase")));
       return;
     }
     const plus = closestOwn(scope, target, sel("qty-plus"));
@@ -2535,6 +2914,7 @@ ${fragment}`, {
       onAddClick(scope, add);
     }
   }
+  var purchaseKind = (value) => value === "subscription" ? "subscription" : "one-time";
   function onChange(scope, target) {
     const value = isField(target) ? target.value : "";
     if (target.matches(`select${sel("option")}`)) {
@@ -2545,7 +2925,7 @@ ${fragment}`, {
       if (value) scope.selectPlan(value);
       else scope.setPurchase("one-time");
     } else if (target.matches(`select${sel("purchase")}`)) {
-      scope.setPurchase(value);
+      scope.setPurchase(purchaseKind(value));
     } else if (target.matches(sel("qty"))) {
       scope.setQuantity(value);
     }
@@ -2560,7 +2940,7 @@ ${fragment}`, {
     });
   }
 
-  // src/product.js
+  // src/product.ts
   var scopes = /* @__PURE__ */ new WeakMap();
   var productSelector2 = () => sel("product");
   var knownOptionNames = /* @__PURE__ */ new Map();
@@ -2585,11 +2965,15 @@ ${fragment}`, {
     return isField2(el) && el.value || null;
   }
   var ProductScope = class {
-    /**
-     * @param {HTMLElement} root
-     * @param {Product} product
-     */
     constructor(root, product) {
+      __publicField(this, "root");
+      __publicField(this, "product");
+      __publicField(this, "plans");
+      __publicField(this, "selected");
+      /** How the visitor buys; `setPurchase` and `selectPlan` change it. */
+      __publicField(this, "purchase");
+      __publicField(this, "variant");
+      __publicField(this, "quantity");
       this.root = root;
       this.product = product;
       this.plans = allPlans(product);
@@ -2601,7 +2985,7 @@ ${fragment}`, {
         defaultPurchase: get(root, "default-purchase") || cfg.defaultPurchase
       });
       this.selected = choice.selected;
-      this.purchaseChoice = choice.purchase;
+      this.purchase = choice.purchase;
       this.variant = null;
       this.quantity = has(root, "quantity") ? Math.max(0, parseInt(get(root, "quantity") ?? "", 10) || 0) : 1;
       scopes.set(root, this);
@@ -2614,11 +2998,7 @@ ${fragment}`, {
       notifyLayoutChanged("product");
       emit("product-ready", { product, scope: this }, root);
     }
-    /**
-     * New data for the same product (a country switch). Keeps the visitor's choice.
-     *
-     * @param {Product} product
-     */
+    /** New data for the same product (a country switch). Keeps the visitor's choice. */
     update(product) {
       const variantId = this.variant?.id;
       this.product = product;
@@ -2632,17 +3012,14 @@ ${fragment}`, {
       notifyLayoutChanged("product");
       emit("product-updated", { product, scope: this }, this.root);
     }
-    /**
-     * @param {string} selector
-     * @returns {HTMLElement[]} Matches in this scope, including the root itself (a card link with tether-bind="link").
-     */
+    /** @returns Matches in this scope, including the root itself (a card link with tether-bind="link"). */
     $(selector) {
       const inner = scoped(this.root, selector, productSelector2());
       return this.root.matches(selector) ? [this.root, ...inner] : inner;
     }
     /**
-     * @param {string | null} authored An option name in the markup.
-     * @returns {string} The product's option of that name, or at that position in the build's language.
+     * @param authored An option name in the markup.
+     * @returns The product's option of that name, or at that position in the build's language.
      */
     optName(authored) {
       if (!authored) return "";
@@ -2651,50 +3028,31 @@ ${fragment}`, {
       const index = (knownOptionNames.get(this.product.handle) ?? []).indexOf(authored);
       return options[index]?.name ?? authored;
     }
-    /** @returns {'one-time' | 'subscription'} */
-    get purchase() {
-      return this.purchaseChoice.kind;
-    }
-    /** @param {string} kind */
-    set purchase(kind) {
-      const wanted = kind === "subscription" ? "subscription" : "one-time";
-      this.purchaseChoice = normalisePurchase(this.product, this.variant, { kind: wanted, planId: this.planId });
-    }
-    /** @returns {string | null} The plan bought on, or offered while buying once. */
-    get planId() {
-      return this.purchaseChoice.planId;
-    }
-    /** @param {string | null} planId */
-    set planId(planId) {
-      this.purchaseChoice = normalisePurchase(this.product, this.variant, { kind: this.purchase, planId });
-    }
-    /** @returns {PlanInGroup | null} */
     get plan() {
-      return this.plans.find((plan) => plan.id === this.planId) ?? null;
+      const planId = purchasePlanId(this.purchase);
+      return this.plans.find((plan) => plan.id === planId) ?? null;
     }
     /** True when the current variant can be bought on a plan. */
     get subscriptionAvailable() {
       return this.plans.some((plan) => allocationFor(this.variant, plan.id));
     }
+    /** True when the line is bought on a plan: subscribing, and the variant is on the plan. */
     get isSubscription() {
-      return this.purchase === "subscription" && allocationFor(this.variant, this.planId) !== null;
+      return linePurchase(this.purchase, this.variant).kind === "subscription";
     }
-    /** @returns {CartLineInput | null} What would be added to the cart right now. */
+    /** @returns What would be added to the cart right now. */
     getLine() {
       if (!this.variant) return null;
       const line = { merchandiseId: this.variant.id, quantity: this.quantity };
-      if (this.isSubscription && this.planId) line.sellingPlanId = this.planId;
+      const bought = linePurchase(this.purchase, this.variant);
+      if (bought.kind === "subscription") line.sellingPlanId = bought.planId;
       const attributes = this.collectAttributes();
       if (attributes.length) line.attributes = attributes;
       return line;
     }
-    /** @returns {{ key: string, value: string }[]} `tether-line-attributes` and the filled `tether-line-attribute` fields. */
+    /** @returns `tether-line-attributes` and the filled `tether-line-attribute` fields. */
     collectAttributes() {
-      const json = (
-        /** @type {Parameters<typeof toAttributes>[0]} */
-        parseJSONAttr(this.root, "line-attributes")
-      );
-      const fixed = toAttributes(json);
+      const fixed = attributesFromJson(parseJSONAttr(this.root, "line-attributes"));
       const fields = this.$(sel("line-attribute")).flatMap((el) => {
         const value = lineAttributeValue(el);
         return value === null ? [] : [{ key: get(el, "line-attribute") ?? "", value }];
@@ -2704,9 +3062,6 @@ ${fragment}`, {
     /**
      * Selects an option value. A combination no variant has moves to the closest variant with the value: the most other
      * choices kept, then one for sale.
-     *
-     * @param {string} name
-     * @param {string} value
      */
     select(name, value) {
       if (this.selected[name] === value) return;
@@ -2732,29 +3087,26 @@ ${fragment}`, {
       this.selected = next;
       this.renderVariant();
     }
-    /** @param {string} id A variant gid or numeric id. */
+    /** @param id A variant gid or numeric id. */
     selectVariant(id) {
       const variant = this.product.variants.nodes.find((candidate) => candidate.id === GID.variant(id));
       if (!variant) return;
       this.selected = selectionOf(variant);
       this.renderVariant();
     }
-    /** @param {string | null} mode `subscription`, else buying once. */
-    setPurchase(mode) {
-      const kind = mode === "subscription" ? "subscription" : "one-time";
-      const next = normalisePurchase(this.product, this.variant, { kind, planId: this.planId });
-      if (next.kind === this.purchase) return;
-      this.purchaseChoice = next;
+    setPurchase(kind) {
+      const next = normalisePurchase(this.product, this.variant, kind, purchasePlanId(this.purchase));
+      if (next.kind === this.purchase.kind) return;
+      this.purchase = next;
       this.renderVariant();
     }
-    /** @param {string | null} ref A plan id, numeric id, name or option value. */
+    /** @param ref A plan id, numeric id, name or option value. */
     selectPlan(ref) {
       const plan = findPlan(this.product, ref);
       if (!plan) return;
-      this.purchaseChoice = { kind: "subscription", planId: plan.id };
+      this.purchase = { kind: "subscription", planId: plan.id };
       this.renderVariant();
     }
-    /** @param {number | string} quantity */
     setQuantity(quantity) {
       const minimum = has(this.root, "quantity") ? 0 : 1;
       this.quantity = Math.max(minimum, parseInt(String(quantity), 10) || 0);
@@ -2763,7 +3115,7 @@ ${fragment}`, {
       });
       this.renderVariant();
     }
-    /** @returns {Promise<unknown>} The cart after adding; `null` when the variant can't be added. */
+    /** @returns The cart after adding; `null` when the variant can't be added. */
     async addToCart() {
       if (!this.variant?.availableForSale) return null;
       const line = this.getLine();
@@ -2789,7 +3141,7 @@ ${fragment}`, {
     renderVariant() {
       const view = productView(
         this.product,
-        { selected: this.selected, purchase: this.purchaseChoice, quantity: this.quantity },
+        { selected: this.selected, purchase: this.purchase, quantity: this.quantity },
         cfg.lowStock
       );
       if (!view) {
@@ -2798,7 +3150,7 @@ ${fragment}`, {
       }
       this.variant = view.variant;
       this.selected = view.selected;
-      this.purchaseChoice = view.purchase;
+      this.purchase = view.purchase;
       writeVariant(this, view);
       emit(
         "variant-changed",
@@ -2807,32 +3159,28 @@ ${fragment}`, {
           variant: view.variant,
           selected: { ...view.selected },
           purchase: view.purchase.kind,
-          sellingPlanId: view.isSubscription ? view.purchase.planId : null
+          sellingPlanId: view.line.kind === "subscription" ? view.line.planId : null
         },
         this.root
       );
     }
   };
 
-  // src/collection.js
-  var collection_exports = {};
-  __export(collection_exports, {
-    ListScope: () => ListScope,
-    listSelector: () => listSelector
-  });
+  // src/collection.ts
   var URL_QUERY_SOURCE = "url:";
   var listSelector = () => `${sel("collection")},${sel("products")},${sel("recommendations")}`;
   var isElement2 = (target) => target instanceof window.Element;
   var toLimit = (raw) => parseInt(raw ?? "", 10) || void 0;
   var toIntent = (raw) => raw === "COMPLEMENTARY" ? "COMPLEMENTARY" : "RELATED";
   var ListScope = class {
-    /** @param {HTMLElement} root */
     constructor(root) {
+      __publicField(this, "root");
+      __publicField(this, "products", []);
+      __publicField(this, "pageInfo", null);
+      __publicField(this, "collection", null);
+      /** Counts loads, so only the latest one renders. */
+      __publicField(this, "loadToken", 0);
       this.root = root;
-      this.products = [];
-      this.pageInfo = null;
-      this.collection = null;
-      this.loadToken = 0;
       setScopeStatus(root, "loading");
       root.addEventListener("click", (event) => {
         if (!isElement2(event.target)) return;
@@ -2842,31 +3190,29 @@ ${fragment}`, {
         void busy(more, () => this.load(true));
       });
     }
-    /** @param {string} selector */
     $(selector) {
       return scoped(this.root, selector, listSelector());
     }
-    /** @returns {ProductQuery} The collection or search query of the list's attributes. */
+    /** The collection or search query of the list's attributes. */
     options() {
       const { root } = this;
-      const query = { reverse: get(root, "reverse") === "true" };
+      const query2 = { reverse: get(root, "reverse") === "true" };
       const first = toLimit(get(root, "limit"));
-      if (first) query.first = first;
+      if (first) query2.first = first;
       const sortKey = get(root, "sort");
-      if (sortKey) query.sortKey = sortKey;
+      if (sortKey) query2.sortKey = sortKey;
       if (has(root, "collection")) {
-        query.collection = get(root, "collection") ?? "";
-        return query;
+        query2.collection = get(root, "collection") ?? "";
+        return query2;
       }
       const raw = get(root, "products") ?? "";
-      query.query = raw.startsWith(URL_QUERY_SOURCE) ? new URL(window.location.href).searchParams.get(raw.slice(URL_QUERY_SOURCE.length)) || "" : raw;
-      return query;
+      query2.query = raw.startsWith(URL_QUERY_SOURCE) ? new URL(window.location.href).searchParams.get(raw.slice(URL_QUERY_SOURCE.length)) || "" : raw;
+      return query2;
     }
     /**
      * The product of a recommendations list: a handle, `url:…` (one dynamic product page), or empty inside a product
      * scope for that product.
      *
-     * @returns {Promise<Product[]>}
      * @throws {TetherError} `NOT_FOUND` when there is no product to recommend for.
      */
     async loadRecommendations() {
@@ -2876,7 +3222,7 @@ ${fragment}`, {
       if (!key) throw new TetherError("No product for recommendations", { code: "NOT_FOUND" });
       return getRecommendations(key, toIntent(get(this.root, "intent")));
     }
-    /** @param {boolean} [more] Appends the next page instead of replacing the products. */
+    /** @param more Appends the next page instead of replacing the products. */
     async load(more = false) {
       this.loadToken += 1;
       const token = this.loadToken;
@@ -2942,21 +3288,7 @@ ${fragment}`, {
     }
   };
 
-  // src/mounting.js
-  var mounting_exports = {};
-  __export(mounting_exports, {
-    hydrateFromPage: () => hydrateFromPage,
-    liveLists: () => liveLists,
-    liveProducts: () => liveProducts,
-    mountProduct: () => mountProduct,
-    mountedLists: () => mountedLists,
-    mountedProducts: () => mountedProducts,
-    pruneLive: () => pruneLive,
-    retryFailed: () => retryFailed,
-    settleMarket: () => settleMarket,
-    trackMarket: () => trackMarket,
-    within: () => within
-  });
+  // src/mounting.ts
   var HYDRATE_SELECTOR = 'script[type="application/json"][data-tether-hydrate]';
   var mountedProducts = /* @__PURE__ */ new WeakSet();
   var mountedLists = /* @__PURE__ */ new WeakSet();
@@ -2972,10 +3304,7 @@ ${fragment}`, {
     });
   }
   function within(root, selector) {
-    const self = root.matches?.(selector) ? [
-      /** @type {HTMLElement} */
-      root
-    ] : [];
+    const self = root.matches?.(selector) ? [root] : [];
     return [...self, ...qsa(root, selector)];
   }
   function applyPageTitle(el, product) {
@@ -3056,12 +3385,8 @@ ${fragment}`, {
   function flushRefresh() {
     const keys = [...refreshQueue];
     refreshQueue = /* @__PURE__ */ new Set();
-    refreshProducts(keys).forEach((promise, index) => {
-      const key = (
-        /** @type {string} */
-        keys[index]
-      );
-      promise.then((fresh) => {
+    keys.forEach((key) => {
+      refreshProduct(key).then((fresh) => {
         applyRefresh(key, fresh);
       }).catch((error) => {
         reportError(error, `refresh ${key}`);
@@ -3086,11 +3411,19 @@ ${fragment}`, {
       document.documentElement.classList.remove(`${cfg.prefix}-market-pending`);
     });
   }
-  var isUsable = (product) => Boolean(product?.id && product.handle);
-  var sameCode = (a, b) => (a ?? "").toUpperCase() === (b ?? "").toUpperCase();
+  function toHydratePayload(json) {
+    if (!isRecord(json)) return { country: void 0, language: void 0, products: [] };
+    const { products } = json;
+    const entries = Array.isArray(products) ? products : [];
+    return {
+      country: toCountry(json["country"]) ?? void 0,
+      language: toLanguage(json["language"]) ?? void 0,
+      products: entries.filter(isProductShape)
+    };
+  }
   var readScripts = /* @__PURE__ */ new WeakSet();
   function hydrateFromPage(root = document) {
-    qsa(root.ownerDocument ?? root, HYDRATE_SELECTOR).forEach((script) => {
+    within(root, HYDRATE_SELECTOR).forEach((script) => {
       if (readScripts.has(script)) return;
       readScripts.add(script);
       let json;
@@ -3100,14 +3433,10 @@ ${fragment}`, {
         warn("bad data-tether-hydrate", error);
         return;
       }
-      const { country, language, products } = (
-        /** @type {HydratePayload | null} */
-        json ?? {}
-      );
-      const usable = Array.isArray(products) ? products.filter(isUsable) : [];
-      rememberOptionNames(usable);
-      if (sameCode(country, cfg.country) && sameCode(language, cfg.language)) {
-        hydrateProducts(usable);
+      const { country, language, products } = toHydratePayload(json);
+      rememberOptionNames(products);
+      if (country === cfg.country && language === cfg.language) {
+        hydrateProducts(products);
         return;
       }
       log("hydration skipped: other market");
@@ -3118,53 +3447,108 @@ ${fragment}`, {
     });
   }
 
-  // src/lazy-iife.js
-  var { cfg: cfg2 } = config_exports;
+  // src/part-integrity.ts
+  var PART_INTEGRITY = { "tether.diagnose.js": "sha384-OKLlZJrSZ5IF9SOjKnEe485fi5xZlb4oLLvSfGjAssABzqd3h9JH1yA/hDczhkjJ", "tether.markets.js": "sha384-QVvTGiZJKx2hOPIpQPrGycWnKVTfDMEJ8z9heHIYSqib+6WyUoTmzKf2oBiFE3le", "tether.search.js": "sha384-P63pnKFjWTIVS8kEbBr4sfZZI91u1tImDTe+y50l2pdOM+W/KQsMymB6YRH801Dc", "tether.extras.js": "sha384-DJwYPZWf7o63ooQuDRvvhLrl5quZwhWO1YQ9RpySNQKjlDIS3uCwxDpDfZYiEjla", "tether.account.js": "sha384-q3UfPH5vDMbKm05wkvEPTDoA/aaIPmRQBDrqmXA4cNF4VFZAo4dgt61TmrNM69mi", "tether.account-pages.js": "sha384-YiSgDwM6qeHXJBcbWLRuk50h2ntAamNadS0MrZByc3cl5PKXZO297l38zYWm0lLe", "tether.analytics.js": "sha384-I93erLFdRG9uy3t+mnaDk/MgECoYOSG3q+9TfIQ39NROWZLvFjYrpHOAnBfsXaJc" };
+
+  // src/lazy-iife.ts
   var coreModules = {
-    "config.js": config_exports,
-    "client.js": client_exports,
-    "dom.js": dom_exports,
-    "fragments.js": fragments_exports,
-    "loader.js": loader_exports,
-    "selling-plans.js": selling_plans_exports,
-    "status.js": status_exports,
-    "cart.js": cart_exports,
-    "product.js": product_exports,
-    "collection.js": collection_exports,
-    "mounting.js": mounting_exports,
-    "market-codes.js": market_codes_exports,
-    "shopify-values.js": shopify_values_exports,
-    "store-html.js": store_html_exports
+    get "config.ts"() {
+      return [cfg, isConfigured, log, MARKET_SOURCES, parseMarkets, reportError, warn];
+    },
+    get "client.ts"() {
+      return [endpoint, gql, orNull, shaped, TetherError];
+    },
+    get "dom.ts"() {
+      return [
+        ANALYTICS_EVENTS,
+        attr,
+        attributesFromJson,
+        emit,
+        formatDate,
+        formatMoney2,
+        get,
+        has,
+        hasTemplate,
+        isOwnEvent,
+        parseJSONAttr,
+        productUrl2,
+        qsa,
+        repeat,
+        sel,
+        setImage,
+        setText,
+        show
+      ];
+    },
+    get "loader.ts"() {
+      return [clearProductCache, getProduct];
+    },
+    get "selling-plans.ts"() {
+      return [allPlans];
+    },
+    get "status.ts"() {
+      return [boundary, resolveProductKey];
+    },
+    get "cart.ts"() {
+      return [Cart];
+    },
+    get "product.ts"() {
+      return [scopes];
+    },
+    get "collection.ts"() {
+      return [listSelector];
+    },
+    get "mounting.ts"() {
+      return [liveLists, liveProducts, mountedProducts, mountProduct, pruneLive, within];
+    },
+    get "market-codes.ts"() {
+      return [toCountry, toLanguage];
+    },
+    get "shopify-values.ts"() {
+      return [isHttpsUrl];
+    },
+    // Parts that load other parts (account → account-pages) use this same loader.
+    get "lazy.ts"() {
+      return [loadPart];
+    }
   };
   var MINIFIED_SCRIPT = /\.min\.js(\?|$)/;
   var coreScript = typeof document === "undefined" ? "" : document.currentScript?.getAttribute("src") ?? "";
   var coreScriptUrl = coreScript ? new URL(coreScript, document.baseURI).href : "";
   var parts = /* @__PURE__ */ new Map();
   function partsFolder() {
-    if (!cfg2.partsUrl) return coreScriptUrl.replace(/[^/]*$/, "");
-    const folder = new URL(cfg2.partsUrl, document.baseURI);
-    if (folder.protocol !== "https:" && folder.origin !== window.location.origin) {
-      throw new Error(`partsUrl must be https or on this site: ${folder.href}`);
-    }
-    return folder.href;
+    if (cfg.partsUrl) return new URL(cfg.partsUrl, document.baseURI).href;
+    if (!coreScriptUrl) return null;
+    return coreScriptUrl.replace(/[^/]*$/, "");
   }
-  function loadScript(name, url) {
+  function applyIntegrity(script, integrity) {
+    script.integrity = integrity;
+    if (new URL(script.src).origin !== window.location.origin) script.crossOrigin = "anonymous";
+  }
+  function loadScript(name, folder, file, integrity) {
     return new Promise((resolve, reject) => {
+      const url2 = `${folder.replace(/\/?$/, "/")}${file}`;
       const script = document.createElement("script");
-      script.src = url;
+      script.src = url2;
       script.async = true;
+      applyIntegrity(script, integrity);
       script.onload = () => {
-        const { Tether } = (
-          /** @type {Window & { Tether?: { __parts?: Record<string, unknown> } }} */
-          window
-        );
-        const part = Tether?.__parts?.[name];
-        if (part) resolve(part);
-        else reject(new Error(`${url} did not register`));
+        const { Tether } = window;
+        const part = Tether?.__parts[name];
+        if (part) {
+          resolve(part);
+          return;
+        }
+        parts.delete(name);
+        reject(new Error(`${url2} did not register`));
       };
       script.onerror = () => {
         parts.delete(name);
-        reject(new Error(`Could not load ${url}. Host it next to the Tether script, or set partsUrl.`));
+        reject(
+          new Error(
+            `Could not load ${url2}, or it is not the file built with this Tether script. Host the same release's files next to the Tether script or at partsUrl.`
+          )
+        );
       };
       document.head.appendChild(script);
     });
@@ -3172,39 +3556,30 @@ ${fragment}`, {
   function loadPart(name) {
     let loading = parts.get(name);
     if (!loading) {
-      let folder;
-      try {
-        folder = partsFolder();
-      } catch (error) {
-        return Promise.reject(error instanceof Error ? error : new Error(String(error)));
+      const folder = partsFolder();
+      if (folder === null) {
+        return Promise.reject(
+          new Error(`The Tether script's own location is unknown, so its ${name} part can't be found: set partsUrl.`)
+        );
       }
       const suffix = MINIFIED_SCRIPT.test(coreScriptUrl) || !coreScriptUrl ? ".min" : "";
-      loading = loadScript(name, `${folder.replace(/\/?$/, "/")}tether.${name}${suffix}.js`);
+      const file = `tether.${name}${suffix}.js`;
+      const integrity = PART_INTEGRITY[file];
+      if (integrity === void 0) {
+        return Promise.reject(new Error(`This Tether script was built without ${file}, so it can't load that part.`));
+      }
+      loading = loadScript(name, folder, file, integrity);
       parts.set(name, loading);
     }
-    return (
-      /** @type {Promise<Parts[Name]>} */
-      loading
-    );
+    return loading;
   }
-  coreModules["lazy.js"] = { loadPart, coreModules };
 
-  // src/markets.js
+  // src/markets.ts
   var storageKey = () => `${cfg.prefix}:market:${cfg.domain}`;
-  function localStorageIfAllowed() {
-    if (typeof window === "undefined") return null;
+  var pageStorage = { getItem: (key) => getStored(key) };
+  function parseJsonOrNull(text2) {
     try {
-      return window.localStorage;
-    } catch {
-      return null;
-    }
-  }
-  function parseJsonOrNull(text) {
-    try {
-      return (
-        /** @type {unknown} */
-        JSON.parse(text)
-      );
+      return JSON.parse(text2);
     } catch (error) {
       if (error instanceof SyntaxError) return null;
       throw error;
@@ -3214,22 +3589,19 @@ ${fragment}`, {
     if (typeof value !== "object" || value === null) return null;
     const country = toCountry(Reflect.get(value, "country"));
     if (!country) return null;
-    const locale = (
-      /** @type {unknown} */
-      Reflect.get(value, "locale")
-    );
+    const locale = Reflect.get(value, "locale");
     return {
       country,
       language: toLanguage(Reflect.get(value, "language")) ?? void 0,
       locale: typeof locale === "string" && locale ? locale : void 0
     };
   }
-  function readSavedMarket(storage = localStorageIfAllowed()) {
-    const text = storage?.getItem(storageKey());
-    return text ? toMarket(parseJsonOrNull(text)) : null;
+  function readSavedMarket(storage = pageStorage) {
+    const text2 = storage.getItem(storageKey());
+    return text2 ? toMarket(parseJsonOrNull(text2)) : null;
   }
 
-  // src/page-market.js
+  // src/page-market.ts
   var configuredMarket = { country: void 0, language: void 0, locale: void 0 };
   var lastPageHadOwnMarket = false;
   function pageMarket() {
@@ -3266,21 +3638,33 @@ ${fragment}`, {
     if (market.locale && !overrides.locale) cfg.locale = market.locale;
     log("market", market);
   }
-  var sameCode2 = (a, b) => (a ?? "").toUpperCase() === (b ?? "").toUpperCase();
+  var sameCode = (a, b) => (a ?? "").toUpperCase() === (b ?? "").toUpperCase();
   function marketForArrival() {
     const page = pageMarket();
     const leftOwnMarket = page === null && lastPageHadOwnMarket;
     lastPageHadOwnMarket = page !== null;
     const target = page ?? (leftOwnMarket ? readSavedMarket() ?? configuredMarket : null);
     if (!target?.country) return null;
-    if (sameCode2(target.country, cfg.country) && sameCode2(target.language, cfg.language)) return null;
+    if (sameCode(target.country, cfg.country) && sameCode(target.language, cfg.language)) return null;
     return { country: target.country, language: target.language, locale: target.locale };
   }
   function setCountry(code, options) {
     return loadPart("markets").then((part) => part.setCountry(code, options));
   }
 
-  // src/account-api.js
+  // src/account-marks.ts
+  var hintKey = () => `${cfg.prefix}:account-hint:${cfg.domain}`;
+  function removeFromBothAreas(key) {
+    removeStored(key, "sessionStorage");
+    removeStored(key, "localStorage");
+  }
+  function forgetBrowserModeTokens() {
+    removeFromBothAreas(`${cfg.prefix}:account:${cfg.domain}`);
+    removeFromBothAreas(`${cfg.prefix}:account-login:${cfg.domain}`);
+  }
+  var isLoginOutcome = (value) => value === "in" || value === "expired" || value === "error";
+
+  // src/account-api.ts
   var ACCOUNT_ATTRIBUTES = [
     "account-login",
     "account-bind",
@@ -3293,20 +3677,12 @@ ${fragment}`, {
     "address-form"
   ];
   var accountSelector = () => [...ACCOUNT_ATTRIBUTES.map((name) => `[${attr(name)}]`), `[${attr("show")}^="logged-"]`].join(",");
-  function hasSavedSession() {
-    const sessionKey = `${cfg.prefix}:account:${cfg.domain}`;
-    const hintKey = `${cfg.prefix}:account-hint:${cfg.domain}`;
-    try {
-      return Boolean(
-        sessionStorage.getItem(sessionKey) || localStorage.getItem(sessionKey) || localStorage.getItem(hintKey)
-      );
-    } catch {
-      return false;
-    }
+  function hasLoginHint() {
+    return Boolean(getStored(hintKey()));
   }
   function mountAccountIfUsed(root) {
-    if (!cfg.account?.clientId && !cfg.account?.server) return;
-    const needed = within(root, accountSelector()).length > 0 || /[?&]code=/.test(window.location.search) || hasSavedSession();
+    if (!cfg.account) return;
+    const needed = within(root, accountSelector()).length > 0 || isLoginOutcome(new URLSearchParams(window.location.search).get("account")) || hasLoginHint();
     if (!needed) return;
     loadPart("account").then((part) => part.mountAccount(root)).catch((error) => {
       reportError(error, "account");
@@ -3314,22 +3690,14 @@ ${fragment}`, {
   }
   function fromPart(name) {
     return (...args) => loadPart("account").then((part) => {
-      const call = (
-        /**
-         * @type {(...callArgs: Parameters<AccountPart[Name]>) => AccountResult<Name> | PromiseLike<AccountResult<Name>>}
-         */
-        part[name]
-      );
+      const call = part[name];
       return call(...args);
     });
   }
   var accountApi = {
     login: fromPart("login"),
     logout: fromPart("logout"),
-    handleCallback: fromPart("handleCallback"),
-    getToken: fromPart("getToken"),
     isLoggedIn: fromPart("isLoggedIn"),
-    query: fromPart("query"),
     customer: fromPart("customer"),
     orders: fromPart("orders"),
     order: fromPart("order"),
@@ -3344,7 +3712,7 @@ ${fragment}`, {
     mountAccount: fromPart("mountAccount")
   };
 
-  // src/controls/cart-controls.js
+  // src/controls/cart-controls.ts
   var lineKeyAttribute = () => `data-${cfg.prefix}-key`;
   var isElement3 = (target) => target instanceof window.Element;
   function lineOf(target) {
@@ -3441,7 +3809,7 @@ ${fragment}`, {
     document.addEventListener("keydown", onKeydown);
   }
 
-  // src/controls/discount.js
+  // src/controls/discount.ts
   var isElement4 = (target) => target instanceof window.Element;
   function codeInputOf(form) {
     const input = form.querySelector(sel("discount-input")) ?? form.querySelector("input");
@@ -3499,7 +3867,7 @@ ${fragment}`, {
     document.addEventListener("click", onClick3);
   }
 
-  // src/controls/extras.js
+  // src/controls/extras.ts
   var addGroup = (button) => loadPart("extras").then((part) => part.addGroup(button));
   var reportExtrasError = (error) => {
     reportError(error, "extras");
@@ -3518,6 +3886,7 @@ ${fragment}`, {
     }).catch(reportExtrasError);
   }
   function onVariantChanged(event) {
+    if (!isOwnEvent(event, "variant-changed")) return;
     const { target } = event;
     if (!(target instanceof window.Element)) return;
     if (!cfg.variantUrl && !target.hasAttribute(attr("variant-url"))) return;
@@ -3528,14 +3897,10 @@ ${fragment}`, {
   function bindExtrasControls() {
     document.addEventListener("click", onClick4);
     window.addEventListener("storage", onStorage);
-    document.addEventListener(
-      `${cfg.prefix}:variant-changed`,
-      /** @type {EventListener} */
-      onVariantChanged
-    );
+    document.addEventListener(`${cfg.prefix}:variant-changed`, onVariantChanged);
   }
 
-  // src/controls/navigation.js
+  // src/controls/navigation.ts
   var mountedBody = null;
   function rememberDocumentMount() {
     mountedBody = document.body;
@@ -3556,7 +3921,9 @@ ${fragment}`, {
   }
   function bindAstroRouter(hooks) {
     document.addEventListener("astro:page-load", () => {
-      void onPageLoad(hooks);
+      onPageLoad(hooks).catch((error) => {
+        reportError(error, "page mount");
+      });
     });
     document.addEventListener("astro:before-swap", () => {
       mountedBody = null;
@@ -3583,11 +3950,13 @@ ${fragment}`, {
     window.addEventListener("online", onOnline);
   }
 
-  // src/index.js
-  var VERSION = "0.6.8";
-  var ANALYTICS_EVENTS = ["product-ready", "list-ready", "cart-updated", "cart-toggled", "checkout", "search"];
+  // src/index.ts
+  var VERSION = "0.7.0";
   var OBSERVE_DEBOUNCE_MS = 50;
-  var pageGlobals = () => window;
+  function pageConfig() {
+    const config = pageGlobal("TETHER_CONFIG");
+    return typeof config === "object" && config !== null ? Object.fromEntries(Object.entries(config)) : {};
+  }
   var initPromise = null;
   var observer = null;
   var analyticsQueue = null;
@@ -3601,10 +3970,7 @@ ${fragment}`, {
       const list = new ListScope(el);
       liveLists.add(list);
       el.addEventListener(`${cfg.prefix}:list-rendered`, (event) => {
-        mount(
-          /** @type {CustomEvent<{ container: ParentNode }>} */
-          event.detail.container
-        );
+        if (isOwnEvent(event, "list-rendered")) mount(event.detail.container);
       });
       void trackMarket(list.load());
     });
@@ -3625,20 +3991,38 @@ ${fragment}`, {
       });
     }
   }
-  function mount(root = document) {
-    if (!isConfigured()) return 0;
-    if (root === document) rememberDocumentMount();
-    pruneLive();
-    hydrateFromPage(root.ownerDocument ?? document);
+  function mountWithin(root) {
     let count = mountLists(root);
     within(root, sel("product")).forEach((el) => {
       if (mountProduct(el)) count++;
     });
     mountParts(root);
+    return count;
+  }
+  function mount(root = document) {
+    if (!isConfigured()) return 0;
+    if (root === document) rememberDocumentMount();
+    pruneLive();
+    hydrateFromPage(root.ownerDocument ?? document);
+    const count = mountWithin(root);
     settleMarket();
     Cart.render();
     log(`mounted ${count} scope(s)`, root);
     return count;
+  }
+  function mountAdded(added) {
+    const roots = added.filter(
+      (root) => root.isConnected && !added.some((other) => other !== root && other.contains(root))
+    );
+    if (!roots.length || !isConfigured()) return;
+    pruneLive();
+    roots.forEach((root) => {
+      hydrateFromPage(root);
+    });
+    const count = roots.reduce((sum, root) => sum + mountWithin(root), 0);
+    settleMarket();
+    Cart.render();
+    log(`mounted ${count} scope(s) in ${roots.length} added element(s)`);
   }
   function unmount() {
     Cart.close();
@@ -3661,13 +4045,13 @@ ${fragment}`, {
     ANALYTICS_EVENTS.forEach((name) => {
       document.addEventListener(`${cfg.prefix}:${name}`, (event) => queue.push(event));
     });
-    document.addEventListener("astro:page-load", () => queue.push(new CustomEvent(`${cfg.prefix}:page`)));
+    document.addEventListener("astro:page-load", (event) => queue.push(event));
     loadPart("analytics").then((part) => part.startAnalytics(queue)).catch((error) => {
       reportError(error, "analytics");
     });
   }
   async function cartInPageMarket(cart) {
-    const country = cfg.country?.toUpperCase();
+    const country = cfg.country;
     const cartCountry = cart?.buyerIdentity.countryCode;
     if (!cart || !country || !cartCountry || cartCountry === country) return cart;
     try {
@@ -3679,12 +4063,13 @@ ${fragment}`, {
   }
   function init2(overrides = {}) {
     if (initPromise && !Object.keys(overrides).length) return initPromise;
-    configure({ ...pageGlobals().TETHER_CONFIG, ...overrides });
+    configure({ ...pageConfig(), ...overrides });
     if (!isConfigured()) {
       warn("TETHER_CONFIG is missing domain or token. Tether is idle.");
       initPromise = Promise.resolve(null);
       return initPromise;
     }
+    forgetBrowserModeTokens();
     bindControls();
     if (cfg.observe) startObserver();
     if (cfg.analytics && !analyticsQueue) startAnalyticsQueue();
@@ -3706,10 +4091,9 @@ ${fragment}`, {
       });
       clearTimeout(timer);
       timer = setTimeout(() => {
-        queued.forEach((node) => {
-          if (node.isConnected) mount(node);
-        });
+        const added = [...queued];
         queued.clear();
+        mountAdded(added);
       }, OBSERVE_DEBOUNCE_MS);
     });
     observer.observe(document.body, { childList: true, subtree: true });
@@ -3718,32 +4102,28 @@ ${fragment}`, {
   var getLocalization = () => loadPart("markets").then((part) => part.getLocalization());
   var diagnose = (options) => loadPart("diagnose").then((part) => part.diagnose({ ...options, version: VERSION }));
   function on(name, listener) {
+    const type = `${cfg.prefix}:${name}`;
     const handler = (event) => {
-      const custom = (
-        /** @type {CustomEvent} Tether's events are CustomEvents. */
-        event
-      );
-      listener(custom.detail, custom);
+      if (isOwnEvent(event, name)) listener(event.detail, event);
     };
-    document.addEventListener(`${cfg.prefix}:${name}`, handler);
+    document.addEventListener(type, handler);
     return () => {
-      document.removeEventListener(`${cfg.prefix}:${name}`, handler);
+      document.removeEventListener(type, handler);
     };
   }
-  var api = {
+  var publicApi = {
     VERSION,
     init: init2,
     mount,
     unmount,
-    /** @returns {TetherConfig} */
+    /** The live config, read-only. */
     get config() {
-      return cfg;
+      return configView;
     },
-    /** @returns {Promise<TetherApi | null>} */
     get ready() {
       return initPromise ?? Promise.resolve(null);
     },
-    query: gql,
+    query,
     withContext,
     cart: Cart,
     getProduct,
@@ -3764,19 +4144,15 @@ ${fragment}`, {
     detectMarket,
     getLocalization,
     diagnose,
-    __core: coreModules,
-    // The `<script>` build's parts register here when their file has loaded.
-    __parts: (
-      /** @type {Record<string, unknown>} */
-      {}
-    ),
     on
   };
+  var internals = { __core: coreModules, __parts: {} };
+  var api = Object.assign(publicApi, internals);
   var index_default = api;
   function autoStart() {
-    const globals = pageGlobals();
-    globals.Tether = api;
-    if (!globals.TETHER_CONFIG || globals.TETHER_CONFIG.autoMount === false || globals.TETHER_INTEGRATION) return;
+    Reflect.set(window, "Tether", api);
+    const config = pageGlobal("TETHER_CONFIG");
+    if (!config || field(config, "autoMount") === false || pageGlobal("TETHER_INTEGRATION")) return;
     const start = () => {
       init2().then(() => mount(document)).catch((error) => {
         reportError(error, "init");

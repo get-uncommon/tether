@@ -1,4 +1,3 @@
-"use strict";
 (() => {
   var __defProp = Object.defineProperty;
   var __export = (target, all) => {
@@ -6,7 +5,7 @@
       __defProp(target, name, { get: all[name], enumerable: true });
   };
 
-  // src/diagnose.js
+  // src/diagnose.ts
   var diagnose_exports = {};
   __export(diagnose_exports, {
     apiVersionStatus: () => apiVersionStatus,
@@ -15,31 +14,31 @@
     didYouMean: () => didYouMean
   });
 
-  // tether-core:config.js
-  var m = window.Tether.__core["config.js"];
-  var { DEFAULTS, cfg, configure, isConfigured, log, reportError, resolveConfig, toMetafieldIdentifier, warn } = m;
+  // tether-core:config.ts
+  var m = window.Tether.__core["config.ts"];
+  var [cfg, isConfigured, log, MARKET_SOURCES, parseMarkets, reportError, warn] = m;
 
-  // tether-core:client.js
-  var m2 = window.Tether.__core["client.js"];
-  var { TetherError, endpoint, gql, request, unwrap, withContext } = m2;
+  // tether-core:client.ts
+  var m2 = window.Tether.__core["client.ts"];
+  var [endpoint, gql, orNull, shaped, TetherError] = m2;
 
-  // tether-core:dom.js
-  var m3 = window.Tether.__core["dom.js"];
-  var { attr, busy, cdnUrl, emit, formatDate, formatMoney, formatPercent, get, has, hasTemplate, imageUrl, notifyLayoutChanged, parseJSONAttr, productUrl, qsa, repeat, repeatKeyed, sameImage, scoped, sel, setImage, setSelected, setStoreHtml, setText, setTextTracked, show, toAttributes, watchImages } = m3;
+  // tether-core:dom.ts
+  var m3 = window.Tether.__core["dom.ts"];
+  var [ANALYTICS_EVENTS, attr, attributesFromJson, emit, formatDate, formatMoney, get, has, hasTemplate, isOwnEvent, parseJSONAttr, productUrl, qsa, repeat, sel, setImage, setText, show] = m3;
 
-  // tether-core:loader.js
-  var m4 = window.Tether.__core["loader.js"];
-  var { clearProductCache, getProduct, getProducts, getRecommendations, hydrateProducts, normalizeProductKey, primeProduct, refreshProducts, takeStale } = m4;
+  // tether-core:loader.ts
+  var m4 = window.Tether.__core["loader.ts"];
+  var [clearProductCache, getProduct] = m4;
 
-  // tether-core:selling-plans.js
-  var m5 = window.Tether.__core["selling-plans.js"];
-  var { GID, allPlans, allocationFor, findPlan, hasPlans, planAdjustment, planCheckoutCharge, planPrice, planSavings, plansForVariant, toGid } = m5;
+  // tether-core:selling-plans.ts
+  var m5 = window.Tether.__core["selling-plans.ts"];
+  var [allPlans] = m5;
 
-  // tether-core:status.js
-  var m6 = window.Tether.__core["status.js"];
-  var { STATUS_KEYS, boundary, isNotFound, ownedBy, resolveProductKey, setScopeStatus } = m6;
+  // tether-core:status.ts
+  var m6 = window.Tether.__core["status.ts"];
+  var [boundary, resolveProductKey] = m6;
 
-  // src/api-version.js
+  // src/api-version.ts
   var QUARTERLY_VERSION = /^(\d{4})-(01|04|07|10)$/;
   var MONTHS_PER_QUARTER = 3;
   var QUARTERS_PER_YEAR = 4;
@@ -84,11 +83,11 @@
     };
   }
 
-  // tether-core:lazy.js
-  var m7 = window.Tether.__core["lazy.js"];
-  var { coreModules, loadPart } = m7;
+  // tether-core:lazy.ts
+  var m7 = window.Tether.__core["lazy.ts"];
+  var [loadPart] = m7;
 
-  // src/diagnose-markup.js
+  // src/diagnose-markup.ts
   var SHOW = /* @__PURE__ */ new Set([
     "in-stock",
     "out-of-stock",
@@ -336,7 +335,7 @@
     return problems;
   }
 
-  // src/diagnose.js
+  // src/diagnose.ts
   var MAX_PRODUCTS_CHECKED = 20;
   var API_UPGRADE_WARNING_MONTHS = 3;
   var TOKEN_EDGE_CHARACTERS = 4;
@@ -379,6 +378,7 @@
     if (ok && (monthsLeft === void 0 || monthsLeft >= API_UPGRADE_WARNING_MONTHS)) return null;
     return { level: ok ? "warn" : "error", message: `apiVersion ${cfg.apiVersion}: ${note}` };
   }
+  var isShopAnswer = shaped({ shop: { name: "string", primaryDomain: { url: "string" }, paymentSettings: { currencyCode: "string" } } });
   async function checkStorefront() {
     if (!isConfigured()) return { kind: "not-configured" };
     const startedAt = Date.now();
@@ -386,6 +386,7 @@
       const data = await gql(
         "query TetherDiagnose { shop { name primaryDomain { url } paymentSettings { currencyCode } } }",
         {},
+        isShopAnswer,
         { context: false }
       );
       const shop = {
@@ -460,7 +461,12 @@
       report.problems.push(...checkOptions(root, key, product));
     });
   }
-  async function diagnose({ root = document, silent = false, version, now = /* @__PURE__ */ new Date() } = {}) {
+  async function diagnose({
+    root = document,
+    silent = false,
+    version = "",
+    now = /* @__PURE__ */ new Date()
+  } = {}) {
     const storefront = await checkStorefront();
     const report = {
       version,
@@ -516,11 +522,8 @@
     console.groupEnd();
   }
 
-  // src/parts/diagnose.js
-  var { Tether } = (
-    /** @type {Window & { Tether?: { __parts: Record<string, unknown> } }} */
-    window
-  );
+  // src/parts/diagnose.ts
+  var { Tether } = window;
   if (!Tether) throw new Error("tether.diagnose.js runs after the Tether script, which loads it");
-  Tether.__parts["diagnose"] = diagnose_exports;
+  Tether.__parts.diagnose = diagnose_exports;
 })();

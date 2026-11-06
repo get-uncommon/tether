@@ -29,11 +29,11 @@ MIT licensed · 29 KB gzipped · no dependencies · TypeScript types · [full re
 
 | | Pick it when | How |
 |---|---|---|
-| **Script tag** (jsDelivr) | a static site or Webflow, no build step, no login needed | `<script src="https://cdn.jsdelivr.net/gh/ravi-klaassens/tether@0.6/dist/tether.min.js" defer></script>` ([steps below](#2-add-the-script-to-webflow)) |
+| **Script tag** (jsDelivr) | a static site or Webflow, no build step, no login needed | `<script src="https://cdn.jsdelivr.net/gh/ravi-klaassens/tether@0.7/dist/tether.min.js" defer></script>` ([steps below](#2-add-the-script-to-webflow)) |
 | **npm** | Astro, Vite or another bundler or framework | `npm install @occluze/tether` ([Astro guide](docs/astro.md), [other frameworks](docs/frameworks.md)) |
 | **With the Worker** | you also want the CMS sync, rebuilds when products change, or customer accounts | either of the above, plus your own free Cloudflare Worker ([Worker](server/README.md), [accounts](docs/accounts.md)) |
 
-The script tag pinned to one release: `…/tether@v0.6.8/dist/tether.min.js`. Its optional parts
+The script tag pinned to one release: `…/tether@v0.7.0/dist/tether.min.js`. Its optional parts
 (search, accounts, markets, analytics) load from the same folder when a page uses them, each checked
 against a hash built into the core. To host them yourself, put the same release's files in one folder
 and set `partsUrl`. Customer accounts need the Worker
@@ -61,10 +61,10 @@ Site settings → Custom code → **Head**:
     productPath: '/product',     // your Webflow product template
   };
 </script>
-<script src="https://cdn.jsdelivr.net/gh/ravi-klaassens/tether@0.6/dist/tether.min.js" defer></script>
+<script src="https://cdn.jsdelivr.net/gh/ravi-klaassens/tether@0.7/dist/tether.min.js" defer></script>
 ```
 
-**Versions:** `@0.6` gets every 0.6.x fix automatically (recommended), `@v0.6.8` pins one release
+**Versions:** `@0.7` gets every 0.7.x fix automatically (recommended), `@v0.7.0` pins one release
 (add its [`integrity`](docs/reference.md#config) hash to pin exactly what runs), `@latest` always takes the newest. Hosting the file yourself? Put the optional parts next to it (`tether.markets.min.js`,
 `tether.search.min.js`, `tether.account.min.js`, `tether.account-pages.min.js`, `tether.analytics.min.js`, `tether.extras.min.js`,
 `tether.diagnose.min.js`): each loads only when a page uses it.

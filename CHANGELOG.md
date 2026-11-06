@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.7.0 (unreleased)
+## 0.7.0 (2026-11-06)
 
 **Before you update: one step for every deployed sync Worker.** Copies made from 0.6.1 to 0.6.8
 have `latest` in `TETHER_VERSION` unless it was changed, so they install 0.7.0 by themselves on
