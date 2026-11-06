@@ -13,7 +13,7 @@ import { dirname, join, posix } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import { releaseAssetName } from '../server/scripts/release-asset.ts';
-import { compareVersions, parseVersion } from '../server/src/release-range.ts';
+import { compareVersions, parseVersion, versionsInRange } from '../server/src/release-range.ts';
 import { KEPT, MANAGED } from '../server/scripts/update-tether.ts';
 import { SHIPPED_REVISION, WORKFLOW_PATH, workflowRevisionAt } from '../server/scripts/workflow-check.ts';
 import { asRecord, fieldOf, numberAt, parseJson, stringAt } from '../server/test/mocks.js';
@@ -419,6 +419,25 @@ function checkPushed({ git, origin, copy, summary }) {
   assert.match(summary, new RegExp(`^### Updated to v${RELEASE_VERSION.replaceAll('.', '\\.')}$`, 'm'));
 }
 
+/**
+ * A copy whose `TETHER_VERSION` range leaves out the release (a copy on `0.7` when this tree is a new minor) stays on
+ * its line, as `pickVersion` and its tests in server/test/update.test.js show. To take the release, its owner writes
+ * the new minor in the file, the one-time step the release notes give; the copy here does the same, so the update is
+ * tested at whatever version this tree is.
+ *
+ * @param {string} deployed
+ */
+async function takeThisMinor(deployed) {
+  const file = join(deployed, 'TETHER_VERSION');
+  const spec = existsSync(file) ? (await readFile(file, 'utf8')).trim() : 'latest';
+  if (versionsInRange([RELEASE_VERSION], spec).length > 0) return;
+  await writeFile(
+    file,
+    `${RELEASE_VERSION.split('.').slice(0, 2).join('.')}
+`,
+  );
+}
+
 for (const { tag, route } of OLD_UPDATERS) {
   test(
     `a copy made from ${tag} is updated to this tree by its own workflow and updater, which commits what it tested; a later failed update shows on the run`,
@@ -437,6 +456,7 @@ for (const { tag, route } of OLD_UPDATERS) {
         const deployed = join(work, 'deployed');
         const release = join(work, 'release');
         await extractServer(tag, deployed);
+        await takeThisMinor(deployed);
         await releaseFolder(release);
         const ownConfig = await readFile(join(deployed, 'tether-sync.config.js'), 'utf8');
         const revision = await workflowRevisionAt(deployed);
