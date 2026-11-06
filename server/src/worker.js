@@ -89,89 +89,96 @@ function publicReport(report) {
   return { ok: report.ok, steps };
 }
 
+/** @typedef {{ config: SyncConfig, fetch: Fetch | undefined, sleep: ((ms: number) => Promise<void>) | undefined }} WorkerSetup */
+
+/** @param {WorkerSetup} setup @param {WorkerEnv} env @param {'job' | 'webhook'} [mode] */
+function appFor({ config, fetch, sleep }, env, mode = 'job') {
+  const namespace = /** @type {Parameters<typeof kvStore>[0] | undefined} */ (env['TETHER_SYNC']);
+  const limit = parseInt(cleanEnv(env).MAX_SUBREQUESTS ?? '', 10) || DEFAULT_MAX_SUBREQUESTS;
+  const counted = countingFetch(fetch, limit);
+  return createApp(config, env, {
+    store: namespace ? kvStore(namespace) : memoryStore(),
+    fetch: counted.fetch,
+    budget: counted.budget,
+    sleep,
+    log: consoleLog,
+    mode,
+  });
+}
+/** @param {Request} request @param {WorkerEnv} env */
+function authorized(request, env) {
+  return bearerMatches(request.headers.get('authorization'), cleanEnv(env).SYNC_SECRET ?? '');
+}
+
+/** @param {WorkerSetup} setup @param {Request} request @param {WorkerEnv} env @param {URL} url */
+async function check(setup, request, env, url) {
+  const { config, fetch, sleep } = setup;
+  const deep = await authorized(request, env);
+  const report = await runCheck(config, env, {
+    deep,
+    fetch,
+    sleep,
+    worker: true,
+    webhookUri: `${url.origin}/webhooks/shopify`,
+    version: deep ? VERSION : null,
+    range: cleanEnv(env).TETHER_VERSION ?? null,
+  });
+  const body = deep ? report : publicReport(report);
+  return Response.json(
+    { version: VERSION, ...body, kv: Boolean(env['TETHER_SYNC']) },
+    { status: report.ok ? 200 : 503 },
+  );
+}
+
+/** @param {WorkerSetup} setup @param {Request} request @param {WorkerEnv} env @param {ExecutionContext} context */
+async function webhook(setup, request, env, context) {
+  const { sleep } = setup;
+  const app = appFor(setup, env, 'webhook');
+  const { response, task } = await handleShopifyWebhook(request, {
+    sync: app.sync,
+    secrets: app.webhookSecrets,
+    shopDomain: app.config.shopify.domain,
+    log: consoleLog,
+    ...(sleep ? { sleep } : {}),
+  });
+  if (task) context.waitUntil(task);
+  return response;
+}
+
+/** @param {WorkerSetup} setup @param {Request} request @param {WorkerEnv} env @param {URL} url */
+async function reconcile(setup, request, env, url) {
+  if (!(await authorized(request, env))) return new Response('unauthorized', { status: 401 });
+  // ?since=all (or an ISO date) is a full first import without the CLI. What doesn't fit in one run, the cron
+  // continues.
+  const raw = url.searchParams.get('since');
+  const since = raw === 'all' ? '2000-01-01T00:00:00Z' : raw;
+  if (since && Number.isNaN(Date.parse(since))) {
+    return new Response('since must be "all" or an ISO date', { status: 400 });
+  }
+  const app = appFor(setup, env);
+  /** @type {Awaited<ReturnType<typeof ensureWebhooks>> | { error: string }} */
+  let webhooks;
+  try {
+    webhooks = await ensureWebhooks({
+      shopify: app.shopify,
+      store: app.store,
+      uri: `${url.origin}/webhooks/shopify`,
+    });
+  } catch (error) {
+    console.error('webhook registration', messageOf(error));
+    webhooks = { error: messageOf(error) };
+  }
+  const result = await app.sync.reconcile(since ? { since } : {});
+  return Response.json({ ...result, webhooks });
+}
+
 /**
  * @param {SyncConfig} config
  * @param {{ fetch?: Fetch, sleep?: (ms: number) => Promise<void> }} [options]
  */
 export function createWorker(config, { fetch, sleep } = {}) {
-  /** @param {WorkerEnv} env @param {'job' | 'webhook'} [mode] */
-  const appFor = (env, mode = 'job') => {
-    const namespace = /** @type {Parameters<typeof kvStore>[0] | undefined} */ (env['TETHER_SYNC']);
-    const limit = parseInt(cleanEnv(env).MAX_SUBREQUESTS ?? '', 10) || DEFAULT_MAX_SUBREQUESTS;
-    const counted = countingFetch(fetch, limit);
-    return createApp(config, env, {
-      store: namespace ? kvStore(namespace) : memoryStore(),
-      fetch: counted.fetch,
-      budget: counted.budget,
-      sleep,
-      log: consoleLog,
-      mode,
-    });
-  };
-  /** @param {Request} request @param {WorkerEnv} env */
-  const authorized = (request, env) =>
-    bearerMatches(request.headers.get('authorization'), cleanEnv(env).SYNC_SECRET ?? '');
-
-  /** @param {Request} request @param {WorkerEnv} env @param {URL} url */
-  async function check(request, env, url) {
-    const deep = await authorized(request, env);
-    const report = await runCheck(config, env, {
-      deep,
-      fetch,
-      sleep,
-      worker: true,
-      webhookUri: `${url.origin}/webhooks/shopify`,
-      version: deep ? VERSION : null,
-      range: cleanEnv(env).TETHER_VERSION ?? null,
-    });
-    const body = deep ? report : publicReport(report);
-    return Response.json(
-      { version: VERSION, ...body, kv: Boolean(env['TETHER_SYNC']) },
-      { status: report.ok ? 200 : 503 },
-    );
-  }
-
-  /** @param {Request} request @param {WorkerEnv} env @param {ExecutionContext} context */
-  async function webhook(request, env, context) {
-    const app = appFor(env, 'webhook');
-    const { response, task } = await handleShopifyWebhook(request, {
-      sync: app.sync,
-      secrets: app.webhookSecrets,
-      shopDomain: app.config.shopify.domain,
-      log: consoleLog,
-      ...(sleep ? { sleep } : {}),
-    });
-    if (task) context.waitUntil(task);
-    return response;
-  }
-
-  /** @param {Request} request @param {WorkerEnv} env @param {URL} url */
-  async function reconcile(request, env, url) {
-    if (!(await authorized(request, env))) return new Response('unauthorized', { status: 401 });
-    // ?since=all (or an ISO date) is a full first import without the CLI. What doesn't fit in one run, the cron
-    // continues.
-    const raw = url.searchParams.get('since');
-    const since = raw === 'all' ? '2000-01-01T00:00:00Z' : raw;
-    if (since && Number.isNaN(Date.parse(since))) {
-      return new Response('since must be "all" or an ISO date', { status: 400 });
-    }
-    const app = appFor(env);
-    /** @type {Awaited<ReturnType<typeof ensureWebhooks>> | { error: string }} */
-    let webhooks;
-    try {
-      webhooks = await ensureWebhooks({
-        shopify: app.shopify,
-        store: app.store,
-        uri: `${url.origin}/webhooks/shopify`,
-      });
-    } catch (error) {
-      console.error('webhook registration', messageOf(error));
-      webhooks = { error: messageOf(error) };
-    }
-    const result = await app.sync.reconcile(since ? { since } : {});
-    return Response.json({ ...result, webhooks });
-  }
-
+  /** @type {WorkerSetup} */
+  const setup = { config, fetch, sleep };
   return {
     /** @param {Request} request @param {WorkerEnv} env @param {ExecutionContext} context */
     async fetch(request, env, context) {
@@ -182,9 +189,10 @@ export function createWorker(config, { fetch, sleep } = {}) {
         if (url.pathname === '/health') {
           return Response.json({ ok: true, version: VERSION, kv: Boolean(env['TETHER_SYNC']) });
         }
-        if (url.pathname === '/check' || url.pathname === '/') return await check(request, env, url);
-        if (url.pathname === '/webhooks/shopify') return await webhook(request, env, context);
-        if (url.pathname === '/reconcile' && request.method === 'POST') return await reconcile(request, env, url);
+        if (url.pathname === '/check' || url.pathname === '/') return await check(setup, request, env, url);
+        if (url.pathname === '/webhooks/shopify') return await webhook(setup, request, env, context);
+        if (url.pathname === '/reconcile' && request.method === 'POST')
+          return await reconcile(setup, request, env, url);
         return new Response('not found', { status: 404 });
       } catch (error) {
         console.error(error);
@@ -194,7 +202,7 @@ export function createWorker(config, { fetch, sleep } = {}) {
 
     /** @param {unknown} _event @param {WorkerEnv} env @param {ExecutionContext} context */
     async scheduled(_event, env, context) {
-      const run = appFor(env)
+      const run = appFor(setup, env)
         .sync.reconcile({})
         .then((result) => {
           const stopped = result.stopped ? ` (stopped: ${result.stopped})` : '';

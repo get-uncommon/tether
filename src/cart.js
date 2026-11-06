@@ -17,7 +17,7 @@ import {
   updateLines,
 } from './cart/mutations.js';
 import { checkout } from './cart/checkout.js';
-import { drawers, isOpen, openCart, closeCart, toggleCart, focusables, trapFocus } from './cart/drawer.js';
+import { drawers, isOpen, openCart, closeCart, toggleCart, trapFocus } from './cart/drawer.js';
 import {
   announce,
   cartStatus,
@@ -41,7 +41,7 @@ import {
 /** @import { Attributes, LineSpec, CartLineInput, LinePatch } from './cart/mutations.js' */
 /** @import { ShopifyCart, ShopifyCartLine, CustomerLink, CartStatus } from './cart/store.js' */
 
-export { focusables, trapFocus };
+export { trapFocus };
 
 /** @returns {readonly ShopifyCartLine[]} */
 const currentLines = () => currentCart()?.lines.nodes ?? [];

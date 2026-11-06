@@ -205,7 +205,8 @@ test('webhooks: the first reconcile registers them through the app, once; check 
   const TETHER_SYNC = {
     async get(k, t) {
       const v = kv.get(k);
-      return v == null ? null : t === 'json' ? JSON.parse(v) : v;
+      if (v == null) return null;
+      return t === 'json' ? JSON.parse(v) : v;
     },
     async put(k, v) {
       kv.set(k, v);

@@ -235,9 +235,7 @@ async function logout({ request, url, settings, sessions, sessionId, fetch: fetc
   const cartId = typeof body['cartId'] === 'string' ? body['cartId'] : '';
   // The next person on this device must not check out as this customer, so a failed unlink is logged.
   if (CART_ID.test(cartId)) {
-    await linkCart(settings, cartId, null, fetchImpl).catch((error) =>
-      console.error('account cart unlink', errorMessage(error)),
-    );
+    await linkCart(settings, cartId, null, fetchImpl).catch(logFailure('account cart unlink'));
   }
   let logoutUrl = null;
   if (session?.idToken) {
@@ -293,45 +291,69 @@ function customerProfile(data) {
 }
 
 /**
- * The routes that need a session, behind CORS and (for POST) the CSRF header.
+ * The logged-in customer of a request, with an access token that is good for a while; `null` when logged out.
  *
- * @param {AccountRequest} context
- * @param {Record<string, string>} cors
- * @param {string} route
+ * @typedef {{ session: Session, api: ReturnType<typeof customerApi> } | null} Customer
  */
-async function customerRoute(context, cors, route) {
-  const { request, url, settings, sessions, sessionId, fetch: fetchImpl, siteOrigin } = context;
-  const loaded = sessionId ? await sessions.load(sessionId) : null;
-  const session = loaded && sessionId ? await sessions.fresh(sessionId, loaded, siteOrigin) : null;
-  const api = session ? customerApi(context, session) : null;
-  const method = request.method;
 
-  if (route === '/me' && method === 'GET') {
-    const data = api ? await api.ask(CUSTOMER_QUERY, {}) : null;
-    if (!data) return jsonResponse({ loggedIn: false }, 200, cors);
-    return jsonResponse({ loggedIn: true, customer: customerProfile(data) }, 200, cors);
-  }
-  if (route === '/orders' && method === 'GET') {
-    const first = Math.max(1, Math.min(50, parseInt(url.searchParams.get('first') ?? '10', 10) || 10));
-    const data = api ? await api.ask(ORDERS_QUERY, { first }) : null;
-    if (!data) return jsonResponse({ loggedIn: false, orders: [] }, 401, cors);
-    const orders = field(field(field(data, 'customer'), 'orders'), 'nodes') ?? [];
-    return jsonResponse({ loggedIn: true, orders }, 200, cors);
-  }
-  if (route === '/cart' && method === 'POST') {
-    if (!session) return jsonResponse({ loggedIn: false }, 401, cors);
-    const cartId = field(await readJsonObject(request), 'cartId');
-    if (typeof cartId !== 'string' || !CART_ID.test(cartId)) return jsonResponse({ error: 'cartId' }, 400, cors);
-    const checkoutUrl = await linkCart(settings, cartId, session.access, fetchImpl);
-    return jsonResponse({ linked: Boolean(checkoutUrl), checkoutUrl }, 200, cors);
-  }
-  const operation = OPERATION_ROUTES[`${method} ${route}`];
-  if (!operation) return jsonResponse({ error: 'not found' }, 404, cors);
-  if (!api) return jsonResponse({ loggedIn: false }, 401, cors);
-  const body = method === 'POST' ? await readJsonObject(request) : {};
-  const { name, input } = operation(url, body);
+/**
+ * @param {AccountRequest} context
+ * @returns {Promise<Customer>}
+ */
+async function customerOf(context) {
+  const { sessions, sessionId, siteOrigin } = context;
+  if (!sessionId) return null;
+  const loaded = await sessions.load(sessionId);
+  const session = loaded ? await sessions.fresh(sessionId, loaded, siteOrigin) : null;
+  return session ? { session, api: customerApi(context, session) } : null;
+}
+
+/**
+ * @typedef {(context: AccountRequest, cors: Record<string, string>, customer: Customer) => Promise<Response>} CustomerRoute
+ */
+
+/** @type {CustomerRoute} */
+async function me(_context, cors, customer) {
+  const data = customer ? await customer.api.ask(CUSTOMER_QUERY, {}) : null;
+  if (!data) return jsonResponse({ loggedIn: false }, 200, cors);
+  return jsonResponse({ loggedIn: true, customer: customerProfile(data) }, 200, cors);
+}
+
+/** Orders per page when the request doesn't say, and at most. */
+const DEFAULT_ORDERS = 10;
+const MAX_ORDERS = 50;
+
+/** @type {CustomerRoute} */
+async function orders({ url }, cors, customer) {
+  const asked = parseInt(url.searchParams.get('first') ?? '', 10) || DEFAULT_ORDERS;
+  const first = Math.max(1, Math.min(MAX_ORDERS, asked));
+  const data = customer ? await customer.api.ask(ORDERS_QUERY, { first }) : null;
+  if (!data) return jsonResponse({ loggedIn: false, orders: [] }, 401, cors);
+  const list = field(field(field(data, 'customer'), 'orders'), 'nodes') ?? [];
+  return jsonResponse({ loggedIn: true, orders: list }, 200, cors);
+}
+
+/** @type {CustomerRoute} */
+async function cart({ request, settings, fetch: fetchImpl }, cors, customer) {
+  if (!customer) return jsonResponse({ loggedIn: false }, 401, cors);
+  const cartId = field(await readJsonObject(request), 'cartId');
+  if (typeof cartId !== 'string' || !CART_ID.test(cartId)) return jsonResponse({ error: 'cartId' }, 400, cors);
+  const checkoutUrl = await linkCart(settings, cartId, customer.session.access, fetchImpl);
+  return jsonResponse({ linked: Boolean(checkoutUrl), checkoutUrl }, 200, cors);
+}
+
+/**
+ * One of the fixed account operations (order detail, profile, addresses, subscriptions, returns).
+ *
+ * @param {Record<string, string>} cors
+ * @param {Customer} customer
+ * @param {import('./shared/account-ops.js').OperationCall} call
+ */
+async function operation(cors, customer, { name, input }) {
   const run = ops[name];
   if (!run) return jsonResponse({ error: 'not found' }, 404, cors);
+  if (!customer) return jsonResponse({ loggedIn: false }, 401, cors);
+  const { api } = customer;
   try {
     const out = await run((query, variables) => api.ask(query, variables), input);
     if (api.ended) return jsonResponse({ loggedIn: false }, 401, cors);
@@ -341,6 +363,31 @@ async function customerRoute(context, cors, route) {
     const userErrors = error.userErrors.length ? error.userErrors : undefined;
     return jsonResponse({ error: error.message, userErrors }, error.status, cors);
   }
+}
+
+/** The routes for the logged-in customer, besides the operations in account-ops.js. */
+const CUSTOMER_ROUTES = new Map([
+  ['GET /me', me],
+  ['GET /orders', orders],
+  ['POST /cart', cart],
+]);
+
+/**
+ * The routes that need a session, behind CORS and (for POST) the CSRF header.
+ *
+ * @param {AccountRequest} context
+ * @param {Record<string, string>} cors
+ * @param {string} route
+ */
+async function customerRoute(context, cors, route) {
+  const key = `${context.request.method} ${route}`;
+  const handler = CUSTOMER_ROUTES.get(key);
+  const routeOperation = OPERATION_ROUTES[key];
+  if (handler) return handler(context, cors, await customerOf(context));
+  if (!routeOperation) return jsonResponse({ error: 'not found' }, 404, cors);
+  const customer = await customerOf(context);
+  const body = context.request.method === 'POST' ? await readJsonObject(context.request) : {};
+  return operation(cors, customer, routeOperation(context.url, body));
 }
 
 /** Top-level navigations: no CORS; the cookies prove which browser it is. */

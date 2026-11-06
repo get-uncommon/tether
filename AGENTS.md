@@ -8,10 +8,11 @@ Tether puts a live Shopify store into Webflow, Astro or any HTML page through `t
 | --- | --- | --- |
 | `src/` | the visitor's browser; `server.js`, `initial.js` and `astro.js` also run in Node at build time | Built by `scripts/build.mjs` into `dist/` |
 | `server/src/` | the user's own Cloudflare Worker, or Node through `bin/tether-sync.js` | Plain JavaScript, run from source. Deployed copies update it with a pinned workflow that imports `src/entry.js` with plain Node, so it never gets a build step |
+| `server/src/shared/` | the browser and the Worker | Imports nothing outside itself; dependency-cruiser enforces the layers |
 | `types/` | | The published `.d.ts` files |
 | `test/`, `server/test/` | `node --test` with jsdom | `e2e/` is Playwright on the Astro starter |
 
-The source is JavaScript with JSDoc types, checked by `tsc` (`checkJs` on top of `@tsconfig/strictest`). A file whose types are still missing starts with `// @ts-nocheck`. That count only goes down: remove the line when you type the file, and never add it to a new file.
+The source is JavaScript with JSDoc types, checked by `tsc` (`checkJs` on top of `@tsconfig/strictest`). Every file is fully typed; `// @ts-nocheck` and type casts that hide a wrong type are not accepted.
 
 ## The gate
 
@@ -26,7 +27,7 @@ The source is JavaScript with JSDoc types, checked by `tsc` (`checkJs` on top of
 
 lefthook runs Prettier and ESLint on staged files before each commit, and `npm run check` before each push. Before calling work done, run `npm run check`. When a change sends a new query or mutation, also run `npm run smoke`.
 
-Existing lint violations are recorded in `eslint-suppressions.json`. Fixing one makes the file shrink (`npx eslint --prune-suppressions`), and a new violation fails. Never add to the file to get green.
+There is no lint baseline: every rule holds for every file.
 
 ## Public API
 

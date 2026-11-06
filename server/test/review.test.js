@@ -89,7 +89,8 @@ test('concurrent create + update webhooks in two Worker invocations: one item (u
   const TETHER_SYNC = {
     async get(k, t) {
       const v = kv.get(k);
-      return v == null ? null : t === 'json' ? JSON.parse(v) : v;
+      if (v == null) return null;
+      return t === 'json' ? JSON.parse(v) : v;
     },
     async put(k, v) {
       kv.set(k, v);
@@ -140,7 +141,8 @@ test('subrequest budget: a Worker reconcile stops before the limit and resumes n
   const TETHER_SYNC = {
     async get(k, t) {
       const v = kv.get(k);
-      return v == null ? null : t === 'json' ? JSON.parse(v) : v;
+      if (v == null) return null;
+      return t === 'json' ? JSON.parse(v) : v;
     },
     async put(k, v) {
       kv.set(k, v);
@@ -287,7 +289,8 @@ test('POST /reconcile?since=all imports everything, and the cron finishes what o
   const TETHER_SYNC = {
     async get(k, t) {
       const v = kv.get(k);
-      return v == null ? null : t === 'json' ? JSON.parse(v) : v;
+      if (v == null) return null;
+      return t === 'json' ? JSON.parse(v) : v;
     },
     async put(k, v) {
       kv.set(k, v);

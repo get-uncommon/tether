@@ -28,7 +28,7 @@ const isFocusable = (el) => el !== null && 'focus' in el;
  * @param {ParentNode} drawer
  * @returns {HTMLElement[]} The visible focusable elements inside `drawer`, in document order.
  */
-export const focusables = (drawer) =>
+const focusables = (drawer) =>
   qsa(drawer, FOCUSABLE).filter((el) => el.offsetParent !== null || el === document.activeElement);
 
 /** @returns {HTMLElement[]} Every cart drawer on the page. */

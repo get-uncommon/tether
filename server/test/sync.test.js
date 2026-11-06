@@ -386,7 +386,8 @@ function kv() {
     },
     async get(k, type) {
       const v = m.get(k);
-      return v == null ? null : type === 'json' ? JSON.parse(v) : v;
+      if (v == null) return null;
+      return type === 'json' ? JSON.parse(v) : v;
     },
     async put(k, v) {
       writes++;

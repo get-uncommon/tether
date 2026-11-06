@@ -25,7 +25,9 @@ createServer(async (req, res) => {
     return;
   }
   // /plain/: a plain HTML page with Tether's <script> build (dist/), like a Webflow site.
-  const base = path.startsWith('/plain/dist/') ? DIST : path.startsWith('/plain/') ? PLAIN : ROOT;
+  let base = ROOT;
+  if (path.startsWith('/plain/dist/')) base = DIST;
+  else if (path.startsWith('/plain/')) base = PLAIN;
   if (base !== ROOT) path = path.replace(base === DIST ? '/plain/dist/' : '/plain/', '/');
   // Only files inside the base folder (an encoded %2F can't climb out).
   const inside = (f) => f === base.replace(/[\\/]$/, '') || f.startsWith(base.endsWith(sep) ? base : base + sep);

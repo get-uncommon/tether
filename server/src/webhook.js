@@ -112,7 +112,8 @@ export async function handleShopifyWebhook(
   }
   // One app's client secret signs webhooks for every shop it is installed on, so the shop must be this Worker's.
   const shop = request.headers.get('x-shopify-shop-domain') ?? '';
-  if (!shopDomain || shop.toLowerCase() !== shopDomain.toLowerCase()) return { response: reply(403, 'unknown shop') };
+  const expectedShop = shopDomain.toLowerCase();
+  if (!expectedShop || shop.toLowerCase() !== expectedShop) return { response: reply(403, 'unknown shop') };
   const topic = request.headers.get('x-shopify-topic') ?? '';
   if (!TOPICS.has(topic)) return { response: reply(200, 'ignored') };
 
