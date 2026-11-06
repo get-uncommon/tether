@@ -5,7 +5,8 @@ import { normalizeConfig, applyEnv } from './mapping.ts';
 import { createShopify } from './shopify.ts';
 import { createWebflow } from './webflow.ts';
 import { createSync } from './sync.ts';
-import { SyncError, messageOf, noopLogger } from './util.ts';
+import { SyncError, noopLogger } from './util.ts';
+import { messageOf } from './shared/error-message.ts';
 import {
   createDeployHook,
   deployOnlyTarget,

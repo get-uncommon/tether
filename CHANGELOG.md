@@ -203,6 +203,19 @@ gets 0.7.0 at once. The breaking changes below list each one's upgrade step.
 - Releases: the signing job installs an exact npm (11.21.1); esbuild, jsdom and Playwright are
   pinned exactly. The build finds GraphQL template literals with TypeScript's parser instead of by
   pairing backticks, which a backtick in a regular expression could throw off.
+- Fix (sync Worker updates): when the updater fails, it prints a `Tether update failed` error
+  annotation with the cause, plus the "workflow file outdated" warning and job-summary step, before
+  exiting non-zero. A copy still on the workflow made before 0.7.0 pipes the updater through `tee`
+  without `pipefail`, so there the run stays green and installs nothing, and the annotation is the
+  only sign of the failure. Copying in the 0.7.0 workflow (revision 3) makes a failed update fail
+  the run.
+- Fix (customer accounts): `ACCOUNT_ORIGINS` entries are compared the way browsers send `Origin`:
+  case, a default `:443` and a trailing slash no longer matter (`https://Shop.com:443/` matches
+  `https://shop.com`). An entry that isn't an https origin alone (a path, a user name, `http:`) is a
+  `/check` error that names it, and the account routes answer 503 until it's fixed, instead of
+  refusing every request without saying why.
+- Fix (customer accounts): a logout whose ticket is too long for a cookie no longer logs a warning
+  that blames the page's address.
 - Repository: CI also lints the workflows with actionlint and zizmor, each downloaded at a pinned
   version and checked against its published hash.
 - Repository: CI runs `npm run check` on pull requests and pushes to `main`, on Node 22.18 and 24.

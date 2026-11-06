@@ -28,8 +28,9 @@
  *   node scripts/update-tether.mjs --allow-unverified   # without the GitHub CLI: install without the signature check
  *   node scripts/update-tether.mjs --from ../tether/server   # use a local release (testing)
  *
- * Prints `updated=<version>` (or `updated=` when nothing changed) and exits non-zero on any failure. Every copy keeps
- * the workflow it was made with, so this output is the contract between every shipped workflow and this script.
+ * Prints `updated=<version>` (or `updated=` when nothing changed). On any failure it prints an `::error` annotation
+ * instead and exits non-zero. Every copy keeps the workflow it was made with, so this output is the contract between
+ * every shipped workflow and this script.
  */
 import { readFile, writeFile, rm, cp, mkdir, mkdtemp, rename, stat } from 'node:fs/promises';
 import { existsSync, realpathSync } from 'node:fs';
@@ -38,6 +39,7 @@ import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { compareVersions, newestInRange, parseVersion } from '../src/release-range.ts';
 import { field } from '../src/shared/json.ts';
+import { messageOf } from '../src/shared/error-message.ts';
 import { downloadAsset, fetchSignedRelease, runCommand } from './release-asset.ts';
 import {
   reportWorkflow,
@@ -197,10 +199,6 @@ async function putBack(names: string[], previous: string, swapError: unknown): P
   }
 }
 
-function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
 /**
  * Replaces the managed files with the release's, and adds the kept ones a new copy doesn't have yet. The release is
  * staged inside the copy, so the swap is a rename on one file system.
@@ -289,6 +287,36 @@ function fromFolder(args: string[]): string | null {
   return resolve(folder);
 }
 
+/**
+ * Warns when the copy's workflow is older than the one its own release ships.
+ *
+ * @param args The script's arguments: with `--from`, the release's workflow is read from that folder.
+ */
+async function reportOwnWorkflow(args: string[]): Promise<void> {
+  const current = await packageVersion(ROOT);
+  const fromDir = fromFolder(args);
+  const where = fromDir ? join(fromDir, WORKFLOW_PATH) : releaseWorkflowUrl(current);
+  await reportWorkflow(await workflowState(ROOT, SHIPPED_REVISION), current, where);
+}
+
+/** `text` as the message of a GitHub Actions workflow command, which ends at the first line break. */
+function workflowCommandText(text: string): string {
+  return text.replaceAll('%', '%25').replaceAll('\r', '%0D').replaceAll('\n', '%0A');
+}
+
+/**
+ * Says why the update failed, in a way every shipped workflow shows. Revision 1 of the workflow pipes this script's
+ * output through `tee` in a shell without `pipefail`, so its step passes whatever this script exits with and only
+ * skips installing: the `::error` annotation, which GitHub reads from stdout, is what shows the failure there, and the
+ * outdated-workflow warning says how to get a workflow whose run fails instead.
+ */
+async function reportFailure(error: unknown, args: string[]): Promise<void> {
+  const message = messageOf(error);
+  console.error(message);
+  console.log(`::error title=Tether update failed::${workflowCommandText(message)}`);
+  await reportOwnWorkflow(args);
+}
+
 async function main(args: string[]): Promise<void> {
   const dryRun = args.includes('--dry-run');
   const policy: VerifyPolicy = args.includes('--allow-unverified') ? 'allow-unverified' : 'require';
@@ -314,8 +342,7 @@ async function main(args: string[]): Promise<void> {
   const currentVersion = parseVersion(current);
   if (targetVersion && currentVersion && compareVersions(targetVersion, currentVersion) <= 0) {
     console.log('up to date');
-    const where = fromDir ? join(fromDir, WORKFLOW_PATH) : releaseWorkflowUrl(current);
-    await reportWorkflow(await workflowState(ROOT, SHIPPED_REVISION), current, where);
+    await reportOwnWorkflow(args);
     console.log('updated=');
     return;
   }
@@ -346,8 +373,12 @@ const self = fileURLToPath(import.meta.url);
 // Run directly, or through the `update-tether.mjs` shim that the workflow of every deployed copy names.
 const entryPoints = [self, self.replace(/\.ts$/, '.mjs')].map(realPath);
 if (script && entryPoints.includes(realPath(resolve(script)))) {
-  main(process.argv.slice(2)).catch((error: unknown) => {
-    console.error(messageOf(error));
-    process.exit(1);
+  const args = process.argv.slice(2);
+  main(args).catch(async (error: unknown) => {
+    try {
+      await reportFailure(error, args);
+    } finally {
+      process.exit(1);
+    }
   });
 }

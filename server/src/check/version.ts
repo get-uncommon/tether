@@ -3,7 +3,7 @@
  * Versions come from jsDelivr, because GitHub's API rate-limits unauthenticated calls from shared IPs.
  */
 import { asList, asRecord, responseJsonOrNull, stringOrNull } from '../json.ts';
-import { messageOf } from '../util.ts';
+import { messageOf } from '../shared/error-message.ts';
 import { compareVersions, newestInRange, parseVersion } from '../release-range.ts';
 
 import type { Steps } from './steps.ts';

@@ -17,7 +17,7 @@ import { dirname, join } from 'node:path';
 import { createApp } from '../src/app.ts';
 import { runCheck, formatCheck } from '../src/check.ts';
 import { fileStore, loadConfig, serve } from '../src/node.ts';
-import { messageOf } from '../src/util.ts';
+import { messageOf } from '../src/shared/error-message.ts';
 
 import type { App } from '../src/app.ts';
 import type { FileStore } from '../src/node.ts';

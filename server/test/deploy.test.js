@@ -70,7 +70,6 @@ test('deploy-only: a content change starts a build, a stock-only change does not
   assert.equal(t.hooks.length, before);
   // A new title is content: rebuild.
   t.apis.shop.products.set(p1.id, { ...p1, title: 'New name' });
-  await new Promise((r) => setTimeout(r, 5));
   const app = createApp(
     defaultConfig,
     { ...shopEnv, DEPLOY_HOOK_MIN_SECONDS: '0' },

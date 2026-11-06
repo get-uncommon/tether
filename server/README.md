@@ -101,6 +101,9 @@ shows a warning and a note in its summary (Actions → the run). Then, once, by 
 release's `server/.github/workflows/update-tether.yml` on GitHub
 (`https://github.com/ravi-klaassens/tether/tree/vX.Y.Z/server/.github/workflows`), copy it over the
 same file in your copy and commit it (keep your own `cron` line if you changed it).
+Until you do, a copy made before 0.7.0 keeps a workflow that can't tell when the update itself
+fails: the run stays green and installs nothing, with an error annotation saying why (Actions → the
+run → Annotations) next to that warning. With the new file, a failed update fails the run.
 
 An update replaces `src/`, `bin/`, `scripts/`, `test/`, `docs/`, `package.json` and this README with
 the release's, so keep your own code and tests outside those folders. The new release's code runs

@@ -76,11 +76,18 @@ async function releaseFolder(target) {
 
 /**
  * Runs Node in the copy as its workflow does, in a repository of its own. `NODE_TEST_CONTEXT` is dropped, or the
- * copy's `node --test` would report to this test run instead of running on its own.
+ * copy's `node --test` would report to this test run instead of running on its own, and so is the job summary of a
+ * CI run of this test, unless `summary` names a file for it.
+ *
+ * @param {string} copy
+ * @param {string[]} args
+ * @param {{ summary?: string }} [options]
  */
-function node(copy, args) {
+function node(copy, args, { summary } = {}) {
   const env = { ...process.env, GITHUB_REPOSITORY: 'shop-owner/tether-sync' };
   delete env['NODE_TEST_CONTEXT'];
+  delete env['GITHUB_STEP_SUMMARY'];
+  if (summary !== undefined) env['GITHUB_STEP_SUMMARY'] = summary;
   // Node before 22.18 strips types only with the flag; the copy's workflow runs a Node 22 that does it by default.
   return run(process.execPath, ['--experimental-strip-types', '--no-warnings', ...args], {
     cwd: copy,
@@ -90,7 +97,7 @@ function node(copy, args) {
 }
 
 test(
-  `a copy made from ${OLD_TAG} installs this tree with its own updater, and its workflow steps pass`,
+  `a copy made from ${OLD_TAG} installs this tree with its own updater, and its workflow steps pass; a later failed update shows on the run`,
   {
     timeout: UPGRADE_TIMEOUT_MS,
   },
@@ -135,6 +142,26 @@ test(
         /^::warning title=Tether workflow file outdated::.* is revision 1,/m,
         'the old workflow is reported',
       );
+
+      // A failing run: the v0.6.8 workflow pipes the updater through `tee` without pipefail, so its step passes
+      // whatever the exit code, and only the annotation and the summary show the failure.
+      const refused = join(work, 'refused');
+      await cp(release, refused, { recursive: true });
+      const refusedPkgPath = join(refused, 'package.json');
+      const refusedPkg = JSON.parse(await readFile(refusedPkgPath, 'utf8'));
+      delete refusedPkg.version;
+      await writeFile(refusedPkgPath, JSON.stringify(refusedPkg, null, 2));
+      const summary = join(work, 'summary.md');
+      const failed = await node(copy, ['scripts/update-tether.mjs', '--from', refused], { summary }).then(
+        () => assert.fail('the update of a release without a version passed'),
+        (/** @type {{ code: number, stdout: string }} */ error) => error,
+      );
+      assert.equal(failed.code, 1);
+      assert.match(failed.stdout, /^::error title=Tether update failed::.*package\.json has no version$/m);
+      assert.match(failed.stdout, /^::warning title=Tether workflow file outdated::.* is revision 1,/m);
+      assert.match(await readFile(summary, 'utf8'), /^### Update the workflow file once$/m);
+      assert.doesNotMatch(failed.stdout, /^updated=/m, 'the old workflow installs nothing');
+      assert.equal(JSON.parse(await readFile(join(copy, 'package.json'), 'utf8')).version, RELEASE_VERSION);
     } finally {
       await rm(work, { recursive: true, force: true });
     }

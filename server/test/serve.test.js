@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { connect } from 'node:net';
 import { serve } from '../src/node.ts';
+import { waitFor } from './mocks.js';
 
 const quiet = { info() {}, warn() {}, error() {} };
 const neverSyncs = () => Promise.reject(new Error('no webhook here is signed'));
@@ -16,18 +17,18 @@ const app = {
 /**
  * @param {number} port
  * @param {string} text
- * @param {{ abortAfter?: number }} [options]
+ * @param {{ abortWhen?: () => Promise<void> }} [options] `abortWhen` settles when the client is to disconnect.
  * @returns {Promise<string>}
  */
-const raw = (port, text, { abortAfter } = {}) =>
+const raw = (port, text, { abortWhen } = {}) =>
   new Promise((resolve) => {
     const s = connect(port, '127.0.0.1', () => {
       s.write(text);
-      if (abortAfter)
-        setTimeout(() => {
+      if (abortWhen)
+        void abortWhen().then(() => {
           s.destroy();
           resolve('');
-        }, abortAfter);
+        });
     });
     let out = '';
     s.on('data', (d) => {
@@ -36,6 +37,18 @@ const raw = (port, text, { abortAfter } = {}) =>
     s.on('end', () => resolve(out));
     s.on('error', () => resolve(out));
   });
+
+/**
+ * The server's side of each connection it accepts, so a test can wait for what the server has read.
+ *
+ * @param {import('node:net').Server} server
+ */
+function serverSockets(server) {
+  /** @type {import('node:net').Socket[]} */
+  const sockets = [];
+  server.on('connection', (socket) => sockets.push(socket));
+  return sockets;
+}
 
 /** @param {import('node:net').Server} server Listening on TCP, so its address is an AddressInfo. */
 function listening(server) {
@@ -47,12 +60,14 @@ function listening(server) {
 test('serve: an aborted upload, a huge body and unknown paths do not crash or buffer', async () => {
   const server = await serve(app, { port: 0, host: '127.0.0.1', log: quiet, maxBody: 1024 });
   const { port } = listening(server);
+  const sockets = serverSockets(server);
   try {
     // Client sends half a body and disconnects: the process keeps running.
-    await raw(port, 'POST /webhooks/shopify HTTP/1.1\r\nHost: x\r\nContent-Length: 1000\r\n\r\n0123456789', {
-      abortAfter: 100,
+    const halfUpload = 'POST /webhooks/shopify HTTP/1.1\r\nHost: x\r\nContent-Length: 1000\r\n\r\n0123456789';
+    await raw(port, halfUpload, {
+      abortWhen: () => waitFor(() => sockets[0]?.bytesRead === halfUpload.length, 'the server to read the half upload'),
     });
-    await new Promise((r) => setTimeout(r, 100));
+    await waitFor(() => sockets[0]?.destroyed === true, 'the server to close the aborted upload');
     const health = await fetch(`http://127.0.0.1:${port}/health`);
     assert.equal(health.status, 200);
     // Too large: refused before it is read.

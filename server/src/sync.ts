@@ -12,7 +12,8 @@ import { reconcile } from './reconcile.ts';
 import { createSerialQueue } from './serial.ts';
 import { SINCE_KEY } from './sync-state.ts';
 import { flushPublish, queueRetry, removeProduct, syncProduct } from './sync-product.ts';
-import { messageOf, noopLogger, productGid, scalarText } from './util.ts';
+import { noopLogger, productGid, scalarText } from './util.ts';
+import { messageOf } from './shared/error-message.ts';
 
 import type { RawConfig, SyncConfig } from './mapping.ts';
 import type { Product } from './product.ts';

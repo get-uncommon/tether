@@ -12,6 +12,7 @@
  * generated from.
  */
 import { JSDOM } from 'jsdom';
+import { messageOf } from '../server/src/shared/error-message.ts';
 import type * as TetherPackage from '../src/index.ts';
 import type { ShopifyCartLine, ShopifyProduct, ShopifyVariant } from '../src/index.ts';
 
@@ -58,7 +59,7 @@ async function step(name: string, check: () => Promise<void> | void): Promise<vo
     console.log(`  ok  ${name}`);
   } catch (error) {
     failed++;
-    console.log(`  FAIL ${name}: ${error instanceof Error ? error.message : String(error)}`);
+    console.log(`  FAIL ${name}: ${messageOf(error)}`);
   }
 }
 
