@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+- Security: the market's country and language are checked before they go into a query's
+  `@inContext`. A `<meta name="tether-page-language">` or a saved market could otherwise change the
+  query text. A language such as `nl-NL` is now sent as `NL` instead of the invalid `NL_NL`.
+- Security (sync Worker): the cached Shopify Admin token is stored encrypted in KV, with a key
+  derived from `SHOPIFY_CLIENT_SECRET`. After the update, the Worker asks Shopify for a new token
+  once.
+- Security (sync Worker): a webhook without the `X-Shopify-Shop-Domain` header is refused (403).
+  Shopify always sends it.
+- Astro integration: `.env` files are read on Windows too.
+- Docs: `tether-bind="description"` inserts the product's HTML as it is written in Shopify.
+
 ## 0.6.7 (2026-11-05)
 
 - Astro: the first page load no longer mounts twice (the injected script and ClientRouter's first
