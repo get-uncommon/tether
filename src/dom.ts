@@ -74,7 +74,7 @@ export function formatDate(iso: string | null | undefined): string {
  * (`store-html.ts`). Everything else from Shopify is written as text (`setText`).
  */
 export function setStoreHtml(el: Element, html: string | null | undefined): void {
-  el.replaceChildren(storeHtmlFragment(html, el.ownerDocument));
+  el.replaceChildren(storeHtmlFragment(html, el.ownerDocument, cfg.embedOrigins));
 }
 
 const isTextField = (el: Element): el is HTMLInputElement | HTMLTextAreaElement =>

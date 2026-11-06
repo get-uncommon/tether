@@ -16,6 +16,12 @@ export interface Image {
   height: number | null;
 }
 
+/** An option value's swatch: a colour, an image, or both, as the merchant set them in the admin. */
+interface Swatch {
+  color: string | null;
+  image: { previewImage: Image | null } | null;
+}
+
 export type SellingPlanAdjustmentValue =
   | { __typename: 'SellingPlanPercentagePriceAdjustment'; adjustmentPercentage: number }
   | { __typename: 'SellingPlanFixedAmountPriceAdjustment'; adjustmentAmount: Money }
@@ -89,7 +95,7 @@ export interface Product {
   seo: { title: string | null; description: string | null };
   featuredImage: Image | null;
   images: { nodes: Image[] };
-  options: { name: string; optionValues: { name: string; swatch: unknown }[] }[];
+  options: { name: string; optionValues: { name: string; swatch: Swatch | null }[] }[];
   priceRange: { minVariantPrice: Money; maxVariantPrice: Money };
   compareAtPriceRange: { minVariantPrice: Money; maxVariantPrice: Money };
   /** Present when metafields are configured; `null` for one that isn't set. */

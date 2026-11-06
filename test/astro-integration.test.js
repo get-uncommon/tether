@@ -42,9 +42,9 @@ test('integration: server-only options stay out of the page silently, unknown on
   await tether({
     domain: 'a.myshopify.com',
     token: 't',
-    // @ts-expect-error -- a config shared with createStorefront() carries options only the server reads
     siteUrl: 'https://shop.test',
     pageSize: 50,
+    // @ts-expect-error -- a misspelt option
     opneCart: true,
   }).hooks['astro:config:setup']({
     injectScript: (_stage, code) => scripts.push(code),

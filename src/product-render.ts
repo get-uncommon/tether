@@ -19,7 +19,7 @@ import {
   sameImage,
   productUrl,
 } from './dom.ts';
-import type { Product, Image } from './fragments.ts';
+import type { Product } from './fragments.ts';
 import type { PlanInGroup } from './selling-plans.ts';
 
 /** The product scope as its renders see it. */
@@ -32,8 +32,6 @@ export interface RenderScope {
   /** The product's option name for one written in the markup. */
   optName: (authored: string | null) => string;
 }
-/** The shape `fragments.ts` selects for an option value's swatch, which it types as `unknown`. */
-type Swatch = { color: string | null; image: { previewImage: Image | null } | null } | null;
 
 /** `tether-bind="image:2"`: the second product image. */
 const NTH_IMAGE_BIND = /^image:(\d+)$/;
@@ -167,8 +165,7 @@ function renderOptionLists(scope: RenderScope): void {
       if (text) setText(text, value.name);
       else if (!node.firstElementChild) setText(node, value.name);
       const swatchEl = qsa(node, sel('bind', 'swatch'))[0];
-      // fragments.ts selects `swatch { color image { previewImage { … } } }`.
-      const swatch = value.swatch as Swatch;
+      const { swatch } = value;
       if (!swatchEl || !swatch) return;
       if (swatch.color) swatchEl.style.backgroundColor = swatch.color;
       if (swatch.image?.previewImage) setImage(swatchEl, swatch.image.previewImage.url, value.name);

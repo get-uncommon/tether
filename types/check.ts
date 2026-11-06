@@ -38,6 +38,8 @@ createStorefront({ domian: 'x.myshopify.com' });
 const env: Record<string, string> = {};
 createStorefront({ ...env, country: 'NL' }); // import.meta.env-style spreads still work
 tetherAstro({ country: 'NL', inject: true });
+// A config shared with createStorefront(): its own options stay out of the page.
+tetherAstro({ country: 'NL', siteUrl: 'https://shop.example', pageSize: 50 });
 
 // Astro 5's `AstroIntegration`, as far as the integration has to fit it (astro isn't installed here).
 type DeepPartial<T> = { [P in keyof T]?: T[P] extends object ? DeepPartial<T[P]> : T[P] };
@@ -77,6 +79,8 @@ const config: TetherConfig = {
   onError: (e, ctx) => console.log((e as TetherError).code, ctx),
 };
 init({ ...config, ...barbaPreset({ lenis: () => null }) });
+// The hooks the preset always sets are typed as set.
+barbaPreset().onCartOpen([]);
 
 async function demo() {
   const cart: ShopifyCart = await Tether.cart.add({

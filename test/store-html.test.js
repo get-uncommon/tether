@@ -181,6 +181,30 @@ test("an embed from the site's own origin is removed, however its src is written
   );
 });
 
+test('embeds are kept only from the built-in video players and the origins the site adds', () => {
+  const players = [
+    'https://www.youtube.com/embed/a',
+    'https://www.youtube-nocookie.com/embed/a',
+    'https://player.vimeo.com/video/1',
+    'https://www.loom.com/embed/a',
+    'https://fast.wistia.net/embed/iframe/a',
+  ];
+  const others = ['https://evil.test/login', 'https://youtube.com.evil.test/embed/a', 'https://vimeo.com/1'];
+  const html = [...players, ...others, 'https://video.test/e', 'https://shop.test/e']
+    .map((src) => `<iframe src="${src}" width="560" height="315"></iframe>`)
+    .join('');
+  const box = site.createElement('div');
+  box.append(storeHtmlFragment(html, site, ['https://video.test', 'https://shop.test']));
+  assert.deepEqual(
+    [...box.querySelectorAll('iframe')].map((frame) => frame.getAttribute('src')),
+    [...players, 'https://video.test/e'],
+  );
+  assert.deepEqual(
+    [...renderOnSite(html).querySelectorAll('iframe')].map((frame) => frame.getAttribute('src')),
+    players,
+  );
+});
+
 test('an embed keeps only the player permissions it asks for: camera, microphone and the rest are dropped', () => {
   const box = renderOnSite(
     '<iframe src="https://www.youtube.com/embed/a" allow="camera; Autoplay *; microphone https://evil.test; fullscreen; ' +

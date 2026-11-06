@@ -10,13 +10,15 @@
  *   PUBLIC_SHOPIFY_DOMAIN=your-store.myshopify.com
  *   PUBLIC_SHOPIFY_STOREFRONT_TOKEN=your-public-storefront-token
  *
- * Options are Tether's config (domain and token override .env). Functions (onError, formatMoney, hooks) can't be
+ * Options are Tether's config (domain and token override .env), and may be the object createStorefront() is given too:
+ * its own options (siteUrl, pageSize) are left out of the page. Functions (onError, formatMoney, hooks) can't be
  * passed here: set them in window.TETHER_CONFIG in your layout, it is merged in. View Transitions (<ClientRouter />)
  * work without extra code. In dev, changes to src/shop.config.js restart the dev server (other files:
  * tether({ ..., watch: ['my/config.js'] })). Runs in Node, inside Astro's config step.
  */
 import { DEFAULTS } from './config.ts';
 import type { TetherOptions } from './config.ts';
+import type { StorefrontOptions } from './server.ts';
 import { isSecretShopifyToken, STORE_ENV_NAMES } from './shopify-values.ts';
 
 // Astro isn't a dependency, so the parts of its integration API this file uses are described here.
@@ -45,8 +47,11 @@ type SerializableOptions = {
   ]?: TetherOptions[Key];
 };
 
-/** Tether's serializable config, plus the integration's own options. */
-interface TetherAstroOptions extends SerializableOptions {
+/** `createStorefront()`'s own options that a config shared with it may hold, which the page leaves out. */
+type ServerOnlyOptions = Pick<StorefrontOptions, 'siteUrl' | 'pageSize'>;
+
+/** Tether's serializable config and the storefront's own options, plus the integration's own options. */
+interface TetherAstroOptions extends SerializableOptions, ServerOnlyOptions {
   /** Add the Tether script to every page (default true). */
   inject?: boolean;
   /** Files that restart the dev server when they change. */
@@ -62,8 +67,8 @@ type Env = Record<string, string | undefined>;
 export type { TetherAstroOptions, AstroConfigSetup };
 
 const DEFAULT_WATCH = ['src/shop.config.js', 'src/shop.config.mjs', 'src/shop.config.ts'];
-/** `createStorefront()`'s own options, which a shared `shop.config.js` may hold: the browser has no use for them. */
-const SERVER_OPTIONS = new Set(['siteUrl', 'pageSize', 'fetch']);
+/** The keys of `ServerOnlyOptions`: the browser has no use for them. */
+const SERVER_OPTIONS = new Set(['siteUrl', 'pageSize']);
 /**
  * Astro is an optional peer dependency. A variable specifier keeps both tsc and the bundler from resolving it.
  */

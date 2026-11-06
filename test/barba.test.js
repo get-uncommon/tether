@@ -18,7 +18,6 @@ test('barba preset: no auto-mount, the scroll lock it took is the one it release
     unlockScroll: () => log.push(['unlock']),
   });
   assert.equal(preset.autoMount, false);
-  assert.ok(preset.onCartOpen && preset.onCartClose);
   preset.onCartClose([]);
   const drawer = document.createElement('div');
   drawer.id = 'cart';
@@ -29,22 +28,32 @@ test('barba preset: no auto-mount, the scroll lock it took is the one it release
   assert.equal(preset.onValueChange, null);
 });
 
-test('barba preset: layout changes resize Lenis and refresh ScrollTrigger, as getters or values', () => {
+test('barba preset: layout changes resize Lenis and refresh ScrollTrigger, an instance or the class', () => {
   const log = [];
   /** @param {import('../src/presets/barba.ts').BarbaPresetOptions} options */
-  const layoutChange = (options) => {
-    const { onLayoutChange } = barbaPreset(options);
-    assert.ok(onLayoutChange);
-    onLayoutChange('x');
-  };
+  const layoutChange = (options) => barbaPreset(options).onLayoutChange('x');
+  class ScrollTrigger {
+    static refresh() {
+      log.push('st class');
+    }
+  }
   layoutChange({
     lenis: () => ({ resize: () => log.push('lenis') }),
     scrollTrigger: () => ({ refresh: () => log.push('st') }),
   });
-  // @ts-expect-error -- the options are typed as getters, but the preset also takes the value itself
-  layoutChange({ lenis: { resize: () => log.push('lenis value') }, scrollTrigger: () => null });
-  layoutChange({ lenis: () => ({}) });
-  assert.deepEqual(log, ['lenis', 'st', 'lenis value']);
+  layoutChange({ scrollTrigger: () => ScrollTrigger });
+  layoutChange({ lenis: () => ({}), scrollTrigger: () => null });
+  assert.deepEqual(log, ['lenis', 'st', 'st class']);
+});
+
+test('barba preset: a value where a getter belongs is refused when the preset is made', () => {
+  for (const name of ['gsap', 'lenis', 'scrollTrigger']) {
+    assert.throws(() => barbaPreset({ [name]: {} }), {
+      name: 'TypeError',
+      message: `barbaPreset: ${name} must be a function that returns it, such as () => ${name}`,
+    });
+  }
+  assert.doesNotThrow(() => barbaPreset({ lenis: null }));
 });
 
 test('barba preset: lines animate with GSAP when they have a height; otherwise leave at once', () => {
@@ -60,7 +69,6 @@ test('barba preset: lines animate with GSAP when they have a height; otherwise l
   const preset = barbaPreset({ gsap: () => gsap, onResize: () => (resized += 1), lineDuration: 0.5 });
   const line = document.createElement('div');
   let done = 0;
-  assert.ok(preset.onLineEnter && preset.onLineLeave);
   preset.onLineLeave(line, () => (done += 1));
   assert.deepEqual(tweens, [], 'jsdom lays nothing out: offsetHeight is 0');
   assert.equal(done, 1);
@@ -74,7 +82,6 @@ test('barba preset: lines animate with GSAP when they have a height; otherwise l
   assert.equal(done, 2);
   assert.equal(resized, 1);
   const { onLineLeave } = barbaPreset({ gsap: () => ({}), animateLines: true });
-  assert.ok(onLineLeave);
   onLineLeave(line, () => (done += 1));
   assert.equal(done, 3, 'something that is not GSAP is not called');
 });
