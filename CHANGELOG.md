@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.7.2 (unreleased)
+## 0.7.2 (2026-11-06)
 
 - Fix: a 2xx answer carrying Shopify's `INTERNAL_SERVER_ERROR`, or GraphQL errors without `data` for
   a mutation, rejects with the new code `SERVER_ERROR` (`status` 200) instead of `HTTP_200`. A cart

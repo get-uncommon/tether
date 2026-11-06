@@ -68,6 +68,7 @@ export declare const Cart: {
     /** The quantity to show: the one asked for while an update is on its way. */
     quantityOf: (line: ShopifyCartLine) => number;
     removeLine(lineIds: string | string[]): Promise<ShopifyCart | null>;
+    /** Removes the lines the cart has when the change runs, so one queued just before it is cleared too. */
     clear(): Promise<ShopifyCart | null>;
     setNote(note: string | null | undefined): Promise<ShopifyCart | null>;
     /**

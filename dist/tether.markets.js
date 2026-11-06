@@ -61,6 +61,16 @@
     }
   }
 
+  // src/uri.ts
+  function decodeOrKeep(text) {
+    try {
+      return decodeURIComponent(text);
+    } catch (error) {
+      if (error instanceof URIError) return text;
+      throw error;
+    }
+  }
+
   // src/markets.ts
   var DEFAULT_COOKIE = "tether_country";
   var storageKey = () => `${cfg.prefix}:market:${cfg.domain}`;
@@ -93,14 +103,15 @@
       locale: typeof locale === "string" && locale ? locale : void 0
     };
   }
+  var parseSavedMarket = (text) => toMarket(parseJsonOrNull(text));
   function readSavedMarket(storage = pageStorage) {
     const text = storage.getItem(storageKey());
-    return text ? toMarket(parseJsonOrNull(text)) : null;
+    return text ? parseSavedMarket(text) : null;
   }
   function readCookie(doc, name) {
     if (!doc || !name) return null;
     const cookie = doc.cookie.split(";").map((part) => part.trim()).find((part) => part.startsWith(`${name}=`));
-    return cookie ? decodeURIComponent(cookie.slice(name.length + 1)) : null;
+    return cookie ? decodeOrKeep(cookie.slice(name.length + 1)) : null;
   }
   function lookupLocale(locales, key) {
     if (!locales || !key) return null;

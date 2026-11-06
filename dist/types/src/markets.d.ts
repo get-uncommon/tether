@@ -50,8 +50,15 @@ export interface Localization {
 /** The localStorage key of the visitor's market: `<prefix>:market:<domain>`. */
 export declare const storageKey: () => string;
 /**
- * The visitor's saved market (`setCountry()`, `tether-country-select`), validated: storage is written by other tabs,
- * older versions and other scripts too.
+ * A market as `rememberMarket` stores it, validated: storage is written by other tabs, older versions and other
+ * scripts too.
+ *
+ * @param text The value stored under `storageKey()`.
+ * @returns `null` when it isn't a valid market.
+ */
+export declare const parseSavedMarket: (text: string) => Market | null;
+/**
+ * The visitor's saved market (`setCountry()`, `tether-country-select`).
  *
  * @param storage Default `localStorage`.
  * @returns `null` when nothing valid is saved.

@@ -33,7 +33,7 @@ export type { AddressFields as CustomerAddressInput } from './account/operations
 export type { CustomerAddress, Fulfillment, MailingAddress, OrderDetail, OrderDetailLine, SubscriptionContract, SubscriptionLine, } from './account/page-answers.js';
 /** The helpers for selling plans, `Tether.plans`. */
 export type SellingPlanHelpers = typeof plans;
-export declare const VERSION = "0.7.1";
+export declare const VERSION = "0.7.2";
 /**
  * Mounts every product scope and product list inside `root`. Safe to call repeatedly.
  *

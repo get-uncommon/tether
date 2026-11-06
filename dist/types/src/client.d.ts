@@ -1,5 +1,5 @@
 import type { TetherConfig } from './config.js';
-export type TetherErrorCode = 'NOT_FOUND' | 'NETWORK' | 'NOT_CONFIGURED' | 'NOT_LOGGED_IN' | 'INVALID' | 'INVALID_COUNTRY' | 'INVALID_DISCOUNT' | 'INVALID_RESPONSE' | 'ERROR' | `HTTP_${number}`;
+export type TetherErrorCode = 'NOT_FOUND' | 'NETWORK' | 'NOT_CONFIGURED' | 'NOT_LOGGED_IN' | 'INVALID' | 'INVALID_COUNTRY' | 'INVALID_DISCOUNT' | 'INVALID_RESPONSE' | 'SERVER_ERROR' | 'ERROR' | `HTTP_${number}`;
 export interface GraphQLError {
     message: string;
     extensions?: {
@@ -13,7 +13,7 @@ export interface UserError {
 }
 interface TetherErrorDetails {
     /** Default `HTTP_<status>` with a status, else `ERROR`. */
-    code?: TetherErrorCode;
+    code?: TetherErrorCode | undefined;
     /** The HTTP status of the response that failed. */
     status?: number;
     /** The GraphQL errors of that response. */
@@ -67,10 +67,10 @@ export declare const orNull: <T>(shape: ShapeOf<T>) => DataCheck<T | null>;
 export declare const shaped: <T>(shape: ShapeOf<T>) => DataCheck<T>;
 /**
  * What an operation does to the store, which decides what is safe to retry. A query only reads, so a failure that may
- * pass is retried: the network (no answer, or a body that stopped arriving), a 429, a 5xx and `THROTTLED`. Shopify may
- * have applied a mutation before a 5xx or a dropped connection, so a mutation is retried only when Shopify answers
- * that it didn't run it (429 or `THROTTLED`): sending it again could add a line twice. Other failures (a 4xx, a 430,
- * an answer that isn't valid, other GraphQL errors) are never retried.
+ * pass is retried: the network (no answer, or a body that stopped arriving), a 429, a 5xx, `THROTTLED` and
+ * `INTERNAL_SERVER_ERROR`. Shopify may have applied a mutation before a server error or a dropped connection, so a
+ * mutation is retried only when Shopify answers that it didn't run it (429 or `THROTTLED`): sending it again could add
+ * a line twice. Other failures (a 4xx, a 430, an answer that isn't valid, other GraphQL errors) are never retried.
  */
 export type Operation = 'query' | 'mutation';
 interface RequestOptions {
@@ -85,7 +85,7 @@ export interface StoreAccess {
 }
 /**
  * A query's text, or a function that writes it for what the token may read: Tether's own queries, built from
- * `fragments.ts`, leave out inventory for a token that can't read it.
+ * `fragments.ts`, leave out inventory for a token that can't read it. Documents Tether didn't write are strings.
  */
 export type QueryText = string | ((access: StoreAccess) => string);
 /** @returns The Storefront GraphQL endpoint of `conf`'s store. */
@@ -108,21 +108,26 @@ export declare function withContext(query: string, ctx?: {
  * One Storefront API request, for any config: the browser's shared one (`gql`) or one the server helpers build.
  * Queries carry a time bucket so Shopify's cache of an identical query text is at most `maxAge` seconds old. A query
  * written for the store's access leaves out inventory once the token turns out not to read it (`INVENTORY_FIELD`);
- * a fixed query text is the caller's own, and that refusal is its error. How often a failure is retried is
+ * a fixed query text is the caller's own, and that refusal is its error, as is a refusal of a text written without
+ * inventory, so the refusal costs at most one extra request. How often a failure is retried is
  * `conf.retries`; which failures are retried is the operation's (`Operation`).
  *
  * @param isData Checks that `data` has what the caller then reads, so a malformed answer fails here.
  * @throws {TetherError} `NOT_CONFIGURED` without a domain or token, `NETWORK` when the store can't be reached or
  *   the answer's body stops arriving, `INVALID_RESPONSE` for a 2xx whose body isn't valid (not JSON, not in the
- *   GraphQL shape, or `data` that `isData` refuses), `HTTP_<status>` for any other HTTP or GraphQL failure.
+ *   GraphQL shape, or `data` that `isData` refuses), `SERVER_ERROR` for a 2xx whose GraphQL errors leave open
+ *   whether Shopify ran it (a top-level `INTERNAL_SERVER_ERROR`, or a mutation's errors without `data`),
+ *   `HTTP_<status>` for any other HTTP or GraphQL failure.
  */
 export declare function request<T>(conf: StorefrontConfig, query: QueryText, variables: Record<string, unknown>, isData: DataCheck<T>, { context, operation }?: RequestOptions): Promise<T>;
 /** `request` with the browser's shared config. */
 export declare function gql<T>(query: QueryText, variables: Record<string, unknown>, isData: DataCheck<T>, options?: RequestOptions): Promise<T>;
 /** The check of `Tether.query()` and the server's `query()`, whose callers read `data` themselves. */
 export declare const hasData: (data: unknown) => data is object;
-/** `Tether.query()`: the caller's own query text decides the shape of `data`, and the caller's `T` states it. */
-export declare function query<T>(text: QueryText, variables?: Record<string, unknown>, options?: Omit<RequestOptions, 'operation'>): Promise<T>;
+/** `Tether.query()` and the server's `query()`: a document Tether didn't write, sent with `conf`. */
+export declare function untypedQuery<T>(conf: StorefrontConfig, text: string, variables?: Record<string, unknown>, options?: Omit<RequestOptions, 'operation'>): Promise<T>;
+/** `Tether.query()`: `untypedQuery` with the browser's shared config. */
+export declare function query<T>(text: string, variables?: Record<string, unknown>, options?: Omit<RequestOptions, 'operation'>): Promise<T>;
 /**
  * @param payload A mutation's payload.
  * @param name The mutation, for the error message.

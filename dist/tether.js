@@ -525,17 +525,28 @@
   function invalidResponse(res, conf) {
     return res.ok ? new TetherError(`Invalid response (${res.status})`, { code: "INVALID_RESPONSE", status: res.status }) : new TetherError(statusText(res.status, conf), { status: res.status });
   }
-  function graphQLFailure(res, errors, conf) {
+  function graphQLFailure(res, errors, conf, code) {
     const message = errors.map((error) => error.message).filter(Boolean).join(" | ");
     let text2 = message || "Storefront API error";
     if (!res.ok) text2 = res.status === 401 || res.status === 403 || !message ? statusText(res.status, conf) : message;
-    return new TetherError(text2, { status: res.status, errors });
+    return new TetherError(text2, { status: res.status, errors, code });
   }
   function networkFailure(error, retry) {
     if (retry === "any") return { kind: "retry", backoffMs: RETRY_BACKOFF_MS };
     throw new TetherError(`Network error: ${messageOf(error)}`, { code: "NETWORK" });
   }
-  async function attempt(conf, query2, variables, isData, retry) {
+  function graphQLOutcome(res, conf, query2, errors, data, retry, operation) {
+    if (query2.includes(INVENTORY_FIELD) && errors.some((error) => error.message.includes(INVENTORY_FIELD))) {
+      return { kind: "inventory-refused", error: graphQLFailure(res, errors, conf) };
+    }
+    const codes = errors.map((error) => error.extensions?.code);
+    if (retry !== "none" && codes.includes("THROTTLED")) return { kind: "retry", backoffMs: THROTTLE_BACKOFF_MS };
+    const serverError = codes.includes("INTERNAL_SERVER_ERROR");
+    if (retry === "any" && serverError) return { kind: "retry", backoffMs: RETRY_BACKOFF_MS };
+    const unclear = res.ok && (serverError || operation === "mutation" && data == null);
+    throw graphQLFailure(res, errors, conf, unclear ? "SERVER_ERROR" : void 0);
+  }
+  async function attempt(conf, query2, variables, isData, retry, operation) {
     let res;
     try {
       res = await (conf.fetch ?? fetch)(endpoint(conf), {
@@ -562,15 +573,7 @@
     const body = toGraphQLResponse(json);
     if (!body) throw invalidResponse(res, conf);
     const { data, errors = [] } = body;
-    if (errors.length) {
-      if (query2.includes(INVENTORY_FIELD) && errors.some((error) => error.message.includes(INVENTORY_FIELD))) {
-        return { kind: "inventory-refused", error: graphQLFailure(res, errors, conf) };
-      }
-      if (retry !== "none" && errors.some((error) => error.extensions?.code === "THROTTLED")) {
-        return { kind: "retry", backoffMs: THROTTLE_BACKOFF_MS };
-      }
-      throw graphQLFailure(res, errors, conf);
-    }
+    if (errors.length) return graphQLOutcome(res, conf, query2, errors, data, retry, operation);
     if (!res.ok) throw new TetherError(statusText(res.status, conf), { status: res.status });
     if (!isData(data)) throw invalidResponse(res, conf);
     return { kind: "data", data };
@@ -583,14 +586,15 @@
     const retryWhileLeft = operation === "mutation" ? "not-run" : "any";
     let retries = 0;
     for (; ; ) {
-      const sent = queryText(conf, query2, { inventory: !storesWithoutInventory.has(store) }, { context, operation });
+      const access = { inventory: !storesWithoutInventory.has(store) };
+      const sent = queryText(conf, query2, access, { context, operation });
       const retry = retries < conf.retries ? retryWhileLeft : "none";
-      const outcome = await attempt(conf, sent, variables, isData, retry);
+      const outcome = await attempt(conf, sent, variables, isData, retry, operation);
       switch (outcome.kind) {
         case "data":
           return outcome.data;
         case "inventory-refused":
-          if (typeof query2 === "string") throw outcome.error;
+          if (typeof query2 === "string" || !access.inventory) throw outcome.error;
           log(`the token can't read inventory: ${INVENTORY_FIELD} is left out from now on`);
           storesWithoutInventory.add(store);
           break;
@@ -606,9 +610,11 @@
     return request(cfg, query2, variables, isData, options);
   }
   var hasData = (data) => typeof data === "object" && data !== null;
-  function query(text2, variables = {}, options) {
-    const operation = operationOf(typeof text2 === "string" ? text2 : text2({ inventory: true }));
-    return gql(text2, variables, hasData, { ...options, operation });
+  function untypedQuery(conf, text2, variables = {}, options) {
+    return request(conf, text2, variables, hasData, { ...options, operation: operationOf(text2) });
+  }
+  function query(text2, variables, options) {
+    return untypedQuery(cfg, text2, variables, options);
   }
   function unwrap(payload, name) {
     if (!payload) throw new TetherError(`${name}: empty response`);
@@ -1680,6 +1686,160 @@
     return list;
   }
 
+  // src/product-render.ts
+  var NTH_IMAGE_BIND = /^image:(\d+)$/;
+  var METAFIELD_BIND = "metafield:";
+  var MULTI_LINE_METAFIELD = /^(rich_text|multi_line_text)_field$/;
+  var ALL_PLAN_GROUPS = ["", "true", "all", "*"];
+  var isSelect = (el) => el.tagName === "SELECT";
+  var selectsIn = (scope, selector) => scope.$(`select${selector}`).filter(isSelect);
+  function renderGallery(el, product) {
+    const images = product.images.nodes;
+    const rendered = [...el.children].map((node) => node.tagName === "IMG" ? node : node.querySelector("img"));
+    const same = !hasTemplate(el) && rendered.length === images.length && rendered.every((img, index) => sameImage(img?.getAttribute("src"), images[index]?.url));
+    if (same) return;
+    repeat(el, images, (node, image) => {
+      const target = node.matches(`img,${sel("bind", "image")}`) ? node : qsa(node, "img")[0] ?? node;
+      setImage(target, image.url, image.altText || product.title);
+    });
+  }
+  function renderMetafield(el, product, ref) {
+    const dot = ref.indexOf(".");
+    const namespace = ref.slice(0, dot);
+    const key = ref.slice(dot + 1);
+    const metafield = (product.metafields ?? []).find((field2) => field2?.namespace === namespace && field2.key === key);
+    if (!metafield) {
+      setText(el, "");
+      return;
+    }
+    const image = metafield.reference?.image;
+    if (image) {
+      setImage(el, image.url, image.altText);
+      return;
+    }
+    if (MULTI_LINE_METAFIELD.test(metafield.type)) el.style.whiteSpace = "pre-line";
+    setText(el, metafield.value);
+  }
+  var PRODUCT_TEXTS = new Map(
+    Object.entries({
+      title: (product) => product.title,
+      "description-text": (product) => product.description,
+      vendor: (product) => product.vendor,
+      type: (product) => product.productType,
+      handle: (product) => product.handle,
+      "published-at": (product) => formatDate(product.publishedAt),
+      "min-price": (product) => formatMoney2(product.priceRange.minVariantPrice),
+      "max-price": (product) => formatMoney2(product.priceRange.maxVariantPrice)
+    })
+  );
+  function renderTags(el, product) {
+    const exclude = (el.getAttribute("exclude") ?? "").split(",").map((tag) => tag.trim()).filter(Boolean);
+    const tags = product.tags.filter((tag) => !exclude.includes(tag));
+    repeat(el, tags, (node, tag) => {
+      setText(node, tag);
+    });
+  }
+  function renderProductBind(el, key, product) {
+    const text2 = PRODUCT_TEXTS.get(key);
+    if (text2) {
+      setText(el, text2(product));
+      return;
+    }
+    switch (key) {
+      case "description":
+        setStoreHtml(el, product.descriptionHtml);
+        break;
+      case "featured-image":
+        setImage(el, product.featuredImage?.url, product.featuredImage?.altText || product.title);
+        break;
+      case "url":
+      case "link": {
+        const url2 = productUrl2(product.handle, product.id);
+        if (url2) el.setAttribute("href", url2);
+        if (key === "url" && !el.firstElementChild && !el.textContent.trim()) setText(el, product.title);
+        break;
+      }
+      case "images":
+        renderGallery(el, product);
+        break;
+      case "tags":
+        renderTags(el, product);
+        break;
+      default:
+        renderIndexedBind(el, key, product);
+    }
+  }
+  function renderIndexedBind(el, key, product) {
+    const nth = NTH_IMAGE_BIND.exec(key);
+    if (nth) {
+      const image = product.images.nodes[Number(nth[1]) - 1] ?? product.featuredImage;
+      setImage(el, image?.url, image?.altText || product.title);
+    } else if (key.startsWith(METAFIELD_BIND)) {
+      renderMetafield(el, product, key.slice(METAFIELD_BIND.length));
+    }
+  }
+  function renderOptionLists(scope) {
+    const { product } = scope;
+    scope.$(sel("option-list")).forEach((container) => {
+      const name = scope.optName(get(container, "option-list"));
+      const option = product.options.find((candidate) => candidate.name === name);
+      if (!option || option.optionValues.length <= 1 && has(container, "hide-single")) {
+        show(container, false);
+        return;
+      }
+      repeat(container, option.optionValues, (node, value) => {
+        node.setAttribute(attr("option-value"), value.name);
+        const text2 = qsa(node, sel("bind", "option-value"))[0];
+        if (text2) setText(text2, value.name);
+        else if (!node.firstElementChild) setText(node, value.name);
+        const swatchEl = qsa(node, sel("bind", "swatch"))[0];
+        const { swatch } = value;
+        if (!swatchEl || !swatch) return;
+        if (swatch.color) swatchEl.style.backgroundColor = swatch.color;
+        if (swatch.image?.previewImage) setImage(swatchEl, swatch.image.previewImage.url, value.name);
+      });
+    });
+  }
+  function renderSelects(scope) {
+    const { product } = scope;
+    selectsIn(scope, sel("option")).forEach((select) => {
+      const option = product.options.find((candidate) => candidate.name === scope.optName(get(select, "option")));
+      if (!option) {
+        show(select, false);
+        return;
+      }
+      select.replaceChildren(...option.optionValues.map((value) => new Option(value.name, value.name)));
+    });
+    selectsIn(scope, sel("variant-select")).forEach((select) => {
+      select.replaceChildren(...product.variants.nodes.map((variant) => new Option(variant.title, variant.id)));
+    });
+    selectsIn(scope, sel("plan")).forEach((select) => {
+      const plans = scope.plans.map((plan) => new Option(plan.name, plan.id));
+      const oneTime = !product.requiresSellingPlan && get(select, "plan") !== "subscription-only";
+      const oneTimeLabel = select.getAttribute(attr("one-time-label")) || "One-time purchase";
+      select.replaceChildren(...oneTime ? [new Option(oneTimeLabel, "")] : [], ...plans);
+    });
+  }
+  function renderPlanLists(scope) {
+    scope.$(sel("plan-list")).forEach((container) => {
+      const raw = (get(container, "plan-list") ?? "").trim();
+      const group = ALL_PLAN_GROUPS.includes(raw.toLowerCase()) ? null : raw;
+      const plans = scope.plans.filter((plan) => !group || plan.group.name === group);
+      repeat(container, plans, (node, plan) => {
+        node.setAttribute(attr("plan-value"), plan.id);
+        if (!node.firstElementChild && !node.querySelector(sel("plan-bind"))) setText(node, plan.name);
+      });
+    });
+  }
+  function writeProduct(scope) {
+    scope.$(sel("bind")).forEach((el) => {
+      renderProductBind(el, get(el, "bind") ?? "", scope.product);
+    });
+    renderOptionLists(scope);
+    renderSelects(scope);
+    renderPlanLists(scope);
+  }
+
   // src/cart/render.ts
   var DEFAULT_TITLE = "Default Title";
   var quantityOf = (line, pending2) => pending2.get(line.id)?.quantity ?? line.quantity;
@@ -1781,7 +1941,8 @@
       if (value !== void 0) setTextTracked(el, value);
     });
     renderLineState(node, line, view);
-    qsa(node, `select${sel("line-plan")}`).forEach((select) => {
+    const planSelects = qsa(node, sel("line-plan")).filter(isSelect);
+    planSelects.forEach((select) => {
       getProduct(variant.product.handle).then((product) => {
         fillPlanSelect(select, line, product);
       }).catch((error) => {
@@ -2016,7 +2177,9 @@
     return (error.errors ?? []).some((graphQLError) => UNKNOWN_CART_MESSAGE.test(graphQLError.message));
   }
   function isUnclearFailure(error) {
-    return error instanceof TetherError && (error.code === "NETWORK" || error.code === "INVALID_RESPONSE" || (error.status ?? 0) >= 500);
+    if (!(error instanceof TetherError)) return false;
+    const { code, status: status2 = 0 } = error;
+    return code === "NETWORK" || code === "INVALID_RESPONSE" || code === "SERVER_ERROR" || status2 >= 500;
   }
   function toLineInput(input, quantity = 1, options = {}) {
     const spec = typeof input === "object" && input !== null ? input : { ...options, quantity, ...input === null || input === void 0 ? {} : { variantId: input } };
@@ -2329,10 +2492,13 @@
       const ids = Array.isArray(lineIds) ? lineIds : [lineIds];
       return runChange(async () => commit(await removeLines(ids), "remove"));
     },
+    /** Removes the lines the cart has when the change runs, so one queued just before it is cleared too. */
     clear() {
-      const ids = currentLines().map((line) => line.id);
-      if (!ids.length) return Promise.resolve(currentCart());
-      return Cart.removeLine(ids);
+      return runChange(async () => {
+        const ids = currentLines().map((line) => line.id);
+        if (!ids.length) return currentCart();
+        return commit(await removeLines(ids), "remove");
+      });
     },
     setNote(note) {
       const variables = { note: note ?? "" };
@@ -2582,170 +2748,18 @@
     return new Map(Object.entries(texts));
   }
 
-  // src/product-render.ts
-  var NTH_IMAGE_BIND = /^image:(\d+)$/;
-  var METAFIELD_BIND = "metafield:";
-  var MULTI_LINE_METAFIELD = /^(rich_text|multi_line_text)_field$/;
-  var ALL_PLAN_GROUPS = ["", "true", "all", "*"];
-  var isSelect = (el) => el.tagName === "SELECT";
-  var selectsIn = (scope, selector) => scope.$(`select${selector}`).filter(isSelect);
-  function renderGallery(el, product) {
-    const images = product.images.nodes;
-    const rendered = [...el.children].map((node) => node.tagName === "IMG" ? node : node.querySelector("img"));
-    const same = !hasTemplate(el) && rendered.length === images.length && rendered.every((img, index) => sameImage(img?.getAttribute("src"), images[index]?.url));
-    if (same) return;
-    repeat(el, images, (node, image) => {
-      const target = node.matches(`img,${sel("bind", "image")}`) ? node : qsa(node, "img")[0] ?? node;
-      setImage(target, image.url, image.altText || product.title);
-    });
-  }
-  function renderMetafield(el, product, ref) {
-    const dot = ref.indexOf(".");
-    const namespace = ref.slice(0, dot);
-    const key = ref.slice(dot + 1);
-    const metafield = (product.metafields ?? []).find((field2) => field2?.namespace === namespace && field2.key === key);
-    if (!metafield) {
-      setText(el, "");
-      return;
+  // src/uri.ts
+  function decodeOrKeep(text2) {
+    try {
+      return decodeURIComponent(text2);
+    } catch (error) {
+      if (error instanceof URIError) return text2;
+      throw error;
     }
-    const image = metafield.reference?.image;
-    if (image) {
-      setImage(el, image.url, image.altText);
-      return;
-    }
-    if (MULTI_LINE_METAFIELD.test(metafield.type)) el.style.whiteSpace = "pre-line";
-    setText(el, metafield.value);
-  }
-  var PRODUCT_TEXTS = new Map(
-    Object.entries({
-      title: (product) => product.title,
-      "description-text": (product) => product.description,
-      vendor: (product) => product.vendor,
-      type: (product) => product.productType,
-      handle: (product) => product.handle,
-      "published-at": (product) => formatDate(product.publishedAt),
-      "min-price": (product) => formatMoney2(product.priceRange.minVariantPrice),
-      "max-price": (product) => formatMoney2(product.priceRange.maxVariantPrice)
-    })
-  );
-  function renderTags(el, product) {
-    const exclude = (el.getAttribute("exclude") ?? "").split(",").map((tag) => tag.trim()).filter(Boolean);
-    const tags = product.tags.filter((tag) => !exclude.includes(tag));
-    repeat(el, tags, (node, tag) => {
-      setText(node, tag);
-    });
-  }
-  function renderProductBind(el, key, product) {
-    const text2 = PRODUCT_TEXTS.get(key);
-    if (text2) {
-      setText(el, text2(product));
-      return;
-    }
-    switch (key) {
-      case "description":
-        setStoreHtml(el, product.descriptionHtml);
-        break;
-      case "featured-image":
-        setImage(el, product.featuredImage?.url, product.featuredImage?.altText || product.title);
-        break;
-      case "url":
-      case "link": {
-        const url2 = productUrl2(product.handle, product.id);
-        if (url2) el.setAttribute("href", url2);
-        if (key === "url" && !el.firstElementChild && !el.textContent.trim()) setText(el, product.title);
-        break;
-      }
-      case "images":
-        renderGallery(el, product);
-        break;
-      case "tags":
-        renderTags(el, product);
-        break;
-      default:
-        renderIndexedBind(el, key, product);
-    }
-  }
-  function renderIndexedBind(el, key, product) {
-    const nth = NTH_IMAGE_BIND.exec(key);
-    if (nth) {
-      const image = product.images.nodes[Number(nth[1]) - 1] ?? product.featuredImage;
-      setImage(el, image?.url, image?.altText || product.title);
-    } else if (key.startsWith(METAFIELD_BIND)) {
-      renderMetafield(el, product, key.slice(METAFIELD_BIND.length));
-    }
-  }
-  function renderOptionLists(scope) {
-    const { product } = scope;
-    scope.$(sel("option-list")).forEach((container) => {
-      const name = scope.optName(get(container, "option-list"));
-      const option = product.options.find((candidate) => candidate.name === name);
-      if (!option || option.optionValues.length <= 1 && has(container, "hide-single")) {
-        show(container, false);
-        return;
-      }
-      repeat(container, option.optionValues, (node, value) => {
-        node.setAttribute(attr("option-value"), value.name);
-        const text2 = qsa(node, sel("bind", "option-value"))[0];
-        if (text2) setText(text2, value.name);
-        else if (!node.firstElementChild) setText(node, value.name);
-        const swatchEl = qsa(node, sel("bind", "swatch"))[0];
-        const { swatch } = value;
-        if (!swatchEl || !swatch) return;
-        if (swatch.color) swatchEl.style.backgroundColor = swatch.color;
-        if (swatch.image?.previewImage) setImage(swatchEl, swatch.image.previewImage.url, value.name);
-      });
-    });
-  }
-  function renderSelects(scope) {
-    const { product } = scope;
-    selectsIn(scope, sel("option")).forEach((select) => {
-      const option = product.options.find((candidate) => candidate.name === scope.optName(get(select, "option")));
-      if (!option) {
-        show(select, false);
-        return;
-      }
-      select.replaceChildren(...option.optionValues.map((value) => new Option(value.name, value.name)));
-    });
-    selectsIn(scope, sel("variant-select")).forEach((select) => {
-      select.replaceChildren(...product.variants.nodes.map((variant) => new Option(variant.title, variant.id)));
-    });
-    selectsIn(scope, sel("plan")).forEach((select) => {
-      const plans = scope.plans.map((plan) => new Option(plan.name, plan.id));
-      const oneTime = !product.requiresSellingPlan && get(select, "plan") !== "subscription-only";
-      const oneTimeLabel = select.getAttribute(attr("one-time-label")) || "One-time purchase";
-      select.replaceChildren(...oneTime ? [new Option(oneTimeLabel, "")] : [], ...plans);
-    });
-  }
-  function renderPlanLists(scope) {
-    scope.$(sel("plan-list")).forEach((container) => {
-      const raw = (get(container, "plan-list") ?? "").trim();
-      const group = ALL_PLAN_GROUPS.includes(raw.toLowerCase()) ? null : raw;
-      const plans = scope.plans.filter((plan) => !group || plan.group.name === group);
-      repeat(container, plans, (node, plan) => {
-        node.setAttribute(attr("plan-value"), plan.id);
-        if (!node.firstElementChild && !node.querySelector(sel("plan-bind"))) setText(node, plan.name);
-      });
-    });
-  }
-  function writeProduct(scope) {
-    scope.$(sel("bind")).forEach((el) => {
-      renderProductBind(el, get(el, "bind") ?? "", scope.product);
-    });
-    renderOptionLists(scope);
-    renderSelects(scope);
-    renderPlanLists(scope);
   }
 
   // src/status.ts
   var URL_SOURCE = "url:";
-  function decodePathSegment(segment) {
-    try {
-      return decodeURIComponent(segment);
-    } catch (error) {
-      if (error instanceof URIError) return segment;
-      throw error;
-    }
-  }
   function resolveProductKey(el, location2 = window.location, name = "product") {
     const raw = (get(el, name) ?? "").trim();
     if (!raw.toLowerCase().startsWith(URL_SOURCE)) return { key: raw || null, fromUrl: false, raw };
@@ -2754,7 +2768,7 @@
     if (source.toLowerCase() === "path") {
       const segments = location2.pathname.split("/").filter(Boolean);
       const segment = segments[segments.length - 1];
-      key = segment === void 0 ? null : decodePathSegment(segment);
+      key = segment === void 0 ? null : decodeOrKeep(segment);
     } else {
       key = new URLSearchParams(location2.search).get(source || "handle");
     }
@@ -3510,9 +3524,10 @@
       locale: typeof locale === "string" && locale ? locale : void 0
     };
   }
+  var parseSavedMarket = (text2) => toMarket(parseJsonOrNull(text2));
   function readSavedMarket(storage = pageStorage) {
     const text2 = storage.getItem(storageKey());
-    return text2 ? toMarket(parseJsonOrNull(text2)) : null;
+    return text2 ? parseSavedMarket(text2) : null;
   }
 
   // src/page-market.ts
@@ -3567,7 +3582,7 @@
   }
 
   // src/part-integrity.ts
-  var PART_INTEGRITY = { "tether.diagnose.js": "sha384-My35ltXsPvspuBHm0xCTu7wl6C4ORwigmKQMCaTKI6VP9ELMCCLYCETpAYW3Fus+", "tether.markets.js": "sha384-m9u+yVeYzqljJYufGt6C6E2xCgqgBSJstvmjU5a2lXZLK3q2saH19EYgP/EC5ox3", "tether.search.js": "sha384-ZrByfRsWNOHbbWOocY4WOD2RWe4QI2qQRZ4Eb+fM5v/UHIQ8mlWxbSwrxJt8yLbc", "tether.extras.js": "sha384-sE3c2fclN/3LKtuYUtC4CjVk76Zu0Mv/jR3p8YYLisAvyDvqJxpx4nj8PbJ3KzXH", "tether.account.js": "sha384-UF36poTg1vnXE7Pg+FYFGMJ4qjKhx9mbOug9bqTYhzgqRppOKS9M/1uY5D/cz9KF", "tether.account-pages.js": "sha384-jJYvZswrRw+pGDYrk0FswWcYqGpZkbR6ooxJGFu0lTYkUlVOcsCXuLLLU6M5kO54", "tether.analytics.js": "sha384-10v5pBMzgfF7BuLGQBg3cdbgMk701Uto5rGjhByiRD2jI9+/WF8DFcSWplIcdRNg" };
+  var PART_INTEGRITY = { "tether.diagnose.js": "sha384-exWttcEw4tQTiJ4OU0r/Y+0T5vVIYIo3kcmieqDPkUUmJQGr2HZzWxZCOmMhsvaY", "tether.markets.js": "sha384-hn9741hCQun49mIj7A2bazMG2wXxTpMDScOQK+8wMeY6KT1p+ovXcKDi3m6BK04C", "tether.search.js": "sha384-ZrByfRsWNOHbbWOocY4WOD2RWe4QI2qQRZ4Eb+fM5v/UHIQ8mlWxbSwrxJt8yLbc", "tether.extras.js": "sha384-lt7I8DOnCx8wwVHQM4ZT39+Jlv95WVED5eVDezUKchNXo4+j1oBXYtxzPFiPyxgm", "tether.account.js": "sha384-UF36poTg1vnXE7Pg+FYFGMJ4qjKhx9mbOug9bqTYhzgqRppOKS9M/1uY5D/cz9KF", "tether.account-pages.js": "sha384-jJYvZswrRw+pGDYrk0FswWcYqGpZkbR6ooxJGFu0lTYkUlVOcsCXuLLLU6M5kO54", "tether.analytics.js": "sha384-10v5pBMzgfF7BuLGQBg3cdbgMk701Uto5rGjhByiRD2jI9+/WF8DFcSWplIcdRNg" };
 
   // src/part-registry.ts
   function isTetherInternals(value) {
@@ -4001,7 +4016,7 @@
   }
 
   // src/index.ts
-  var VERSION = "0.7.1";
+  var VERSION = "0.7.2";
   var OBSERVE_DEBOUNCE_MS = 50;
   function pageConfig() {
     const config = pageGlobal("TETHER_CONFIG");

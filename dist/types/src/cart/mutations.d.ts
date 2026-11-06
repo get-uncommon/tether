@@ -28,8 +28,8 @@ export interface CartLineInput {
 export declare function isCartGone(error: unknown): boolean;
 /**
  * @returns True when a change failed without saying whether Shopify applied it: no answer or no whole body came (the
- *   network), a 2xx whose body isn't valid, or a server error (5xx), which can come after the change was committed.
- *   Shopify's user errors and a 4xx are clear.
+ *   network), a 2xx whose body isn't valid, or a server error (a 5xx, or a 2xx with `SERVER_ERROR`), which can come
+ *   after the change was committed. Shopify's user errors and a 4xx are clear.
  */
 export declare function isUnclearFailure(error: unknown): boolean;
 /**

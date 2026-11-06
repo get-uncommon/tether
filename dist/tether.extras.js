@@ -33,10 +33,32 @@
   var m5 = window.Tether.__core["page-market.ts"];
   var [setCountry] = m5;
 
-  // server/src/shared/json.ts
-  function isRecord(value) {
-    return value !== null && typeof value === "object" && !Array.isArray(value);
+  // tether-core:market-codes.ts
+  var m6 = window.Tether.__core["market-codes.ts"];
+  var [toCountry, toLanguage] = m6;
+
+  // src/markets.ts
+  var storageKey = () => `${cfg.prefix}:market:${cfg.domain}`;
+  function parseJsonOrNull(text) {
+    try {
+      return JSON.parse(text);
+    } catch (error) {
+      if (error instanceof SyntaxError) return null;
+      throw error;
+    }
   }
+  function toMarket(value) {
+    if (typeof value !== "object" || value === null) return null;
+    const country = toCountry(Reflect.get(value, "country"));
+    if (!country) return null;
+    const locale = Reflect.get(value, "locale");
+    return {
+      country,
+      language: toLanguage(Reflect.get(value, "language")) ?? void 0,
+      locale: typeof locale === "string" && locale ? locale : void 0
+    };
+  }
+  var parseSavedMarket = (text) => toMarket(parseJsonOrNull(text));
 
   // src/extras.ts
   function groupAttributes(group, name) {
@@ -67,22 +89,6 @@
       return null;
     }
   }
-  function parseStoredMarket(text) {
-    let value;
-    try {
-      value = JSON.parse(text);
-    } catch {
-      return null;
-    }
-    if (!isRecord(value)) return null;
-    const { country, language, locale } = value;
-    if (typeof country !== "string" || !country) return null;
-    return {
-      country,
-      language: typeof language === "string" ? language : null,
-      locale: typeof locale === "string" ? locale : void 0
-    };
-  }
   function onStorage(event) {
     if (event.key === cfg.storageKey || event.key === `${cfg.storageKey}:seen`) {
       Cart.init().catch((error) => {
@@ -90,10 +96,10 @@
       });
       return;
     }
-    if (event.key !== `${cfg.prefix}:market:${cfg.domain}` || !event.newValue) return;
-    const market = parseStoredMarket(event.newValue);
+    if (event.key !== storageKey() || !event.newValue) return;
+    const market = parseSavedMarket(event.newValue);
     if (!market) return;
-    const options = { language: market.language, locale: market.locale, remember: false };
+    const options = { language: market.language ?? null, locale: market.locale, remember: false };
     setCountry(market.country, options).catch((error) => {
       reportError(error, "market from another tab");
     });
@@ -118,6 +124,11 @@
     if (sellingPlanId) url.searchParams.set("selling_plan", numericId(sellingPlanId));
     else url.searchParams.delete("selling_plan");
     replaceUrlIfAllowed(url);
+  }
+
+  // server/src/shared/json.ts
+  function isRecord(value) {
+    return value !== null && typeof value === "object" && !Array.isArray(value);
   }
 
   // src/part-registry.ts
