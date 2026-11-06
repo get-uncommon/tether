@@ -1,3 +1,4 @@
+"use strict";
 (() => {
   var __defProp = Object.defineProperty;
   var __export = (target, all) => {
@@ -15,6 +16,7 @@
     requestReturn: () => requestReturn,
     saveAddress: () => saveAddress,
     setup: () => setup,
+    showUnavailable: () => showUnavailable,
     subscriptionAction: () => subscriptionAction,
     subscriptions: () => subscriptions,
     updateProfile: () => updateProfile
@@ -22,174 +24,234 @@
 
   // tether-core:config.js
   var m = window.Tether.__core["config.js"];
-  var { DEFAULTS, cfg, configure, isConfigured, log, reportError, warn } = m;
-
-  // tether-core:client.js
-  var m2 = window.Tether.__core["client.js"];
-  var { TetherError, endpoint, gql, request, unwrap, withContext } = m2;
+  var { DEFAULTS, cfg, configure, isConfigured, log, reportError, resolveConfig, toMetafieldIdentifier, warn } = m;
 
   // tether-core:dom.js
-  var m3 = window.Tether.__core["dom.js"];
-  var { attr, busy, cdnUrl, dataKey, emit, formatDate, formatMoney, formatPercent, get, has, hasTemplate, imageUrl, notifyLayoutChanged, parseJSONAttr, productUrl, qsa, readText, repeat, repeatKeyed, sameImage, scoped, sel, setImage, setSelected, setText, setTextTracked, show, toAttributes, watchImages } = m3;
+  var m2 = window.Tether.__core["dom.js"];
+  var { attr, busy, cdnUrl, emit, formatDate, formatMoney, formatPercent, get, has, hasTemplate, imageUrl, notifyLayoutChanged, parseJSONAttr, productUrl, qsa, repeat, repeatKeyed, sameImage, scoped, sel, setImage, setSelected, setStoreHtml, setText, setTextTracked, show, toAttributes, watchImages } = m2;
 
-  // server/src/account-ops.js
+  // tether-core:client.js
+  var m3 = window.Tether.__core["client.js"];
+  var { TetherError, endpoint, gql, request, unwrap, withContext } = m3;
+
+  // server/src/shared/account-ops.js
+  var InputError = class extends Error {
+    /**
+     * @param {string} message
+     * @param {{ status?: number, userErrors?: UserError[] }} [details]
+     */
+    constructor(message, { status = 400, userErrors = [] } = {}) {
+      super(message);
+      this.name = "InputError";
+      this.status = status;
+      this.userErrors = userErrors;
+    }
+  };
   var MONEY = "amount currencyCode";
   var ADDRESS = "id firstName lastName company address1 address2 city province zoneCode zip country countryCode phoneNumber formatted";
-  var Q = {
+  var USER_ERRORS = "userErrors { field message }";
+  var QUERIES = {
     order: `query TetherOrder($id:ID!){order(id:$id){id name number processedAt cancelledAt financialStatus fulfillmentStatus statusPageUrl requiresShipping totalPrice{${MONEY}}subtotal{${MONEY}}totalShipping{${MONEY}}totalTax{${MONEY}}shippingAddress{${ADDRESS}}billingAddress{${ADDRESS}}lineItems(first:50){nodes{id name title variantTitle quantity sku image{url altText}price{${MONEY}}totalPrice{${MONEY}}suggestedReturnReasonDefinitions(first:10){nodes{id name handle}}}}fulfillments(first:10){nodes{id status createdAt estimatedDeliveryAt latestShipmentStatus trackingInformation{company number url}}}returnInformation{returnableLineItems(first:50){nodes{quantity lineItem{id}}}}returns(first:10){nodes{id status}}}}`,
     addresses: `query TetherAddresses{customer{defaultAddress{id}addresses(first:20){nodes{${ADDRESS}}}}}`,
     subscriptions: `query TetherSubscriptions{customer{subscriptionContracts(first:20,reverse:true){nodes{id status nextBillingDate currencyCode deliveryPrice{${MONEY}}deliveryPolicy{interval intervalCount{count}}lines(first:20){nodes{id name title variantTitle quantity sku currentPrice{${MONEY}}lineDiscountedPrice{${MONEY}}image{url altText}}}upcomingBillingCycles(first:3){nodes{cycleIndex skipped billingAttemptExpectedDate}}}}}}`,
     contract: `query TetherContract($id:ID!){customer{subscriptionContract(id:$id){id status upcomingBillingCycles(first:3){nodes{cycleIndex skipped}}}}}`
   };
-  var M = {
-    profile: "mutation TetherProfile($input: CustomerUpdateInput!) { customerUpdate(input: $input) { customer { firstName lastName } userErrors { field message } } }",
-    addressCreate: `mutation TetherAddressCreate($address:CustomerAddressInput!,$default:Boolean){customerAddressCreate(address:$address,defaultAddress:$default){customerAddress{${ADDRESS}}userErrors{field message}}}`,
-    addressUpdate: `mutation TetherAddressUpdate($id:ID!,$address:CustomerAddressInput,$default:Boolean){customerAddressUpdate(addressId:$id,address:$address,defaultAddress:$default){customerAddress{${ADDRESS}}userErrors{field message}}}`,
-    addressDelete: "mutation TetherAddressDelete($id: ID!) { customerAddressDelete(addressId: $id) { deletedAddressId userErrors { field message } } }",
-    pause: "mutation TetherPause($id: ID!) { subscriptionContractPause(subscriptionContractId: $id) { contract { id status } userErrors { field message } } }",
-    resume: "mutation TetherResume($id: ID!) { subscriptionContractActivate(subscriptionContractId: $id) { contract { id status } userErrors { field message } } }",
-    cancel: "mutation TetherCancel($id: ID!) { subscriptionContractCancel(subscriptionContractId: $id) { contract { id status } userErrors { field message } } }",
-    skip: "mutation TetherSkip($input: SubscriptionBillingCycleInput!) { subscriptionBillingCycleSkip(billingCycleInput: $input) { billingCycle { cycleIndex skipped } userErrors { field message } } }",
-    unskip: "mutation TetherUnskip($input: SubscriptionBillingCycleInput!) { subscriptionBillingCycleUnskip(billingCycleInput: $input) { billingCycle { cycleIndex skipped } userErrors { field message } } }",
-    returnRequest: "mutation TetherReturn($orderId: ID!, $lines: [RequestedLineItemInput!]!) { orderRequestReturn(orderId: $orderId, requestedLineItems: $lines) { return { id status } userErrors { field message } } }"
+  var MUTATIONS = {
+    profile: `mutation TetherProfile($input:CustomerUpdateInput!){customerUpdate(input:$input){customer{firstName lastName}${USER_ERRORS}}}`,
+    addressCreate: `mutation TetherAddressCreate($address:CustomerAddressInput!,$default:Boolean){customerAddressCreate(address:$address,defaultAddress:$default){customerAddress{${ADDRESS}}${USER_ERRORS}}}`,
+    addressUpdate: `mutation TetherAddressUpdate($id:ID!,$address:CustomerAddressInput,$default:Boolean){customerAddressUpdate(addressId:$id,address:$address,defaultAddress:$default){customerAddress{${ADDRESS}}${USER_ERRORS}}}`,
+    addressDelete: `mutation TetherAddressDelete($id:ID!){customerAddressDelete(addressId:$id){deletedAddressId ${USER_ERRORS}}}`,
+    returnRequest: `mutation TetherReturn($orderId:ID!,$lines:[RequestedLineItemInput!]!){orderRequestReturn(orderId:$orderId,requestedLineItems:$lines){return{id status}${USER_ERRORS}}}`
   };
-  var InputError = class extends Error {
+  var SUBSCRIPTION_ACTIONS = {
+    pause: {
+      document: `mutation TetherPause($id:ID!){subscriptionContractPause(subscriptionContractId:$id){contract{id status}${USER_ERRORS}}}`,
+      payload: "subscriptionContractPause",
+      input: "contract"
+    },
+    resume: {
+      document: `mutation TetherResume($id:ID!){subscriptionContractActivate(subscriptionContractId:$id){contract{id status}${USER_ERRORS}}}`,
+      payload: "subscriptionContractActivate",
+      input: "contract"
+    },
+    cancel: {
+      document: `mutation TetherCancel($id:ID!){subscriptionContractCancel(subscriptionContractId:$id){contract{id status}${USER_ERRORS}}}`,
+      payload: "subscriptionContractCancel",
+      input: "contract"
+    },
+    skip: {
+      document: `mutation TetherSkip($input:SubscriptionBillingCycleInput!){subscriptionBillingCycleSkip(billingCycleInput:$input){billingCycle{cycleIndex skipped}${USER_ERRORS}}}`,
+      payload: "subscriptionBillingCycleSkip",
+      input: "billingCycle"
+    },
+    unskip: {
+      document: `mutation TetherUnskip($input:SubscriptionBillingCycleInput!){subscriptionBillingCycleUnskip(billingCycleInput:$input){billingCycle{cycleIndex skipped}${USER_ERRORS}}}`,
+      payload: "subscriptionBillingCycleUnskip",
+      input: "billingCycle"
+    }
   };
-  var gid = (type) => new RegExp(`^gid://shopify/${type}/\\d+(\\?[\\w=&.-]{1,80})?$`);
-  var IDS = {
-    Order: gid("Order"),
-    CustomerAddress: gid("CustomerAddress"),
-    SubscriptionContract: gid("SubscriptionContract"),
-    LineItem: gid("LineItem"),
-    ReturnReasonDefinition: gid("ReturnReasonDefinition")
-  };
-  function idOf(type, value) {
-    const v = /^\d{1,20}$/.test(String(value ?? "")) ? `gid://shopify/${type}/${value}` : String(value ?? "");
-    if (!IDS[type].test(v)) throw new InputError(`${type} id`);
-    return v;
+  function isSubscriptionAction(value) {
+    return typeof value === "string" && Object.hasOwn(SUBSCRIPTION_ACTIONS, value);
   }
-  var text = (v, max = 255) => {
-    if (v == null || v === "") return void 0;
-    if (typeof v !== "string" && typeof v !== "number") throw new InputError("text");
-    const s = String(v).replace(/[\u0000-\u001f\u007f]/g, "").trim();
-    if (s.length > max) throw new InputError("too long");
-    return s;
-  };
-  var ADDRESS_FIELDS = ["firstName", "lastName", "company", "address1", "address2", "city", "zip", "zoneCode", "phoneNumber"];
-  function addressInput(a = {}, { clear = false } = {}) {
-    if (!a || typeof a !== "object" || Array.isArray(a)) throw new InputError("address");
+  function field(value, key) {
+    if (value === null || typeof value !== "object") return void 0;
+    return (
+      /** @type {Record<string, unknown>} */
+      value[key]
+    );
+  }
+  function nodes(value) {
+    const list = field(value, "nodes");
+    return Array.isArray(list) ? list : [];
+  }
+  var NUMERIC_ID = /^\d{1,20}$/;
+  function idOf(type, value) {
+    const raw = typeof value === "string" || typeof value === "number" ? String(value) : "";
+    const id = NUMERIC_ID.test(raw) ? `gid://shopify/${type}/${raw}` : raw;
+    if (!new RegExp(`^gid://shopify/${type}/\\d+(\\?[\\w=&.-]{1,80})?$`).test(id)) throw new InputError(`${type} id`);
+    return id;
+  }
+  var CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/g;
+  function text(value, maxLength = 255) {
+    if (value === null || value === void 0 || value === "") return void 0;
+    if (typeof value !== "string" && typeof value !== "number") throw new InputError("text");
+    const clean = String(value).replace(CONTROL_CHARACTERS, "").trim();
+    if (clean.length > maxLength) throw new InputError("too long");
+    return clean;
+  }
+  var ADDRESS_FIELDS = [
+    "firstName",
+    "lastName",
+    "company",
+    "address1",
+    "address2",
+    "city",
+    "zip",
+    "zoneCode",
+    "phoneNumber"
+  ];
+  function addressInput(address, { clear = false } = {}) {
+    if (address === null || typeof address !== "object" || Array.isArray(address)) throw new InputError("address");
+    const source = (
+      /** @type {Record<string, unknown>} */
+      address
+    );
     const out = {};
-    ADDRESS_FIELDS.forEach((k) => {
-      const v = text(a[k]);
-      if (v !== void 0) out[k] = v;
-      else if (clear && k in a && (a[k] === "" || a[k] === null)) out[k] = "";
-    });
-    if (a.countryCode != null && a.countryCode !== "") {
-      const c = String(a.countryCode).toUpperCase();
-      if (!/^[A-Z]{2}$/.test(c)) throw new InputError("countryCode");
-      out.countryCode = c;
+    for (const key of ADDRESS_FIELDS) {
+      const value = text(source[key]);
+      if (value !== void 0) out[key] = value;
+      else if (clear && key in source && (source[key] === "" || source[key] === null)) out[key] = "";
+    }
+    const country = text(source["countryCode"]);
+    if (country !== void 0) {
+      const code = country.toUpperCase();
+      if (!/^[A-Z]{2}$/.test(code)) throw new InputError("countryCode");
+      out["countryCode"] = code;
     }
     return out;
   }
-  var userErrors = (payload) => {
-    const errs = payload?.userErrors || [];
-    if (errs.length) {
-      const e = new InputError(errs.map((x) => x.message).join(" | "));
-      e.userErrors = errs;
-      throw e;
+  function payloadOf(data, name) {
+    const payload = field(data, name);
+    const errors = field(payload, "userErrors");
+    if (Array.isArray(errors) && errors.length) {
+      const userErrors = (
+        /** @type {UserError[]} */
+        errors
+      );
+      throw new InputError(userErrors.map((error) => error.message).join(" | "), { userErrors });
     }
     return payload;
-  };
+  }
   var ops = {
     async order(ask, { id }) {
-      const data = await ask(Q.order, { id: idOf("Order", id) });
-      return { order: data?.order || null };
+      const data = await ask(QUERIES.order, { id: idOf("Order", id) });
+      return { order: field(data, "order") ?? null };
     },
     async profile(ask, { firstName, lastName }) {
       const input = {};
-      if (firstName !== void 0) input.firstName = text(firstName, 100) ?? "";
-      if (lastName !== void 0) input.lastName = text(lastName, 100) ?? "";
+      if (firstName !== void 0) input["firstName"] = text(firstName, 100) ?? "";
+      if (lastName !== void 0) input["lastName"] = text(lastName, 100) ?? "";
       if (!Object.keys(input).length) throw new InputError("nothing to change");
-      const p = userErrors((await ask(M.profile, { input }))?.customerUpdate);
-      return { customer: p.customer };
+      const payload = payloadOf(await ask(MUTATIONS.profile, { input }), "customerUpdate");
+      return { customer: field(payload, "customer") };
     },
     async addresses(ask) {
-      const c = (await ask(Q.addresses, {}))?.customer;
-      const def = c?.defaultAddress?.id || null;
-      return { addresses: (c?.addresses?.nodes || []).map((a) => ({ ...a, isDefault: a.id === def })) };
+      const customer = field(await ask(QUERIES.addresses, {}), "customer");
+      const defaultId = field(field(customer, "defaultAddress"), "id") ?? null;
+      const addresses2 = nodes(field(customer, "addresses")).map((address) => ({
+        .../** @type {object} */
+        address,
+        isDefault: field(address, "id") === defaultId
+      }));
+      return { addresses: addresses2 };
     },
     async saveAddress(ask, { id, address, isDefault }) {
-      const a = addressInput(address || {}, { clear: Boolean(id) });
-      const def = isDefault === true ? true : void 0;
-      const p = id ? userErrors((await ask(M.addressUpdate, { id: idOf("CustomerAddress", id), address: Object.keys(a).length ? a : null, default: def ?? null }))?.customerAddressUpdate) : userErrors((await ask(M.addressCreate, { address: a, default: def ?? false }))?.customerAddressCreate);
-      return { address: p.customerAddress };
+      const fields = addressInput(address ?? {}, { clear: Boolean(id) });
+      const makeDefault = isDefault === true;
+      if (!id) {
+        const created = await ask(MUTATIONS.addressCreate, { address: fields, default: makeDefault });
+        return { address: field(payloadOf(created, "customerAddressCreate"), "customerAddress") };
+      }
+      const updated = await ask(MUTATIONS.addressUpdate, {
+        id: idOf("CustomerAddress", id),
+        address: Object.keys(fields).length ? fields : null,
+        default: makeDefault ? true : null
+      });
+      return { address: field(payloadOf(updated, "customerAddressUpdate"), "customerAddress") };
     },
     async deleteAddress(ask, { id }) {
-      const p = userErrors((await ask(M.addressDelete, { id: idOf("CustomerAddress", id) }))?.customerAddressDelete);
-      return { deleted: p.deletedAddressId };
+      const data = await ask(MUTATIONS.addressDelete, { id: idOf("CustomerAddress", id) });
+      return { deleted: field(payloadOf(data, "customerAddressDelete"), "deletedAddressId") };
     },
     async subscriptions(ask) {
-      return { subscriptions: (await ask(Q.subscriptions, {}))?.customer?.subscriptionContracts?.nodes || [] };
+      const contracts = field(field(await ask(QUERIES.subscriptions, {}), "customer"), "subscriptionContracts");
+      return { subscriptions: nodes(contracts) };
     },
     async subscription(ask, { id, action }) {
-      if (!["pause", "resume", "skip", "unskip", "cancel"].includes(action)) throw new InputError("action");
+      if (!isSubscriptionAction(action)) throw new InputError("action");
       const contractId = idOf("SubscriptionContract", id);
-      const contract = (await ask(Q.contract, { id: contractId }))?.customer?.subscriptionContract;
-      if (!contract) {
-        const e = new InputError("not found");
-        e.status = 404;
-        throw e;
+      const contract = field(field(await ask(QUERIES.contract, { id: contractId }), "customer"), "subscriptionContract");
+      if (!contract) throw new InputError("not found", { status: 404 });
+      const { document: document2, payload, input } = SUBSCRIPTION_ACTIONS[action];
+      if (input === "contract") {
+        return { contract: field(payloadOf(await ask(document2, { id: contractId }), payload), "contract") };
       }
-      if (action === "skip" || action === "unskip") {
-        const cycles = contract.upcomingBillingCycles?.nodes || [];
-        const cycle = action === "skip" ? cycles.find((c) => !c.skipped) : cycles.find((c) => c.skipped);
-        if (!cycle) throw new InputError(action === "skip" ? "no upcoming delivery to skip" : "nothing skipped");
-        const p2 = userErrors((await ask(M[action], { input: { contractId, selector: { index: cycle.cycleIndex } } }))?.[action === "skip" ? "subscriptionBillingCycleSkip" : "subscriptionBillingCycleUnskip"]);
-        return { billingCycle: p2.billingCycle };
-      }
-      const name = { pause: "subscriptionContractPause", resume: "subscriptionContractActivate", cancel: "subscriptionContractCancel" }[action];
-      const p = userErrors((await ask(M[action], { id: contractId }))?.[name]);
-      return { contract: p.contract };
+      const cycles = nodes(field(contract, "upcomingBillingCycles"));
+      const wantSkipped = action === "unskip";
+      const cycle = cycles.find((candidate) => Boolean(field(candidate, "skipped")) === wantSkipped);
+      if (!cycle) throw new InputError(wantSkipped ? "nothing skipped" : "no upcoming delivery to skip");
+      const variables = { input: { contractId, selector: { index: field(cycle, "cycleIndex") } } };
+      return { billingCycle: field(payloadOf(await ask(document2, variables), payload), "billingCycle") };
     },
-    async requestReturn(ask, { orderId, lines: lines2 }) {
-      const oid = idOf("Order", orderId);
-      if (!Array.isArray(lines2) || !lines2.length || lines2.length > 50) throw new InputError("lines");
-      const requested = lines2.map((l) => {
-        const q = Number(l?.quantity);
-        if (!Number.isInteger(q) || q < 1 || q > 1e3) throw new InputError("quantity");
-        const out = { lineItemId: idOf("LineItem", l.lineItemId), quantity: q };
-        if (l.reasonId) out.returnReasonDefinitionId = idOf("ReturnReasonDefinition", l.reasonId);
-        const note = text(l.note, 300);
-        if (note) out.customerNote = note;
+    async requestReturn(ask, { orderId, lines }) {
+      const order2 = idOf("Order", orderId);
+      if (!Array.isArray(lines) || !lines.length || lines.length > 50) throw new InputError("lines");
+      const requested = lines.map((line) => {
+        const quantity = Number(field(line, "quantity"));
+        if (!Number.isInteger(quantity) || quantity < 1 || quantity > 1e3) throw new InputError("quantity");
+        const out = { lineItemId: idOf("LineItem", field(line, "lineItemId")), quantity };
+        const reason = field(line, "reasonId");
+        if (reason) out["returnReasonDefinitionId"] = idOf("ReturnReasonDefinition", reason);
+        const note = text(field(line, "note"), 300);
+        if (note) out["customerNote"] = note;
         return out;
       });
-      const p = userErrors((await ask(M.returnRequest, { orderId: oid, lines: requested }))?.orderRequestReturn);
-      return { return: p.return };
+      const data = await ask(MUTATIONS.returnRequest, { orderId: order2, lines: requested });
+      return { return: field(payloadOf(data, "orderRequestReturn"), "return") };
     }
   };
 
-  // src/account-pages.js
-  var ctx = null;
-  var bound = false;
-  function setup(c) {
-    ctx = c;
+  // src/account/operations.js
+  var context = null;
+  function setup(shared) {
+    context = shared;
   }
-  var https = (u) => {
-    try {
-      return new URL(u).protocol === "https:";
-    } catch {
-      return false;
-    }
-  };
-  var date = (s) => {
-    try {
-      return new Date(s).toLocaleDateString(cfg.locale || void 0);
-    } catch {
-      return s;
-    }
-  };
+  function pagesContext() {
+    if (!context) throw new Error("account-pages: loaded without the account part");
+    return context;
+  }
   var ROUTE = {
-    order: (i) => ["GET", `/order?id=${encodeURIComponent(i.id)}`],
+    order: (input) => ["GET", `/order?id=${encodeURIComponent(String(input["id"]))}`],
     addresses: () => ["GET", "/addresses"],
     subscriptions: () => ["GET", "/subscriptions"],
     profile: () => ["POST", "/profile"],
@@ -199,394 +261,663 @@
     requestReturn: () => ["POST", "/return"]
   };
   async function run(name, input = {}) {
-    const { server, serverFetch, query } = ctx;
-    if (server()) {
+    const { serverBase, serverFetch, query } = pagesContext();
+    if (serverBase()) {
       const [method, path] = ROUTE[name](input);
-      const data = await serverFetch(path, method === "POST" ? { method, body: input } : {});
-      if (data.loggedIn === false) throw new TetherError("Not logged in", { code: "NOT_LOGGED_IN", status: 401 });
-      return data;
+      const answer = await serverFetch(path, method === "POST" ? { method, body: input } : {});
+      if (answer.kind === "logged-out") throw new TetherError("Not logged in", { code: "NOT_LOGGED_IN", status: 401 });
+      return answer.data;
     }
+    const operation = ops[name];
+    if (!operation) throw new TetherError(`Customer accounts: no operation ${name}`);
     try {
-      return await ops[name]((q, v) => query(q, v), input);
-    } catch (err) {
-      if (err instanceof InputError) throw new TetherError(err.message, { code: "INVALID", userErrors: err.userErrors });
-      throw err;
+      return await operation(
+        async (document2, variables) => (
+          /** @type {Record<string, unknown> | null} */
+          await query(document2, variables)
+        ),
+        input
+      );
+    } catch (error) {
+      if (!(error instanceof InputError)) throw error;
+      throw new TetherError(error.message, { code: "INVALID", userErrors: error.userErrors });
     }
   }
-  var changed = (what) => {
-    ctx.reset();
+  function changed(what) {
+    pagesContext().reset();
     emit("account-updated", { what });
-  };
-  var order = (id) => run("order", { id }).then((r) => r.order);
-  var updateProfile = ({ firstName, lastName } = {}) => run("profile", { firstName, lastName }).then((r) => {
+  }
+  async function order(id) {
+    const result = await run("order", { id });
+    return (
+      /** @type {OrderDetail | null} */
+      result["order"] ?? null
+    );
+  }
+  async function updateProfile({ firstName, lastName } = {}) {
+    const result = await run("profile", { firstName, lastName });
     changed("profile");
-    return r.customer;
-  });
-  var addresses = () => run("addresses").then((r) => r.addresses);
-  var saveAddress = (address, { id, isDefault } = {}) => run("saveAddress", { id, address, isDefault }).then((r) => {
+    return (
+      /** @type {{ firstName: string | null, lastName: string | null }} */
+      result["customer"]
+    );
+  }
+  async function addresses() {
+    const result = await run("addresses");
+    return (
+      /** @type {CustomerAddress[]} */
+      result["addresses"]
+    );
+  }
+  async function saveAddress(address, { id, isDefault } = {}) {
+    const result = await run("saveAddress", { id, address, isDefault });
     changed("addresses");
-    return r.address;
-  });
-  var deleteAddress = (id) => run("deleteAddress", { id }).then((r) => {
+    return (
+      /** @type {CustomerAddress} */
+      result["address"]
+    );
+  }
+  async function deleteAddress(id) {
+    const result = await run("deleteAddress", { id });
     changed("addresses");
-    return r.deleted;
-  });
-  var subscriptions = () => run("subscriptions").then((r) => r.subscriptions);
-  var subscriptionAction = (id, action) => run("subscription", { id, action }).then((r) => {
+    return (
+      /** @type {string} */
+      result["deleted"]
+    );
+  }
+  async function subscriptions() {
+    const result = await run("subscriptions");
+    return (
+      /** @type {SubscriptionContract[]} */
+      result["subscriptions"]
+    );
+  }
+  async function subscriptionAction(id, action) {
+    const result = await run("subscription", { id, action });
     changed("subscriptions");
-    return r;
-  });
-  var requestReturn = (orderId, lines2) => run("requestReturn", { orderId, lines: lines2 }).then((r) => {
+    return result;
+  }
+  async function requestReturn(orderId, lines) {
+    const result = await run("requestReturn", { orderId, lines });
     changed("orders");
-    return r.return;
+    return (
+      /** @type {{ id: string, status: string }} */
+      result["return"]
+    );
+  }
+
+  // tether-core:shopify-values.js
+  var m4 = window.Tether.__core["shopify-values.js"];
+  var { STORE_ENV_NAMES, formatMoney: formatMoney2, isHttpsUrl, isSecretShopifyToken, productKey, productUrl: productUrl2 } = m4;
+
+  // src/account-links.js
+  function localDate(iso) {
+    try {
+      return new Date(iso).toLocaleDateString(cfg.locale);
+    } catch (error) {
+      if (error instanceof RangeError) return iso;
+      throw error;
+    }
+  }
+
+  // src/account/markup.js
+  function showIn(root, name, conditions) {
+    qsa(root, sel(name)).forEach((el) => {
+      const key = get(el, name) ?? "";
+      if (Object.hasOwn(conditions, key)) show(el, conditions[key] === true);
+    });
+  }
+  var bindsIn = (row, name) => qsa(row, sel(name)).concat(row.matches(sel(name)) ? [row] : []);
+  var enumText = (value) => value ? value.toLowerCase().replace(/_/g, " ") : "";
+  var addressText = (address) => (address?.formatted ?? []).join(", ");
+  var ownValue = (values, key) => Object.hasOwn(values, key) ? values[key] : void 0;
+
+  // src/account/order-lines.js
+  var lineTexts = (line, returnable) => ({
+    title: line.title || line.name,
+    "variant-title": line.variantTitle || "",
+    quantity: String(line.quantity),
+    price: formatMoney(line.price),
+    total: formatMoney(line.totalPrice),
+    sku: line.sku || "",
+    returnable: returnable === null ? void 0 : String(returnable)
   });
-  var lower = (v) => v ? String(v).toLowerCase().replace(/_/g, " ") : "";
-  var lines = (a) => (a?.formatted || []).join(", ");
-  var showIn = (root, name, conds) => qsa(root, sel(name)).forEach((el) => {
-    const k = get(el, name);
-    if (k in conds) show(el, Boolean(conds[k]));
-  });
-  var showGlobal = (root, conds) => showIn(root, "show", conds);
-  function fillLines(box, items, returnable = null) {
-    repeat(box, items, (row, l) => {
-      const can = returnable ? returnable.get(l.id) || 0 : 0;
-      row.dataset.tetherLine = l.id;
-      qsa(row, sel("order-line")).concat(row.matches(sel("order-line")) ? [row] : []).forEach((el) => {
-        const k = get(el, "order-line");
-        if (k === "image") {
-          if (l.image) setImage(el, l.image.url, l.image.altText || l.title);
-          return;
-        }
-        const v = { title: l.title || l.name, "variant-title": l.variantTitle || "", quantity: String(l.quantity), price: l.price ? formatMoney(l.price) : "", total: l.totalPrice ? formatMoney(l.totalPrice) : "", sku: l.sku || "", returnable: String(can) }[k];
-        if (v != null) setText(el, v);
-      });
-      showIn(row, "order-line-show", { returnable: can > 0 });
-      qsa(row, sel("return-quantity")).forEach((input) => {
-        input.max = String(can);
-        input.min = "0";
-        if (!input.value) input.value = "0";
-        input.disabled = can < 1;
-      });
-      qsa(row, `select${sel("return-reason")}`).forEach((select) => {
-        const reasons = l.suggestedReturnReasonDefinitions?.nodes || [];
-        if (select.dataset.tetherFilled !== l.id) {
-          select.dataset.tetherFilled = l.id;
-          reasons.forEach((r) => select.appendChild(new Option(r.name, r.id)));
-        }
+  var isInput = (el) => el.tagName === "INPUT";
+  function fillReturnControls(row, line, returnable) {
+    showIn(row, "order-line-show", { returnable: returnable > 0 });
+    qsa(row, sel("return-quantity")).forEach((input) => {
+      if (!isInput(input)) return;
+      input.max = String(returnable);
+      input.min = "0";
+      if (!input.value) input.value = "0";
+      input.disabled = returnable < 1;
+    });
+    qsa(row, `select${sel("return-reason")}`).forEach((select) => {
+      if (select.dataset["tetherFilled"] === line.id) return;
+      select.dataset["tetherFilled"] = line.id;
+      (line.suggestedReturnReasonDefinitions?.nodes ?? []).forEach((reason) => {
+        select.appendChild(new Option(reason.name, reason.id));
       });
     });
   }
-  var SCOPE = { order: sel("order") };
-  async function renderOrder(el) {
+  function fillLines(box, lines, returns) {
+    repeat(box, lines, (row, line) => {
+      const id = line.id;
+      const returnable = returns && id ? returns.get(id) ?? 0 : null;
+      if (id) row.dataset["tetherLine"] = id;
+      const texts = lineTexts(line, returnable);
+      bindsIn(row, "order-line").forEach((el) => {
+        const key = get(el, "order-line") ?? "";
+        if (key === "image") {
+          if (line.image) setImage(el, line.image.url, line.image.altText || line.title);
+          return;
+        }
+        const text2 = ownValue(texts, key);
+        if (text2 !== void 0) setText(el, text2);
+      });
+      if (id && returnable !== null) fillReturnControls(row, { ...line, id }, returnable);
+    });
+  }
+
+  // src/account/order-page.js
+  function orderKey(el) {
     const raw = get(el, "order") || "";
-    const key = raw.startsWith("url:") ? new URL(window.location.href).searchParams.get(raw.slice(4) || "id") : raw;
-    const state = (s) => el.setAttribute(attr("order-state"), s);
-    if (!key) {
-      state("not-found");
-      showIn(el, "order-show", { "not-found": true });
-      return;
-    }
-    state("loading");
-    showIn(el, "order-show", { loading: true, ready: false, "not-found": false, error: false });
-    let o;
-    try {
-      o = await order(key);
-    } catch (err) {
-      reportError(err, "order");
-      state("error");
-      showIn(el, "order-show", { loading: false, error: true });
-      return;
-    }
-    if (!o) {
-      state("not-found");
-      showIn(el, "order-show", { loading: false, "not-found": true });
-      return;
-    }
-    el.dataset.tetherOrderId = o.id;
-    const returnable = new Map((o.returnInformation?.returnableLineItems?.nodes || []).map((r) => [r.lineItem?.id, r.quantity]));
-    const ships = o.fulfillments?.nodes || [];
-    qsa(el, sel("order-bind")).forEach((b) => {
-      const k = get(b, "order-bind");
-      if (k === "url") {
-        if (https(o.statusPageUrl)) b.setAttribute("href", o.statusPageUrl);
+    if (!raw.startsWith("url:")) return raw;
+    return new URL(window.location.href).searchParams.get(raw.slice("url:".length) || "id");
+  }
+  function showOrderState(el, state) {
+    el.setAttribute(attr("order-state"), state);
+    showIn(el, "order-show", {
+      loading: state === "loading",
+      ready: false,
+      "not-found": state === "not-found",
+      error: state === "error"
+    });
+  }
+  var orderTexts = (detail) => ({
+    name: detail.name,
+    date: localDate(detail.processedAt),
+    total: formatMoney(detail.totalPrice),
+    subtotal: formatMoney(detail.subtotal),
+    shipping: formatMoney(detail.totalShipping),
+    tax: formatMoney(detail.totalTax),
+    status: enumText(detail.financialStatus),
+    fulfillment: enumText(detail.fulfillmentStatus),
+    "shipping-address": addressText(detail.shippingAddress),
+    "billing-address": addressText(detail.billingAddress),
+    items: detail.lineItems.nodes.map((line) => `${line.quantity}\xD7 ${line.title || line.name}`).join(", "),
+    cancelled: detail.cancelledAt ? localDate(detail.cancelledAt) : ""
+  });
+  function fillFulfillment(row, fulfillment) {
+    const tracking = fulfillment.trackingInformation[0];
+    const texts = {
+      status: enumText(fulfillment.latestShipmentStatus || fulfillment.status),
+      date: localDate(fulfillment.createdAt),
+      eta: fulfillment.estimatedDeliveryAt ? localDate(fulfillment.estimatedDeliveryAt) : "",
+      company: tracking?.company || "",
+      number: tracking?.number || ""
+    };
+    bindsIn(row, "fulfillment-bind").forEach((el) => {
+      const key = get(el, "fulfillment-bind") ?? "";
+      if (key === "url") {
+        const url = tracking?.url;
+        const linked = isHttpsUrl(url);
+        if (linked && url) el.setAttribute("href", url);
+        show(el, linked);
         return;
       }
-      const v = {
-        name: o.name,
-        date: date(o.processedAt),
-        total: formatMoney(o.totalPrice),
-        subtotal: o.subtotal ? formatMoney(o.subtotal) : "",
-        shipping: o.totalShipping ? formatMoney(o.totalShipping) : "",
-        tax: o.totalTax ? formatMoney(o.totalTax) : "",
-        status: lower(o.financialStatus),
-        fulfillment: lower(o.fulfillmentStatus),
-        "shipping-address": lines(o.shippingAddress),
-        "billing-address": lines(o.billingAddress),
-        items: (o.lineItems?.nodes || []).map((l) => `${l.quantity}\xD7 ${l.title || l.name}`).join(", "),
-        cancelled: o.cancelledAt ? date(o.cancelledAt) : ""
-      }[k];
-      if (v != null) setText(b, v);
+      const text2 = ownValue(texts, key);
+      if (text2 !== void 0) setText(el, text2);
     });
-    qsa(el, sel("order-lines")).forEach((box) => fillLines(box, o.lineItems?.nodes || [], returnable));
-    qsa(el, sel("order-fulfillments")).forEach((box) => repeat(box, ships, (row, f) => {
-      const t = f.trackingInformation?.[0] || {};
-      qsa(row, sel("fulfillment-bind")).concat(row.matches(sel("fulfillment-bind")) ? [row] : []).forEach((b) => {
-        const k = get(b, "fulfillment-bind");
-        if (k === "url") {
-          const ok = https(t.url);
-          if (ok) b.setAttribute("href", t.url);
-          show(b, ok);
-          return;
-        }
-        const v = { status: lower(f.latestShipmentStatus || f.status), date: date(f.createdAt), eta: f.estimatedDeliveryAt ? date(f.estimatedDeliveryAt) : "", company: t.company || "", number: t.number || "" }[k];
-        if (v != null) setText(b, v);
-      });
-    }));
+  }
+  function fillOrder(el, detail) {
+    const returnable = new Map(
+      (detail.returnInformation?.returnableLineItems.nodes ?? []).map((entry) => [
+        entry.lineItem?.id ?? "",
+        entry.quantity
+      ])
+    );
+    const shipments = detail.fulfillments.nodes;
+    const texts = orderTexts(detail);
+    qsa(el, sel("order-bind")).forEach((bind) => {
+      const key = get(bind, "order-bind") ?? "";
+      if (key === "url") {
+        if (detail.statusPageUrl && isHttpsUrl(detail.statusPageUrl)) bind.setAttribute("href", detail.statusPageUrl);
+        return;
+      }
+      const text2 = ownValue(texts, key);
+      if (text2 !== void 0) setText(bind, text2);
+    });
+    qsa(el, sel("order-lines")).forEach((box) => {
+      fillLines(box, detail.lineItems.nodes, returnable);
+    });
+    qsa(el, sel("order-fulfillments")).forEach((box) => {
+      repeat(box, shipments, fillFulfillment);
+    });
+    const returnRequested = el.dataset["tetherReturned"] === "1";
     showIn(el, "order-show", {
       loading: false,
       ready: true,
       error: false,
       "not-found": false,
-      cancelled: Boolean(o.cancelledAt),
-      shipped: ships.length > 0,
-      returnable: [...returnable.values()].some((q) => q > 0),
-      "has-returns": el.dataset.tetherReturned !== "1" && (o.returns?.nodes || []).length > 0,
-      "return-requested": el.dataset.tetherReturned === "1"
+      cancelled: Boolean(detail.cancelledAt),
+      shipped: shipments.length > 0,
+      returnable: [...returnable.values()].some((quantity) => quantity > 0),
+      "has-returns": !returnRequested && detail.returns.nodes.length > 0,
+      "return-requested": returnRequested
     });
-    state("ready");
+    el.setAttribute(attr("order-state"), "ready");
   }
-  async function renderProfile(form) {
-    const c = await ctx.customer().catch(() => null);
-    if (!c) return;
-    ["firstName", "lastName"].forEach((n) => {
-      const i = form.elements?.[n];
-      if (i && !i.dataset.tetherTouched) i.value = c[n] || "";
+  async function renderOrder(el) {
+    const key = orderKey(el);
+    if (!key) {
+      el.setAttribute(attr("order-state"), "not-found");
+      showIn(el, "order-show", { "not-found": true });
+      return;
+    }
+    showOrderState(el, "loading");
+    let detail;
+    try {
+      detail = await order(key);
+    } catch (error) {
+      reportError(error, "order");
+      showOrderState(el, "error");
+      return;
+    }
+    if (!detail) {
+      showOrderState(el, "not-found");
+      return;
+    }
+    el.dataset["tetherOrderId"] = detail.id;
+    fillOrder(el, detail);
+  }
+
+  // src/account/addresses-view.js
+  var shown = [];
+  var shownAddress = (id) => shown.find((address) => address.id === id);
+  var addressTexts = (address) => ({
+    formatted: addressText(address),
+    name: [address.firstName, address.lastName].filter(Boolean).join(" "),
+    company: address.company || "",
+    address1: address.address1 || "",
+    address2: address.address2 || "",
+    city: address.city || "",
+    zip: address.zip || "",
+    province: address.province || "",
+    country: address.country || "",
+    phone: address.phoneNumber || ""
+  });
+  function fillAddress(row, address) {
+    row.dataset["tetherAddress"] = address.id;
+    const texts = addressTexts(address);
+    bindsIn(row, "address-bind").forEach((el) => {
+      const text2 = ownValue(texts, get(el, "address-bind") ?? "");
+      if (text2 !== void 0) setText(el, text2);
     });
+    showIn(row, "address-show", { default: address.isDefault, "not-default": !address.isDefault });
   }
-  var addressCache = null;
   async function renderAddresses(root) {
     const boxes = qsa(root, sel("addresses"));
     if (!boxes.length) return;
-    showGlobal(root, { "addresses-loading": true, "addresses-empty": false });
+    showIn(root, "show", { "addresses-loading": true, "addresses-empty": false });
     let list;
     try {
-      list = addressCache = await addresses();
-    } catch (err) {
-      reportError(err, "addresses");
-      showGlobal(root, { "addresses-loading": false, "addresses-error": true });
+      list = await addresses();
+    } catch (error) {
+      reportError(error, "addresses");
+      showIn(root, "show", { "addresses-loading": false, "addresses-error": true });
       return;
     }
-    showGlobal(root, { "addresses-loading": false, "addresses-empty": list.length === 0, "addresses-error": false });
-    boxes.forEach((box) => repeat(box, list, (row, a) => {
-      row.dataset.tetherAddress = a.id;
-      qsa(row, sel("address-bind")).concat(row.matches(sel("address-bind")) ? [row] : []).forEach((b) => {
-        const v = { formatted: lines(a), name: [a.firstName, a.lastName].filter(Boolean).join(" "), company: a.company || "", address1: a.address1 || "", address2: a.address2 || "", city: a.city || "", zip: a.zip || "", province: a.province || "", country: a.country || "", phone: a.phoneNumber || "" }[get(b, "address-bind")];
-        if (v != null) setText(b, v);
-      });
-      showIn(row, "address-show", { default: a.isDefault, "not-default": !a.isDefault });
-    }));
+    shown = list;
+    showIn(root, "show", { "addresses-loading": false, "addresses-empty": list.length === 0, "addresses-error": false });
+    boxes.forEach((box) => {
+      repeat(box, list, fillAddress);
+    });
   }
-  var SUB_ACTIONS = ["pause", "resume", "skip", "unskip", "cancel"];
-  function subConds(c) {
-    const next = c.upcomingBillingCycles?.nodes?.[0];
-    const st = c.status;
+
+  // src/account/subscriptions-view.js
+  function conditionsOf(contract) {
+    const next = contract.upcomingBillingCycles.nodes[0];
+    const status = contract.status;
+    const active = status === "ACTIVE";
     return {
-      active: st === "ACTIVE",
-      paused: st === "PAUSED",
-      cancelled: st === "CANCELLED",
-      expired: st === "EXPIRED",
-      failed: st === "FAILED",
+      active,
+      paused: status === "PAUSED",
+      cancelled: status === "CANCELLED",
+      expired: status === "EXPIRED",
+      failed: status === "FAILED",
       skipped: Boolean(next?.skipped),
-      "can-pause": st === "ACTIVE",
-      "can-resume": st === "PAUSED" || st === "FAILED",
-      "can-skip": st === "ACTIVE" && Boolean(next) && !next.skipped,
-      "can-unskip": st === "ACTIVE" && Boolean(next?.skipped),
-      "can-cancel": st === "ACTIVE" || st === "PAUSED" || st === "FAILED"
+      "can-pause": active,
+      "can-resume": status === "PAUSED" || status === "FAILED",
+      "can-skip": active && next !== void 0 && !next.skipped,
+      "can-unskip": active && Boolean(next?.skipped),
+      "can-cancel": active || status === "PAUSED" || status === "FAILED"
     };
+  }
+  function intervalText(contract) {
+    const unit = enumText(contract.deliveryPolicy?.interval);
+    if (!unit) return "";
+    const count = contract.deliveryPolicy?.intervalCount?.count ?? 1;
+    return count <= 1 ? unit : `${count} ${unit}s`;
+  }
+  function contractTexts(contract) {
+    const lines = contract.lines.nodes;
+    const total = lines.reduce((sum, line) => sum + Number.parseFloat(line.lineDiscountedPrice?.amount ?? "0"), 0);
+    return {
+      status: enumText(contract.status),
+      next: contract.nextBillingDate ? localDate(contract.nextBillingDate) : "",
+      interval: intervalText(contract),
+      products: lines.map((line) => `${line.quantity}\xD7 ${line.title}`).join(", "),
+      total: lines.length ? formatMoney({ amount: String(total), currencyCode: contract.currencyCode }) : "",
+      delivery: formatMoney(contract.deliveryPrice)
+    };
+  }
+  function fillLine(row, line) {
+    const texts = {
+      title: line.title,
+      "variant-title": line.variantTitle || "",
+      quantity: String(line.quantity),
+      price: formatMoney(line.currentPrice)
+    };
+    bindsIn(row, "subscription-line").forEach((el) => {
+      const key = get(el, "subscription-line") ?? "";
+      if (key === "image") {
+        if (line.image) setImage(el, line.image.url, line.image.altText || line.title);
+        return;
+      }
+      const text2 = ownValue(texts, key);
+      if (text2 !== void 0) setText(el, text2);
+    });
+  }
+  function fillContract(row, contract) {
+    row.dataset["tetherSubscription"] = contract.id;
+    row.setAttribute(attr("subscription-status"), enumText(contract.status));
+    const texts = contractTexts(contract);
+    qsa(row, sel("subscription-bind")).forEach((el) => {
+      const text2 = ownValue(texts, get(el, "subscription-bind") ?? "");
+      if (text2 !== void 0) setText(el, text2);
+    });
+    qsa(row, sel("subscription-lines")).forEach((box) => {
+      repeat(box, contract.lines.nodes, fillLine);
+    });
+    const conditions = conditionsOf(contract);
+    showIn(row, "subscription-show", conditions);
+    qsa(row, sel("subscription-action")).forEach((button) => {
+      const allowed = ownValue(conditions, `can-${get(button, "subscription-action") ?? ""}`) === true;
+      if ("disabled" in button) button.disabled = !allowed;
+      button.classList.toggle("is-disabled", !allowed);
+    });
   }
   async function renderSubscriptions(root) {
     const boxes = qsa(root, sel("subscriptions"));
     if (!boxes.length) return;
-    showGlobal(root, { "subscriptions-loading": true, "subscriptions-empty": false });
+    showIn(root, "show", { "subscriptions-loading": true, "subscriptions-empty": false });
     let list;
     try {
       list = await subscriptions();
-    } catch (err) {
-      reportError(err, "subscriptions");
-      showGlobal(root, { "subscriptions-loading": false, "subscriptions-error": true });
+    } catch (error) {
+      reportError(error, "subscriptions");
+      showIn(root, "show", { "subscriptions-loading": false, "subscriptions-error": true });
       return;
     }
-    showGlobal(root, { "subscriptions-loading": false, "subscriptions-empty": list.length === 0, "subscriptions-error": false });
-    boxes.forEach((box) => repeat(box, list, (row, c) => {
-      row.dataset.tetherSubscription = c.id;
-      row.setAttribute(attr("subscription-status"), lower(c.status));
-      const ls = c.lines?.nodes || [];
-      const n = c.deliveryPolicy?.intervalCount?.count || 1;
-      const unit = lower(c.deliveryPolicy?.interval);
-      const total = ls.reduce((sum, l) => sum + parseFloat(l.lineDiscountedPrice?.amount || 0), 0);
-      qsa(row, sel("subscription-bind")).forEach((b) => {
-        const k = get(b, "subscription-bind");
-        const v = {
-          status: lower(c.status),
-          next: c.nextBillingDate ? date(c.nextBillingDate) : "",
-          interval: unit ? n === 1 ? unit : `${n} ${unit}s` : "",
-          products: ls.map((l) => `${l.quantity}\xD7 ${l.title}`).join(", "),
-          total: ls.length ? formatMoney({ amount: String(total), currencyCode: c.currencyCode }) : "",
-          delivery: c.deliveryPrice ? formatMoney(c.deliveryPrice) : ""
-        }[k];
-        if (v != null) setText(b, v);
-      });
-      qsa(row, sel("subscription-lines")).forEach((lb) => repeat(lb, ls, (lr, l) => {
-        qsa(lr, sel("subscription-line")).concat(lr.matches(sel("subscription-line")) ? [lr] : []).forEach((b) => {
-          const k = get(b, "subscription-line");
-          if (k === "image") {
-            if (l.image) setImage(b, l.image.url, l.image.altText || l.title);
-            return;
-          }
-          const v = { title: l.title, "variant-title": l.variantTitle || "", quantity: String(l.quantity), price: formatMoney(l.currentPrice) }[k];
-          if (v != null) setText(b, v);
-        });
-      }));
-      const conds = subConds(c);
-      showIn(row, "subscription-show", conds);
-      qsa(row, sel("subscription-action")).forEach((btn) => {
-        const a = get(btn, "subscription-action");
-        const ok = conds[`can-${a}`];
-        btn.disabled = !ok;
-        btn.classList.toggle("is-disabled", !ok);
-      });
-    }));
+    showIn(root, "show", {
+      "subscriptions-loading": false,
+      "subscriptions-empty": list.length === 0,
+      "subscriptions-error": false
+    });
+    boxes.forEach((box) => {
+      repeat(box, list, fillContract);
+    });
   }
-  async function renderPages(root = document) {
-    if (!bound) {
-      bound = true;
-      bindPages();
+
+  // src/account/page-events.js
+  var SUBSCRIPTION_ACTIONS2 = ["pause", "resume", "skip", "unskip", "cancel"];
+  var isSubscriptionAction2 = (value) => SUBSCRIPTION_ACTIONS2.some((action) => action === value);
+  var isInput2 = (el) => el.tagName === "INPUT";
+  var isForm = (el) => el.tagName === "FORM";
+  function fieldsOf(form) {
+    const fields = {};
+    for (const field2 of form.elements) {
+      if (!isInput2(field2) && field2.tagName !== "SELECT" && field2.tagName !== "TEXTAREA") continue;
+      const input = (
+        /** @type {HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement} */
+        field2
+      );
+      if (!input.name || input.type === "submit" || input.type === "button" || input.type === "checkbox") continue;
+      fields[input.name] = input.value;
     }
-    await Promise.all([
-      ...qsa(root, sel("order")).map((el) => renderOrder(el)),
-      ...qsa(root, sel("profile-form")).map((f) => renderProfile(f)),
-      renderAddresses(root),
-      renderSubscriptions(root)
-    ]);
+    return fields;
   }
-  var fieldsOf = (form) => Object.fromEntries([...form.elements].filter((i) => i.name && i.type !== "submit" && i.type !== "button" && i.type !== "checkbox").map((i) => [i.name, i.value]));
-  async function act(el, fn, { error } = {}) {
-    if (el.getAttribute("aria-busy") === "true") return void 0;
+  function messageOf(error) {
+    const userErrors = error instanceof TetherError ? error.userErrors ?? [] : [];
+    const message = userErrors.map((userError) => userError.message).join(" ");
+    if (message) return message;
+    const text2 = error instanceof Error && error.message ? error.message : "Something went wrong";
+    return text2.replace(/^Customer accounts: /, "");
+  }
+  async function act(el, change) {
+    if (el.getAttribute("aria-busy") === "true") return "busy";
     el.classList.add("is-busy");
     el.setAttribute("aria-busy", "true");
     el.setAttribute(attr("form-state"), "pending");
-    qsa(el, sel("form-error")).forEach((e) => setText(e, ""));
+    const errorBoxes = qsa(el, sel("form-error"));
+    errorBoxes.forEach((box) => {
+      setText(box, "");
+    });
     try {
-      const out = await fn();
+      await change();
       el.setAttribute(attr("form-state"), "saved");
-      return out;
-    } catch (err) {
+      return "saved";
+    } catch (error) {
       el.setAttribute(attr("form-state"), "error");
-      const msg = err?.userErrors?.map((u) => u.message).join(" ") || err?.message || "Something went wrong";
-      qsa(el, sel("form-error")).forEach((e) => setText(e, msg.replace(/^Customer accounts: /, "")));
-      if (error) reportError(err, error);
-      return void 0;
+      errorBoxes.forEach((box) => {
+        setText(box, messageOf(error));
+      });
+      return "error";
     } finally {
       el.classList.remove("is-busy");
       el.removeAttribute("aria-busy");
     }
   }
-  function bindPages() {
-    document.addEventListener("submit", (e) => {
-      const f = e.target;
-      if (f.matches?.(sel("profile-form"))) {
-        e.preventDefault();
-        act(f, async () => {
-          await updateProfile(fieldsOf(f));
-          await ctx.bindCustomer?.(document);
-        });
-      } else if (f.matches?.(sel("address-form"))) {
-        e.preventDefault();
-        const id = f.dataset.tetherAddressId || void 0;
-        const isDefault = Boolean(f.elements?.isDefault?.checked);
-        act(f, async () => {
-          await saveAddress(fieldsOf(f), { id, isDefault });
-          f.reset();
-          delete f.dataset.tetherAddressId;
-          await renderAddresses(document);
-        });
+  var confirmed = (button) => {
+    const question = get(button, "confirm");
+    return !question || window.confirm(question);
+  };
+  var addressFormReset = (form) => {
+    form.reset();
+    delete form.dataset["tetherAddressId"];
+  };
+  function onSubmit(event) {
+    const form = event.target;
+    if (!(form instanceof window.HTMLFormElement)) return;
+    if (form.matches(sel("profile-form"))) {
+      event.preventDefault();
+      void act(form, async () => {
+        await updateProfile(fieldsOf(form));
+        await pagesContext().bindCustomer(document);
+      });
+    } else if (form.matches(sel("address-form"))) {
+      event.preventDefault();
+      const id = form.dataset["tetherAddressId"];
+      const box = form.elements.namedItem("isDefault");
+      const isDefault = box instanceof window.HTMLInputElement && box.checked;
+      void act(form, async () => {
+        await saveAddress(fieldsOf(form), { id, isDefault });
+        addressFormReset(form);
+        await renderAddresses(document);
+      });
+    }
+  }
+  function editAddress(id) {
+    const address = shownAddress(id);
+    const form = document.querySelector(sel("address-form"));
+    if (!address || !form || !isForm(form)) return;
+    form.dataset["tetherAddressId"] = address.id;
+    for (const field2 of form.elements) {
+      if (!isInput2(field2) && field2.tagName !== "SELECT" && field2.tagName !== "TEXTAREA") continue;
+      const input = (
+        /** @type {HTMLInputElement} */
+        field2
+      );
+      if (input.name === "isDefault") input.checked = address.isDefault;
+      else if (input.name && Object.hasOwn(address, input.name)) {
+        const value = Object.entries(address).find(([key]) => key === input.name)?.[1];
+        input.value = typeof value === "string" ? value : "";
       }
-    }, true);
-    document.addEventListener("input", (e) => {
-      if (e.target.closest?.(sel("profile-form"))) e.target.dataset.tetherTouched = "1";
+    }
+    form.scrollIntoView({ block: "nearest" });
+  }
+  function onAddressClick(event, target) {
+    const row = target.closest("[data-tether-address]");
+    const id = row instanceof window.HTMLElement ? row.dataset["tetherAddress"] : void 0;
+    if (target.closest(sel("address-new"))) {
+      const form = document.querySelector(sel("address-form"));
+      if (form && isForm(form)) addressFormReset(form);
+      return true;
+    }
+    if (!(row instanceof window.HTMLElement) || !id) return false;
+    const deleteButton = target.closest(sel("address-delete"));
+    if (deleteButton) {
+      event.preventDefault();
+      if (!confirmed(deleteButton)) return true;
+      void act(row, async () => {
+        await deleteAddress(id);
+        await renderAddresses(document);
+      });
+    } else if (target.closest(sel("address-default"))) {
+      event.preventDefault();
+      void act(row, async () => {
+        await saveAddress(null, { id, isDefault: true });
+        await renderAddresses(document);
+      });
+    } else if (target.closest(sel("address-edit"))) {
+      event.preventDefault();
+      editAddress(id);
+    } else {
+      return false;
+    }
+    return true;
+  }
+  function onSubscriptionAction(button) {
+    const row = button.closest("[data-tether-subscription]");
+    const action = get(button, "subscription-action");
+    const disabled = "disabled" in button && button.disabled === true || button.classList.contains("is-disabled");
+    if (!(row instanceof window.HTMLElement) || !isSubscriptionAction2(action) || disabled || !confirmed(button)) return;
+    const id = row.dataset["tetherSubscription"] ?? "";
+    row.setAttribute(attr("subscription-state"), "pending");
+    void act(row, async () => {
+      await subscriptionAction(id, action);
+      await renderSubscriptions(document);
+    }).then((outcome) => {
+      const state = outcome === "error" ? "error" : "done";
+      qsa(document, "[data-tether-subscription]").filter((candidate) => candidate === row || candidate.dataset["tetherSubscription"] === id).forEach((candidate) => {
+        candidate.setAttribute(attr("subscription-state"), state);
+      });
     });
-    document.addEventListener("click", (e) => {
-      const t = e.target;
-      const row = t.closest?.("[data-tether-address]");
-      const confirmOk = (btn2) => {
-        const q = get(btn2, "confirm");
-        return !q || window.confirm(q);
-      };
-      let btn;
-      if ((btn = t.closest?.(sel("address-delete"))) && row) {
-        e.preventDefault();
-        if (confirmOk(btn)) act(row, async () => {
-          await deleteAddress(row.dataset.tetherAddress);
-          await renderAddresses(document);
-        });
-      } else if ((btn = t.closest?.(sel("address-default"))) && row) {
-        e.preventDefault();
-        act(row, async () => {
-          await saveAddress(null, { id: row.dataset.tetherAddress, isDefault: true });
-          await renderAddresses(document);
-        });
-      } else if ((btn = t.closest?.(sel("address-edit"))) && row) {
-        e.preventDefault();
-        const a = (addressCache || []).find((x) => x.id === row.dataset.tetherAddress);
-        const f = document.querySelector(sel("address-form"));
-        if (a && f) {
-          f.dataset.tetherAddressId = a.id;
-          [...f.elements].forEach((i) => {
-            if (i.name && i.name in a) i.value = a[i.name] ?? "";
-            if (i.name === "isDefault") i.checked = a.isDefault;
-          });
-          f.scrollIntoView?.({ block: "nearest" });
-        }
-      } else if (btn = t.closest?.(sel("address-new"))) {
-        const f = document.querySelector(sel("address-form"));
-        if (f) {
-          f.reset();
-          delete f.dataset.tetherAddressId;
-        }
-      } else if (btn = t.closest?.(sel("subscription-action"))) {
-        e.preventDefault();
-        const sub = btn.closest("[data-tether-subscription]");
-        const a = get(btn, "subscription-action");
-        if (!sub || !SUB_ACTIONS.includes(a) || btn.disabled || !confirmOk(btn)) return;
-        const id = sub.dataset.tetherSubscription;
-        sub.setAttribute(attr("subscription-state"), "pending");
-        act(sub, async () => {
-          await subscriptionAction(id, a);
-          await renderSubscriptions(document);
-        }).then(() => {
-          const state = sub.getAttribute(attr("form-state")) === "error" ? "error" : "done";
-          qsa(document, "[data-tether-subscription]").filter((r) => r === sub || r.dataset.tetherSubscription === id).forEach((r) => r.setAttribute(attr("subscription-state"), state));
-        });
-      } else if (btn = t.closest?.(sel("order-return"))) {
-        e.preventDefault();
-        const scope = btn.closest(SCOPE.order);
-        if (!scope?.dataset.tetherOrderId) return;
-        const req = qsa(scope, "[data-tether-line]").map((r) => ({
-          lineItemId: r.dataset.tetherLine,
-          quantity: parseInt(r.querySelector(sel("return-quantity"))?.value || "0", 10),
-          reasonId: r.querySelector(sel("return-reason"))?.value || void 0,
-          note: r.querySelector(sel("return-note"))?.value || void 0
-        })).filter((l) => l.quantity > 0);
-        if (!req.length || !confirmOk(btn)) return;
-        act(scope, async () => {
-          await requestReturn(scope.dataset.tetherOrderId, req);
-          scope.dataset.tetherReturned = "1";
-          await renderOrder(scope);
-        });
+  }
+  function returnLineOf(row) {
+    const quantity = row.querySelector(sel("return-quantity"));
+    const reason = row.querySelector(sel("return-reason"));
+    const note = row.querySelector(sel("return-note"));
+    const valueOf = (field2) => field2 && "value" in field2 && typeof field2.value === "string" ? field2.value : "";
+    const line = { lineItemId: row.dataset["tetherLine"] ?? "", quantity: Number.parseInt(valueOf(quantity) || "0", 10) };
+    const reasonId = valueOf(reason);
+    if (reasonId) line.reasonId = reasonId;
+    const noteText = valueOf(note);
+    if (noteText) line.note = noteText;
+    return line;
+  }
+  function onReturnRequest(button) {
+    const scope = button.closest(sel("order"));
+    if (!(scope instanceof window.HTMLElement)) return;
+    const orderId = scope.dataset["tetherOrderId"];
+    if (!orderId) return;
+    const lines = qsa(scope, "[data-tether-line]").map(returnLineOf).filter((line) => line.quantity > 0);
+    if (!lines.length || !confirmed(button)) return;
+    void act(scope, async () => {
+      await requestReturn(orderId, lines);
+      scope.dataset["tetherReturned"] = "1";
+      await renderOrder(scope);
+    });
+  }
+  function onClick(event) {
+    const target = event.target;
+    if (!(target instanceof window.Element)) return;
+    if (onAddressClick(event, target)) return;
+    const subscriptionButton = target.closest(sel("subscription-action"));
+    if (subscriptionButton instanceof window.HTMLElement) {
+      event.preventDefault();
+      onSubscriptionAction(subscriptionButton);
+      return;
+    }
+    const returnButton = target.closest(sel("order-return"));
+    if (returnButton instanceof window.HTMLElement) {
+      event.preventDefault();
+      onReturnRequest(returnButton);
+    }
+  }
+  function listenToPages() {
+    document.addEventListener("submit", onSubmit, true);
+    document.addEventListener("input", (event) => {
+      const target = event.target;
+      if (target instanceof window.HTMLElement && target.closest(sel("profile-form"))) {
+        target.dataset["tetherTouched"] = "1";
       }
+    });
+    document.addEventListener("click", onClick);
+  }
+
+  // src/account-pages.js
+  var PROFILE_FIELDS = (
+    /** @type {const} */
+    ["firstName", "lastName"]
+  );
+  async function renderProfile(form) {
+    const customer = await pagesContext().customer().catch((error) => {
+      reportError(error, "account");
+      return null;
+    });
+    if (!customer || form.tagName !== "FORM") return;
+    const fields = (
+      /** @type {HTMLFormElement} */
+      form.elements
+    );
+    PROFILE_FIELDS.forEach((name) => {
+      const input = fields.namedItem(name);
+      const isTextField = input instanceof window.HTMLInputElement || input instanceof window.HTMLTextAreaElement;
+      if (isTextField && !input.dataset["tetherTouched"]) input.value = customer[name] ?? "";
+    });
+  }
+  var listening = false;
+  async function renderPages(root = document) {
+    if (!listening) {
+      listening = true;
+      listenToPages();
+    }
+    await Promise.all([
+      ...qsa(root, sel("order")).map((el) => renderOrder(el)),
+      ...qsa(root, sel("profile-form")).map((form) => renderProfile(form)),
+      renderAddresses(root),
+      renderSubscriptions(root)
+    ]);
+  }
+  function showUnavailable(root) {
+    qsa(root, sel("order")).forEach((el) => {
+      showOrderState(el, "error");
+    });
+    showIn(root, "show", {
+      "addresses-loading": false,
+      "addresses-error": true,
+      "subscriptions-loading": false,
+      "subscriptions-error": true
     });
   }
 
   // src/parts/account-pages.js
-  window.Tether.__parts["account-pages"] = account_pages_exports;
+  var { Tether } = (
+    /** @type {Window & { Tether?: { __parts: Record<string, unknown> } }} */
+    window
+  );
+  if (!Tether) throw new Error("tether.account-pages.js runs after the Tether script, which loads it");
+  Tether.__parts["account-pages"] = account_pages_exports;
 })();

@@ -1,72 +1,92 @@
 // src/presets/barba.js
-var LINE_DURATION = 0.3;
+var LINE_DURATION_SECONDS = 0.3;
+var collapsed = () => ({
+  height: 0,
+  paddingTop: 0,
+  paddingBottom: 0,
+  borderBottomWidth: 0,
+  opacity: 0,
+  overflow: "hidden"
+});
+var ANIMATED_PROPS = "height,paddingTop,paddingBottom,borderBottomWidth,opacity,overflow";
 var reducedMotion = () => typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+function current(option) {
+  if (typeof option !== "function") return option;
+  const getter = (
+    /** @type {() => unknown} */
+    option
+  );
+  return getter();
+}
+function callIfPresent(target, method) {
+  if (typeof target !== "object" || target === null) return;
+  const fn = Reflect.get(target, method);
+  if (typeof fn === "function") fn.call(target);
+}
+var isGsap = (value) => typeof value === "object" && value !== null && typeof Reflect.get(value, "fromTo") === "function" && typeof Reflect.get(value, "to") === "function";
 function barbaPreset(options = {}) {
   const {
-    gsap = () => window.gsap,
+    gsap = () => (
+      /** @type {unknown} */
+      Reflect.get(window, "gsap")
+    ),
     lenis = null,
-    scrollTrigger = () => window.ScrollTrigger,
+    scrollTrigger = () => (
+      /** @type {unknown} */
+      Reflect.get(window, "ScrollTrigger")
+    ),
     lockScroll = null,
     unlockScroll = null,
     onResize = null,
     onValueChange = null,
     animateLines = true,
-    lineDuration = LINE_DURATION
+    lineDuration = LINE_DURATION_SECONDS
   } = options;
-  const get = (v) => typeof v === "function" ? v() : v;
   let locked = false;
-  const canAnimate = (node) => animateLines && get(gsap) && !reducedMotion() && node.offsetHeight > 0;
+  const animator = (node) => {
+    if (!animateLines || reducedMotion() || node.offsetHeight <= 0) return null;
+    const animation = current(gsap);
+    return isGsap(animation) ? animation : null;
+  };
   return {
     autoMount: false,
     onLayoutChange() {
-      get(lenis)?.resize?.();
-      get(scrollTrigger)?.refresh?.();
+      callIfPresent(current(lenis), "resize");
+      callIfPresent(current(scrollTrigger), "refresh");
     },
     onCartOpen(drawers) {
-      if (!locked && typeof lockScroll === "function" && drawers[0]) {
-        lockScroll(drawers[0]);
-        locked = true;
-      }
+      const drawer = drawers[0];
+      if (locked || typeof lockScroll !== "function" || !drawer) return;
+      lockScroll(drawer);
+      locked = true;
     },
     onCartClose() {
       if (locked && typeof unlockScroll === "function") unlockScroll();
       locked = false;
     },
     onLineEnter(node) {
-      const g = get(gsap);
-      if (!canAnimate(node)) return;
-      const st = getComputedStyle(node);
-      g.fromTo(node, {
-        height: 0,
-        paddingTop: 0,
-        paddingBottom: 0,
-        borderBottomWidth: 0,
-        opacity: 0,
-        overflow: "hidden"
-      }, {
+      const animation = animator(node);
+      if (!animation) return;
+      const style = getComputedStyle(node);
+      animation.fromTo(node, collapsed(), {
         height: node.offsetHeight,
-        paddingTop: st.paddingTop,
-        paddingBottom: st.paddingBottom,
-        borderBottomWidth: st.borderBottomWidth,
+        paddingTop: style.paddingTop,
+        paddingBottom: style.paddingBottom,
+        borderBottomWidth: style.borderBottomWidth,
         opacity: 1,
         duration: lineDuration,
-        clearProps: "height,paddingTop,paddingBottom,borderBottomWidth,opacity,overflow",
+        clearProps: ANIMATED_PROPS,
         onComplete: () => onResize?.()
       });
     },
     onLineLeave(node, done) {
-      const g = get(gsap);
-      if (!canAnimate(node)) {
+      const animation = animator(node);
+      if (!animation) {
         done();
         return;
       }
-      g.to(node, {
-        height: 0,
-        paddingTop: 0,
-        paddingBottom: 0,
-        borderBottomWidth: 0,
-        opacity: 0,
-        overflow: "hidden",
+      animation.to(node, {
+        ...collapsed(),
         duration: lineDuration,
         onComplete: () => {
           done();

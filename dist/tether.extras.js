@@ -1,3 +1,4 @@
+"use strict";
 (() => {
   var __defProp = Object.defineProperty;
   var __export = (target, all) => {
@@ -15,11 +16,11 @@
 
   // tether-core:config.js
   var m = window.Tether.__core["config.js"];
-  var { DEFAULTS, cfg, configure, isConfigured, log, reportError, warn } = m;
+  var { DEFAULTS, cfg, configure, isConfigured, log, reportError, resolveConfig, toMetafieldIdentifier, warn } = m;
 
   // tether-core:dom.js
   var m2 = window.Tether.__core["dom.js"];
-  var { attr, busy, cdnUrl, dataKey, emit, formatDate, formatMoney, formatPercent, get, has, hasTemplate, imageUrl, notifyLayoutChanged, parseJSONAttr, productUrl, qsa, readText, repeat, repeatKeyed, sameImage, scoped, sel, setImage, setSelected, setText, setTextTracked, show, toAttributes, watchImages } = m2;
+  var { attr, busy, cdnUrl, emit, formatDate, formatMoney, formatPercent, get, has, hasTemplate, imageUrl, notifyLayoutChanged, parseJSONAttr, productUrl, qsa, repeat, repeatKeyed, sameImage, scoped, sel, setImage, setSelected, setStoreHtml, setText, setTextTracked, show, toAttributes, watchImages } = m2;
 
   // tether-core:product.js
   var m3 = window.Tether.__core["product.js"];
@@ -27,19 +28,26 @@
 
   // tether-core:cart.js
   var m4 = window.Tether.__core["cart.js"];
-  var { Cart, focusables, toLineInput } = m4;
+  var { Cart, trapFocus } = m4;
 
   // src/extras.js
-  async function addGroup(btn) {
-    const group = btn.closest(sel("group"));
+  function groupAttributes(group, name) {
+    const extra = toAttributes(
+      /** @type {Parameters<typeof toAttributes>[0]} */
+      parseJSONAttr(group, "line-attributes")
+    );
+    return name ? [{ key: "_group", value: name }, ...extra] : extra;
+  }
+  async function addGroup(button) {
+    const group = button.closest(sel("group"));
     if (!group) return null;
     const name = get(group, "group");
-    const extra = toAttributes(parseJSONAttr(group, "line-attributes"));
-    const groupAttrs = name ? [{ key: "_group", value: name }, ...extra] : extra;
-    const lines = qsa(group, sel("product")).map((el) => scopes.get(el)).filter((s) => s && s.variant?.availableForSale && s.quantity > 0).map((s) => {
-      const l = s.getLine();
-      l.attributes = [...l.attributes || [], ...groupAttrs];
-      return l;
+    const attributes = groupAttributes(group, name);
+    const lines = qsa(group, sel("product")).flatMap((el) => {
+      const scope = scopes.get(el);
+      if (!scope?.variant?.availableForSale || scope.quantity <= 0) return [];
+      const line = scope.getLine();
+      return line ? [{ ...line, attributes: [...line.attributes ?? [], ...attributes] }] : [];
     });
     if (!lines.length) {
       warn("group-add: nothing selected");
@@ -49,39 +57,76 @@
       const cart = await Cart.add(lines);
       emit("group-added", { group: name, lines }, group);
       return cart;
-    } catch (err) {
-      reportError(err, "group add");
+    } catch (error) {
+      reportError(error, "group add");
       return null;
     }
   }
-  function onStorage(e) {
-    if (e.key === cfg.storageKey || e.key === `${cfg.storageKey}:seen`) Cart.init();
-    else if (e.key === `${cfg.prefix}:market:${cfg.domain}` && e.newValue) {
-      try {
-        const m5 = JSON.parse(e.newValue);
-        if (m5?.country) window.Tether?.setCountry(m5.country, { language: m5.language ?? null, locale: m5.locale, remember: false }).catch(() => {
-        });
-      } catch {
-      }
+  function parseStoredMarket(text) {
+    let value;
+    try {
+      value = JSON.parse(text);
+    } catch {
+      return null;
     }
+    if (typeof value !== "object" || value === null) return null;
+    const { country, language, locale } = (
+      /** @type {Record<string, unknown>} */
+      value
+    );
+    if (typeof country !== "string" || !country) return null;
+    return {
+      country,
+      language: typeof language === "string" ? language : null,
+      locale: typeof locale === "string" ? locale : void 0
+    };
+  }
+  function onStorage(event) {
+    if (event.key === cfg.storageKey || event.key === `${cfg.storageKey}:seen`) {
+      Cart.init().catch((error) => {
+        reportError(error, "cart from another tab");
+      });
+      return;
+    }
+    if (event.key !== `${cfg.prefix}:market:${cfg.domain}` || !event.newValue) return;
+    const market = parseStoredMarket(event.newValue);
+    const { Tether: Tether2 } = (
+      /** @type {Window & { Tether?: { setCountry: SetCountry } }} */
+      window
+    );
+    if (!market || !Tether2) return;
+    const options = { language: market.language, locale: market.locale, remember: false };
+    Tether2.setCountry(market.country, options).catch((error) => {
+      reportError(error, "market from another tab");
+    });
   }
   var urlKeys = /* @__PURE__ */ new WeakMap();
-  function writeVariantUrl(root, { variant, sellingPlanId }) {
-    const key = `${variant.id}|${sellingPlanId || ""}`;
-    const before = urlKeys.get(root);
-    urlKeys.set(root, key);
-    if (!before || before === key) return;
-    if (!has(root, "variant-url") && !(cfg.variantUrl && document.querySelector(sel("product")) === root)) return;
+  var numericId = (gid) => gid.split("/").pop() ?? gid;
+  function replaceUrlIfAllowed(url) {
     try {
-      const u = new URL(window.location.href);
-      u.searchParams.set("variant", variant.id.split("/").pop());
-      if (sellingPlanId) u.searchParams.set("selling_plan", sellingPlanId.split("/").pop());
-      else u.searchParams.delete("selling_plan");
-      window.history.replaceState(window.history.state, "", u);
+      window.history.replaceState(window.history.state, "", url);
     } catch {
     }
   }
+  function writeVariantUrl(root, { variant, sellingPlanId }) {
+    const key = `${variant.id}|${sellingPlanId ?? ""}`;
+    const before = urlKeys.get(root);
+    urlKeys.set(root, key);
+    if (!before || before === key) return;
+    const isMainProduct = cfg.variantUrl && document.querySelector(sel("product")) === root;
+    if (!has(root, "variant-url") && !isMainProduct) return;
+    const url = new URL(window.location.href);
+    url.searchParams.set("variant", numericId(variant.id));
+    if (sellingPlanId) url.searchParams.set("selling_plan", numericId(sellingPlanId));
+    else url.searchParams.delete("selling_plan");
+    replaceUrlIfAllowed(url);
+  }
 
   // src/parts/extras.js
-  window.Tether.__parts.extras = extras_exports;
+  var { Tether } = (
+    /** @type {Window & { Tether?: { __parts: Record<string, unknown> } }} */
+    window
+  );
+  if (!Tether) throw new Error("tether.extras.js runs after the Tether script, which loads it");
+  Tether.__parts["extras"] = extras_exports;
 })();

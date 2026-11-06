@@ -1,6 +1,6 @@
 {
   "name": "@occluze/tether",
-  "version": "0.6.7",
+  "version": "0.6.8",
   "description": "Free, open-source alternative to Smootify and Storesynk (Shopyflow): Shopify products, cart and subscriptions in Webflow with HTML attributes. Optional Shopify to Webflow CMS sync.",
   "type": "module",
   "main": "dist/esm/index.js",

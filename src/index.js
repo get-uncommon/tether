@@ -47,7 +47,7 @@ import { bindNavigation, rememberDocumentMount } from './controls/navigation.js'
 
 export { addGroup, setCountry };
 
-export const VERSION = '0.6.7';
+export const VERSION = '0.6.8';
 
 /** The events the analytics part reports, buffered from `init()` until the part has loaded. */
 const ANALYTICS_EVENTS = ['product-ready', 'list-ready', 'cart-updated', 'cart-toggled', 'checkout', 'search'];
