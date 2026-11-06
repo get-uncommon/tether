@@ -1256,3 +1256,30 @@ test('account pages (server mode): order page with returns, subscriptions with a
     window.history.replaceState(null, '', '/');
   }
 });
+
+test('integration: a secret Shopify token is never written into pages, and a non-PUBLIC name is flagged', async () => {
+  const { default: tether } = await import('../src/astro.js');
+  const prev = { ...process.env };
+  const setup = (warnings, scripts = []) =>
+    tether().hooks['astro:config:setup']({
+      injectScript: (stage, code) => scripts.push(code),
+      command: 'build',
+      config: { root: pathToFileURL(join(tmpdir(), 'astro-secret/')) },
+      logger: { warn: (m) => warnings.push(m) },
+    });
+  try {
+    delete process.env.PUBLIC_SHOPIFY_STOREFRONT_TOKEN;
+    process.env.PUBLIC_SHOPIFY_DOMAIN = 'shop.myshopify.com';
+    process.env.SHOPIFY_STOREFRONT_TOKEN = 'shpat_0123456789abcdef';
+    const scripts = [];
+    await assert.rejects(setup([], scripts), /secret token/);
+    assert.ok(!scripts.join('').includes('shpat_'), 'nothing was injected');
+
+    process.env.SHOPIFY_STOREFRONT_TOKEN = '0123456789abcdef0123456789abcdef';
+    const warnings = [];
+    await setup(warnings);
+    assert.match(warnings.join(' '), /SHOPIFY_STOREFRONT_TOKEN is written into every page/);
+  } finally {
+    process.env = prev;
+  }
+});

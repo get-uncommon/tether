@@ -12,6 +12,17 @@ export const STORE_ENV_NAMES = {
 };
 
 /**
+ * True for a token Shopify issues as a secret (`shpat_` Admin, `shpss_` shared secret, `shpca_` client credentials,
+ * `shppa_` private app, `shpua_` user). The public Storefront token has no such prefix. A secret token must never
+ * reach a page.
+ *
+ * @param {string} token
+ */
+export function isSecretShopifyToken(token) {
+  return /^shp[a-z]{2}_/.test(token.trim());
+}
+
+/**
  * Money as text in `locale`, e.g. `{ amount: '30.0', currencyCode: 'EUR' }` in `nl-NL` → `€ 30,00`.
  *
  * @param {Money | null | undefined} money

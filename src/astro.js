@@ -16,7 +16,7 @@
  * View Transitions (<ClientRouter />) work without extra code. In dev, changes to
  * src/shop.config.js restart the dev server (other files: tether({ ..., watch: ['my/config.js'] })).
  */
-import { STORE_ENV_NAMES } from './shopify-values.js';
+import { isSecretShopifyToken, STORE_ENV_NAMES } from './shopify-values.js';
 
 /** The mode Astro runs in: --mode, else development for dev and production for build. */
 function modeOf(command, argv = process.argv) {
@@ -52,6 +52,28 @@ async function readEnv(command, root) {
     /* not in Node: nothing to read */
   }
   return { ...out, ...process.env };
+}
+
+/**
+ * Fills the store's domain and token from .env when the options don't set them, and refuses a secret token: whatever
+ * is read here is written into every page.
+ */
+function applyStoreEnv(config, env, logger) {
+  for (const [key, names] of Object.entries(STORE_ENV_NAMES)) {
+    if (config[key]) continue;
+    const name = names.find((n) => env[n]);
+    if (!name) continue;
+    config[key] = env[name];
+    // Whatever is read here is written into every page, so a name without PUBLIC_ is a mistake waiting to happen.
+    if (!name.startsWith('PUBLIC_')) {
+      logger.warn(`${name} is written into every page as Tether's ${key}. Name it PUBLIC_${name} to say so.`);
+    }
+  }
+  if (typeof config.token === 'string' && isSecretShopifyToken(config.token)) {
+    throw new Error(
+      'The Shopify token for Tether is a secret token (shpat_/shpss_/…), which would be published in every page. Use the public Storefront API token from the Headless channel.',
+    );
+  }
 }
 
 export default function tether(options = {}) {
@@ -99,9 +121,7 @@ export default function tether(options = {}) {
           }
         }
         const env = await readEnv(command, root);
-        for (const [key, names] of Object.entries(STORE_ENV_NAMES)) {
-          if (!config[key]) config[key] = names.map((n) => env[n]).find(Boolean);
-        }
+        applyStoreEnv(config, env, logger);
         const bad = Object.entries(config)
           .filter(([, v]) => typeof v === 'function')
           .map(([k]) => k);
