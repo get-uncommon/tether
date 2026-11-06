@@ -1,6 +1,16 @@
 # Changelog
 
-## 0.7.3 (unreleased)
+## 0.8.0 (unreleased)
+
+A minor release because `Tether.query()`'s types changed (below); nothing else breaks.
+
+**Sync Worker copies:** a copy whose `TETHER_VERSION` says `0.7` stays on 0.7.x and does not get
+this release's sync fixes (no pages lost or products skipped by a reconcile, removed webhooks
+registered again). To take them, write `0.8` in the copy's `TETHER_VERSION` and commit it. A copy on
+`latest` installs 0.8.0 by itself. The update workflow is unchanged, so there is no other step.
+
+**Sites:** the script tag pinned to `@0.7` stays on 0.7.x; change it to `@0.8` to update. npm users
+get 0.8.0 with `npm install @occluze/tether@^0.8.0`.
 
 - **Breaking (types):** `Tether.query()` and the server's `query()` answer `Promise<object>` and
   take no type argument: Tether checks only that the answer is an object, so a type argument
@@ -26,7 +36,7 @@
   before anything changes. A copy without a `TETHER_VERSION` file records the minor it updated to,
   and a copy whose own version is outside its `TETHER_VERSION` range is warned on every run instead
   of reporting up to date. These come with the updater in this release, so they apply from a copy's
-  next update after installing 0.7.3.
+  next update after installing 0.8.0.
 - Sync Worker copies git-ignore the updater's `.tether-update-*` work folder (a failed rollback
   keeps it for a restore by hand); copies get this with this release.
 - Releases: the GitHub Release no longer carries `tether.esm.js`, which needs the `esm/` folder the
