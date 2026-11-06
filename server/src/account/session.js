@@ -23,7 +23,10 @@ import { discover, SessionEndedError, tokenRequest } from './shopify.js';
 const REFRESH_MARGIN_MS = 5 * 60e3;
 /** A token answer without `expires_in` is taken to last this long. */
 const DEFAULT_TOKEN_SECONDS = 3600;
-/** How long, and how often, to wait for a refresh another request started. */
+/**
+ * How long, and how often, to wait for a refresh that a request in another isolate started. KV is eventually
+ * consistent across locations, so this only recovers a race within one location; elsewhere the customer logs in again.
+ */
 const REFRESH_WAIT_ATTEMPTS = 3;
 const REFRESH_WAIT_MS = 300;
 
@@ -54,6 +57,14 @@ export function sessionTokens(tokens, previous) {
     expiresAt: Date.now() + (Number(tokens.expires_in) || DEFAULT_TOKEN_SECONDS) * 1000,
   };
 }
+
+/**
+ * Refreshes in progress in this isolate, by session key: parallel requests of one page share one refresh instead of
+ * racing Shopify's refresh-token rotation.
+ *
+ * @type {Map<string, Promise<Session | null>>}
+ */
+const refreshing = new Map();
 
 /**
  * @param {object} options
@@ -100,6 +111,21 @@ export function createSessionStore({ store, settings, fetch: fetchImpl }) {
    */
   async function fresh(id, session, origin) {
     if (session.expiresAt > Date.now() + REFRESH_MARGIN_MS) return session;
+    const key = await keyOf(id);
+    const running = refreshing.get(key);
+    if (running) return running;
+    const refresh = refreshNow(id, session, origin).finally(() => refreshing.delete(key));
+    refreshing.set(key, refresh);
+    return refresh;
+  }
+
+  /**
+   * @param {string} id
+   * @param {Session} session
+   * @param {string} origin
+   * @returns {Promise<Session | null>}
+   */
+  async function refreshNow(id, session, origin) {
     /** @type {Discovery} */
     const discovery = await discover(settings, fetchImpl);
     try {

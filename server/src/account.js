@@ -88,6 +88,17 @@ function errorMessage(error) {
   return error instanceof Error ? error.message : String(error);
 }
 
+/**
+ * A rejection handler that logs the failure under `label` and lets the request carry on.
+ *
+ * @param {string} label
+ */
+function logFailure(label) {
+  return (/** @type {unknown} */ error) => {
+    console.error(label, errorMessage(error));
+  };
+}
+
 /** @param {unknown} value @param {string} key */
 function field(value, key) {
   if (value === null || typeof value !== 'object') return undefined;
@@ -216,12 +227,17 @@ async function logoutRedirect({ request, settings, fetch: fetchImpl, siteOrigin 
 async function logout({ request, url, settings, sessions, sessionId, fetch: fetchImpl, siteOrigin }, cors) {
   const body = await readJsonObject(request);
   const session = sessionId ? await sessions.load(sessionId).catch(() => null) : null;
-  if (sessionId) await sessions.end(sessionId).catch((error) => console.error('account logout', errorMessage(error)));
+  if (sessionId) await sessions.end(sessionId).catch(logFailure('account logout'));
   const headers = new Headers({ 'Content-Type': 'application/json', ...NO_STORE, ...cors });
   headers.append('Set-Cookie', setCookie(SESSION_COOKIE, '', 0));
   const returnTo = safeReturn(typeof body['returnTo'] === 'string' ? body['returnTo'] : `${siteOrigin}/`, settings);
   const cartId = typeof body['cartId'] === 'string' ? body['cartId'] : '';
-  if (CART_ID.test(cartId)) await linkCart(settings, cartId, null, fetchImpl).catch(() => null);
+  // The next person on this device must not check out as this customer, so a failed unlink is logged.
+  if (CART_ID.test(cartId)) {
+    await linkCart(settings, cartId, null, fetchImpl).catch((error) =>
+      console.error('account cart unlink', errorMessage(error)),
+    );
+  }
   let logoutUrl = null;
   if (session?.idToken) {
     /** @type {LogoutTicket} */

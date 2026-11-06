@@ -307,7 +307,8 @@ const CART_LINK = `mutation L($id: ID!, $b: CartBuyerIdentityInput!) {
  * @param {string} cartId
  * @param {string | null} accessToken
  * @param {Fetch} fetchImpl
- * @returns {Promise<string | null>} The cart's checkout URL, or `null` when no link was made.
+ * @returns {Promise<string | null>} The cart's checkout URL; `null` without a Storefront token or cart.
+ * @throws {Error} When Shopify refuses the change.
  */
 export async function linkCart(settings, cartId, accessToken, fetchImpl) {
   if (!settings.storefrontToken || !cartId) return null;
@@ -318,5 +319,12 @@ export async function linkCart(settings, cartId, accessToken, fetchImpl) {
   });
   const body = asRecord(await response.json().catch(() => ({})));
   const update = asRecord(asRecord(body['data'])['cartBuyerIdentityUpdate']);
+  const problems = [body['errors'], update['userErrors']].flatMap((list) =>
+    Array.isArray(list) ? /** @type {unknown[]} */ (list) : [],
+  );
+  if (!response.ok || problems.length) {
+    const messages = problems.map((problem) => text(asRecord(problem), 'message')).join(' | ');
+    throw new Error(`cart link ${response.status} ${messages}`.trim());
+  }
   return text(asRecord(update['cart']), 'checkoutUrl') || null;
 }

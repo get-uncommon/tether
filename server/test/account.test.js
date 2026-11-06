@@ -430,8 +430,10 @@ test('settings: not set up -> 404; missing pieces -> 503 without details for the
 test('refresh race: two requests refresh at once (Shopify rotates the refresh token): both stay logged in', async () => {
   const { memory, cookie, sh } = await loginFlow();
   let rotated = false;
+  let refreshes = 0;
   const rotating = async (url, init) => {
     if (String(url).endsWith('/oauth/token') && new URLSearchParams(init.body).get('grant_type') === 'refresh_token') {
+      refreshes++;
       await new Promise((r) => setTimeout(r, rotated ? 0 : 5));
       if (rotated) return new Response(JSON.stringify({ error: 'invalid_grant' }), { status: 400 }); // the old refresh token is spent
       rotated = true;
@@ -448,6 +450,7 @@ test('refresh race: two requests refresh at once (Shopify rotates the refresh to
     const [a, b] = await Promise.all([run('/me'), run('/orders')]);
     assert.equal((await a.json()).loggedIn, true);
     assert.equal((await b.json()).loggedIn, true, 'the loser uses the session the winner refreshed');
+    assert.equal(refreshes, 1, 'requests in one isolate share one refresh');
   } finally {
     Date.now = realNow;
   }
