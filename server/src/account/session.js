@@ -4,8 +4,9 @@
  */
 
 /** @import { ExpiringStore } from './kv.js' */
-/** @import { AccountSettings } from './settings.js' */
+/** @import { ReadyAccountSettings } from './settings.js' */
 /** @import { Discovery, Fetch } from './shopify.js' */
+/** @import { TokenAnswer } from '../shared/token-answer.js' */
 
 import { isRecord } from '../shared/json.js';
 import { open, seal, sha256, toHex } from '../crypto.js';
@@ -34,28 +35,27 @@ const REFRESH_WAIT_MS = 300;
 /** @param {unknown} value @returns {value is Session} */
 function isSession(value) {
   if (!isRecord(value)) return false;
-  const session = value;
   return (
-    typeof session['access'] === 'string' &&
-    (session['refresh'] === null || typeof session['refresh'] === 'string') &&
-    typeof session['idToken'] === 'string' &&
-    typeof session['createdAt'] === 'number' &&
-    typeof session['expiresAt'] === 'number'
+    typeof value['access'] === 'string' &&
+    (value['refresh'] === null || typeof value['refresh'] === 'string') &&
+    typeof value['idToken'] === 'string' &&
+    typeof value['createdAt'] === 'number' &&
+    typeof value['expiresAt'] === 'number'
   );
 }
 
 /**
  * The session fields a token answer gives.
  *
- * @param {import('./shopify.js').TokenSet} tokens
+ * @param {TokenAnswer} tokens
  * @param {Pick<Session, 'refresh' | 'idToken'>} previous What to keep when the answer omits it.
  */
 export function sessionTokens(tokens, previous) {
   return {
-    access: tokens.access_token,
-    refresh: tokens.refresh_token ?? previous.refresh,
-    idToken: tokens.id_token ?? previous.idToken,
-    expiresAt: Date.now() + (tokens.expires_in ?? DEFAULT_TOKEN_SECONDS) * 1000,
+    access: tokens.accessToken,
+    refresh: tokens.refreshToken ?? previous.refresh,
+    idToken: tokens.idToken ?? previous.idToken,
+    expiresAt: Date.now() + (tokens.expiresInSeconds ?? DEFAULT_TOKEN_SECONDS) * 1000,
   };
 }
 
@@ -70,7 +70,7 @@ const refreshing = new Map();
 /**
  * @param {object} options
  * @param {ExpiringStore} options.store
- * @param {AccountSettings} options.settings
+ * @param {ReadyAccountSettings} options.settings
  * @param {Fetch} options.fetch
  */
 export function createSessionStore({ store, settings, fetch: fetchImpl }) {

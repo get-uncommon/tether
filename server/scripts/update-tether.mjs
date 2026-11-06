@@ -3,9 +3,9 @@
  * Updates this deployed copy of tether-sync to the newest Tether release that matches TETHER_VERSION (a file next to
  * package.json), the way jsDelivr version ranges work:
  *
- *   0.3      newest 0.3.x (patches only)          <- default
- *   0.3.3    pinned: never changes
- *   latest   newest release, including new minor versions
+ *   0.6      newest 0.6.x (patches only)          <- shipped in TETHER_VERSION, and the default without the file
+ *   0.6.0    pinned: never changes
+ *   latest   newest release, including a new 0.x minor, which can break the copy
  *
  * It replaces the code (src/, bin/, scripts/, test/, docs/, package.json, README) and keeps what belongs to the copy:
  * tether-sync.config.js (mapping), wrangler.jsonc (Cloudflare ids), TETHER_VERSION. .github/ is never touched: GitHub
@@ -25,7 +25,8 @@
  *   node scripts/update-tether.mjs --dry-run  # only say what it would do
  *   node scripts/update-tether.mjs --from ../tether/server   # use a local release (testing)
  *
- * Prints `updated=<version>` (or `updated=`) for the workflow.
+ * Prints `updated=<version>` (or `updated=` when nothing changed) and exits non-zero on any failure. Every copy keeps
+ * the workflow it was made with, so this output is the contract between every shipped workflow and this script.
  */
 import { readFile, writeFile, rm, cp, mkdir, mkdtemp, rename, stat } from 'node:fs/promises';
 import { existsSync, realpathSync } from 'node:fs';
@@ -185,12 +186,37 @@ async function swapIn(names, staged, previous) {
       await rename(join(staged, name), join(ROOT, name));
     }
   } catch (error) {
-    for (const name of moved.reverse()) {
+    await putBack(moved.reverse(), previous, error);
+    throw error;
+  }
+}
+
+/** Putting the copy's own entries back failed: the copy is half updated, and its own entries are kept for a person. */
+class RollbackError extends Error {}
+
+/**
+ * Restores the copy's own entries after a failed swap.
+ *
+ * @param {string[]} names The entries already swapped, last first.
+ * @param {string} previous The folder holding the copy's own entries.
+ * @param {unknown} swapError Named in the message: it is why the copy was being put back.
+ * @throws {RollbackError}
+ */
+async function putBack(names, previous, swapError) {
+  try {
+    for (const name of names) {
       await rm(join(ROOT, name), { recursive: true, force: true });
       if (existsSync(join(previous, name))) await rename(join(previous, name), join(ROOT, name));
     }
-    throw error;
+  } catch (error) {
+    const why = `the update failed (${messageOf(swapError)}) and putting the copy back failed (${messageOf(error)})`;
+    throw new RollbackError(`${why}: the copy's own files are in ${previous}`, { cause: error });
   }
+}
+
+/** @param {unknown} error */
+function messageOf(error) {
+  return error instanceof Error ? error.message : String(error);
 }
 
 /**
@@ -201,6 +227,7 @@ async function swapIn(names, staged, previous) {
  */
 async function install(source) {
   const work = await mkdtemp(join(ROOT, '.tether-update-'));
+  let keepWork = false;
   try {
     const staged = join(work, 'new');
     const previous = join(work, 'old');
@@ -209,8 +236,11 @@ async function install(source) {
     const names = MANAGED.filter((name) => existsSync(join(source, name)));
     for (const name of names) await cp(join(source, name), join(staged, name), { recursive: true });
     await swapIn(names, staged, previous);
+  } catch (error) {
+    keepWork = error instanceof RollbackError;
+    throw error;
   } finally {
-    await rm(work, { recursive: true, force: true });
+    if (!keepWork) await rm(work, { recursive: true, force: true });
   }
   for (const name of KEPT) {
     const missing = !existsSync(join(ROOT, name)) && existsSync(join(source, name));
@@ -249,11 +279,23 @@ async function installFromGitHub(version, tags) {
   }
 }
 
+/**
+ * @param {string[]} args
+ * @returns {string | null} The local release folder after `--from`, or `null` without the option.
+ * @throws {Error} For `--from` without a folder, which would otherwise install the copy over itself.
+ */
+function fromFolder(args) {
+  const index = args.indexOf('--from');
+  if (index === -1) return null;
+  const folder = args[index + 1];
+  if (folder === undefined || folder.startsWith('--')) throw new Error('--from needs the folder of a release');
+  return resolve(folder);
+}
+
 /** @param {string[]} args */
 async function main(args) {
   const dryRun = args.includes('--dry-run');
-  const fromIndex = args.indexOf('--from');
-  const fromDir = fromIndex === -1 ? null : resolve(args[fromIndex + 1] ?? '.');
+  const fromDir = fromFolder(args);
 
   const specFile = join(ROOT, 'TETHER_VERSION');
   const spec = existsSync(specFile) ? ((await readFile(specFile, 'utf8')).split('\n')[0] ?? '').trim() : '';
@@ -305,7 +347,7 @@ function realPath(path) {
 const script = process.argv[1];
 if (script && realPath(resolve(script)) === realPath(fileURLToPath(import.meta.url))) {
   main(process.argv.slice(2)).catch((/** @type {unknown} */ error) => {
-    console.error(error instanceof Error ? error.message : String(error));
+    console.error(messageOf(error));
     process.exit(1);
   });
 }

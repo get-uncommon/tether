@@ -3,13 +3,9 @@
  * into the type the caller asked for, so a missing or mistyped field becomes a default instead of a crash later on.
  */
 
-/**
- * @param {unknown} value
- * @returns {value is Record<string, unknown>}
- */
-export function isPlainObject(value) {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
-}
+import { isRecord } from './shared/json.js';
+
+export { asList, isRecord as isPlainObject, textOrNull } from './shared/json.js';
 
 /**
  * The value's own fields, or an empty record when it is not a plain object.
@@ -18,18 +14,7 @@ export function isPlainObject(value) {
  * @returns {Record<string, unknown>}
  */
 export function asRecord(value) {
-  return isPlainObject(value) ? value : {};
-}
-
-/**
- * @param {unknown} value
- * @returns {unknown[]}
- */
-export function asList(value) {
-  if (!Array.isArray(value)) return [];
-  /** @type {unknown[]} */
-  const list = value;
-  return list;
+  return isRecord(value) ? value : {};
 }
 
 /**
@@ -38,16 +23,6 @@ export function asList(value) {
  */
 export function stringOrNull(value) {
   return typeof value === 'string' ? value : null;
-}
-
-/**
- * A non-empty string, or `null`: Shopify sends `""` and `null` alike for an unset text field.
- *
- * @param {unknown} value
- * @returns {string | null}
- */
-export function textOrNull(value) {
-  return typeof value === 'string' && value !== '' ? value : null;
 }
 
 /**

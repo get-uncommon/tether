@@ -3,7 +3,7 @@
  * opens /check, and its result says whether the connection tests have what they need.
  */
 import { accountProblems, accountSettings } from '../account/settings.js';
-import { envProblems, MIN_SYNC_SECRET } from '../env.js';
+import { envProblems, kvBinding, MIN_SYNC_SECRET } from '../env.js';
 import { deployHookMinSeconds } from '../settings.js';
 
 /** @typedef {import('./steps.js').Steps} Steps */
@@ -138,7 +138,17 @@ function checkAccounts(steps, { rawEnv, worker, webhookUri }) {
   const problems = accountProblems(settings);
   for (const problem of problems)
     steps.add(problem.severity === 'warning' ? 'warn' : 'error', 'Customer accounts', problem.message);
-  if (!problems.length) {
+  // The Worker refuses account requests without the namespace (account.js); elsewhere the host passes its own store.
+  const unbound = worker && !kvBinding(rawEnv);
+  if (unbound) {
+    steps.add(
+      'error',
+      'Customer accounts',
+      'The TETHER_SYNC KV namespace is not bound, so no login can be kept: accounts answer 503.',
+      'Cloudflare → your Worker → Bindings → add the KV namespace as TETHER_SYNC, as in wrangler.jsonc.',
+    );
+  }
+  if (!problems.length && !unbound) {
     const client = settings.clientSecret ? ' (confidential client)' : '';
     steps.add('ok', 'Customer accounts', `on for ${settings.origins.join(', ')}${client}`);
   }
@@ -233,6 +243,15 @@ function checkSecrets(steps, { env, rawEnv, worker }) {
       'No webhook secret: webhooks will be rejected, only the cron reconcile syncs.',
       'Set SHOPIFY_WEBHOOK_SECRET (Settings → Notifications → Webhooks shows it), or use a Dev Dashboard app (its client secret is used).',
     );
+
+  if (worker && !kvBinding(rawEnv)) {
+    steps.add(
+      'warn',
+      'KV storage',
+      'TETHER_SYNC is not bound: the sync keeps nothing between runs, so POST /reconcile and the cron refuse to run, and every webhook rewrites its product.',
+      'Cloudflare → your Worker → Bindings → add the KV namespace as TETHER_SYNC, as in wrangler.jsonc.',
+    );
+  }
 
   // A SYNC_SECRET that is set but ignored was already reported.
   const syncSecretIgnored = envProblems(rawEnv).some((problem) => problem.key === 'SYNC_SECRET');

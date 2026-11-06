@@ -1,6 +1,8 @@
 /** Cookies, CORS and responses for the account routes. */
 
-/** @import { AccountSettings, ReadyAccountSettings } from './settings.js' */
+/** @import { ReadyAccountSettings } from './settings.js' */
+
+import { asRecord, responseJsonOrNull } from '../json.js';
 
 /** The session cookie: an opaque random id; the session itself is sealed in KV under its hash. */
 export const SESSION_COOKIE = '__Host-tether-account';
@@ -31,6 +33,11 @@ export function readCookie(request, name, maxLength) {
 /**
  * A `Set-Cookie` value. `maxAgeSeconds` 0 deletes the cookie.
  *
+ * `SameSite=Lax` for all three: the login comes back from Shopify as a cross-site top-level navigation to the
+ * callback, which needs the login cookie, and also the session cookie, to end the session this browser already had
+ * before replacing it. `Strict` would withhold both there. The other routes don't rely on SameSite against CSRF:
+ * they need an allowed Origin, and POSTs a custom header that forces a CORS preflight.
+ *
  * @param {string} name
  * @param {string} value
  * @param {number} maxAgeSeconds
@@ -46,7 +53,7 @@ export function setCookie(name, value, maxAgeSeconds) {
  * Sec-Fetch-Site, which pages can't set. Everything else needs an allowed Origin.
  *
  * @param {Request} request
- * @param {AccountSettings} settings
+ * @param {Pick<ReadyAccountSettings, 'origins'>} settings
  * @returns {Record<string, string> | null}
  */
 export function corsHeaders(request, settings) {
@@ -99,4 +106,17 @@ export function safeReturn(raw, settings) {
     // Not an absolute URL: the site's home below.
   }
   return `${settings.origins[0]}/`;
+}
+
+/** A Storefront cart id, as the browser sends it to link or unlink a cart. */
+export const CART_ID = /^gid:\/\/shopify\/Cart\/[\w-]+(\?key=[\w-]+)?$/;
+
+/**
+ * The request body as a JSON object; `{}` for a body that is not one, whose fields the routes then refuse one by one.
+ *
+ * @param {Request} request
+ * @returns {Promise<Record<string, unknown>>}
+ */
+export async function readJsonObject(request) {
+  return asRecord(await responseJsonOrNull(request));
 }

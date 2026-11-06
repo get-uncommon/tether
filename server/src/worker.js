@@ -20,7 +20,7 @@ import { kvStore, memoryStore } from './store.js';
 import { handleShopifyWebhook } from './webhook.js';
 import { bearerMatches } from './hmac.js';
 import { runCheck } from './check.js';
-import { cleanEnv } from './env.js';
+import { cleanEnv, kvBinding } from './env.js';
 import { ensureWebhooks } from './webhooks.js';
 import { VERSION } from './version.js';
 import { messageOf } from './util.js';
@@ -30,21 +30,23 @@ import { handleAccount } from './account.js';
 /** @typedef {{ waitUntil(promise: Promise<unknown>): void }} ExecutionContext */
 /** @typedef {Parameters<typeof createApp>[0]} SyncConfig */
 /** @typedef {typeof fetch} Fetch */
+/** @typedef {import('./store.js').Store} Store */
 
 const consoleLog = {
-  info: (/** @type {unknown[]} */ ...args) => {
-    console.log(...args);
-  },
-  warn: (/** @type {unknown[]} */ ...args) => {
-    console.warn(...args);
-  },
-  error: (/** @type {unknown[]} */ ...args) => {
-    console.error(...args);
-  },
+  info: console.log,
+  warn: console.warn,
+  error: console.error,
   debug() {
     // Debug output is for the Node CLI's --verbose.
   },
 };
+
+/**
+ * Without its KV namespace the sync forgets its cursor and hashes after every invocation, so each run starts over and
+ * rewrites what didn't change.
+ */
+const MISSING_KV =
+  'the TETHER_SYNC KV namespace is not bound: the sync keeps nothing between runs. Add it in Cloudflare → your Worker → Bindings, as in wrangler.jsonc';
 
 /** Subrequests one invocation may make. Cloudflare's free plan allows 50; the rest is headroom. */
 const DEFAULT_MAX_SUBREQUESTS = 45;
@@ -88,13 +90,17 @@ function publicReport(report) {
 
 /** @typedef {{ config: SyncConfig, fetch: Fetch | undefined, sleep: ((ms: number) => Promise<void>) | undefined }} WorkerSetup */
 
-/** @param {WorkerSetup} setup @param {WorkerEnv} env @param {'job' | 'webhook'} [mode] */
-function appFor({ config, fetch, sleep }, env, mode = 'job') {
-  const namespace = /** @type {Parameters<typeof kvStore>[0] | undefined} */ (env['TETHER_SYNC']);
+/**
+ * @param {WorkerSetup} setup
+ * @param {WorkerEnv} env
+ * @param {Store} store
+ * @param {'job' | 'webhook'} [mode]
+ */
+function appFor({ config, fetch, sleep }, env, store, mode = 'job') {
   const limit = parseInt(cleanEnv(env).MAX_SUBREQUESTS ?? '', 10) || DEFAULT_MAX_SUBREQUESTS;
   const counted = countingFetch(fetch, limit);
   return createApp(config, env, {
-    store: namespace ? kvStore(namespace) : memoryStore(),
+    store,
     fetch: counted.fetch,
     budget: counted.budget,
     sleep,
@@ -120,14 +126,18 @@ async function check(setup, request, env, url) {
     version: deep ? VERSION : null,
     range: cleanEnv(env).TETHER_VERSION ?? null,
   });
-  const body = deep ? { version: VERSION, ...report, kv: Boolean(env['TETHER_SYNC']) } : publicReport(report);
+  const body = deep ? { version: VERSION, ...report, kv: kvBinding(env) !== null } : publicReport(report);
   return Response.json(body, { status: report.ok ? 200 : 503 });
 }
 
 /** @param {WorkerSetup} setup @param {Request} request @param {WorkerEnv} env @param {ExecutionContext} context */
 async function webhook(setup, request, env, context) {
   const { sleep } = setup;
-  const app = appFor(setup, env, 'webhook');
+  const namespace = kvBinding(env);
+  // A webhook is still synced without the namespace, only without its stored hash: answering with an error would make
+  // Shopify retry it and, after enough failures, delete the subscription.
+  if (!namespace) console.error(`webhook: ${MISSING_KV}`);
+  const app = appFor(setup, env, namespace ? kvStore(namespace) : memoryStore(), 'webhook');
   const { response, task } = await handleShopifyWebhook(request, {
     sync: app.sync,
     secrets: app.webhookSecrets,
@@ -149,7 +159,12 @@ async function reconcile(setup, request, env, url) {
   if (since && Number.isNaN(Date.parse(since))) {
     return new Response('since must be "all" or an ISO date', { status: 400 });
   }
-  const app = appFor(setup, env);
+  const namespace = kvBinding(env);
+  if (!namespace) {
+    console.error(`reconcile: ${MISSING_KV}`);
+    return Response.json({ error: MISSING_KV }, { status: 503 });
+  }
+  const app = appFor(setup, env, kvStore(namespace));
   /** @type {Awaited<ReturnType<typeof ensureWebhooks>> | { error: string }} */
   let webhooks;
   try {
@@ -164,6 +179,28 @@ async function reconcile(setup, request, env, url) {
   }
   const result = await app.sync.reconcile(since ? { since } : {});
   return Response.json({ ...result, webhooks });
+}
+
+/** @param {WorkerSetup} setup @param {WorkerEnv} env */
+async function scheduledReconcile(setup, env) {
+  try {
+    const namespace = kvBinding(env);
+    if (!namespace) throw new Error(MISSING_KV);
+    const result = await appFor(setup, env, kvStore(namespace)).sync.reconcile({});
+    const stopped = result.stopped ? ` (stopped: ${result.stopped})` : '';
+    console.log(
+      `reconcile: ${result.processed} checked, ${result.changes} written, complete=${String(result.complete)}${stopped}`,
+    );
+    // The run has stored its cursor and retries by now; a run Shopify's product list stopped is still a failed run.
+    if (result.stopped === 'error') {
+      const reasons = result.failures.filter((failure) => failure.id === null).map((failure) => failure.error);
+      throw new Error(`listing products failed: ${reasons.join('; ')}`);
+    }
+    return result;
+  } catch (error) {
+    console.error('reconcile failed:', messageOf(error));
+    throw error;
+  }
 }
 
 /**
@@ -193,17 +230,14 @@ export function createWorker(config, { fetch, sleep } = {}) {
       }
     },
 
-    /** @param {unknown} _event @param {WorkerEnv} env @param {ExecutionContext} context */
+    /**
+     * The cron reconcile. A failure is logged and rethrown, so Cloudflare records the run as failed and the next cron
+     * run starts again from the stored cursor.
+     *
+     * @param {unknown} _event @param {WorkerEnv} env @param {ExecutionContext} context
+     */
     async scheduled(_event, env, context) {
-      const run = appFor(setup, env)
-        .sync.reconcile({})
-        .then((result) => {
-          const stopped = result.stopped ? ` (stopped: ${result.stopped})` : '';
-          console.log(
-            `reconcile: ${result.processed} checked, ${result.changes} written, complete=${String(result.complete)}${stopped}`,
-          );
-          return result;
-        });
+      const run = scheduledReconcile(setup, env);
       context.waitUntil(run);
       return run;
     },

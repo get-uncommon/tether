@@ -15,8 +15,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: 22
           registry-url: https://registry.npmjs.org
@@ -26,11 +28,22 @@ jobs:
       - name: Tag matches package.json
         run: |
           test "v$(node -p "require('./package.json').version")" = "$GITHUB_REF_NAME" || { echo "::error::tag $GITHUB_REF_NAME doesn't match package.json"; exit 1; }
+      # npm and the Release ship the committed dist/, so it must be what this tag's source builds.
+      - name: Committed dist/ matches a fresh build
+        shell: bash
+        run: |
+          npm run build
+          if ! git diff --exit-code --stat -- dist/ || [ -n "$(git status --porcelain --untracked-files=all -- dist/)" ]; then
+            git status --short -- dist/
+            echo "::error::dist/ differs from a fresh npm run build: rebuild and commit it"
+            exit 1
+          fi
       - run: npm test
       - run: npm run smoke
       - name: Publish to npm
         run: npm publish --provenance --access public
       - name: GitHub Release
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -41,5 +54,7 @@ jobs:
             echo '```html'; echo "<script src=\"https://cdn.jsdelivr.net/gh/${GITHUB_REPOSITORY}@${V%.*}/dist/tether.min.js\" defer></script>"; echo '```'; echo
             echo '```bash'; echo 'npm install @occluze/tether'; echo '```'
           } >> notes.md
-          gh release create "$GITHUB_REF_NAME" --title "Tether $V" --notes-file notes.md --latest \
-            dist/tether.min.js dist/tether.markets.min.js dist/tether.diagnose.min.js dist/tether.search.min.js dist/tether.account.min.js dist/tether.analytics.min.js dist/tether.extras.min.js dist/tether.esm.js
+          # Every script next to the core, so a site can self-host the folder: the core loads its parts from beside it.
+          # dist/esm/ is left out: its chunks import each other by path, which flat Release assets don't keep.
+          mapfile -t assets < <(find dist -maxdepth 1 -type f | sort)
+          gh release create "$GITHUB_REF_NAME" --title "Tether $V" --notes-file notes.md --latest "${assets[@]}"

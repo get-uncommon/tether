@@ -58,15 +58,28 @@ Your copy updates itself, like a jsDelivr version. The `TETHER_VERSION` file in 
 
 | `TETHER_VERSION` | Gets |
 |---|---|
-| `latest` (default) | every release, automatically |
-| `0.6` | only 0.6.x fixes |
+| `0.6` (default) | only 0.6.x fixes |
 | `0.6.0` | pinned: never changes |
+| `latest` | every release, including a new 0.x minor version, which can need changes in your copy |
+
+A new minor version (0.7) is never installed by itself: when you're ready for it, change the file to `0.7`.
 
 It checks every Monday (want daily? change the `cron` line in your copy's `.github/workflows/update-tether.yml` to `'23 5 * * *'`), and only updates when the new version's tests pass. To update right away: your copy on GitHub → **Actions** → **Update Tether**
 → **Run workflow**. It tests the new version, then Cloudflare redeploys. Your settings stay as they are.
 A release is installed by the commit its `v…` tag points at, and only when that commit is on the
 Tether repository's `main` branch. `https://YOUR-WORKER/health` answers `{ "ok": true, "version": "…" }`
 with the version that's running.
+
+An update replaces `src/`, `bin/`, `scripts/`, `test/`, `docs/`, `package.json` and this README with
+the release's, so keep your own code and tests outside those folders. The new release's code runs
+only in a job that can read your repository, not change it; a second job commits the tested change.
+
+**Product descriptions.** The sync writes Shopify's description HTML into the Webflow field as it
+is. Anyone who can edit products in Shopify, apps included, writes that HTML, and the sync does not
+clean it. On a page that shows it through `tether-bind="description"`, Tether's script cleans it in
+the browser. Webflow doesn't document what its rich-text field strips, so don't count on that: if
+your pages render the field themselves and you don't trust everyone who can edit products, map
+`description` to the plain-text `description` source instead.
 
 ## Several stores or client sites
 
@@ -86,8 +99,8 @@ Add these later as secrets, only if you need them: Cloudflare → your Worker �
 | `WEBFLOW_OWNED` | Fields Shopify fills in once, then editors own: `description,intro` |
 | `SHOPIFY_ADMIN_TOKEN` | Stores with an old admin-created custom app (`shpat_…`) instead of a Dev Dashboard app |
 | `SHOPIFY_WEBHOOK_SECRET` | Webhooks you created yourself under Shopify → Settings → Notifications |
-| `ACCOUNT_CLIENT_ID`, `ACCOUNT_ORIGINS`, `STOREFRONT_TOKEN` (+ `ACCOUNT_CLIENT_SECRET`) | Customer accounts through this Worker, the safe mode: the browser never holds a Shopify token ([setup](../docs/accounts.md#server-mode)) |
-| `ACCOUNT_SECRET` | Recommended with customer accounts: 24+ random characters, the sessions' own encryption key (else it comes from `SYNC_SECRET`) |
+| `ACCOUNT_CLIENT_ID`, `ACCOUNT_ORIGINS`, `STOREFRONT_TOKEN` (+ `ACCOUNT_CLIENT_SECRET`) | Customer accounts through this Worker, the safe mode: the browser never holds a Shopify token. Needs the `TETHER_SYNC` KV binding, which the deploy creates ([setup](../docs/accounts.md#server-mode)) |
+| `ACCOUNT_SECRET` | Set it with customer accounts: 24+ random characters, the sessions' own encryption key. Without it the key comes from `SYNC_SECRET`, the `/reconcile` password, and `/check` warns. Setting it later logs every customer out once |
 | `DEPLOY_HOOK_URL` | A statically built site (Astro, …): start a build when product content changes ([how](../docs/astro.md#7-rebuild-when-products-change)). Without Webflow, set the Webflow fields to `none` |
 | `DEPLOY_HOOK_MIN_SECONDS` | At most one build per this many seconds (default 60) |
 | `MAX_SUBREQUESTS` | A paid Workers plan, to let each run do more (default 45) |

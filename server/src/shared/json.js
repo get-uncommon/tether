@@ -24,3 +24,23 @@ export function isRecord(value) {
 export function field(value, key) {
   return isRecord(value) ? value[key] : undefined;
 }
+
+/**
+ * The value when it is an array, else an empty list.
+ *
+ * @param {unknown} value
+ * @returns {unknown[]}
+ */
+export function asList(value) {
+  return Array.isArray(value) ? value : [];
+}
+
+/**
+ * A non-empty string, or `null`: Shopify sends `""` and `null` alike for an unset text field.
+ *
+ * @param {unknown} value
+ * @returns {string | null}
+ */
+export function textOrNull(value) {
+  return typeof value === 'string' && value !== '' ? value : null;
+}

@@ -25,6 +25,8 @@ export const DEPLOY_FIELDS = {
   name: 'title',
   slug: 'handle',
   'shopify-id': 'legacyId',
+  // Only hashed, to notice a change: the site's build reads the description from the Storefront API itself, and
+  // cleans it there (docs/astro.md).
   description: 'descriptionHtml',
   vendor: 'vendor',
   'product-type': 'productType',

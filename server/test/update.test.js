@@ -9,7 +9,12 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { listTags, pickVersion, releaseCommit } from '../scripts/update-tether.mjs';
 
-const WORKFLOW_HASH = 'a369c8e1628b'; // change only together with a plan for existing copies
+/**
+ * The shipped workflow's hash. A copy keeps the workflow it was made with, because an Action's token can't change a
+ * workflow file, so every version of the script must keep the contract that all shipped workflows rely on (see the
+ * output test below). The hash makes a change to the workflow a deliberate one, checked against that contract.
+ */
+const WORKFLOW_HASH = '30da9f16851f';
 
 const TAGS = ['v0.1.0', 'v0.2.0', 'v0.3.0', 'v0.3.1', 'v0.3.3', 'v0.3.2', 'v0.4.0', 'v1.0.0', 'not-a-version'];
 
@@ -38,7 +43,10 @@ test('updating a copy replaces the code and keeps config, wrangler ids and TETHE
   await cp(join(root, 'scripts'), join(copy, 'scripts'), { recursive: true });
   await cp(join(root, 'src'), join(copy, 'src'), { recursive: true });
   await writeFile(join(copy, 'src', 'old.js'), 'old');
-  await writeFile(join(copy, 'package.json'), JSON.stringify({ name: '@occluze/tether-sync', version: '0.3.1' }));
+  await writeFile(
+    join(copy, 'package.json'),
+    JSON.stringify({ name: '@occluze/tether-sync', version: '0.3.1', type: 'module' }),
+  );
   await writeFile(
     join(copy, 'tether-sync.config.js'),
     'export default { fields: { material: "metafield:custom.material" } };',
@@ -77,11 +85,51 @@ test('updating a copy replaces the code and keeps config, wrangler ids and TETHE
     encoding: 'utf8',
   });
   assert.match(again, /up to date/);
+  assert.equal(workflowVersion(out), version, 'the workflow reads the new version');
+  assert.equal(workflowVersion(again), '', 'an empty version tells every workflow there is nothing to commit');
 });
 
-test('the shipped workflow stays identical, so copies made with any earlier version keep updating', async () => {
-  // Some deployed copies run an updater that also copies .github/, and GitHub refuses an Action's push that changes a
-  // workflow file: a changed workflow here would stop their updates.
+/**
+ * What every shipped workflow, old and new, takes from the script's output: the value of the last `updated=` line
+ * (`grep '^updated=' | tail -1 | cut -d= -f2`), empty when nothing changed.
+ *
+ * @param {string} output
+ */
+function workflowVersion(output) {
+  const lines = output.split(/\r?\n/).filter((line) => line.startsWith('updated='));
+  assert.ok(lines.length, 'the output has an updated= line');
+  return lines.at(-1).split('=')[1];
+}
+
+test('the workflow keeps to the contract: the script path, the updated= line, test/ and src/entry.js', async () => {
+  const workflow = await readFile(new URL('../.github/workflows/update-tether.yml', import.meta.url), 'utf8');
+  for (const command of [
+    'node scripts/update-tether.mjs | tee update.log',
+    `grep '^updated=' update.log | tail -1 | cut -d= -f2`,
+    'node --test test/*.test.js',
+    "import('./src/entry.js')",
+  ]) {
+    assert.ok(workflow.includes(command), command);
+  }
+});
+
+test('a failed update exits non-zero, and --from without a folder is refused', () => {
+  const script = fileURLToPath(new URL('../scripts/update-tether.mjs', import.meta.url));
+  assert.throws(
+    () => execFileSync('node', [script, '--from'], { encoding: 'utf8', stdio: 'pipe' }),
+    (error) => error.status === 1 && /--from needs the folder/.test(String(error.stderr)),
+  );
+});
+
+test('the shipped TETHER_VERSION takes the fixes of the minor version it ships with, never a new minor', async () => {
+  const range = (await readFile(new URL('../TETHER_VERSION', import.meta.url), 'utf8')).trim();
+  const { version } = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
+  assert.equal(range, version.split('.').slice(0, 2).join('.'), 'a release bumps TETHER_VERSION with the minor');
+});
+
+test('the shipped workflow changes only on purpose: copies made with any version keep their own', async () => {
+  // Copies made with 0.3.3 to 0.3.5 run an updater that also copies .github/, and GitHub refuses an Action's push that
+  // changes a workflow file. Their range (0.3) holds no release with a changed workflow.
   const { createHash } = await import('node:crypto');
   const wf = await readFile(new URL('../.github/workflows/update-tether.yml', import.meta.url));
   assert.equal(createHash('sha256').update(wf).digest('hex').slice(0, 12), WORKFLOW_HASH);

@@ -2,7 +2,7 @@
  * Customer accounts through the Worker (server mode): the visitor's browser never holds a Shopify token. The Worker
  * logs the customer in with Shopify's Customer Account API (OAuth with PKCE, the id token's signature checked), keeps
  * the tokens sealed in KV, and gives the browser only an HttpOnly session cookie. The browser can then ask for a fixed
- * set of things, listed in `NAVIGATIONS` and `customerRoute` below and in `server/src/shared/account-ops.js`.
+ * set of things: the navigations in `NAVIGATIONS` below, logout, and the routes in `account/customer.js`.
  *
  * The Worker must run on the shop's own domain (a route `shop.com/_tether/*`), so the browser sends the cookie.
  * Settings and set-up: `docs/accounts.md`.
@@ -11,28 +11,29 @@
 /** @import { ReadyAccountSettings } from './account/settings.js' */
 /** @import { Fetch } from './account/shopify.js' */
 /** @import { Session } from './account/session.js' */
-/** @import { OperationCall } from './shared/account-ops.js' */
+/** @import { ExpiringStore, MemoryEntries } from './account/kv.js' */
 
-import { CUSTOMER_QUERY, ORDERS_QUERY } from './shared/account-documents.js';
 import { authorizeUrl } from './shared/account-login.js';
-import { InputError, operationCall, ops } from './shared/account-ops.js';
 import { randomToken } from './shared/base64url.js';
-import { field, isRecord } from './shared/json.js';
+import { isRecord } from './shared/json.js';
 import { open, seal } from './crypto.js';
-import { asRecord, responseJsonOrNull, textOrNull } from './json.js';
 import { messageOf } from './util.js';
+import { kvBinding } from './env.js';
 import { accountProblems, accountSettings, readyAccountSettings } from './account/settings.js';
-import { accountStore } from './account/kv.js';
+import { kvAccountStore, memoryAccountStore } from './account/kv.js';
 import { createSessionStore, sessionTokens } from './account/session.js';
 import { verifyIdToken } from './account/id-token.js';
-import { customerQuery, discover, linkCart, tokenRequest, UnauthorizedError } from './account/shopify.js';
+import { discover, linkCart, tokenRequest } from './account/shopify.js';
+import { customerRoute } from './account/customer.js';
 import {
+  CART_ID,
   corsHeaders,
   jsonResponse,
   LOGIN_COOKIE,
   LOGOUT_COOKIE,
   NO_STORE,
   readCookie,
+  readJsonObject,
   redirectResponse,
   safeReturn,
   SESSION_COOKIE,
@@ -48,7 +49,6 @@ export const BASE = '/_tether/account';
 const PENDING_LOGIN_SECONDS = 600;
 /** Seconds the one-time logout ticket stays valid. */
 const LOGOUT_TICKET_SECONDS = 120;
-const CART_ID = /^gid:\/\/shopify\/Cart\/[\w-]+(\?key=[\w-]+)?$/;
 
 /** @typedef {{ state: string, nonce: string, verifier: string, at: number, returnTo: string }} PendingLogin */
 /** @typedef {{ idToken: string, returnTo: string, at: number }} LogoutTicket */
@@ -66,16 +66,6 @@ function isLogoutTicket(value) {
   return (
     typeof value['idToken'] === 'string' && typeof value['returnTo'] === 'string' && typeof value['at'] === 'number'
   );
-}
-
-/**
- * The request body as a JSON object; `{}` for a body that is not one, whose fields the routes then refuse one by one.
- *
- * @param {Request} request
- * @returns {Promise<Record<string, unknown>>}
- */
-async function readJsonObject(request) {
-  return asRecord(await responseJsonOrNull(request));
 }
 
 /**
@@ -112,6 +102,7 @@ async function login({ request, url, settings, fetch: fetchImpl, callbackUrl }) 
     nonce: randomToken(),
     verifier: randomToken(),
     at: Date.now(),
+    // The Referer is whatever the browser sent: like `returnTo`, it only counts when it is on one of the site's origins.
     returnTo: safeReturn(url.searchParams.get('returnTo') ?? request.headers.get('referer') ?? '', settings),
   };
   const locale = (url.searchParams.get('locale') ?? '').replace(/[^a-zA-Z-]/g, '').slice(0, 8);
@@ -119,7 +110,7 @@ async function login({ request, url, settings, fetch: fetchImpl, callbackUrl }) 
     .replace(/[^A-Za-z]/g, '')
     .slice(0, 2)
     .toUpperCase();
-  const authorize = await authorizeUrl(discovery.authorization_endpoint, {
+  const authorize = await authorizeUrl(discovery.authorizationEndpoint, {
     clientId: settings.clientId,
     redirectUri: callbackUrl,
     state: pending.state,
@@ -137,33 +128,64 @@ async function login({ request, url, settings, fetch: fetchImpl, callbackUrl }) 
 }
 
 /**
- * The pending login of this browser, when it is the one Shopify's answer belongs to and not older than
- * {@link PENDING_LOGIN_SECONDS}.
+ * What the login cookie says about Shopify's answer. `expired`: no pending login in this browser (its cookie lasts
+ * as long as a login may take), or one older than {@link PENDING_LOGIN_SECONDS}. `mismatch`: a pending login that
+ * isn't the one the answer belongs to (another tab's, or a forged answer: login CSRF), or a cookie that doesn't open.
  *
+ * @typedef {{ kind: 'pending', pending: PendingLogin }
+ *   | { kind: 'expired', returnTo: string | null }
+ *   | { kind: 'mismatch' }} PendingLoginCheck
+ */
+
+/**
  * @param {AccountRequest} context
- * @returns {Promise<PendingLogin | null>}
+ * @returns {Promise<PendingLoginCheck>}
  */
 async function pendingLoginOf({ request, url, settings }) {
-  const pending = await open(settings.secret, 'login', LOGIN_COOKIE, readCookie(request, LOGIN_COOKIE, 2000));
+  const cookie = readCookie(request, LOGIN_COOKIE, 2000);
+  if (cookie === null) return { kind: 'expired', returnTo: null };
+  const pending = await open(settings.secret, 'login', LOGIN_COOKIE, cookie);
   const state = url.searchParams.get('state') ?? '';
-  if (!isPendingLogin(pending) || !state || pending.state !== state) return null;
-  return Date.now() - pending.at > PENDING_LOGIN_SECONDS * 1000 ? null : pending;
+  if (!isPendingLogin(pending) || !state || pending.state !== state) return { kind: 'mismatch' };
+  if (Date.now() - pending.at > PENDING_LOGIN_SECONDS * 1000) return { kind: 'expired', returnTo: pending.returnTo };
+  return { kind: 'pending', pending };
+}
+
+/**
+ * Where a login lands: `returnTo` (the site's home when it is unknown) with `?account=<outcome>` for the page.
+ *
+ * @param {string | null} returnTo
+ * @param {'in' | 'expired' | 'error'} outcome
+ * @param {AccountRequest} context
+ */
+function landing(returnTo, outcome, { settings, siteOrigin }) {
+  const back = new URL(returnTo === null ? `${siteOrigin}/` : safeReturn(returnTo, settings));
+  back.searchParams.set('account', outcome);
+  return back.href;
 }
 
 /** @param {AccountRequest} context */
 async function callback(context) {
   const { url, settings, sessions, sessionId, fetch: fetchImpl, siteOrigin, callbackUrl } = context;
-  const clearLogin = setCookie(LOGIN_COOKIE, '', 0);
-  const pending = await pendingLoginOf(context);
-  if (!pending) return redirectResponse(`${siteOrigin}/?account=expired`, { 'Set-Cookie': clearLogin });
+  const clearLogin = { 'Set-Cookie': setCookie(LOGIN_COOKIE, '', 0) };
+  const check = await pendingLoginOf(context);
+  if (check.kind === 'expired') return redirectResponse(landing(check.returnTo, 'expired', context), clearLogin);
+  if (check.kind === 'mismatch') {
+    console.error('account login: the answer is not for the pending login in this browser');
+    return redirectResponse(landing(null, 'error', context), clearLogin);
+  }
+  const { pending } = check;
   const code = url.searchParams.get('code');
-  if (url.searchParams.get('error') || !code) {
-    return redirectResponse(safeReturn(pending.returnTo, settings), { 'Set-Cookie': clearLogin });
+  // Shopify sends `error` when the customer cancels or the login fails on its side.
+  const refused = url.searchParams.get('error');
+  if (refused !== null || !code) {
+    console.error('account login: Shopify answered', (refused ?? 'without a code').slice(0, 100));
+    return redirectResponse(landing(pending.returnTo, 'error', context), clearLogin);
   }
   const discovery = await discover(settings, fetchImpl);
   const grant = { grant_type: 'authorization_code', redirect_uri: callbackUrl, code, code_verifier: pending.verifier };
   const tokens = await tokenRequest(settings, discovery, grant, siteOrigin, fetchImpl);
-  const idToken = tokens.id_token;
+  const { idToken } = tokens;
   if (!idToken) throw new Error('id token missing');
   await verifyIdToken(idToken, discovery, settings, pending.nonce, fetchImpl);
   const id = randomToken(32);
@@ -172,11 +194,9 @@ async function callback(context) {
   await sessions.save(id, session);
   // The cookie is about to point at the new session, so the old one could never be ended from this browser again.
   if (sessionId) await sessions.end(sessionId).catch(logFailure('account login: previous session not ended'));
-  const back = new URL(safeReturn(pending.returnTo, settings));
-  back.searchParams.set('account', 'in');
-  const headers = new Headers({ Location: back.href, ...NO_STORE });
+  const headers = new Headers({ Location: landing(pending.returnTo, 'in', context), ...NO_STORE });
   headers.append('Set-Cookie', setCookie(SESSION_COOKIE, id, settings.sessionDays * 86400));
-  headers.append('Set-Cookie', clearLogin);
+  headers.append('Set-Cookie', clearLogin['Set-Cookie']);
   return new Response(null, { status: 302, headers });
 }
 
@@ -193,12 +213,14 @@ async function logoutRedirect({ request, settings, fetch: fetchImpl, siteOrigin 
     return redirectResponse(`${siteOrigin}/`, clear);
   }
   try {
-    const shopifyLogout = new URL((await discover(settings, fetchImpl)).end_session_endpoint);
+    // Discovery accepts only an https end-session endpoint, so the id token goes nowhere else.
+    const shopifyLogout = new URL((await discover(settings, fetchImpl)).endSessionEndpoint);
     shopifyLogout.searchParams.set('id_token_hint', ticket.idToken);
     shopifyLogout.searchParams.set('post_logout_redirect_uri', ticket.returnTo);
     return redirectResponse(shopifyLogout.toString(), clear);
-  } catch {
-    // Shopify's endpoints can't be reached: the session here is already gone, so go back to the site.
+  } catch (error) {
+    // The session here is already gone, so the customer goes back to the site; Shopify's own session stays.
+    console.error('account logout: Shopify not logged out, its endpoints are unreachable', messageOf(error));
     return redirectResponse(ticket.returnTo, clear);
   }
 }
@@ -249,147 +271,6 @@ async function logout({ request, url, settings, sessions, sessionId, fetch: fetc
   return new Response(JSON.stringify({ loggedOut: true, logoutUrl }), { status: 200, headers });
 }
 
-/**
- * The logged-in customer's Customer Account API for one request. `ended` turns true when Shopify refuses the token;
- * the session is then ended here too.
- *
- * @param {AccountRequest} context
- * @param {Session} session
- */
-function customerApi({ settings, sessions, sessionId, fetch: fetchImpl, siteOrigin }, session) {
-  const api = {
-    ended: false,
-    /**
-     * @param {string} query
-     * @param {Record<string, unknown>} variables
-     * @returns {Promise<Record<string, unknown> | null>} `null` once Shopify has ended the session.
-     */
-    async ask(query, variables) {
-      try {
-        const discovery = await discover(settings, fetchImpl);
-        return await customerQuery(discovery, session.access, query, variables, siteOrigin, fetchImpl);
-      } catch (error) {
-        if (!(error instanceof UnauthorizedError)) throw error;
-        api.ended = true;
-        if (sessionId) await sessions.end(sessionId);
-        return null;
-      }
-    },
-  };
-  return api;
-}
-
-/** @param {unknown} data */
-function customerProfile(data) {
-  const customer = field(data, 'customer');
-  return {
-    id: textOrNull(field(customer, 'id')),
-    firstName: textOrNull(field(customer, 'firstName')),
-    lastName: textOrNull(field(customer, 'lastName')),
-    displayName: textOrNull(field(customer, 'displayName')),
-    email: textOrNull(field(field(customer, 'emailAddress'), 'emailAddress')),
-    address: field(field(customer, 'defaultAddress'), 'formatted') ?? null,
-  };
-}
-
-/**
- * The logged-in customer of a request, with an access token that is good for a while; `null` when logged out.
- *
- * @typedef {{ session: Session, api: ReturnType<typeof customerApi> } | null} Customer
- */
-
-/**
- * @param {AccountRequest} context
- * @returns {Promise<Customer>}
- */
-async function customerOf(context) {
-  const { sessions, sessionId, siteOrigin } = context;
-  if (!sessionId) return null;
-  const loaded = await sessions.load(sessionId);
-  const session = loaded ? await sessions.fresh(sessionId, loaded, siteOrigin) : null;
-  return session ? { session, api: customerApi(context, session) } : null;
-}
-
-/**
- * @typedef {(context: AccountRequest, cors: Record<string, string>, customer: Customer) => Promise<Response>} CustomerRoute
- */
-
-/** @type {CustomerRoute} */
-async function me(_context, cors, customer) {
-  const data = customer ? await customer.api.ask(CUSTOMER_QUERY, {}) : null;
-  if (!data) return jsonResponse({ loggedIn: false }, 200, cors);
-  return jsonResponse({ loggedIn: true, customer: customerProfile(data) }, 200, cors);
-}
-
-/** Orders per page when the request doesn't say, and at most. */
-const DEFAULT_ORDERS = 10;
-const MAX_ORDERS = 50;
-
-/** @type {CustomerRoute} */
-async function orders({ url }, cors, customer) {
-  const asked = parseInt(url.searchParams.get('first') ?? '', 10) || DEFAULT_ORDERS;
-  const first = Math.max(1, Math.min(MAX_ORDERS, asked));
-  const data = customer ? await customer.api.ask(ORDERS_QUERY, { first }) : null;
-  if (!data) return jsonResponse({ loggedIn: false, orders: [] }, 401, cors);
-  const list = field(field(field(data, 'customer'), 'orders'), 'nodes') ?? [];
-  return jsonResponse({ loggedIn: true, orders: list }, 200, cors);
-}
-
-/** @type {CustomerRoute} */
-async function cart({ request, settings, fetch: fetchImpl }, cors, customer) {
-  if (!customer) return jsonResponse({ loggedIn: false }, 401, cors);
-  const cartId = field(await readJsonObject(request), 'cartId');
-  if (typeof cartId !== 'string' || !CART_ID.test(cartId)) return jsonResponse({ error: 'cartId' }, 400, cors);
-  const checkoutUrl = await linkCart(settings, cartId, customer.session.access, fetchImpl);
-  return jsonResponse({ linked: Boolean(checkoutUrl), checkoutUrl }, 200, cors);
-}
-
-/**
- * One of the fixed account operations (order detail, profile, addresses, subscriptions, returns).
- *
- * @param {Record<string, string>} cors
- * @param {Customer} customer
- * @param {OperationCall} call
- */
-async function operation(cors, customer, { name, input }) {
-  if (!customer) return jsonResponse({ loggedIn: false }, 401, cors);
-  const { api } = customer;
-  try {
-    const out = await ops[name]((query, variables) => api.ask(query, variables), input);
-    if (api.ended) return jsonResponse({ loggedIn: false }, 401, cors);
-    return jsonResponse({ ok: true, ...out }, 200, cors);
-  } catch (error) {
-    if (!(error instanceof InputError)) throw error;
-    const userErrors = error.userErrors.length ? error.userErrors : undefined;
-    // `code` tells the browser this is refused input, not a missing route, whatever the status.
-    return jsonResponse({ error: error.message, code: 'INVALID', userErrors }, error.status, cors);
-  }
-}
-
-/** The routes for the logged-in customer, besides the operations in account-ops.js. */
-const CUSTOMER_ROUTES = new Map([
-  ['GET /me', me],
-  ['GET /orders', orders],
-  ['POST /cart', cart],
-]);
-
-/**
- * The routes that need a session, behind CORS and (for POST) the CSRF header.
- *
- * @param {AccountRequest} context
- * @param {Record<string, string>} cors
- * @param {string} route
- */
-async function customerRoute(context, cors, route) {
-  const { method } = context.request;
-  const handler = CUSTOMER_ROUTES.get(`${method} ${route}`);
-  if (handler) return handler(context, cors, await customerOf(context));
-  const body = method === 'POST' ? await readJsonObject(context.request) : {};
-  const call = operationCall(method, route, context.url, body);
-  if (!call) return jsonResponse({ error: 'not found' }, 404, cors);
-  return operation(cors, await customerOf(context), call);
-}
-
 /** Top-level navigations: no CORS; the cookies prove which browser it is. */
 const NAVIGATIONS = new Map([
   ['GET /login', login],
@@ -411,12 +292,28 @@ function navigationFailed(siteOrigin) {
 }
 
 /**
+ * Where the sessions live: the explicit memory map when the caller passes one, else the TETHER_SYNC namespace.
+ *
+ * @param {Record<string, unknown>} env
+ * @param {MemoryEntries | undefined} memory
+ * @returns {ExpiringStore | null} `null` when there is neither: a login could not be kept.
+ */
+function sessionStorage(env, memory) {
+  if (memory) return memoryAccountStore(memory);
+  const namespace = kvBinding(env);
+  return namespace ? kvAccountStore(namespace) : null;
+}
+
+/** The answer while accounts can't work; what is missing is only logged and shown by an authorized /check. */
+const NOT_SET_UP = { error: 'accounts are not set up (see /check)' };
+
+/**
  * Handles `/_tether/account/*`.
  *
  * @param {Request} request
  * @param {Record<string, unknown>} env The Worker's env.
- * @param {{ fetch?: Fetch, memory?: import('./account/kv.js').MemoryEntries }} [options] `memory` is the store used
- *   without a KV namespace (tests).
+ * @param {{ fetch?: Fetch, memory?: MemoryEntries }} [options] `memory` keeps the sessions in that map instead of
+ *   the TETHER_SYNC namespace, for tests and hosts other than Cloudflare.
  * @returns {Promise<Response | null>} `null` when the path isn't an account route.
  */
 export async function handleAccount(request, env, { fetch: fetchImpl = globalThis.fetch, memory } = {}) {
@@ -427,16 +324,20 @@ export async function handleAccount(request, env, { fetch: fetchImpl = globalThi
   const ready = readyAccountSettings(configured);
   if (ready.kind === 'not-ready') {
     console.error('account setup', ready.errors.map((problem) => problem.message).join('; '));
-    return jsonResponse({ error: 'accounts are not set up (see /check)' }, 503);
+    return jsonResponse(NOT_SET_UP, 503);
+  }
+  const store = sessionStorage(env, memory);
+  if (!store) {
+    console.error('account setup: the TETHER_SYNC KV namespace is not bound, so no login can be kept');
+    return jsonResponse(NOT_SET_UP, 503);
   }
   const { settings } = ready;
-  const namespace = /** @type {import('./account/kv.js').KvNamespace | undefined} */ (env['TETHER_SYNC']);
   /** @type {AccountRequest} */
   const context = {
     request,
     url,
     settings,
-    sessions: createSessionStore({ store: accountStore(namespace, memory), settings, fetch: fetchImpl }),
+    sessions: createSessionStore({ store, settings, fetch: fetchImpl }),
     sessionId: readCookie(request, SESSION_COOKIE, 100),
     fetch: fetchImpl,
     siteOrigin: settings.origins[0],

@@ -3,22 +3,21 @@
  * signing keys, then its claims. The Worker trusts nothing in the token before the signature holds.
  */
 
-/** @import { AccountSettings } from './settings.js' */
+/** @import { ShopifyAccountSettings } from './settings.js' */
 /** @import { Discovery, Fetch } from './shopify.js' */
 
 import { fromBase64Url } from '../shared/base64url.js';
-import { field } from '../shared/json.js';
-import { asList, asRecord, responseJsonOrNull } from '../json.js';
+import { checkIdTokenClaims } from '../shared/id-token-claims.js';
+import { asList, field } from '../shared/json.js';
+import { asRecord, responseJsonOrNull } from '../json.js';
+import { JSON_HEADERS } from './shopify.js';
 
 /** @typedef {{ kid: string, jwk: JsonWebKey }} SigningKey An RSA key from Shopify's key set, by its key id. */
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
-const JSON_HEADERS = { Accept: 'application/json', 'User-Agent': 'tether-sync (Cloudflare Worker)' };
 /** How long Shopify's signing keys are trusted before they are fetched again. */
 const JWKS_TTL_MS = 3600e3;
-/** Clock difference allowed between Shopify and the Worker for `iat` and `nbf`. */
-const CLOCK_SKEW_SECONDS = 300;
 
 /** @type {Map<string, { keys: SigningKey[], until: number }>} */
 const jwksCache = new Map();
@@ -71,25 +70,15 @@ async function signingKeys(jwksUri, kid, fetchImpl) {
 }
 
 /**
- * The `aud` claim as a list: a JWT may carry one audience or several.
- *
- * @param {unknown} claim
- * @returns {unknown[]}
- */
-function audiencesOf(claim) {
-  return Array.isArray(claim) ? asList(claim) : [claim];
-}
-
-/**
  * Checks the id token's RS256 signature against Shopify's published key with the token's `kid`, and only then its
- * claims: issuer, audience, nonce, expiry, and that it was issued and valid by now.
+ * claims (`checkIdTokenClaims`).
  *
  * @param {string} token
  * @param {Discovery} discovery
- * @param {AccountSettings} settings
+ * @param {ShopifyAccountSettings} settings
  * @param {string} nonce The nonce sent with this login.
  * @param {Fetch} fetchImpl
- * @returns {Promise<Record<string, unknown>>} The token's claims.
+ * @returns {Promise<string>} The customer's `sub`.
  * @throws {Error} When the signature or a claim doesn't hold.
  */
 export async function verifyIdToken(token, discovery, settings, nonce, fetchImpl) {
@@ -99,7 +88,7 @@ export async function verifyIdToken(token, discovery, settings, nonce, fetchImpl
   if (header['alg'] !== 'RS256') throw new Error(`id token alg ${String(header['alg'])}`);
   const kid = header['kid'];
   if (typeof kid !== 'string' || !kid) throw new Error('id token has no key id');
-  const signingKey = (await signingKeys(discovery.jwks_uri, kid, fetchImpl)).find((key) => key.kid === kid);
+  const signingKey = (await signingKeys(discovery.jwksUri, kid, fetchImpl)).find((key) => key.kid === kid);
   if (!signingKey) throw new Error('id token key not found');
   const key = await crypto.subtle.importKey(
     'jwk',
@@ -112,13 +101,12 @@ export async function verifyIdToken(token, discovery, settings, nonce, fetchImpl
   if (!(await crypto.subtle.verify('RSASSA-PKCS1-v1_5', key, fromBase64Url(signature), signed))) {
     throw new Error('id token signature');
   }
-  const claims = jwtPart(payloadPart);
-  const now = Date.now() / 1000;
-  if (claims['iss'] !== discovery.issuer) throw new Error('id token issuer');
-  if (!audiencesOf(claims['aud']).includes(settings.clientId)) throw new Error('id token audience');
-  if (claims['nonce'] !== nonce) throw new Error('id token nonce');
-  if (!(Number(claims['exp']) > now)) throw new Error('id token expired');
-  if (Number(claims['iat'] ?? 0) > now + CLOCK_SKEW_SECONDS) throw new Error('id token issued in the future');
-  if (Number(claims['nbf'] ?? 0) > now + CLOCK_SKEW_SECONDS) throw new Error('id token not valid yet');
-  return claims;
+  const check = checkIdTokenClaims(jwtPart(payloadPart), {
+    issuer: discovery.issuer,
+    clientId: settings.clientId,
+    nonce,
+    nowSeconds: Date.now() / 1000,
+  });
+  if (check.kind === 'invalid') throw new Error(`id token ${check.reason}`);
+  return check.subject;
 }

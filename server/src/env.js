@@ -75,3 +75,36 @@ export function cleanEnv(env) {
   }
   return clean;
 }
+
+/**
+ * The Worker's KV namespace binding, as far as Tether uses it. Cloudflare defines the signatures; only that the three
+ * methods exist can be checked when the binding arrives.
+ *
+ * @typedef {object} KvBinding
+ * @property {(key: string, type?: 'text' | 'json') => Promise<unknown>} get
+ * @property {(key: string, value: string, options?: { expirationTtl: number }) => Promise<void>} put
+ * @property {(key: string) => Promise<void>} delete
+ */
+
+/** The binding's name in wrangler.jsonc. */
+const KV_BINDING = 'TETHER_SYNC';
+
+/**
+ * @param {unknown} value
+ * @returns {value is KvBinding}
+ */
+function isKvBinding(value) {
+  if (value === null || typeof value !== 'object') return false;
+  return ['get', 'put', 'delete'].every((method) => typeof Reflect.get(value, method) === 'function');
+}
+
+/**
+ * The TETHER_SYNC KV namespace, or `null` when the Worker has none, or a setting by that name that is no namespace.
+ *
+ * @param {Record<string, unknown>} env
+ * @returns {KvBinding | null}
+ */
+export function kvBinding(env) {
+  const binding = env[KV_BINDING];
+  return isKvBinding(binding) ? binding : null;
+}
