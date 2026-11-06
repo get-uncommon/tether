@@ -1,32 +1,22 @@
 /**
- * What both account modes share: the storage keys, where browser mode keeps its session, one request to Shopify or
+ * What both account modes share: where browser mode keeps its session, one request to Shopify or
  * the Worker, the redirect to Shopify's pages, and the login language. Storage throws in private mode and where the
  * visitor blocks site data; a login then lasts as long as the page.
  */
 import { cfg } from '../config.js';
 import { TetherError } from '../client.js';
 import { isRecord } from '../../server/src/shared/json.js';
+import { hintKey } from '../account-marks.js';
 
 /** @typedef {'session' | 'local'} StorageArea */
 
-/** @returns {string} The browser-mode session's key. */
-export const sessionKey = () => `${cfg.prefix}:account:${cfg.domain}`;
-
-/** @returns {string} The key of the login in progress (browser mode), between leaving for Shopify and coming back. */
-export const pendingLoginKey = () => `${cfg.prefix}:account-login:${cfg.domain}`;
-
 /**
- * Server mode's "may be logged in" mark: it makes the core load this part on the next page, and holds no secret.
- *
- * @returns {string}
- */
-const hintKey = () => `${cfg.prefix}:account-hint:${cfg.domain}`;
-
-/**
- * Where browser mode keeps the customer's tokens, which carry the `customer-account-api:full` scope. By default
- * `sessionStorage`: the login ends with the tab. `account.remember` chooses `localStorage`, where the refresh token
- * stays on the device until logout. Any script on the page can read either area, so a site that renders HTML it
- * doesn't control, or loads third-party scripts, should use server mode, which keeps every token in the Worker.
+ * Where browser mode keeps the customer's tokens: the access token and the refresh token carry the
+ * `customer-account-api:full` scope. By default `sessionStorage`: this tab only, and closing the tab ends the login.
+ * `account.remember` chooses `localStorage`: every tab, and the refresh token stays on the device until logout or
+ * until Shopify ends the session. Any script that runs on the site's pages can read either area, and could take the
+ * tokens to use elsewhere, so a site that renders HTML it doesn't control, or loads third-party scripts, should use
+ * server mode, which keeps every token in the Worker.
  *
  * @returns {StorageArea}
  */
@@ -68,12 +58,6 @@ export function writeJsonIfAllowed(area, key, value) {
 export function setLoginHint(loggedIn) {
   writeJsonIfAllowed('local', hintKey(), loggedIn ? 1 : null);
 }
-
-/**
- * @param {unknown} value
- * @returns {string | null}
- */
-export const textOrNull = (value) => (typeof value === 'string' ? value : null);
 
 /**
  * One request to Shopify or the Worker. A request that never got an answer is a `NETWORK` error in both modes.

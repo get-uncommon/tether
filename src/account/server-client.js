@@ -6,15 +6,8 @@ import { cfg } from '../config.js';
 import { TetherError } from '../client.js';
 import { Cart } from '../cart.js';
 import { emit } from '../dom.js';
-import {
-  accountFetch,
-  loginCountry,
-  loginLanguage,
-  navigate,
-  readJsonObjectOrEmpty,
-  setLoginHint,
-  textOrNull,
-} from './shared.js';
+import { accountFetch, loginCountry, loginLanguage, navigate, readJsonObjectOrEmpty, setLoginHint } from './shared.js';
+import { textOrNull } from '../../server/src/shared/json.js';
 import { toServerCustomer, toUserErrors } from './answers.js';
 /** @import { AccountCustomer } from './answers.js' */
 

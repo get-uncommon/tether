@@ -7,6 +7,7 @@ import { cfg, reportError } from './config.js';
 import { attr } from './dom.js';
 import { loadPart } from './lazy.js';
 import { within } from './mounting.js';
+import { hintKey, isLoginOutcome, pendingLoginKey, sessionKey } from './account-marks.js';
 /** @import { Parts } from './lazy.js' */
 
 /** @typedef {Parts['account']} AccountPart */
@@ -51,31 +52,45 @@ function isStoredIfAllowed(area, key) {
 }
 
 /**
- * Whether this browser keeps an account session or the hint of one, so a page without account markup still finishes
- * a login. The keys are account/shared.js's, which the part owns.
+ * Whether this browser keeps an account session or the hint of one, so checkout on a page without account markup
+ * still knows the customer.
  *
  * @returns {boolean}
  */
 function hasSavedSession() {
-  const sessionKey = `${cfg.prefix}:account:${cfg.domain}`;
-  const hintKey = `${cfg.prefix}:account-hint:${cfg.domain}`;
   return (
-    isStoredIfAllowed('session', sessionKey) ||
-    isStoredIfAllowed('local', sessionKey) ||
-    isStoredIfAllowed('local', hintKey)
+    isStoredIfAllowed('session', sessionKey()) ||
+    isStoredIfAllowed('local', sessionKey()) ||
+    isStoredIfAllowed('local', hintKey())
   );
 }
 
 /**
+ * Whether this page is a login coming back: in server mode the Worker's `?account=` mark, in browser mode Shopify's
+ * answer (`?state=` with `code` or `error`) to a login this tab started. A `?code=` alone is often something else,
+ * such as a discount link, and doesn't load the part.
+ *
+ * @param {URLSearchParams} params The page's query.
+ * @returns {boolean}
+ */
+function isLoginCallback(params) {
+  if (cfg.account?.server) return isLoginOutcome(params.get('account'));
+  const answered = params.has('state') && (params.has('code') || params.has('error'));
+  return answered && isStoredIfAllowed('session', pendingLoginKey());
+}
+
+/**
  * Loads the account part and mounts it on `root`, when accounts are configured and the page needs them: account
- * markup in `root`, a login coming back from Shopify (`?code=`), or a saved session.
+ * markup in `root`, a login coming back (`isLoginCallback`), or a saved session.
  *
  * @param {ParentNode} root
  */
 export function mountAccountIfUsed(root) {
   if (!cfg.account?.clientId && !cfg.account?.server) return;
   const needed =
-    within(root, accountSelector()).length > 0 || /[?&]code=/.test(window.location.search) || hasSavedSession();
+    within(root, accountSelector()).length > 0 ||
+    isLoginCallback(new URLSearchParams(window.location.search)) ||
+    hasSavedSession();
   if (!needed) return;
   loadPart('account')
     .then((part) => part.mountAccount(root))

@@ -3,7 +3,7 @@
  * rules are answers.js's: every selected field is kept, a missing one reads as `null`, and the ids the pages act on
  * are required.
  */
-import { field, isRecord } from '../../server/src/shared/json.js';
+import { field, isRecord, textOrNull } from '../../server/src/shared/json.js';
 import {
   countOrZero,
   imageOrNull,
@@ -16,7 +16,6 @@ import {
   toOrderLine,
   unexpected,
 } from './answers.js';
-import { textOrNull } from './shared.js';
 /** @import { Money } from '../shopify-values.js' */
 /** @import { AccountImage, AccountOrderLine } from './answers.js' */
 

@@ -43,9 +43,10 @@ import {
   serverLoginRedirect,
   serverLogout,
 } from './account/server-client.js';
-import { renderOrderList } from './account/order-list.js';
+import { DEFAULT_ORDER_COUNT, MAX_ORDER_COUNT, isOrderCount, renderOrderList } from './account/order-list.js';
 import { ownValue } from './account/markup.js';
 import { toAccountOrders } from './account/answers.js';
+import { isLoginOutcome } from './account-marks.js';
 /** @import { AccountCustomer, AccountOrder } from './account/answers.js' */
 /** @import { Parts } from './lazy.js' */
 /** @import { AddressFields, ReturnLine } from './account/operations.js' */
@@ -53,12 +54,6 @@ import { toAccountOrders } from './account/answers.js';
 
 export { getToken, handleCallback };
 
-/**
- * What the Worker's login redirect says in `?account=`: `in` after a login, `expired` when the login took too long,
- * `error` when it failed.
- *
- * @typedef {'in' | 'expired' | 'error'} LoginOutcome
- */
 /**
  * @typedef {{ kind: 'logged-in' } | { kind: 'logged-out' } | { kind: 'unknown', error: unknown }} LoginState
  *   `unknown` when the Worker or Shopify can't say: the page shows its logged-out content, and the account pages their
@@ -110,13 +105,19 @@ export async function customer() {
 }
 
 /**
- * @param {{ first?: number }} [options]
+ * @param {{ first?: number }} [options] `first`: a whole number from 1 to `MAX_ORDER_COUNT`.
  * @returns {Promise<AccountOrder[]>} The customer's most recent orders, newest first; none when nobody is logged in.
- * @throws {TetherError} When the Worker or Shopify can't answer.
+ * @throws {TetherError} `INVALID` for another `first`, which is refused before any request; else when the Worker or
+ *   Shopify can't answer.
  */
-export async function orders({ first = 10 } = {}) {
+export async function orders({ first = DEFAULT_ORDER_COUNT } = {}) {
+  if (!isOrderCount(first)) {
+    throw new TetherError(`Customer accounts: orders() takes first from 1 to ${String(MAX_ORDER_COUNT)}`, {
+      code: 'INVALID',
+    });
+  }
   if (!serverBase()) return browserOrders(first);
-  const answer = await serverFetch(`/orders?first=${first}`);
+  const answer = await serverFetch(`/orders?${new URLSearchParams({ first: String(first) }).toString()}`);
   return answer.kind === 'logged-out' ? [] : toAccountOrders(answer.data['orders']);
 }
 
@@ -298,12 +299,6 @@ function onClick(event) {
     });
   }
 }
-
-/**
- * @param {string | null} value
- * @returns {value is LoginOutcome}
- */
-const isLoginOutcome = (value) => value === 'in' || value === 'expired' || value === 'error';
 
 /**
  * Back from the Worker's login (`?account=`): drops the mark and sends `tether:account-login`, or

@@ -62,6 +62,7 @@ function discovery(url) {
       authorization_endpoint: 'https://shopify.com/authentication/1/oauth/authorize',
       token_endpoint: 'https://shopify.com/authentication/1/oauth/token',
       end_session_endpoint: 'https://shopify.com/authentication/1/logout',
+      jwks_uri: 'https://shopify.com/authentication/1/.well-known/jwks.json',
     });
   }
   if (url.endsWith('/.well-known/customer-account-api')) return json({ graphql_api: GRAPHQL });
@@ -235,6 +236,34 @@ test('both modes: input Shopify or the operation refuses is INVALID', async () =
   await assert.rejects(account.saveAddress('not an address'), { code: 'INVALID' });
 });
 
+test('both modes: orders({ first }) takes a whole number from 1 to 50, checked before any request', async () => {
+  const asked = [];
+  globalThis.fetch = async (url) => {
+    asked.push(String(url));
+    return json({ orders: [] });
+  };
+  for (const accountConfig of [{ server: '/_tether/account' }, { clientId: 'client-1' }]) {
+    configure({ ...testConfig(), account: accountConfig });
+    for (const first of ['10&x=1', 0, 51, 2.5, Number.NaN]) {
+      await assert.rejects(account.orders({ first }), { code: 'INVALID' }, String(first));
+    }
+  }
+  assert.deepEqual(asked, []);
+  configure({ ...testConfig(), account: { server: '/_tether/account' } });
+  await account.orders({ first: 50 });
+  document.body.innerHTML = '<div tether-orders tether-limit="100"><a></a></div>';
+  globalThis.fetch = async (url) => {
+    asked.push(String(url));
+    return new URL(url).pathname.endsWith('/me') ? json({ loggedIn: true, customer: ADA }) : json({ orders: [] });
+  };
+  await account.render(document);
+  assert.deepEqual(
+    asked.filter((url) => url.includes('/orders')).map((url) => new URL(url).search),
+    ['?first=50', '?first=50'],
+    'a tether-limit above 50 asks for 50',
+  );
+});
+
 test('server mode: an answer without the ids the page acts on is an error, other fields read as null', async () => {
   configure({ ...testConfig(), account: { server: '/_tether/account' } });
   globalThis.fetch = async (url) =>
@@ -271,6 +300,19 @@ test('browser mode: a token Shopify refuses and that cannot be refreshed ends th
   assert.equal(account.isLoggedIn(), false);
 });
 
+test('browser mode: only invalid_grant ends the session; another token refusal is an error that keeps it', async () => {
+  configure({ ...testConfig(), account: { clientId: 'client-1' } });
+  storeSession({ expiresAt: Date.now() - 1000, refresh: 'refresh-1' });
+  globalThis.fetch = async (url) => discovery(String(url)) ?? json({ error: 'invalid_client' }, 401);
+  await assert.rejects(account.getToken(), { code: 'TOKEN_FAILED', status: 401 });
+  assert.equal(JSON.parse(sessionStorage.getItem(SESSION_KEY)).refresh, 'refresh-1', 'the session is kept');
+  assert.equal(account.isLoggedIn(), true);
+
+  globalThis.fetch = async (url) => discovery(String(url)) ?? json({ error: 'invalid_grant' }, 400);
+  assert.equal(await account.getToken(), null);
+  assert.equal(sessionStorage.getItem(SESSION_KEY), null, 'Shopify ended the login');
+});
+
 test('browser mode: a stored session of another shape is not a login', async () => {
   configure({ ...testConfig(), account: { clientId: 'client-1' } });
   sessionStorage.setItem(SESSION_KEY, JSON.stringify({ access: 42, expiresAt: 'soon' }));
@@ -279,6 +321,46 @@ test('browser mode: a stored session of another shape is not a login', async () 
   };
   assert.equal(await account.getToken(), null);
   assert.equal(account.isLoggedIn(), false);
+});
+
+test('browser mode: the id token is checked as the Worker checks it, azp and iat included', async () => {
+  configure({ ...testConfig(), account: { clientId: 'client-1' } });
+  const now = Date.now() / 1000;
+  const good = {
+    iss: 'https://shopify.com/authentication/1',
+    aud: 'client-1',
+    sub: 'gid://shopify/Customer/1',
+    nonce: 'nonce-1',
+    iat: now,
+    exp: now + 3600,
+  };
+  for (const [claims, reason] of [
+    [{ ...good, azp: 'another-client' }, 'authorized party'],
+    [{ ...good, aud: ['client-1', 'another-client'] }, 'authorized party missing'],
+    [{ ...good, iat: undefined }, 'issued-at missing'],
+    [{ ...good, exp: String(now + 3600) }, 'expired'],
+    [{ ...good, sub: undefined }, 'subject missing'],
+  ]) {
+    sessionStorage.setItem(
+      'tether:account-login:shop.test',
+      JSON.stringify({
+        state: 's-1',
+        nonce: 'nonce-1',
+        verifier: 'v',
+        redirect: 'https://site.test/account',
+        returnTo: '',
+        at: Date.now(),
+      }),
+    );
+    window.history.replaceState(null, '', '/account?code=c-1&state=s-1');
+    const idToken = `x.${Buffer.from(JSON.stringify(claims)).toString('base64url')}.y`;
+    globalThis.fetch = async (url) =>
+      discovery(String(url)) ?? json({ access_token: 'tok-1', id_token: idToken, expires_in: 3600 });
+    await assert.rejects(account.handleCallback(), {
+      message: `Customer accounts: the login answer did not check out (${reason})`,
+    });
+    assert.equal(sessionStorage.getItem(SESSION_KEY), null, 'no session');
+  }
 });
 
 // Runs last: it leaves a session in memory.

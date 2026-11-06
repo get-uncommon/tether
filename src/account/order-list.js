@@ -9,8 +9,27 @@ import { ownValue, showIn } from './markup.js';
 import { fillLines } from './order-lines.js';
 /** @import { AccountOrder } from './answers.js' */
 
-/** How many orders a `tether-orders` list shows without `tether-limit`. */
-const DEFAULT_ORDER_COUNT = 10;
+/** How many orders `orders()` answers, and a `tether-orders` list shows, without being told. */
+export const DEFAULT_ORDER_COUNT = 10;
+/** The most orders one request asks for, in both modes: the Worker answers no more. */
+export const MAX_ORDER_COUNT = 50;
+
+/**
+ * @param {unknown} value
+ * @returns {value is number} True for a number of orders one request can ask for: a whole number from 1 to
+ *   `MAX_ORDER_COUNT`.
+ */
+export const isOrderCount = (value) =>
+  typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= MAX_ORDER_COUNT;
+
+/**
+ * @param {string | null} limit The list's `tether-limit`.
+ * @returns {number} How many orders the list shows: the limit, kept within what one request can ask for.
+ */
+function listLimit(limit) {
+  const asked = Number.parseInt(limit || String(DEFAULT_ORDER_COUNT), 10) || DEFAULT_ORDER_COUNT;
+  return Math.min(Math.max(asked, 1), MAX_ORDER_COUNT);
+}
 
 /**
  * @param {string} gid `gid://shopify/Order/123`, possibly with a query.
@@ -85,7 +104,7 @@ export async function renderOrderList(root, loadOrders) {
   const first = lists[0];
   if (!first) return;
   showIn(root, 'show', { 'orders-loading': true, 'orders-empty': false });
-  const limit = Number.parseInt(get(first, 'limit') || String(DEFAULT_ORDER_COUNT), 10) || DEFAULT_ORDER_COUNT;
+  const limit = listLimit(get(first, 'limit'));
   /** @type {AccountOrder[] | null} `null` after a failure. */
   let orders;
   try {

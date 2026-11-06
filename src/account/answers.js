@@ -7,8 +7,7 @@
  * their orders, Shopify's `userErrors`); page-answers.js reads the account pages' answers.
  */
 import { TetherError } from '../client.js';
-import { field, isRecord } from '../../server/src/shared/json.js';
-import { textOrNull } from './shared.js';
+import { field, isRecord, textOrNull } from '../../server/src/shared/json.js';
 /** @import { Money } from '../shopify-values.js' */
 /** @import { UserError } from '../client.js' */
 

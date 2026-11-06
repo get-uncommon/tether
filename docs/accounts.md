@@ -2,7 +2,9 @@
 
 Login, the customer's name and orders, and a checkout that knows them (saved addresses and cards),
 with Shopify's [Customer Account API](https://shopify.dev/docs/api/customer). The account part
-(about 7 KB gzipped) loads only on pages that use it.
+(about 8 KB gzipped) loads only on pages that need it: pages with account markup, a login coming
+back (Shopify's answer to a login this tab started, or the Worker's `?account=`), and pages where
+the visitor may be logged in.
 
 There are two ways to run it. **Use the server mode for live sites.**
 
@@ -84,12 +86,23 @@ The markup and JavaScript below are the same in both modes.
 ## Browser mode
 
 For a quick start or a site without its own domain on Cloudflare. The login happens in the
-browser (OAuth with PKCE; `state`, `nonce`, issuer and audience checked), and the browser holds
-the customer's tokens with their full scope: the same access server mode keeps in the Worker. They
-live in `sessionStorage` (gone when the tab closes), or `localStorage` with `remember: true` (kept
-across tabs and restarts). Any script on your pages can read them, and use them elsewhere. **Use
-server mode** when your pages render HTML you don't control (store descriptions, CMS rich text from
-others, user content) or load third-party scripts (analytics, chat, A/B testing, tag managers).
+browser (OAuth with PKCE and `state`; the id token's claims checked as the Worker checks them:
+issuer, audience, authorized party, `nonce`, expiry, issue time, not-before and subject), and the browser
+holds the customer's tokens with their full scope: the same access server mode keeps in the Worker.
+
+**Where the tokens are kept, and what that risks.** The access token and the refresh token (and
+the id token, for Shopify's logout) are kept in Web Storage:
+
+- by default in `sessionStorage`: this tab only. **Closing the tab ends the login**, and a new
+  tab starts logged out;
+- with `account: { remember: true }` in `localStorage`: every tab, across restarts. The refresh
+  token stays on the device until the customer logs out or Shopify ends the session.
+
+Any script that runs on your pages can read either area, and could take the tokens to use them
+elsewhere: with `remember`, that includes the refresh token, which keeps working after the tab
+is closed. **Use server mode** when your pages render HTML you don't control (store descriptions,
+CMS rich text from others, user content) or load third-party scripts (analytics, chat, A/B
+testing, tag managers).
 
 1. Shopify: as above, client type **Public**, and the callback URI is the page visitors come back
    to (e.g. `https://your-shop.com/account`).
@@ -131,6 +144,7 @@ a signature, which is safe only because the answer comes from Shopify over TLS.
 `tether-order-bind`: `name` (#1001), `date`, `total`, `status` (payment), `fulfillment`, `items`,
 `image` (the first product's image), `url` (Shopify's order status page). `tether-order-line`:
 `title`, `variant-title`, `quantity`, `image`.
+`tether-limit` is how many orders the list shows: 10 by default, at most 50.
 
 While logged in, checkout knows the customer (their details filled in, the order in their account).
 Logging out unlinks the cart.
@@ -271,7 +285,7 @@ enforces the same through the customer's token). Every change needs the allowed 
 ```js
 await Tether.account.login();                 // to Shopify's login page and back
 const me = await Tether.account.customer();   // { firstName, lastName, emailAddress, … }
-const orders = await Tether.account.orders({ first: 5 });
+const orders = await Tether.account.orders({ first: 5 });   // 1 to 50, default 10
 const order = await Tether.account.order(1234);          // lines, totals, fulfillments, returnable lines
 await Tether.account.updateProfile({ firstName: 'Ada' });
 const list = await Tether.account.addresses();           // [{ id, formatted, isDefault, … }]
@@ -294,12 +308,16 @@ Failures are `TetherError`s with a `code`, the same in both modes:
 | `code` | When |
 |---|---|
 | `NOT_LOGGED_IN` | an action that needs a customer (order, profile, addresses, subscriptions, returns) while nobody is logged in |
-| `INVALID` | Shopify or the Worker refused the input; Shopify's messages (e.g. "Zip is invalid") are in `err.userErrors` |
+| `INVALID` | Shopify or the Worker refused the input; Shopify's messages (e.g. "Zip is invalid") are in `err.userErrors`. Also `orders({ first })` with a `first` that isn't a whole number from 1 to 50, before any request |
 | `NETWORK` | the Worker or Shopify couldn't be reached |
 | `HTTP_<status>` | the Worker answered with another error, e.g. `HTTP_502` when Shopify failed behind it |
 
-Browser mode adds `NOT_CONFIGURED` (no `account.clientId`), and `SESSION_ENDED` / `TOKEN_FAILED`
-when Shopify refuses or fails a token request (an ended session logs the visitor out).
+Browser mode adds `NOT_CONFIGURED` (no `account.clientId`), and two for a token request that
+Shopify refuses or fails. `SESSION_ENDED` is Shopify's `invalid_grant`: the login code or refresh
+token is no longer valid, so the visitor is logged out here. `TOKEN_FAILED` is any other refusal or
+failure, such as `invalid_client` or a wrong callback URI: a setup mistake, so the session is kept,
+as the Worker does in server mode, and the request fails with this error (for the page's account
+markup it goes to `onError`).
 
 ### Events
 
@@ -308,7 +326,9 @@ On `document`: `tether:account-login` after a login, `tether:account-logout`,
 `tether:account-error` with `{ error }` when a login didn't work. In server mode `error` is
 `'error'` (the login failed: the Worker sends the visitor back with `?account=error`) or
 `'expired'` (`?account=expired`: the login took longer than ten minutes, or came back to another
-browser). In browser mode it is Shopify's OAuth error code, e.g. `access_denied`.
+browser). In browser mode it is the OAuth error code Shopify sends back, e.g. `access_denied`; a
+login that took longer than ten minutes, or whose answer doesn't check out, goes to `onError`
+instead, with no event.
 
 ## Tested
 

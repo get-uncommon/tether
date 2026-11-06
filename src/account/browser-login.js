@@ -9,15 +9,9 @@ import { emit } from '../dom.js';
 import { randomToken } from '../../server/src/shared/base64url.js';
 import { authorizeUrl } from '../../server/src/shared/account-login.js';
 import { isRecord } from '../../server/src/shared/json.js';
-import {
-  loginCountry,
-  loginLanguage,
-  navigate,
-  pendingLoginKey,
-  readJsonIfAllowed,
-  writeJsonIfAllowed,
-} from './shared.js';
-import { answersLogin, discover, requestToken } from './shopify-auth.js';
+import { loginCountry, loginLanguage, navigate, readJsonIfAllowed, writeJsonIfAllowed } from './shared.js';
+import { pendingLoginKey } from '../account-marks.js';
+import { discover, loginAnswerProblem, requestToken } from './shopify-auth.js';
 import { clientId, startSession } from './browser-session.js';
 
 /**
@@ -110,9 +104,8 @@ export async function handleCallback() {
     code_verifier: pending.verifier,
   });
   const { issuer } = await discover();
-  if (!answersLogin(answer.idToken, { nonce: pending.nonce, issuer, client })) {
-    throw new TetherError('Customer accounts: the login answer did not check out (nonce/issuer/audience)');
-  }
+  const problem = loginAnswerProblem(answer.idToken, { nonce: pending.nonce, issuer, client });
+  if (problem !== null) throw new TetherError(`Customer accounts: the login answer did not check out (${problem})`);
   await startSession(answer);
   emit('account-login', {});
   const back = pending.returnTo ? new URL(pending.returnTo, window.location.href) : null;

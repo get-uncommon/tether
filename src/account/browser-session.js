@@ -8,21 +8,20 @@ import { cfg, reportError } from '../config.js';
 import { TetherError } from '../client.js';
 import { emit } from '../dom.js';
 import { Cart } from '../cart.js';
-import { field, isRecord } from '../../server/src/shared/json.js';
+import { field, isRecord, textOrNull } from '../../server/src/shared/json.js';
 import {
   accountFetch,
   navigate,
   readJsonIfAllowed,
   readJsonObjectOrEmpty,
   sessionArea,
-  sessionKey,
-  textOrNull,
   writeJsonIfAllowed,
 } from './shared.js';
+import { sessionKey } from '../account-marks.js';
 import { discover, requestToken } from './shopify-auth.js';
 import { CUSTOMER_QUERY, ORDERS_QUERY } from '../../server/src/shared/account-documents.js';
 import { toAccountCustomer, toAccountOrders } from './answers.js';
-/** @import { TokenAnswer } from './shopify-auth.js' */
+/** @import { TokenAnswer } from '../../server/src/shared/token-answer.js' */
 /** @import { AccountCustomer, AccountOrder } from './answers.js' */
 
 /**
@@ -34,6 +33,9 @@ import { toAccountCustomer, toAccountOrders } from './answers.js';
  */
 /** @typedef {{ kind: 'answer', data: unknown } | { kind: 'logged-out' }} CustomerAnswer */
 
+/** Shopify's access tokens last an hour; an answer without `expires_in` is taken to say so. */
+const DEFAULT_TOKEN_SECONDS = 3600;
+const MS_PER_SECOND = 1000;
 /** An access token is refreshed this long before Shopify says it expires, so a request never carries a dead one. */
 const REFRESH_MARGIN_SECONDS = 120;
 /** Shopify's status for an access token it refuses. */
@@ -91,10 +93,11 @@ export function clientId() {
  * @param {BrowserSession | null} previous A refresh answer may leave out the refresh and id tokens: these are kept.
  */
 function keep(answer, previous) {
+  const lifetime = answer.expiresInSeconds ?? DEFAULT_TOKEN_SECONDS;
   session = {
-    access: answer.access,
-    expiresAt: Date.now() + Math.max(0, answer.expiresInSeconds - REFRESH_MARGIN_SECONDS) * 1000,
-    refresh: answer.refresh ?? previous?.refresh ?? null,
+    access: answer.accessToken,
+    expiresAt: Date.now() + Math.max(0, lifetime - REFRESH_MARGIN_SECONDS) * MS_PER_SECOND,
+    refresh: answer.refreshToken ?? previous?.refresh ?? null,
     idToken: answer.idToken ?? previous?.idToken ?? null,
   };
   writeJsonIfAllowed(sessionArea(), sessionKey(), session);

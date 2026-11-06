@@ -5,74 +5,71 @@
  */
 import { cfg } from '../config.js';
 import { TetherError } from '../client.js';
-import { isHttpsUrl } from '../shopify-values.js';
 import { fromBase64Url } from '../../server/src/shared/base64url.js';
-import { isRecord } from '../../server/src/shared/json.js';
-import { accountFetch, readJsonObjectOrEmpty, textOrNull } from './shared.js';
+import {
+  CUSTOMER_ACCOUNT_API,
+  DiscoveryError,
+  OPENID_CONFIGURATION,
+  accountEndpoints,
+  graphqlEndpoint,
+  wellKnownUrl,
+} from '../../server/src/shared/discovery.js';
+import { checkIdTokenClaims } from '../../server/src/shared/id-token-claims.js';
+import { tokenAnswer, tokenRefusal } from '../../server/src/shared/token-answer.js';
+import { accountFetch, readJsonObjectOrEmpty } from './shared.js';
+/** @import { AccountEndpoints, DiscoveryDocument } from '../../server/src/shared/discovery.js' */
+/** @import { TokenAnswer } from '../../server/src/shared/token-answer.js' */
+
+const MS_PER_SECOND = 1000;
+
+/** @type {{ shop: string, endpoints: AccountEndpoints } | null} The last shop's endpoints, asked once per page. */
+let discovered = null;
+
+/** @returns {string} The host whose discovery documents name the shop's account endpoints. */
+const accountShop = () => cfg.account?.shopDomain || cfg.domain;
 
 /**
- * @typedef {object} Endpoints
- * @property {string} issuer The id token's `iss`.
- * @property {string} authorizationEndpoint
- * @property {string} tokenEndpoint
- * @property {string} endSessionEndpoint
- * @property {string} graphql The Customer Account API.
- */
-/**
- * @typedef {object} TokenAnswer
- * @property {string} access
- * @property {string | null} refresh Left out of some refresh answers.
- * @property {string | null} idToken Left out of refresh answers.
- * @property {number} expiresInSeconds
- */
-
-/** Shopify's access tokens last an hour; an answer without `expires_in` is taken to say so. */
-const DEFAULT_TOKEN_SECONDS = 3600;
-
-/** @type {Endpoints | null} */
-let endpoints = null;
-
-/**
- * @param {string} document `openid-configuration` or `customer-account-api`.
+ * @param {string} shop
+ * @param {DiscoveryDocument} document
  * @returns {Promise<Record<string, unknown>>}
  */
-async function wellKnown(document) {
-  const shop = cfg.account?.shopDomain || cfg.domain;
-  const response = await accountFetch(`https://${shop}/.well-known/${document}`);
+async function wellKnown(shop, document) {
+  const response = await accountFetch(wellKnownUrl(shop, document));
   if (!response.ok) {
-    throw new TetherError(`Customer accounts: ${document} answered ${response.status}`, { status: response.status });
+    throw new TetherError(`Customer accounts: ${document} answered ${String(response.status)}`, {
+      status: response.status,
+    });
   }
   return readJsonObjectOrEmpty(response);
 }
 
 /**
- * @param {Record<string, unknown>} json
- * @param {string} name
- * @returns {string}
- * @throws {TetherError} When Shopify's document lacks the endpoint, or names one that isn't https: the tokens and the
- *   customer's data go there.
+ * @param {string} shop
+ * @returns {Promise<AccountEndpoints>}
+ * @throws {TetherError} When Shopify's documents can't be read, lack an endpoint, or name one that isn't https: the
+ *   tokens and the customer's data go there.
  */
-function endpointIn(json, name) {
-  const url = textOrNull(json[name]);
-  if (url === null || !isHttpsUrl(url)) throw new TetherError(`Customer accounts: Shopify named no https ${name}`);
-  return url;
+async function readEndpoints(shop) {
+  const [openid, api] = await Promise.all([
+    wellKnown(shop, OPENID_CONFIGURATION),
+    wellKnown(shop, CUSTOMER_ACCOUNT_API),
+  ]);
+  try {
+    return accountEndpoints(openid, graphqlEndpoint(api));
+  } catch (error) {
+    if (error instanceof DiscoveryError) throw new TetherError(`Customer accounts: ${error.message}`);
+    throw error;
+  }
 }
 
 /**
- * @returns {Promise<Endpoints>} The shop's endpoints, asked once per page.
- * @throws {TetherError} When Shopify's documents can't be read.
+ * @returns {Promise<AccountEndpoints>} The shop's endpoints, asked once per page and shop.
+ * @throws {TetherError} As `readEndpoints`.
  */
 export async function discover() {
-  if (endpoints) return endpoints;
-  const [openid, api] = await Promise.all([wellKnown('openid-configuration'), wellKnown('customer-account-api')]);
-  endpoints = {
-    issuer: endpointIn(openid, 'issuer'),
-    authorizationEndpoint: endpointIn(openid, 'authorization_endpoint'),
-    tokenEndpoint: endpointIn(openid, 'token_endpoint'),
-    endSessionEndpoint: endpointIn(openid, 'end_session_endpoint'),
-    graphql: endpointIn(api, 'graphql_api'),
-  };
-  return endpoints;
+  const shop = accountShop();
+  if (discovered?.shop !== shop) discovered = { shop, endpoints: await readEndpoints(shop) };
+  return discovered.endpoints;
 }
 
 /**
@@ -83,7 +80,9 @@ export async function discover() {
  *
  * @param {Record<string, string>} params
  * @returns {Promise<TokenAnswer>}
- * @throws {TetherError} `SESSION_ENDED` when Shopify refuses the code or refresh token (400, 401), else `TOKEN_FAILED`.
+ * @throws {TetherError} `SESSION_ENDED` when Shopify refuses the grant itself (`invalid_grant`: the code or refresh
+ *   token is no longer valid), as the Worker does. Any other refusal or failure is `TOKEN_FAILED`: `invalid_client` or
+ *   a wrong `redirect_uri` is a setup error, which must not log every customer out.
  */
 export async function requestToken(params) {
   const { tokenEndpoint } = await discover();
@@ -92,20 +91,13 @@ export async function requestToken(params) {
     body: new URLSearchParams(params),
   });
   const data = await readJsonObjectOrEmpty(response);
-  const access = textOrNull(data['access_token']);
-  if (!response.ok || !access) {
-    const ended = response.status === 400 || response.status === 401;
-    throw new TetherError(`Customer accounts: token ${response.status} ${textOrNull(data['error']) ?? ''}`.trim(), {
-      status: response.status,
-      code: ended ? 'SESSION_ENDED' : 'TOKEN_FAILED',
-    });
-  }
-  return {
-    access,
-    refresh: textOrNull(data['refresh_token']) || null,
-    idToken: textOrNull(data['id_token']) || null,
-    expiresInSeconds: Number(data['expires_in']) || DEFAULT_TOKEN_SECONDS,
-  };
+  const answer = response.ok ? tokenAnswer(data) : null;
+  if (answer) return answer;
+  const refusal = tokenRefusal(data);
+  throw new TetherError(`Customer accounts: token ${String(response.status)} ${refusal.code ?? ''}`.trim(), {
+    status: response.status,
+    code: refusal.kind === 'session-ended' ? 'SESSION_ENDED' : 'TOKEN_FAILED',
+  });
 }
 
 /**
@@ -127,31 +119,26 @@ function decodedJsonOrNull(payload) {
  * `requestToken`).
  *
  * @param {string} idToken
- * @returns {Record<string, unknown> | null}
+ * @returns {unknown} The decoded payload; `null` for a token without one.
  */
 function idTokenClaims(idToken) {
   const payload = idToken.split('.')[1];
-  if (!payload) return null;
-  const claims = decodedJsonOrNull(payload);
-  return isRecord(claims) ? claims : null;
+  return payload ? decodedJsonOrNull(payload) : null;
 }
 
 /**
  * @param {string | null} idToken
  * @param {{ nonce: string, issuer: string, client: string }} expected The login's nonce, Shopify's issuer, our client.
- * @returns {boolean} True when the id token answers this login: the expected claims, and not expired.
+ * @returns {string | null} Why the id token doesn't answer this login, checked as the Worker checks it; `null` when
+ *   it does.
  */
-export function answersLogin(idToken, { nonce, issuer, client }) {
-  const claims = idToken ? idTokenClaims(idToken) : null;
-  if (!claims) return false;
-  const audience = claims['aud'];
-  const audiences = Array.isArray(audience) ? audience : [audience];
-  const expiresAt = claims['exp'];
-  return (
-    claims['nonce'] === nonce &&
-    claims['iss'] === issuer &&
-    audiences.includes(client) &&
-    typeof expiresAt === 'number' &&
-    expiresAt * 1000 >= Date.now()
-  );
+export function loginAnswerProblem(idToken, { nonce, issuer, client }) {
+  if (!idToken) return 'no id token';
+  const check = checkIdTokenClaims(idTokenClaims(idToken), {
+    issuer,
+    clientId: client,
+    nonce,
+    nowSeconds: Date.now() / MS_PER_SECOND,
+  });
+  return check.kind === 'valid' ? null : check.reason;
 }
