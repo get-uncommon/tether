@@ -7,7 +7,7 @@ import { cfg } from './config.js';
 const MONEY = 'amount currencyCode';
 const IMAGE = 'url altText width height';
 
-export function metafieldIdentifiers(o = cfg) {
+function metafieldIdentifiers(o = cfg) {
   return (o.metafields || []).map((m) => {
     if (typeof m === 'string') {
       const i = m.indexOf('.');
@@ -29,7 +29,7 @@ function metafieldsField(o = cfg) {
   }`;
 }
 
-export const SELLING_PLAN_FIELDS = `
+const SELLING_PLAN_FIELDS = `
   id name description recurringDeliveries
   options { name value }
   priceAdjustments {
@@ -42,7 +42,7 @@ export const SELLING_PLAN_FIELDS = `
     }
   }`;
 
-export const ALLOCATION_FIELDS = `
+const ALLOCATION_FIELDS = `
   sellingPlan { id }
   checkoutChargeAmount { ${MONEY} }
   remainingBalanceChargeAmount { ${MONEY} }

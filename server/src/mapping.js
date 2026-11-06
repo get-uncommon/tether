@@ -17,7 +17,7 @@
 import { SyncError } from './util.js';
 import { DEFAULT_API_VERSION } from './shopify.js';
 
-export const DEFAULT_FIELDS = { name: 'title', slug: 'handle' };
+const DEFAULT_FIELDS = { name: 'title', slug: 'handle' };
 
 export function normalizeConfig(raw = {}) {
   const idField = raw.match?.idField || 'shopify-id';
@@ -61,7 +61,7 @@ const PLACEHOLDER = /^(your[-_]|choose[-_]|example|changeme|change[-_]me|placeho
 export const MIN_SYNC_SECRET = 24;
 
 /** Why an env value is ignored: 'placeholder' or 'too-short', or null when it's usable. */
-export function envValueProblem(key, value) {
+function envValueProblem(key, value) {
   if (typeof value !== 'string') return null;
   const t = value.trim();
   if (!t || UNSET.has(t.toLowerCase())) return null;
@@ -110,7 +110,7 @@ export function applyEnv(raw = {}, env = {}) {
   return out;
 }
 
-export function readSource(product, src) {
+function readSource(product, src) {
   if (typeof src === 'function') return src(product);
   if (typeof src !== 'string') return src;
   if (src.startsWith('metafield:')) return product.metafields?.[src.slice(10)] ?? null;

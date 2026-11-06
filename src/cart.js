@@ -15,7 +15,7 @@ import {
 } from './dom.js';
 
 /** Accepts many shapes and returns a Shopify CartLineInput. */
-export function toLineInput(input, quantity = 1, opts = {}) {
+function toLineInput(input, quantity = 1, opts = {}) {
   const src = typeof input === 'object' && input !== null ? input : { variantId: input, quantity, ...opts };
   const merchandiseId = GID.variant(src.merchandiseId || src.variantId || src.id);
   if (!merchandiseId) throw new TetherError('add(): variantId is required');

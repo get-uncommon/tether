@@ -9,8 +9,6 @@ const parse = (v) => {
 };
 const fmt = (y, m) => `${y}-${String(m).padStart(2, '0')}`;
 
-export const isDatedVersion = (v) => Boolean(parse(v));
-
 /** '2026-07' -> '2026-10', '2026-10' -> '2027-01'. */
 export function nextApiVersion(v, steps = 1) {
   const p = parse(v);

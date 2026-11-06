@@ -71,7 +71,7 @@ export function fileStore(path, { delayMs = 250 } = {}) {
 }
 
 /** The config shipped with the package (env-driven default mapping). */
-export const BUNDLED_CONFIG = fileURLToPath(new URL('../tether-sync.config.js', import.meta.url));
+const BUNDLED_CONFIG = fileURLToPath(new URL('../tether-sync.config.js', import.meta.url));
 
 export async function loadConfig(path) {
   const candidates = path ? [path] : ['tether-sync.config.js', 'tether-sync.config.mjs', 'tether-sync.config.json', BUNDLED_CONFIG];
@@ -93,7 +93,7 @@ function toRequest(req, body) {
 }
 
 /** Largest webhook body accepted (Shopify product webhooks are a few KB). */
-export const MAX_BODY = 1024 * 1024;
+const MAX_BODY = 1024 * 1024;
 
 export function serve(app, { port = 8787, host, log = console, maxBody = MAX_BODY } = {}) {
   const server = createServer(async (req, res) => {

@@ -10,7 +10,7 @@
 const MONEY = 'amount currencyCode';
 const ADDRESS = 'id firstName lastName company address1 address2 city province zoneCode zip country countryCode phoneNumber formatted';
 
-export const Q = {
+const Q = {
   order: `query TetherOrder($id: ID!) { order(id: $id) {
   id name number processedAt cancelledAt financialStatus fulfillmentStatus statusPageUrl requiresShipping
   totalPrice { ${MONEY} } subtotal { ${MONEY} } totalShipping { ${MONEY} } totalTax { ${MONEY} }
@@ -53,7 +53,7 @@ const IDS = {
   LineItem: gid('LineItem'), ReturnReasonDefinition: gid('ReturnReasonDefinition'),
 };
 /** A gid of exactly this type ('123' becomes gid://shopify/Type/123). */
-export function idOf(type, value) {
+function idOf(type, value) {
   const v = /^\d{1,20}$/.test(String(value ?? '')) ? `gid://shopify/${type}/${value}` : String(value ?? '');
   if (!IDS[type].test(v)) throw new InputError(`${type} id`);
   return v;

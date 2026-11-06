@@ -177,7 +177,7 @@ export async function runCheck(rawConfig, rawEnv, { deep = true, fetch, sleep, w
 const semver = (v) => String(v).replace(/^v/, '').split('.').map(Number);
 const newerThan = (a, b) => { const x = semver(a); const y = semver(b); for (let i = 0; i < 3; i++) { if (x[i] !== y[i]) return x[i] > y[i]; } return false; };
 /** Newest tag in a jsDelivr-style range ('latest', '0.3', '0.3.3'); same rules as scripts/update-tether.mjs. */
-export function pickVersion(tags, spec) {
+function pickVersion(tags, spec) {
   const s = String(spec || '').trim().replace(/^v/, '').toLowerCase();
   const all = tags.map((t) => /^v?(\d+)\.(\d+)\.(\d+)$/.exec(t)).filter(Boolean).map((m) => [m[1], m[2], m[3]].join('.'));
   const ok = s === 'latest' || s === '' ? () => true

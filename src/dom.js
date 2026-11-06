@@ -9,7 +9,7 @@ export const sel = (name, value) =>
   value === undefined ? `[${attr(name)}]` : `[${attr(name)}="${value}"]`;
 export const get = (el, name) => el.getAttribute(attr(name));
 export const has = (el, name) => el.hasAttribute(attr(name));
-export const dataKey = () => `data-${cfg.prefix}-key`;
+const dataKey = () => `data-${cfg.prefix}-key`;
 
 /**
  * productPath '/product' -> /product/<handle>.
@@ -108,7 +108,7 @@ export function setText(el, v) {
   else el.textContent = text;
 }
 
-export const readText = (el) => (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' ? el.value : el.textContent);
+const readText = (el) => (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' ? el.value : el.textContent);
 
 /** setText that reports changes to cfg.onValueChange (for scramble/roll effects). */
 export function setTextTracked(el, v) {
