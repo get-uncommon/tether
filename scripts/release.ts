@@ -6,9 +6,10 @@
  *   npm run release -- 0.4.0 --push     ...and push (GitHub Actions then publishes to npm
  *                                       with provenance and creates the GitHub Release)
  *
- * Needs a "## 0.4.0" section in CHANGELOG.md first (the release notes come from it), a clean
- * working tree and the main branch. The version is set in package.json and written from there into every
- * copy (`versions.ts`).
+ * Needs a "## 0.4.0" or "## 0.4.0 (unreleased)" section in CHANGELOG.md first (the release notes come from it; the
+ * heading is dated), a clean working tree, and HEAD at origin/main (a detached checkout works, so a worktree can
+ * release). The version is set in package.json and written from there into every copy (`versions.ts`); dist/ is
+ * rebuilt from it.
  */
 import { readFile, writeFile } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
@@ -75,7 +76,12 @@ async function edit(file: string, change: (text: string) => string, { optional =
 async function checkReady(version: string): Promise<void> {
   if (!VERSION_PATTERN.test(version)) fail('usage: npm run release -- X.Y.Z [--push]');
   if (output('git', ['status', '--porcelain'])) fail('working tree not clean: commit or stash first');
-  if (output('git', ['branch', '--show-current']) !== 'main') fail('not on main');
+  // The release commit goes on top of what main is on GitHub now, from any checkout (a worktree can't check out a
+  // branch another one holds), so HEAD must be exactly origin/main.
+  run('git', ['fetch', '--quiet', 'origin', 'main']);
+  if (output('git', ['rev-parse', 'HEAD']) !== output('git', ['rev-parse', 'origin/main'])) {
+    fail('HEAD is not origin/main: check out origin/main (git switch --detach origin/main)');
+  }
   const current = await packageVersion(ROOT);
   if (!isNewer(parseVersion(version), parseVersion(current))) fail(`${version} is not newer than ${current}`);
   const changelog = await readFile(join(ROOT, 'CHANGELOG.md'), 'utf8');
@@ -89,6 +95,11 @@ async function bump(version: string): Promise<void> {
   const packageJson = (text: string): string => text.replace(PACKAGE_VERSION, `"version": "${version}"`);
   await edit('package.json', packageJson);
   await syncVersions(ROOT);
+  // The heading the notes were written under becomes the release's, dated in UTC.
+  const date = new Date().toISOString().slice(0, 10);
+  await edit('CHANGELOG.md', (text) => text.replace(`\n## ${version} (unreleased)\n`, `\n## ${version} (${date})\n`), {
+    optional: true,
+  });
   // Pinned examples in the README; ranges like @0.3 follow the minor version.
   await edit(
     'README.md',
@@ -107,6 +118,9 @@ const push = process.argv.includes('--push');
 await checkReady(version);
 await bump(version);
 run('npm', ['install', '--package-lock-only', '--no-audit', '--no-fund', '--silent']);
+// npm and the Release ship the committed dist/, which carries the version: release.yml refuses a tag whose dist/
+// differs from a fresh build.
+run('npm', ['run', 'build']);
 run('npm', ['test']);
 run('npm', ['run', 'smoke']);
 run('git', ['add', '-A']);
@@ -114,9 +128,9 @@ run('git', ['commit', '-q', '-m', `Tether ${version}`]);
 run('git', ['tag', `v${version}`]);
 console.log(`\nTagged v${version}.`);
 if (push) {
-  run('git', ['push', 'origin', 'main']);
+  run('git', ['push', 'origin', 'HEAD:main']);
   run('git', ['push', 'origin', `v${version}`]);
   console.log('Pushed. GitHub Actions publishes to npm and creates the release.');
 } else {
-  console.log(`Push when ready: git push origin main && git push origin v${version}`);
+  console.log(`Push when ready: git push origin HEAD:main && git push origin v${version}`);
 }
