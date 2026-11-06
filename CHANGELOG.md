@@ -2,11 +2,11 @@
 
 ## 0.7.1 (unreleased)
 
-- Fix: cart changes and other Storefront mutations are no longer sent again after a network error
-  or a 5xx, when Shopify may already have applied them, so a timed-out "Add to cart" can't add the
-  line twice. They are still retried on 429 and `THROTTLED`, which Shopify answers without running
-  them; queries keep their retries. `Tether.query()` and the server's `query()` treat a document
-  with a `mutation` the same way.
+- Fix: cart changes and other Storefront mutations are no longer sent again after a network error or
+  a 5xx, when Shopify may already have applied them, so a timed-out "Add to cart" can't add the line
+  twice. They are still retried on 429 and `THROTTLED`, which Shopify answers without running them;
+  queries keep their retries. `Tether.query()` and the server's `query()` treat a document with a
+  `mutation` the same way.
 - Fix: a saved cart id that isn't a Shopify cart id (written by another script, or edited by hand)
   is forgotten instead of sent; the next change starts a new cart.
 - Fix: when another script replaces `window.Tether` after the Tether script, an optional part
@@ -15,14 +15,13 @@
 - Sync Worker updates: a tag whose GitHub Release doesn't carry its signed
   `tether-server-X.Y.Z.tar.gz` yet (its release workflow is still running, or failed) is skipped
   with a warning; the update installs the newest release that has its file, or reports up to date,
-  instead of failing the run. The misleading "set TETHER_VERSION to 0.7.0 or newer" message is
-  gone. Copies get this from 0.7.1 on: until a copy has installed 0.7.1, its 0.7.0 updater still
-  fails the run while a new tag's release workflow runs, and the next run after the Release is
-  published installs it. Nothing needs doing.
-- Sync Worker copies made from 0.6.1 to 0.6.8 still have `latest` in `TETHER_VERSION` (updates
-  never change that file), so they will install 0.8.0 by themselves, and a 0.x minor can need
-  one-time steps. **To stay on the 0.7 line:** write `0.7` in the file, as copies made from 0.7.0
-  have.
+  instead of failing the run. The misleading "set TETHER_VERSION to 0.7.0 or newer" message is gone.
+  Copies get this from 0.7.1 on: until a copy has installed 0.7.1, its 0.7.0 updater still fails the
+  run while a new tag's release workflow runs, and the next run after the Release is published
+  installs it. Nothing needs doing.
+- Sync Worker copies made from 0.6.1 to 0.6.8 still have `latest` in `TETHER_VERSION` (updates never
+  change that file), so they will install 0.8.0 by themselves, and a 0.x minor can need one-time
+  steps. **To stay on the 0.7 line:** write `0.7` in the file, as copies made from 0.7.0 have.
 - Sync Worker README: an update also replaces `.dev.vars.example` and `.gitignore`. Lines added to
   the copy's `.gitignore` are dropped by the next update, so ignore your own files from a
   `.gitignore` in your own folder.
@@ -32,11 +31,12 @@
   only after the whole gate passes.
 - Docs: the reference no longer tells sites to load `@0.6` / `@v0.6.8`; pinning is described as
   `@X.Y` / `@vX.Y.Z`, and a test keeps release numbers out of `docs/`.
+
 ## 0.7.0 (2026-11-06)
 
-**Before you update: one step for every deployed sync Worker.** Copies made from 0.6.1 to 0.6.8
-have `latest` in `TETHER_VERSION` unless it was changed, so they install 0.7.0 by themselves on
-their next scheduled update run (Mondays by default), and Cloudflare deploys it. Before that run:
+**Before you update: one step for every deployed sync Worker.** Copies made from 0.6.1 to 0.6.8 have
+`latest` in `TETHER_VERSION` unless it was changed, so they install 0.7.0 by themselves on their
+next scheduled update run (Mondays by default), and Cloudflare deploys it. Before that run:
 
 - **If the shop uses customer accounts:** add the Worker secret `ACCOUNT_SECRET` (24 or more random
   characters, e.g. `openssl rand -hex 24`, not the value of `SYNC_SECRET`) in Cloudflare → your
@@ -52,12 +52,12 @@ the secret is added. Workers without customer accounts need nothing. After 0.7.0
 update run also asks you to copy the new update workflow file in, once, by hand (see "Sync Worker
 updates" below).
 
-**Until you copy that workflow file in, a failed update looks green.** The workflow that copies got from
-0.6.x pipes the updater through `tee`, so a run whose update failed still shows a green check: it
-installs nothing, and the only sign is an error annotation titled `Tether update failed` on the run
-(Actions → the run → Annotations). Copy the new workflow file in once, right after 0.7.0 is installed,
-and a failed update fails the run from then on. Until then, look at the annotations of each update
-run, or update by hand: with the [GitHub CLI](https://cli.github.com) installed, run
+**Until you copy that workflow file in, a failed update looks green.** The workflow that copies got
+from 0.6.x pipes the updater through `tee`, so a run whose update failed still shows a green check:
+it installs nothing, and the only sign is an error annotation titled `Tether update failed` on the
+run (Actions → the run → Annotations). Copy the new workflow file in once, right after 0.7.0 is
+installed, and a failed update fails the run from then on. Until then, look at the annotations of
+each update run, or update by hand: with the [GitHub CLI](https://cli.github.com) installed, run
 `node scripts/update-tether.mjs` in the copy and commit the result (see the Worker README).
 
 Sites that load the script from jsDelivr as `@0.6` stay on 0.6 until they change the URL; `@latest`
@@ -66,8 +66,8 @@ gets 0.7.0 at once. The breaking changes below list each one's upgrade step.
 - **Breaking (script build):** every optional part carries the sha384 `integrity` hash from the
   core's own build, a `partsUrl` included, and loads with CORS when it is on another origin. A
   self-hosted `partsUrl` must serve the files of the same release as the core: upload the whole
-  folder of that release and replace it together with the core. A part from another release fails
-  to load. Watch builds (`--watch`) carry the hashes too, rebuilding the core when a part changes.
+  folder of that release and replace it together with the core. A part from another release fails to
+  load. Watch builds (`--watch`) carry the hashes too, rebuilding the core when a part changes.
   **Upgrade:** sites that load parts from beside the core (jsDelivr, or the whole release folder
   self-hosted) need nothing; a `partsUrl` folder is updated with the core.
 - **Breaking (sync Worker updates):** a copy installs a release only from the signed
@@ -75,13 +75,12 @@ gets 0.7.0 at once. The breaking changes below list each one's upgrade step.
   Tether's release workflow built it from the tag's commit (still required to be on `main`). Run by
   hand without the GitHub CLI, the updater refuses unless `--allow-unverified` is given; a check
   that fails is always refused. Releases before 0.7.0 have no signed file and can't be installed by
-  the new updater. **Upgrade:** none for the updater itself: a copy's own 0.6 updater installs
-  0.7.0 (0.6.8's by commit, checked against `main`; 0.6.0–0.6.7's by tag), and from then on every
-  update is verified (`gh` comes with every GitHub runner). A copy made from 0.3.3–0.3.5 whose
+  the new updater. **Upgrade:** none for the updater itself: a copy's own 0.6 updater installs 0.7.0
+  (0.6.8's by commit, checked against `main`; 0.6.0–0.6.7's by tag), and from then on every update
+  is verified (`gh` comes with every GitHub runner). A copy made from 0.3.3–0.3.5 whose
   `TETHER_VERSION` was changed to `latest` first copies in the release's
   `.github/workflows/update-tether.yml` by hand: its updater also replaces that file, and GitHub
-  refuses the push.
-  Which copies take 0.7.0 is decided by their `TETHER_VERSION` (next item).
+  refuses the push. Which copies take 0.7.0 is decided by their `TETHER_VERSION` (next item).
 - **Breaking (sync Worker updates):** copies made from 0.6.1 to 0.6.8 have `latest` in
   `TETHER_VERSION` unless it was changed, so they install 0.7.0 by themselves; copies on `0.6` (made
   from 0.6.0, or changed) wait until it says `0.7`. **Upgrade:** the step at the top of this
@@ -89,11 +88,11 @@ gets 0.7.0 at once. The breaking changes below list each one's upgrade step.
 - **Breaking (customer accounts):** accounts run only through the Worker (`account.server`), so no
   customer token is ever kept in the browser. Browser mode is removed: the `account.clientId`,
   `callbackUrl`, `tokenUrl`, `shopDomain` and `remember` options, and `Tether.account.query()`,
-  `getToken()` and `handleCallback()`. An `account` config without `server` warns "customer
-  accounts need the Worker since 0.7.0: set account.server" and loads nothing; a `Tether.account`
-  function called without it rejects with `NOT_CONFIGURED`. Types: `account.server` is required,
-  and the account answers keep their exact shapes. Visitors logged in through browser mode are
-  logged out. **Upgrade (sites with `account.clientId`):** set up accounts in the Worker
+  `getToken()` and `handleCallback()`. An `account` config without `server` warns "customer accounts
+  need the Worker since 0.7.0: set account.server" and loads nothing; a `Tether.account` function
+  called without it rejects with `NOT_CONFIGURED`. Types: `account.server` is required, and the
+  account answers keep their exact shapes. Visitors logged in through browser mode are logged out.
+  **Upgrade (sites with `account.clientId`):** set up accounts in the Worker
   ([setup](docs/accounts.md#setup)): register `https://your-shop.com/_tether/account/callback` as
   the callback URI in Shopify, give the Worker `ACCOUNT_CLIENT_ID`, `ACCOUNT_ORIGINS`,
   `STOREFRONT_TOKEN` and `ACCOUNT_SECRET`, then replace the browser options with
@@ -116,16 +115,16 @@ gets 0.7.0 at once. The breaking changes below list each one's upgrade step.
   wrote those properties changes, to `setCheckoutResolver`.
 - **Breaking (events):** `Tether.on(name, fn)` calls `fn` only for events Tether dispatched itself,
   so another script's look-alike `tether:*` event can't hand a listener a detail it didn't expect.
-  The variant link (`tether-variant-url`) ignores such events too. Types: `Tether.on` takes only
-  the names in `TetherEvents`; the `(name: string, fn: (detail: unknown) => …)` form is gone.
+  The variant link (`tether-variant-url`) ignores such events too. Types: `Tether.on` takes only the
+  names in `TetherEvents`; the `(name: string, fn: (detail: unknown) => …)` form is gone.
   **Upgrade:** listen with `document.addEventListener` for your own events.
 - **Breaking (descriptions):** a description can't cover the page any more. It loses `class`
   attributes (a site's modal or overlay class would apply to it), the inline styles `transform`,
   `translate`, `rotate`, `scale` and `offset-*`, negative margins, and values in viewport or
   container-query units (`vw`, `cqw`, …; the latter resolve against the window outside a size
-  container). Content wider than the element still isn't clipped. **Upgrade:** style
-  descriptions from the site's CSS through the element Tether fills
-  (`[tether-bind="description"] h2 { … }`), not with classes inside the description.
+  container). Content wider than the element still isn't clipped. **Upgrade:** style descriptions
+  from the site's CSS through the element Tether fills (`[tether-bind="description"] h2 { … }`), not
+  with classes inside the description.
 - Fix: the analytics part no longer throws on a `checkout` event without a cart.
 - Security (descriptions): in an outline, shadow, filter, border-image or mask-border outset, text
   decoration or text stroke, every number but a colour must be a px length of at most 40px, so a
@@ -135,40 +134,39 @@ gets 0.7.0 at once. The breaking changes below list each one's upgrade step.
   `word-spacing` are kept down to `-4px` or `-0.25em` and a negative `text-indent` down to `-40px`,
   so tight tracking in headings stays; anything beyond is removed. Ordinary shadows and outlines
   look as before.
-- Size, gzipped, against 0.6.8: the `<script>` core is 28.9 KB, up from 24.8 KB. The growth pays
-  for the description sanitizer, the checks on Storefront answers and the integrity hashes of the
-  parts. Every part is smaller: account 4.1 KB (from 6.4, browser mode is gone), account pages 6.1
-  (7.3), diagnose 5.1 (5.5), analytics 3.0 (3.3), markets 2.5 (2.9), search 2.4 (2.5), extras 1.2
-  (1.4). The core shares with its parts only the functions they use, and the store-countries code
-  behind `Tether.getLocalization()` lives in the markets part, which that function already loaded.
-- Fix: until the saved cart loads, `[tether-cart-count]` shows the count from the last page only when
-  the stored value is a whole number; anything else another script wrote there is ignored.
+- Size, gzipped, against 0.6.8: the `<script>` core is 28.9 KB, up from 24.8 KB. The growth pays for
+  the description sanitizer, the checks on Storefront answers and the integrity hashes of the parts.
+  Every part is smaller: account 4.1 KB (from 6.4, browser mode is gone), account pages 6.1 (7.3),
+  diagnose 5.1 (5.5), analytics 3.0 (3.3), markets 2.5 (2.9), search 2.4 (2.5), extras 1.2 (1.4).
+  The core shares with its parts only the functions they use, and the store-countries code behind
+  `Tether.getLocalization()` lives in the markets part, which that function already loaded.
+- Fix: until the saved cart loads, `[tether-cart-count]` shows the count from the last page only
+  when the stored value is a whole number; anything else another script wrote there is ignored.
 - Fix: where the browser blocks `sessionStorage` but not `localStorage`, the tokens 0.6's
   browser-mode accounts left in `localStorage` are still removed.
-- Fix: a Storefront answer missing fields Tether reads (a product without prices or variants, a
-  cart without lines, a page without `pageInfo`) is a `TetherError` `Invalid response (200)`
-  (`HTTP_200`) instead of a crash inside the render, in the browser script and in
-  `createStorefront()`, whose `getProduct(gid)` no longer reads a node of another type as a product.
-  A malformed product fails the batch it was loaded in. `Tether.query()` answers stay typed by the
-  caller.
+- Fix: a Storefront answer missing fields Tether reads (a product without prices or variants, a cart
+  without lines, a page without `pageInfo`) is a `TetherError` `Invalid response (200)` (`HTTP_200`)
+  instead of a crash inside the render, in the browser script and in `createStorefront()`, whose
+  `getProduct(gid)` no longer reads a node of another type as a product. A malformed product fails
+  the batch it was loaded in. `Tether.query()` answers stay typed by the caller.
 - Fix: `tether:layout-changed` is always dispatched. A page `ScrollTrigger` whose `refresh` isn't a
   function is skipped, and an `onLayoutChange` hook or refresh that throws is reported to `onError`.
-- Types: the published `Tether` type no longer includes the `<script>` build's internal `__core`
-  and `__parts`, which it described wrongly.
+- Types: the published `Tether` type no longer includes the `<script>` build's internal `__core` and
+  `__parts`, which it described wrongly.
 - **Breaking (descriptions):** iframes are kept only from YouTube (`www.youtube.com`,
   `www.youtube-nocookie.com`), Vimeo's player, Loom and Wistia, so store content can't frame a
   look-alike login page; an iframe from any other origin is removed. Kept embeds look as before.
   **Upgrade:** list other players in the new `embedOrigins` option (bare https origins, e.g.
   `['https://player.example.com']`); an entry that isn't one is skipped with a warning.
 - **Breaking (Barba preset):** `barbaPreset()`'s `gsap`, `lenis` and `scrollTrigger` take only
-  getters (`() => lenis`), as their types always said; a value throws a `TypeError` when the
-  preset is made. **Upgrade:** wrap the value in a function.
+  getters (`() => lenis`), as their types always said; a value throws a `TypeError` when the preset
+  is made. **Upgrade:** wrap the value in a function.
 - Fix (Barba preset): the default `scrollTrigger` getter calls `ScrollTrigger.refresh()` after an
   async render again; it was skipped because ScrollTrigger is a class.
 - Types: `barbaPreset()` returns its hooks as set (not `| null`); a product option value's `swatch`
   is typed (`{ color, image: { previewImage } }`) instead of `unknown`; the Astro integration
-  accepts `siteUrl` and `pageSize`, so the config shared with `createStorefront()` type-checks
-  (both are still left out of the page).
+  accepts `siteUrl` and `pageSize`, so the config shared with `createStorefront()` type-checks (both
+  are still left out of the page).
 - Types: `ResolvedTetherConfig.domain` is a `ShopDomain` (or `''`) and `apiVersion` an `ApiVersion`
   (or `'unstable'`), branded where the config is read; `TetherOptions` still takes plain strings.
 - **Breaking (errors):** the codes `NOT_ALLOWED`, `SESSION_ENDED` and `TOKEN_FAILED`, which nothing
@@ -190,9 +188,9 @@ gets 0.7.0 at once. The breaking changes below list each one's upgrade step.
   `InitialState` declares `unavailable`. The Astro integration's `hooks` is typed as the
   `astro:config:setup` hook it registers. **Upgrade:** code that read fields Tether doesn't query
   through the index signature reads them from its own `Tether.query()` result instead.
-- **Breaking (types):** the published declarations are generated from the source (now TypeScript)
-  by `tsc` at build time, in `dist/types/`, so they can't drift from the code. Where the
-  hand-written ones differed, they now say what the code does: `TetherError` is a type export of
+- **Breaking (types):** the published declarations are generated from the source (now TypeScript) by
+  `tsc` at build time, in `dist/types/`, so they can't drift from the code. Where the hand-written
+  ones differed, they now say what the code does: `TetherError` is a type export of
   `@occluze/tether` (the class is `Tether.TetherError`, and a value export of
   `@occluze/tether/server`), `Tether.on(name, fn)` takes the names of the events Tether dispatches
   (`TetherEvents`) and types each one's detail, `scope.setPurchase()` takes
@@ -200,8 +198,8 @@ gets 0.7.0 at once. The breaking changes below list each one's upgrade step.
   `createStorefront()` names the `.env` keys it reads instead of taking any key. The types a site
   imports keep their names (`TetherConfig`, `Tether`, `ShopifyProduct`, `ShopifyCart`, `Storefront`,
   `InitialState`, the account answers, …), and `window.Tether` and `window.TETHER_CONFIG` stay
-  declared. **Upgrade:** a site that imported `TetherError` from `@occluze/tether` as a value (it was
-  never exported there at run time) uses `Tether.TetherError`.
+  declared. **Upgrade:** a site that imported `TetherError` from `@occluze/tether` as a value (it
+  was never exported there at run time) uses `Tether.TetherError`.
 - The source is TypeScript. The sync Worker and its CLI run it unbuilt through Node's type
   stripping, so they need Node 22.18 or newer; the browser builds in `dist/` are unchanged. Deployed
   Worker copies keep working: `src/entry.js`, `bin/tether-sync.js` and `scripts/update-tether.mjs`,
@@ -213,8 +211,9 @@ gets 0.7.0 at once. The breaking changes below list each one's upgrade step.
   variants (Shopify always sends at least one), so its non-null overload holds; `initialState(null)`
   is still `null`. **Upgrade:** none for Shopify data.
 - Customer accounts: on start the core removes the tokens Tether 0.6's browser-mode accounts left in
-  `sessionStorage` / `localStorage` (`<prefix>:account:<domain>`, `<prefix>:account-login:<domain>`),
-  so a full-scope refresh token doesn't stay behind. This cleanup is removed again in 0.8.0.
+  `sessionStorage` / `localStorage` (`<prefix>:account:<domain>`,
+  `<prefix>:account-login:<domain>`), so a full-scope refresh token doesn't stay behind. This
+  cleanup is removed again in 0.8.0.
 - Sync Worker: a repeated webhook delivery is also dropped across the Worker's isolates in a data
   centre, through Cloudflare's Cache API (`caches.open('tether-webhook-deliveries')`, kept six
   hours, without KV writes). This works only when the webhooks are registered on the shop's own
@@ -228,14 +227,14 @@ gets 0.7.0 at once. The breaking changes below list each one's upgrade step.
 - Sync CLI: the `Webflow requests` count is right with Webflow and `DEPLOY_HOOK_URL` together (it
   stayed at 0).
 - **Breaking (sync Worker):** customer accounts need `ACCOUNT_SECRET` (24+ random characters); the
-  session key no longer falls back to `SYNC_SECRET`, the `/reconcile` and `/check` password.
-  Without it the account routes answer 503 `accounts need the Worker secret ACCOUNT_SECRET (see
-  /check)` and log `account setup ACCOUNT_SECRET is not set`; the sync, webhooks and deploys are
-  unaffected, and `/check` shows an error step that says what to set. An `ACCOUNT_SECRET` equal to
-  `SYNC_SECRET` is refused the same way (the routes answer 503 `accounts are not set up (see
-  /check)`), since anyone with the `/check` password could otherwise open customer sessions.
-  **Upgrade:** the step at the top of this section; a Worker that copied `SYNC_SECRET` into
-  `ACCOUNT_SECRET` sets one of its own (customers are logged out once).
+  session key no longer falls back to `SYNC_SECRET`, the `/reconcile` and `/check` password. Without
+  it the account routes answer 503 `accounts need the Worker secret ACCOUNT_SECRET (see /check)` and
+  log `account setup ACCOUNT_SECRET is not set`; the sync, webhooks and deploys are unaffected, and
+  `/check` shows an error step that says what to set. An `ACCOUNT_SECRET` equal to `SYNC_SECRET` is
+  refused the same way (the routes answer 503 `accounts are not set up (see /check)`), since anyone
+  with the `/check` password could otherwise open customer sessions. **Upgrade:** the step at the
+  top of this section; a Worker that copied `SYNC_SECRET` into `ACCOUNT_SECRET` sets one of its own
+  (customers are logged out once).
 - Sync Worker updates: when a release ships a newer `.github/workflows/update-tether.yml` than the
   copy's (its `# Tether workflow revision:` line), the update run prints a GitHub Actions warning
   and adds the one-time manual step to the job summary. **Upgrade notes, for any later release that
@@ -244,13 +243,13 @@ gets 0.7.0 at once. The breaking changes below list each one's upgrade step.
   file; keep your own `cron` line). 0.7.0 ships revision 3: separate jobs, the release's tests run
   with a read-only token that isn't kept in the checkout, actions pinned by commit, and the update
   uploaded with its sha256 as a job output before the release's tests run, so `publish` applies it
-  only when the hash matches and the tests can't change what is pushed. Copies
-  deployed before 0.7.0 have revision 1 (no revision line). Their 0.6 updater installs 0.7.0
-  without a warning; from then on every update run warns, also a run that finds nothing new, until
-  the copy has the new workflow. The warning and the job summary link to the release's workflow
-  file. **Upgrade (every copy deployed before 0.7.0):** do that one-time copy once 0.7.0 is
-  installed. Until then the copy keeps updating with its old workflow, whose test step holds a token
-  that can write to the copy's repository.
+  only when the hash matches and the tests can't change what is pushed. Copies deployed before 0.7.0
+  have revision 1 (no revision line). Their 0.6 updater installs 0.7.0 without a warning; from then
+  on every update run warns, also a run that finds nothing new, until the copy has the new workflow.
+  The warning and the job summary link to the release's workflow file. **Upgrade (every copy
+  deployed before 0.7.0):** do that one-time copy once 0.7.0 is installed. Until then the copy keeps
+  updating with its old workflow, whose test step holds a token that can write to the copy's
+  repository.
 - Releases: `release.yml` builds `tether-server-X.Y.Z.tar.gz` (a `git archive` of the tag's
   `server/`, the same bytes on every run), attests it (`actions/attest-build-provenance`, pinned)
   and uploads it to the GitHub Release. The release runs the whole gate (`npm run check`);
@@ -277,10 +276,10 @@ gets 0.7.0 at once. The breaking changes below list each one's upgrade step.
   `DEPLOY_HOOK_MIN_SECONDS` one from 0 to 86400. Any other value (`-1`, `1e3`, `45.9`) uses the
   default (45, 60), and `/check` reports it as an error naming the setting. A negative
   `MAX_SUBREQUESTS` used to stop every sync at once, and `1e3` meant 1.
-- Customer accounts: the Worker reads the login's `locale` and `country` the way the browser does:
-  a value that isn't a language or country code is left out (with a warning in the Worker log)
-  instead of being repaired, so `U1S` no longer becomes `US`. `locale` goes to Shopify as a language
-  tag: `de-DE` is sent as `de`, `pt-BR` stays `pt-BR`.
+- Customer accounts: the Worker reads the login's `locale` and `country` the way the browser does: a
+  value that isn't a language or country code is left out (with a warning in the Worker log) instead
+  of being repaired, so `U1S` no longer becomes `US`. `locale` goes to Shopify as a language tag:
+  `de-DE` is sent as `de`, `pt-BR` stays `pt-BR`.
 - Fix (customer accounts): `ACCOUNT_ORIGINS` entries are compared the way browsers send `Origin`:
   case, a default `:443` and a trailing slash no longer matter (`https://Shop.com:443/` matches
   `https://shop.com`). An entry that isn't an https origin alone (a path, a user name, `http:`) is a
@@ -294,20 +293,21 @@ gets 0.7.0 at once. The breaking changes below list each one's upgrade step.
 - Repository: browser, Node-side, Worker and test code are type-checked as separate programs
   (`tsc -b`), so browser code can't use Node globals and the Worker can't use the DOM; the tests are
   type-checked too, with their fakes checked against the interfaces they stand in for.
-- Types: `ApiVersion` is the template literal `` `${number}-${'01' | '04' | '07' | '10'}` `` (it was a
-  branded string), and the API version constants are typed `ApiVersion`.
+- Types: `ApiVersion` is the template literal `` `${number}-${'01' | '04' | '07' | '10'}` `` (it was
+  a branded string), and the API version constants are typed `ApiVersion`.
 - Security: descriptions lose `id` attributes (they could clobber `window.<id>` and the site's own
   ids), inline style declarations that position content over the page or load from elsewhere
   (`position`, `top`/`right`/`bottom`/`left`/`inset`, `z-index`, any value with `url(`,
-  `expression(` or `@import`), and iframes from the site's own origin; an iframe's `allow` keeps only
-  `autoplay`, `encrypted-media`, `picture-in-picture`, `fullscreen`, `clipboard-write`,
+  `expression(` or `@import`), and iframes from the site's own origin; an iframe's `allow` keeps
+  only `autoplay`, `encrypted-media`, `picture-in-picture`, `fullscreen`, `clipboard-write`,
   `accelerometer`, `gyroscope` and `web-share`. **Behaviour change:** inline styles are written back
   as the browser parses them (`color:red` becomes `color: red;`); the look is the same.
-- Config: an unknown `TETHER_CONFIG` key (a typo) warns and is left out of the config. `partsUrl`
-  is checked when Tether starts: one that is neither https nor on the site warns and the parts load
-  beside the core. `markets.detect` takes a single source name too, and `Tether.detectMarket(markets)`
-  validates the `markets` it is given. **Behaviour change:** `Tether.config` is a read-only view of
-  the live config: a write throws in strict-mode code and warns (`Tether.init(options)` changes it).
+- Config: an unknown `TETHER_CONFIG` key (a typo) warns and is left out of the config. `partsUrl` is
+  checked when Tether starts: one that is neither https nor on the site warns and the parts load
+  beside the core. `markets.detect` takes a single source name too, and
+  `Tether.detectMarket(markets)` validates the `markets` it is given. **Behaviour change:**
+  `Tether.config` is a read-only view of the live config: a write throws in strict-mode code and
+  warns (`Tether.init(options)` changes it).
 - Analytics: only events Tether itself sent become analytics events; a look-alike `tether:*` event
   from another script sends nothing (and no longer throws inside the analytics part).
 - `observe`: each burst of added elements is mounted once, reading only their own hydrate tags and
@@ -316,37 +316,40 @@ gets 0.7.0 at once. The breaking changes below list each one's upgrade step.
   product loads from Shopify.
 - A failed mount after `astro:page-load`, a failed render after add-to-cart and a failed refresh of
   a server-rendered product are reported (or handled) instead of surfacing as unhandled rejections.
-- `@inContext` is added after reading the operation header with strings and comments blanked out:
-  a `)` in a variable's default value no longer misplaces it, and the word `@inContext` in a comment
+- `@inContext` is added after reading the operation header with strings and comments blanked out: a
+  `)` in a variable's default value no longer misplaces it, and the word `@inContext` in a comment
   or the selection set no longer stops it. An operation that names its own `@inContext` keeps it.
 - Script build: a part file that loads but doesn't register is tried again on next use. **Behaviour
   change:** when the core was not loaded by a `<script src>` (so its folder is unknown) and there is
   no `partsUrl`, loading a part fails with a message saying so, instead of fetching it from the site
   root.
-- Cart: `Tether.cart.lines`, `Tether.cart.warnings` and the `subscribe` meta's `warnings` are copies;
-  `lastError` is always an `Error` or `null`; `add()` rejects if Shopify answers without a cart.
+- Cart: `Tether.cart.lines`, `Tether.cart.warnings` and the `subscribe` meta's `warnings` are
+  copies; `lastError` is always an `Error` or `null`; `add()` rejects if Shopify answers without a
+  cart.
 - Astro integration: `createStorefront()`'s own options in a shared `shop.config.js` (`siteUrl`,
   `pageSize`, `fetch`) are left out of the page; any other unknown option warns at build time.
-- Types (also covered by the generated declarations above): the `TetherError` constructor takes typed `errors`/`userErrors`/`code`; `Tether.config` is `ResolvedTetherConfig`;
-  `query()` defaults to `unknown` instead of `any`; `onError` receives `unknown` (a handler may still type it narrower); cart
-  changes that can answer without a cart return `ShopifyCart | null` and `checkout()` the checkout
-  URL; `imageUrl()` returns `url` itself when it is empty; an `initialState` plan's price and an
-  image's `width`/`height` can be `null`; `__core` and `__parts` are declared.
+- Types (also covered by the generated declarations above): the `TetherError` constructor takes
+  typed `errors`/`userErrors`/`code`; `Tether.config` is `ResolvedTetherConfig`; `query()` defaults
+  to `unknown` instead of `any`; `onError` receives `unknown` (a handler may still type it
+  narrower); cart changes that can answer without a cart return `ShopifyCart | null` and
+  `checkout()` the checkout URL; `imageUrl()` returns `url` itself when it is empty; an
+  `initialState` plan's price and an image's `width`/`height` can be `null`; `__core` and `__parts`
+  are declared.
 - Releases: the version is set in `package.json` only; the release script writes every copy from it
   (`scripts/versions.ts`), and a test checks they agree.
 - Security: descriptions (`tether-bind="description"`, `tether-collection-bind="description"`) go
-  through an allow-list of content elements and attributes. **Behaviour change:** `<style>` blocks and
-  form fields are removed, unknown elements are unwrapped (their text stays), iframes are kept only
-  with an https `src` and run sandboxed with a strict referrer policy, and links that open a new tab
-  get `rel="noopener noreferrer"`. Text formatting, inline styles, images, links, tables and video
-  embeds render as before.
+  through an allow-list of content elements and attributes. **Behaviour change:** `<style>` blocks
+  and form fields are removed, unknown elements are unwrapped (their text stays), iframes are kept
+  only with an https `src` and run sandboxed with a strict referrer policy, and links that open a
+  new tab get `rel="noopener noreferrer"`. Text formatting, inline styles, images, links, tables and
+  video embeds render as before.
 - Security: the optional parts loaded from the core script's own folder carry a sha384 `integrity`
   hash from the same build, so a core pinned with `integrity` runs only its own parts. **Behaviour
   change:** a core on another origin loads its parts with CORS (jsDelivr sends the headers; a
   self-hosted copy on another domain must too).
 - Security (sync Worker): a repeated webhook delivery (same `X-Shopify-Webhook-Id`) is dropped
-  within the Worker instance, and across the data centre on the shop's own domain (see above), after the signature and shop
-  checks.
+  within the Worker instance, and across the data centre on the shop's own domain (see above), after
+  the signature and shop checks.
 - Security (sync Worker): a new login ends the session the browser already had. A failed login,
   callback or logout step sends the visitor back to the site with `?account=error` (and clears the
   login cookies) instead of a raw 502 answer.
@@ -372,8 +375,8 @@ gets 0.7.0 at once. The breaking changes below list each one's upgrade step.
   unit (JPY whole, KWD three decimals) instead of hundredths.
 - `productUrl()` (browser links and `@occluze/tether/server`) gives no link (`null`) for a missing
   handle or id instead of `/product/null`, and encodes the handle.
-- A token without inventory access gets queries without `quantityAvailable`; `Tether.query()`
-  texts are sent as written.
+- A token without inventory access gets queries without `quantityAvailable`; `Tether.query()` texts
+  are sent as written.
 - Storefront answers that are malformed reject with a `TetherError` instead of a `TypeError`.
 - Sync Worker: `/health` answers `{ ok: true }` only; the public `/check` answers only
   `{ ok, steps }` with each step's title and level. The running version and the KV binding need the
@@ -398,25 +401,25 @@ gets 0.7.0 at once. The breaking changes below list each one's upgrade step.
 - Security (sync Worker): a webhook without the `X-Shopify-Shop-Domain` header is refused (403).
   Shopify always sends it.
 - Security: product and collection descriptions (`tether-bind="description"`,
-  `tether-collection-bind="description"`) are sanitized. Scripts, event handlers and `javascript:` links are
-  removed; markup, styles, images, links and video embeds stay. A description that relied on a script in its
-  HTML no longer runs it.
-- Security: the Astro integration refuses a secret Shopify token (`shpat_`, `shpss_`, …), because it would be
-  written into every page. It warns when the token comes from a name without `PUBLIC_`.
+  `tether-collection-bind="description"`) are sanitized. Scripts, event handlers and `javascript:`
+  links are removed; markup, styles, images, links and video embeds stay. A description that relied
+  on a script in its HTML no longer runs it.
+- Security: the Astro integration refuses a secret Shopify token (`shpat_`, `shpss_`, …), because it
+  would be written into every page. It warns when the token comes from a name without `PUBLIC_`.
 - Security: a background image URL is escaped for CSS, and checkout only opens an https URL.
 - Security: `partsUrl` must be https or on the site's own origin.
-- Security (sync Worker): the public `/check` shows only each step's title and level. Details and the API
-  tests need `Authorization: Bearer <SYNC_SECRET>`.
-- Security (sync Worker): webhooks over 1 MB are refused (413), and a webhook is accepted only for the
-  configured store.
+- Security (sync Worker): the public `/check` shows only each step's title and level. Details and
+  the API tests need `Authorization: Bearer <SYNC_SECRET>`.
+- Security (sync Worker): webhooks over 1 MB are refused (413), and a webhook is accepted only for
+  the configured store.
 - Security (sync Worker): customer accounts no longer accept an example value as the session key.
   `/check` recommends a separate `ACCOUNT_SECRET` instead of reusing `SYNC_SECRET`.
-- Security (sync Worker): account discovery never guesses Shopify's endpoints. The id token must name
-  its signing key, and `iat`/`nbf` are checked.
-- Security (sync Worker updates): a release is installed by the commit its tag points at, and only when
-  that commit is on the upstream default branch.
-- Customer accounts (server mode): parallel requests share one token refresh. A failed cart unlink at
-  logout is logged.
+- Security (sync Worker): account discovery never guesses Shopify's endpoints. The id token must
+  name its signing key, and `iat`/`nbf` are checked.
+- Security (sync Worker updates): a release is installed by the commit its tag points at, and only
+  when that commit is on the upstream default branch.
+- Customer accounts (server mode): parallel requests share one token refresh. A failed cart unlink
+  at logout is logged.
 - Astro integration: `.env` files are read on Windows too.
 - The core script is about 21 KB gzipped (was 20 KB).
 
@@ -433,8 +436,8 @@ gets 0.7.0 at once. The breaking changes below list each one's upgrade step.
 - Subscriptions: `tether-subscription-state="done"` lands on the row as shown after the update.
 - Orders: a tracking link without a URL is hidden; after a return request only `return-requested`
   shows, not `has-returns` as well.
-- Cart: `setAttributes`, `applyDiscount` and `removeDiscount` called quickly in a row no longer
-  undo each other (each reads the cart in its turn).
+- Cart: `setAttributes`, `applyDiscount` and `removeDiscount` called quickly in a row no longer undo
+  each other (each reads the cart in its turn).
 - Checkout asks Shopify for the checkout URL and the account's own URL side by side.
 - Account: the order list and the account pages load side by side.
 - Sync: a deploy hook that can't be reached keeps the rebuild pending for the next run.
@@ -443,9 +446,9 @@ gets 0.7.0 at once. The breaking changes below list each one's upgrade step.
 
 ## 0.6.6 (2026-11-05)
 
-- Sync (Node CLI file store): a write from another process in the same coarse timestamp tick
-  (common on Linux) is no longer missed; the store compares size and inode as well as mtime. This
-  also made the sync's update check fail on some GitHub runners.
+- Sync (Node CLI file store): a write from another process in the same coarse timestamp tick (common
+  on Linux) is no longer missed; the store compares size and inode as well as mtime. This also made
+  the sync's update check fail on some GitHub runners.
 
 ## 0.6.5 (2026-11-05)
 
@@ -459,54 +462,56 @@ subscriptions. A new optional part (6 KB) loads only on pages that use them.
 Fixes from a full security audit (Cloudflare's security-audit method; details in the release notes):
 
 - **Sync webhooks:** the `X-Shopify-Topic` header isn't covered by Shopify's signature, so it no
-  longer decides on its own: every webhook asks Shopify for the product, and an item is only
-  removed when Shopify no longer has the product. Before, a replayed signed webhook with the
-  topic changed to `products/delete` could take a live product off the site.
-- **`tether-sync serve` (Node):** routes before reading the body, accepts bodies up to 1 MB
-  (413 above), and an aborted upload no longer stops the process. New `--host` option
-  (e.g. `127.0.0.1` behind a proxy).
+  longer decides on its own: every webhook asks Shopify for the product, and an item is only removed
+  when Shopify no longer has the product. Before, a replayed signed webhook with the topic changed
+  to `products/delete` could take a live product off the site.
+- **`tether-sync serve` (Node):** routes before reading the body, accepts bodies up to 1 MB (413
+  above), and an aborted upload no longer stops the process. New `--host` option (e.g. `127.0.0.1`
+  behind a proxy).
 - **Test server (`e2e/serve.mjs`, development only):** serves only files inside its folders and
   listens on 127.0.0.1.
 
 ## 0.6.4 (2026-11-05)
 
-- Customer accounts, server mode: the Worker asks for Shopify's signing keys with JSON headers
-  (a request from a Worker without them can get a bot-protection page instead of the keys), and
-  says clearly when the keys can't be fetched.
+- Customer accounts, server mode: the Worker asks for Shopify's signing keys with JSON headers (a
+  request from a Worker without them can get a bot-protection page instead of the keys), and says
+  clearly when the keys can't be fetched.
 
 ## 0.6.3 (2026-11-05)
 
-- Customer accounts, server mode on a deployed Worker: login failed with "account error" because
-  the store domain's bot protection answers 403 to Workers for its `.well-known` files. The Worker
-  now finds the shop id through the Storefront API and uses Shopify's account addresses directly
-  (needs `STOREFRONT_TOKEN`, which server mode already asks for).
+- Customer accounts, server mode on a deployed Worker: login failed with "account error" because the
+  store domain's bot protection answers 403 to Workers for its `.well-known` files. The Worker now
+  finds the shop id through the Storefront API and uses Shopify's account addresses directly (needs
+  `STOREFRONT_TOKEN`, which server mode already asks for).
 
 ## 0.6.2 (2026-11-05)
 
 From testers building an Astro store from the starter:
 
 **Fixes**
-- Cart: quick +/− clicks no longer step the count and totals through every reply from Shopify
-  (+ + + − from 1 showed 2, 3, 4, 3). Only the latest quantity is sent; a click that undoes the
-  last one sends nothing.
-- A wrong token (or an Admin token, `shpat_…`) now says so, naming the store: Shopify's 401 has
-  no message, so the error (and `astro build`'s output) was empty.
+
+- Cart: quick +/− clicks no longer step the count and totals through every reply from Shopify (+ + +
+  − from 1 showed 2, 3, 4, 3). Only the latest quantity is sent; a click that undoes the last one
+  sends nothing.
+- A wrong token (or an Admin token, `shpat_…`) now says so, naming the store: Shopify's 401 has no
+  message, so the error (and `astro build`'s output) was empty.
 - `hydrate(products, { card: true })` keeps two images per product (a hover image,
   `tether-bind="image:2"`), `images: n` for more. Cards with a second image showed the first one
   until the background refresh.
 - `diagnose()`: documented values (`tether-show="search-empty"`, `logged-in`, `logged-out`) are no
-  longer called unknown. It now finds typos, with a suggestion: `tether-bind="pric"`, attributes like
-  `tether-bnd` or `tether-add-to-card`, and an option list for an option the product doesn't have.
-  Clearer messages, with no empty or `undefined` parts.
+  longer called unknown. It now finds typos, with a suggestion: `tether-bind="pric"`, attributes
+  like `tether-bnd` or `tether-add-to-card`, and an option list for an option the product doesn't
+  have. Clearer messages, with no empty or `undefined` parts.
 - Types: `initialState(product)` is non-null for a product (strict `astro check` passes with the
   docs' examples). `show` has `plenty-in-stock` and `has-savings`. `getProduct()` and
-  `getProducts({ query })` take `null`/`undefined`. A typo in `createStorefront()` options is now
-  a type error.
+  `getProducts({ query })` take `null`/`undefined`. A typo in `createStorefront()` options is now a
+  type error.
 - Astro integration: in dev, a change to `src/shop.config.js` restarts the dev server, so the
   browser gets the new config too (`watch` for other files). `.env` files follow `--mode`, and the
   store variables are declared through `astro:env`.
 
 **New**
+
 - `account.server` can be a path on your own site (`'/_tether/account'`).
 - Accounts: `tether-show="orders-loading"` / `"orders-empty"`, `tether-order-bind="image"`, and
   `tether-order-lines` with `tether-order-line="title|variant-title|quantity|image"`.
@@ -514,22 +519,24 @@ From testers building an Astro store from the starter:
 - `tether-max-width` / `data-max-width` (and `-max-height`, `-crop`): valid HTML for image sizes.
 
 **Starter and docs**
+
 - README: the three ways to install side by side (script tag via jsDelivr, npm, with the Worker),
   with when to pick each.
 - The Astro starter has `site`, canonical links, a favicon, a 404 page, a static search page,
   `tsconfig.json`, and no longer ignores `package-lock.json`. The first cards and the first product
   image load eagerly (`fetchpriority="high"`), the rest lazily.
-- Astro guide: `astro:assets` `<Image>` makes images download twice with Tether (use `<img>`),
-  fonts with `<ClientRouter />`, search pages need SSR (or `url:q`), a null check for unknown
-  collections, `prerender` with SSR, and `revalidate: false` for SSR pages.
+- Astro guide: `astro:assets` `<Image>` makes images download twice with Tether (use `<img>`), fonts
+  with `<ClientRouter />`, search pages need SSR (or `url:q`), a null check for unknown collections,
+  `prerender` with SSR, and `revalidate: false` for SSR pages.
 
 ## 0.6.1 (2026-11-04)
 
-**Customer accounts, server mode: fixes from an independent security review** (nothing critical
-was found; every finding is fixed and has a test):
-- Login CSRF: the pending login is now sealed in an HttpOnly cookie in the browser that started
-  it, so a login link from someone else can't log a visitor into the wrong account. As a result,
-  nothing is written to KV before a real login (no quota abuse by anonymous requests).
+**Customer accounts, server mode: fixes from an independent security review** (nothing critical was
+found; every finding is fixed and has a test):
+
+- Login CSRF: the pending login is now sealed in an HttpOnly cookie in the browser that started it,
+  so a login link from someone else can't log a visitor into the wrong account. As a result, nothing
+  is written to KV before a real login (no quota abuse by anonymous requests).
 - `/login` no longer takes a cart; carts are only linked through the protected `POST /cart`.
 - Logout can't fail open: the session is ended and the cookie cleared first, even when Shopify is
   down. The id token for Shopify's logout goes through a one-time HttpOnly cookie, never the page.
@@ -549,6 +556,7 @@ SvelteKit, Next.js, Eleventy, subscriptions, multi-market, an accessible React c
 shopping in them (phone, keyboard only, screen reader, German, French, US, bargain hunter, …).
 
 **New: optional parts** (each loads only on pages that use it; the main script stays 20 KB)
+
 - **Search as you type** (`tether-search`, 2 KB): Shopify's predictive search with products,
   collections and suggested searches; keyboard and screen-reader friendly.
 - **Customer accounts** (4 KB): login on Shopify's page, the customer's name and orders, a checkout
@@ -557,23 +565,25 @@ shopping in them (phone, keyboard only, screen reader, German, French, US, barga
   HttpOnly session cookie, so no Shopify token ever reaches the browser. Browser mode for quick
   starts. Both tested on a real store. [Guide](docs/accounts.md).
 - **Analytics** (`analytics`, 3 KB): GA4 / Tag Manager ecommerce events in `dataLayer`, Shopify's
-  own analytics (experimental, through Shopify's scripts), or `onEvent` for any tool. [Guide](docs/analytics.md).
+  own analytics (experimental, through Shopify's scripts), or `onEvent` for any tool.
+  [Guide](docs/analytics.md).
 - **Structured data:** `shop.jsonLd(product)` for Google's product results.
 - **Other markets on static sites:** `html.tether-market-pending` until the visitor's prices are in.
-- **Real-browser tests** (36, in Chromium, WebKit, Firefox and a phone, on every push): the
-  starter, a plain HTML page with the `<script>` build and its optional parts, GA4 events, the
-  market marker, and Shopify analytics with Shopify's real scripts (their sends intercepted).
+- **Real-browser tests** (36, in Chromium, WebKit, Firefox and a phone, on every push): the starter,
+  a plain HTML page with the `<script>` build and its optional parts, GA4 events, the market marker,
+  and Shopify analytics with Shopify's real scripts (their sends intercepted).
 
 **Fixes**
-- **Stale prices:** Shopify caches the answer to an identical query text, prices included, for
-  hours after a change. Tether's queries now carry a one-minute time marker (`maxAge`, default 60
-  seconds), so the server module, builds and pages get current prices. (The cart always had them,
-  so a page could show one price and checkout charge another.)
+
+- **Stale prices:** Shopify caches the answer to an identical query text, prices included, for hours
+  after a change. Tether's queries now carry a one-minute time marker (`maxAge`, default 60
+  seconds), so the server module, builds and pages get current prices. (The cart always had them, so
+  a page could show one price and checkout charge another.)
 - Two quick clicks on cart +/− counted once; they now add up, show at once, and the line gets
   `is-busy` until Shopify answers. `Tether.cart.changeQuantity(lineId, ±1)` does the same for your
   own buttons; `Tether.cart.quantityOf(line)` shows the pending quantity.
-- Clicking an option value that's unavailable with the current choices threw the other choices
-  away. It now picks the closest variant that has the value; a value no variant has is ignored.
+- Clicking an option value that's unavailable with the current choices threw the other choices away.
+  It now picks the closest variant that has the value; a value no variant has is ignored.
 - View Transitions into a page built for another market (`/de/`) kept the old market. New:
   `<meta name="tether-page-country|language|locale">` makes a page that market, also back again.
 - With the Astro integration, a visitor's saved money format lost to the config on every page.
@@ -588,9 +598,12 @@ shopping in them (phone, keyboard only, screen reader, German, French, US, barga
 - Recommendations for a missing product are no longer reported to `onError`.
 
 **New**
+
 - Cart warnings per line: `tether-line="warning"`, `is-warning`, `tether-line-show="warning"`, and
-  `warningText(w)` to translate Shopify's messages. Cart lines carry `merchandise.quantityAvailable`.
-- Shareable variant links: `variantUrl: true` (or `tether-variant-url`) keeps `?variant=` in the URL.
+  `warningText(w)` to translate Shopify's messages. Cart lines carry
+  `merchandise.quantityAvailable`.
+- Shareable variant links: `variantUrl: true` (or `tether-variant-url`) keeps `?variant=` in the
+  URL.
 - Tabs stay in sync: a cart change or market switch in one tab updates the others. The cart count
   shows its last known value at once on the next page, instead of 0.
 - `tether-show="plenty-in-stock"`, `lowStock` (default 5), `tether-plan-bind="option"`,
@@ -599,18 +612,20 @@ shopping in them (phone, keyboard only, screen reader, German, French, US, barga
 - `checkout-charge` counts the quantity.
 - Server: `hydrate(products, { card: true })` for lists (about 40% smaller); `initialState()` gains
   `has-savings`, `plenty-in-stock`, `plans`, `savings` and a plain `unavailable` map; `lowStock`.
-- `diagnose()` shows the market in use and warns about product options the page offers no way to choose.
+- `diagnose()` shows the market in use and warns about product options the page offers no way to
+  choose.
 - Types: `seo`, `setCountry` options (`locale`, `language: null`), the new config options.
-- Docs: [other frameworks](docs/frameworks.md) (Next.js, SvelteKit, Vite, Eleventy); many
-  attributes and classes that were only in the code are now in the reference.
+- Docs: [other frameworks](docs/frameworks.md) (Next.js, SvelteKit, Vite, Eleventy); many attributes
+  and classes that were only in the code are now in the reference.
 
-The main script is 20.1 KB gzipped (18.5 KB in 0.5): the fixes above. Bundles, tab sync and
-variant links moved to the optional `extras` part (1 KB).
+The main script is 20.1 KB gzipped (18.5 KB in 0.5): the fixes above. Bundles, tab sync and variant
+links moved to the optional `extras` part (1 KB).
 
 ## 0.5.0 (2026-11-04)
 
 **Astro** ([guide](docs/astro.md), [starter](examples/astro)): Shopify product pages built at build
 time (or per request with SSR), with live prices, stock, variants, subscriptions and the cart.
+
 - `@occluze/tether/astro`: an integration that adds Tether to every page, configured from `.env`
   (`PUBLIC_SHOPIFY_DOMAIN`, `PUBLIC_SHOPIFY_STOREFRONT_TOKEN`).
 - `@occluze/tether/server`: `createStorefront()` for build-time and server data: `getProduct`,
@@ -618,21 +633,24 @@ time (or per request with SSR), with live prices, stock, variants, subscriptions
   `formatMoney`, `productUrl`, `imageUrl`, `query`. Same product shape as the browser.
 - Hydration: `shop.hydrate(products)` puts the data in the page; the browser renders it without a
   request and refreshes prices and stock once in the background, batched for the whole page
-  (`revalidate: false` to skip). Server-rendered images and products loaded earlier in the visit are kept.
-- View Transitions (`<ClientRouter />`) work by themselves: each page is mounted, the cart closes
-  on navigation (`astro: false` to turn off).
+  (`revalidate: false` to skip). Server-rendered images and products loaded earlier in the visit are
+  kept.
+- View Transitions (`<ClientRouter />`) work by themselves: each page is mounted, the cart closes on
+  navigation (`astro: false` to turn off).
 - `shop.initialState(product)`: what Tether shows first (variant, price, purchase mode, every
   `tether-show` condition, unavailable options), so server-rendered pages don't change when the
   script takes over. Same rules as the browser, covered by a test that compares the two.
 - `Tether.cart.subscribe(fn)` for React, Svelte and Vue islands, with `loaded` (saved cart known)
   and `warnings`. `Tether.cart.loaded`, `Tether.imageUrl()`.
-- `getRecommendations()` also takes a handle (server and browser), so it runs next to `getProduct()`.
+- `getRecommendations()` also takes a handle (server and browser), so it runs next to
+  `getProduct()`.
 
-**Sync: rebuild on change.** `DEPLOY_HOOK_URL` starts a build of a statically built site
-(Cloudflare Pages, Netlify, Vercel) when product content changes; stock changes don't. At most one
-build per `DEPLOY_HOOK_MIN_SECONDS` (60). Works with or without Webflow.
+**Sync: rebuild on change.** `DEPLOY_HOOK_URL` starts a build of a statically built site (Cloudflare
+Pages, Netlify, Vercel) when product content changes; stock changes don't. At most one build per
+`DEPLOY_HOOK_MIN_SECONDS` (60). Works with or without Webflow.
 
 **Fixes** (found by first-time users building with the docs only):
+
 - `tether-show` elements hidden before the script ran (a class, `style="display:none"`, `hidden`)
   are now shown when their condition applies, for every condition, not only error/not-found.
 - Cart line links (`tether-line="url"`) open the variant that's in the cart.
@@ -642,14 +660,15 @@ build per `DEPLOY_HOOK_MIN_SECONDS` (60). Works with or without Webflow.
   `tether:cart-warning` event (API 2024-07 and later; older versions just skip it).
 - Cart line links also keep the subscription plan (`selling_plan=`).
 - `cart.subscribe` and `tether:cart-updated` now also fire when the saved cart has loaded.
-- Discount codes: the form no longer becomes a page navigation with Astro's router; an invalid
-  code gets `is-invalid` and is removed from the cart (it used to stay and repeat its warning).
+- Discount codes: the form no longer becomes a page navigation with Astro's router; an invalid code
+  gets `is-invalid` and is removed from the cart (it used to stay and repeat its warning).
 - Another language: when Shopify translates option names (Size → Größe), `tether-option-list`,
   `tether-option` and `tether-option-selected` keep matching (by position).
 - `Tether.query()` / `shop.query()` add the market to anonymous and shorthand queries too.
 - `diagnose()` knows `tether-show="cart-warning"`.
 
 **Markets:**
+
 - `setCountry('DE', { locale: 'de-DE' })`, or a `locale` in a `markets.locales` entry for that
   country: the money format follows the country, and is remembered with it.
 - `tether-countries="NL,DE"` limits a country select to your markets, in your order.
@@ -658,7 +677,9 @@ build per `DEPLOY_HOOK_MIN_SECONDS` (60). Works with or without Webflow.
 
 ## 0.4.0 (2026-11-04)
 
-**Smaller:** the script every visitor loads went from 62.9 KB to 50.8 KB (20.7 → 17.1 KB gzipped, 15.4 KB brotli), while gaining the fixes below.
+**Smaller:** the script every visitor loads went from 62.9 KB to 50.8 KB (20.7 → 17.1 KB gzipped,
+15.4 KB brotli), while gaining the fixes below.
+
 - Diagnose and markets are optional parts, loaded on first use (`tether.diagnose.min.js`,
   `tether.markets.min.js`, next to the main script; split chunks for bundlers). Self-hosting: copy
   them too, or set `partsUrl`. `Tether.detectMarket()` and `Tether.getLocalization()` now return
@@ -668,6 +689,7 @@ build per `DEPLOY_HOOK_MIN_SECONDS` (60). Works with or without Webflow.
 **TypeScript types** for the whole API, config, events and the Barba preset.
 
 **Tested on a real Webflow site** (product pages, subscriptions, cart, Barba transitions), fixing:
+
 - The cart drawer is now keyboard and screen-reader friendly: dialog semantics, focus moves in and
   back, Tab stays inside, `aria-expanded` on cart buttons (`cartFocus: false` to turn off).
 - Add-to-cart links (not only buttons) get `aria-disabled` when unavailable.
@@ -681,8 +703,8 @@ The npm package shows the author link (occluze.com).
 ## 0.3.6 (2026-11-04)
 
 - Fix: updates of deployed sync copies could be rejected by GitHub, because an Action's token may
-  not change workflow files. The updater no longer touches `.github/`; the workflow file stays as
-  it was deployed, and all update logic lives in `scripts/update-tether.mjs`, which updates itself.
+  not change workflow files. The updater no longer touches `.github/`; the workflow file stays as it
+  was deployed, and all update logic lives in `scripts/update-tether.mjs`, which updates itself.
   (Reverts the 0.3.5 workflow step.)
 - On npm: `npm install @occluze/tether`.
 
@@ -710,120 +732,132 @@ Webflow within seconds.
 
 - The Deploy form asks only for what a deploy needs: store domain, collection id, Webflow token,
   Shopify client id + secret, `SYNC_SECRET`. Optional settings are documented as secrets to add
-  later (`FIELD_MAP`, `WEBFLOW_OWNED`, `SHOPIFY_ADMIN_TOKEN`, `SHOPIFY_WEBHOOK_SECRET`, `MAX_SUBREQUESTS`).
+  later (`FIELD_MAP`, `WEBFLOW_OWNED`, `SHOPIFY_ADMIN_TOKEN`, `SHOPIFY_WEBHOOK_SECRET`,
+  `MAX_SUBREQUESTS`).
 - No manual webhook setup: the Worker registers the product webhooks through the app on its first
   `POST /reconcile` (signed with the client secret). `/check` reports them; the CLI has
   `tether-sync webhooks <url>`. Webhooks signed with either the client secret or
   `SHOPIFY_WEBHOOK_SECRET` are accepted.
 - `check` folds fields the collection doesn't have into one line instead of a warning per field.
-- Deployed copies update themselves: `TETHER_VERSION` (`0.3` patches only, `0.3.3` pinned,
-  `latest`) and an **Update Tether** GitHub Action in the copy (weekly, or Run workflow) that
-  takes the newest matching release, tests it, commits it and lets Cloudflare redeploy. Mapping,
-  Cloudflare ids and secrets are kept. The Action keeps its schedule alive, `/health` shows the
-  running version, and `/check` warns when an update in the range hasn't been installed.
+- Deployed copies update themselves: `TETHER_VERSION` (`0.3` patches only, `0.3.3` pinned, `latest`)
+  and an **Update Tether** GitHub Action in the copy (weekly, or Run workflow) that takes the newest
+  matching release, tests it, commits it and lets Cloudflare redeploy. Mapping, Cloudflare ids and
+  secrets are kept. The Action keeps its schedule alive, `/health` shows the running version, and
+  `/check` warns when an update in the range hasn't been installed.
 
 ## 0.3.2 (2026-11-04)
 
-- Worker: `POST /reconcile?since=all` (with `SYNC_SECRET`) runs a full first import without
-  the CLI; if it doesn't fit in one run, the cron continues it.
-- Fix: a half-done reconcile window that started from an explicit `since` is now resumed by the
-  next run instead of being dropped.
+- Worker: `POST /reconcile?since=all` (with `SYNC_SECRET`) runs a full first import without the CLI;
+  if it doesn't fit in one run, the cron continues it.
+- Fix: a half-done reconcile window that started from an explicit `since` is now resumed by the next
+  run instead of being dropped.
 
 ## 0.3.1 (2026-11-04)
 
-- Deploy to Cloudflare: the form starts empty (no example values), with clearer descriptions
-  of what's required.
-- Example values (`your-…`, `choose-…`, `…`) and a `SYNC_SECRET` shorter than 24 characters
-  count as not set, so a left-over example can never unlock `/reconcile` or the API tests on
-  `/check`. `check` names each such value.
+- Deploy to Cloudflare: the form starts empty (no example values), with clearer descriptions of
+  what's required.
+- Example values (`your-…`, `choose-…`, `…`) and a `SYNC_SECRET` shorter than 24 characters count as
+  not set, so a left-over example can never unlock `/reconcile` or the API tests on `/check`.
+  `check` names each such value.
 - CI: actions/checkout and actions/setup-node v5 (Node 24).
 
 ## 0.3.0 (2026-11-04)
 
 **Markets and localization**
+
 - `markets: { detect: true, locales }`: country/language from the visitor's saved choice, your
   server (`window.TETHER_COUNTRY`, `<meta name="tether-country">`, a cookie such as one set from
-  Cloudflare's `cf-ipcountry`) or Webflow Localization (locale subdirectory or `<html lang>`).
-  No IP lookups from the browser.
-- `select[tether-country-select]` (from `localization.availableCountries`) and `tether-country-bind`.
+  Cloudflare's `cf-ipcountry`) or Webflow Localization (locale subdirectory or `<html lang>`). No IP
+  lookups from the browser.
+- `select[tether-country-select]` (from `localization.availableCountries`) and
+  `tether-country-bind`.
 - `Tether.setCountry(code, { language })`: updates `@inContext`, the cart's
-  `buyerIdentity.countryCode`, and re-renders products (keeping the selection) and lists.
-  A saved cart from another market is moved on load. Events `country-changed`, `product-updated`.
+  `buyerIdentity.countryCode`, and re-renders products (keeping the selection) and lists. A saved
+  cart from another market is moved on load. Events `country-changed`, `product-updated`.
 - `Tether.getLocalization()`, `Tether.detectMarket()`; diagnose() shows the detected market.
 - Switching ignores responses still on their way from the old market, keeps rendered products
   visible (`tether-state="updating"`), never creates a cart, and a saved choice applies without
   `detect`. Detached roots from page transitions are released.
 
 **Shopify API upgrade safety**
+
 - `scripts/api-version.mjs [--next]`; diagnose() names the version to upgrade to; a warning for
   `apiVersion: 'unstable'`.
-- `.github/workflows/smoke.yml`: weekly and on push, tests + smoke on the pinned and the next
-  API version; opens/updates an issue on failure.
+- `.github/workflows/smoke.yml`: weekly and on push, tests + smoke on the pinned and the next API
+  version; opens/updates an issue on failure.
 - The smoke test covers the localization query and `setCountry`.
 
 **Server sync**
+
 - Deploy to Cloudflare button: `server/wrangler.jsonc` (KV binding, cron), secrets prompted from
   `.dev.vars.example`, descriptions in `package.json`.
 - The config file now ships as a working default for a standard Products collection, with
   `SHOPIFY_DOMAIN` / `WEBFLOW_COLLECTION_ID` from the environment, `FIELD_MAP` / `WEBFLOW_OWNED`
   overrides, and `webflow.skipMissingFields` (on by default).
-- `tether-sync check` is a guided first-run: what's missing, how to fix it, API and mapping tests,
-  a sample item. Also at `GET /check` on the Worker (API tests only with `SYNC_SECRET`).
+- `tether-sync check` is a guided first-run: what's missing, how to fix it, API and mapping tests, a
+  sample item. Also at `GET /check` on the Worker (API tests only with `SYNC_SECRET`).
 - Secrets set to `none` count as unset.
 - Reliability (from a review of 0.2.0):
-  - Product pages fit Shopify's 1,000-point query cost limit (25 variants, 10 images per
-    product, ~19 products per page) and shrink on `MAX_COST_EXCEEDED`.
-  - Reconcile budgets products, pages and subrequests (Worker: `MAX_SUBREQUESTS`, default 45),
-    saves its exact position (page + offset) and never stalls on bulk edits; the window overlaps by
+  - Product pages fit Shopify's 1,000-point query cost limit (25 variants, 10 images per product,
+    ~19 products per page) and shrink on `MAX_COST_EXCEEDED`.
+  - Reconcile budgets products, pages and subrequests (Worker: `MAX_SUBREQUESTS`, default 45), saves
+    its exact position (page + offset) and never stalls on bulk edits; the window overlaps by
     `overlapMinutes`; a Shopify error saves progress instead of throwing.
   - Hashes are stored only after a successful publish; a failed publish is retried.
-  - Duplicate items from concurrent runs are prevented (Webflow's unique slug: the loser adopts
-    the winner's item); a created item's id is stored before publishing.
+  - Duplicate items from concurrent runs are prevented (Webflow's unique slug: the loser adopts the
+    winner's item); a created item's id is stored before publishing.
   - Webhook runs fail fast on long rate-limit waits and queue the product for reconcile.
   - The client-credentials token and the Webflow item index are cached in the store.
   - A draft product whose item was deleted in Webflow is no longer recreated; prune with
     `onDelete: 'unpublish'` no longer repeats.
   - `SYNC_SECRET=none` no longer opens `/reconcile`; `/check` without the secret hides values.
-  - The Node state file batches writes, merges with other processes and recovers from a failed write.
+  - The Node state file batches writes, merges with other processes and recovers from a failed
+    write.
 - Fix: `server/src/worker.js` was excluded by `.gitignore` in 0.2.0.
 
 ## 0.2.0 (2026-11-04)
 
 **Products without a Webflow CMS item**
+
 - `tether-product="url:handle"` (any query parameter, e.g. `url:p`) and `url:path` (last path
   segment): one static page renders any Shopify product.
 - `productPath` templates accept `{handle}` and `{id}`, e.g. `'/product?handle={handle}'`.
 - `tether-page-title="{title} | Shop"` sets the document title.
 
 **Robustness**
+
 - State blocks: `tether-show="loading | ready | error | not-found"` in products and lists,
   `tether-show="cart-error"` for the cart. Blocks hidden by a Webflow class are shown too.
 - Failed scopes get `tether-error` (`not-found` or an error code) and disabled add-to-cart buttons.
-- Errors carry a `code` (`NOT_FOUND`, `NETWORK`, `HTTP_401`, …). New events `product-not-found`
-  and `cart-error`; product and list failures also emit `error`.
+- Errors carry a `code` (`NOT_FOUND`, `NETWORK`, `HTTP_401`, …). New events `product-not-found` and
+  `cart-error`; product and list failures also emit `error`.
 - A failed cart load no longer forgets the cart when Shopify is only unreachable.
-- `Tether.diagnose()`: config, API version support window, token reachability, selling plans
-  and markup problems on the page.
+- `Tether.diagnose()`: config, API version support window, token reachability, selling plans and
+  markup problems on the page.
 - Documented `onError` for Sentry-style reporting and the Shopify API upgrade process.
   `npm run smoke` checks diagnose and not-found, and takes `TETHER_API_VERSION`.
 
 **Server-side sync (new, `server/`)**
-- Shopify → Webflow CMS sync for a Cloudflare Worker or a Node CLI: HMAC-verified product
-  webhooks, idempotent `reconcile` cron with a cursor and a per-run budget, `import` with `--prune`,
-  per-project field mapping with Webflow-owned fields, Webflow throttling, `check` command.
-  See `server/README.md`.
+
+- Shopify → Webflow CMS sync for a Cloudflare Worker or a Node CLI: HMAC-verified product webhooks,
+  idempotent `reconcile` cron with a cursor and a per-run budget, `import` with `--prune`,
+  per-project field mapping with Webflow-owned fields, Webflow throttling, `check` command. See
+  `server/README.md`.
 
 ## 0.1.3 (2026-11-04)
 
-- `tether-bind="image:N"` binds the nth product image (e.g. a lifestyle shot), falling back to the featured image.
+- `tether-bind="image:N"` binds the nth product image (e.g. a lifestyle shot), falling back to the
+  featured image.
 
 ## 0.1.2 (2026-11-04)
 
-- `tether-plan-list="true"` / `"all"` / `"*"` now list every plan, like an empty value (Webflow often can't save empty attribute values).
+- `tether-plan-list="true"` / `"all"` / `"*"` now list every plan, like an empty value (Webflow
+  often can't save empty attribute values).
 
 ## 0.1.1 (2026-11-04)
 
-- Fix: attributes on the product root element itself (e.g. a card link with `tether-bind="link"`) were ignored.
+- Fix: attributes on the product root element itself (e.g. a card link with `tether-bind="link"`)
+  were ignored.
 
 ## 0.1.0 (2026-11-04)
 
@@ -831,10 +865,10 @@ First release.
 
 - Products, variants, options, swatches, metafields, recommendations
 - Product lists from collections or search, with load more
-- Cart: add (single or many lines), update, remove, clear, note, attributes,
-  discount codes, buyer identity, checkout (same or new tab), drawer
-- Subscriptions via Shopify selling plans: one-time/subscribe toggle, plan list,
-  subscription price and savings, change plan or switch to one-time in the cart
+- Cart: add (single or many lines), update, remove, clear, note, attributes, discount codes, buyer
+  identity, checkout (same or new tab), drawer
+- Subscriptions via Shopify selling plans: one-time/subscribe toggle, plan list, subscription price
+  and savings, change plan or switch to one-time in the cart
 - Bundles / build-a-box with `tether-group`
 - Markets via `@inContext(country, language)`
 - Configurable attribute prefix (`prefix: 'wfs'` for older markup)

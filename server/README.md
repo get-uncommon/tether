@@ -27,6 +27,7 @@ Then go to Site settings → Apps & integrations → API access, and generate a 
 scope `read_products`, release it, and install it on your store. Copy its **client ID** and **client secret**.
 
 **3. Deploy.** Click **Deploy to Cloudflare** (above).
+
 - Connect GitHub (or GitLab) for your copy of the code, and tick **Create private Git repository**.
 - Fill in the six fields: store domain (`your-store.myshopify.com`), collection ID, Webflow token,
   client ID, client secret, and a `SYNC_SECRET`. Make the secret with `openssl rand -hex 24` and
@@ -62,11 +63,11 @@ title and level (pass, warning, error), never the store, collection or values.
 
 Your copy updates itself, like a jsDelivr version. The `TETHER_VERSION` file in your copy decides which releases it takes:
 
-| `TETHER_VERSION` | Gets |
-|---|---|
-| `X.Y` | only fixes of that minor version (`X.Y.z`). A new copy starts on the minor version it was made from |
-| `X.Y.Z` | pinned: never changes |
-| `latest` | every release, including a new 0.x minor version, which can need changes in your copy |
+| `TETHER_VERSION` | Gets                                                                                                |
+| ---------------- | --------------------------------------------------------------------------------------------------- |
+| `X.Y`            | only fixes of that minor version (`X.Y.z`). A new copy starts on the minor version it was made from |
+| `X.Y.Z`          | pinned: never changes                                                                               |
+| `latest`         | every release, including a new 0.x minor version, which can need changes in your copy               |
 
 Under `X.Y` a new minor version is never installed by itself. When you're ready for one, do its
 one-time upgrade steps from the [CHANGELOG](../CHANGELOG.md), then change the file to its `X.Y`.
@@ -125,6 +126,7 @@ your pages render the field themselves and you don't trust everyone who can edit
 ## Several stores or client sites
 
 One deploy per store: each click creates its own Worker for one store and one Webflow collection.
+
 - **Client stores:** create the Shopify app in the **client's** Dev Dashboard, because the app and
   the store must be in the same organization. Deploying on the client's own Cloudflare account
   makes handover easy.
@@ -134,17 +136,17 @@ One deploy per store: each click creates its own Worker for one store and one We
 
 Add these later as secrets, only if you need them: Cloudflare → your Worker → Settings → Variables and Secrets.
 
-| Secret | When |
-|---|---|
-| `FIELD_MAP` | Other fields or metafields: `{"material":"metafield:custom.material"}` |
-| `WEBFLOW_OWNED` | Fields Shopify fills in once, then editors own: `description,intro` |
-| `SHOPIFY_ADMIN_TOKEN` | Stores with an old admin-created custom app (`shpat_…`) instead of a Dev Dashboard app |
-| `SHOPIFY_WEBHOOK_SECRET` | Webhooks you created yourself under Shopify → Settings → Notifications |
-| `ACCOUNT_CLIENT_ID`, `ACCOUNT_ORIGINS`, `STOREFRONT_TOKEN` (+ `ACCOUNT_CLIENT_SECRET`) | Customer accounts through this Worker: the browser never holds a Shopify token. Needs the `TETHER_SYNC` KV binding, which the deploy creates, and `ACCOUNT_SECRET` ([setup](../docs/accounts.md#setup)) |
-| `ACCOUNT_SECRET` | Required with customer accounts: 24+ random characters, not the same as `SYNC_SECRET`, the sessions' own encryption key. Without it, or with the value of `SYNC_SECRET`, the account routes answer 503 and `/check` says what to set. Changing it logs every customer out once |
-| `DEPLOY_HOOK_URL` | A statically built site (Astro, …): start a build when product content changes ([how](../docs/astro.md#7-rebuild-when-products-change)). Without Webflow, set the Webflow fields to `none` |
-| `DEPLOY_HOOK_MIN_SECONDS` | At most one build per this many seconds: a whole number from 0 to 86400 (default 60) |
-| `MAX_SUBREQUESTS` | A paid Workers plan, to let each run do more: a whole number from 1 to 10000000 (default 45). `/check` reports a value it can't use, for this and `DEPLOY_HOOK_MIN_SECONDS` |
+| Secret                                                                                 | When                                                                                                                                                                                                                                                                           |
+| -------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `FIELD_MAP`                                                                            | Other fields or metafields: `{"material":"metafield:custom.material"}`                                                                                                                                                                                                         |
+| `WEBFLOW_OWNED`                                                                        | Fields Shopify fills in once, then editors own: `description,intro`                                                                                                                                                                                                            |
+| `SHOPIFY_ADMIN_TOKEN`                                                                  | Stores with an old admin-created custom app (`shpat_…`) instead of a Dev Dashboard app                                                                                                                                                                                         |
+| `SHOPIFY_WEBHOOK_SECRET`                                                               | Webhooks you created yourself under Shopify → Settings → Notifications                                                                                                                                                                                                         |
+| `ACCOUNT_CLIENT_ID`, `ACCOUNT_ORIGINS`, `STOREFRONT_TOKEN` (+ `ACCOUNT_CLIENT_SECRET`) | Customer accounts through this Worker: the browser never holds a Shopify token. Needs the `TETHER_SYNC` KV binding, which the deploy creates, and `ACCOUNT_SECRET` ([setup](../docs/accounts.md#setup))                                                                        |
+| `ACCOUNT_SECRET`                                                                       | Required with customer accounts: 24+ random characters, not the same as `SYNC_SECRET`, the sessions' own encryption key. Without it, or with the value of `SYNC_SECRET`, the account routes answer 503 and `/check` says what to set. Changing it logs every customer out once |
+| `DEPLOY_HOOK_URL`                                                                      | A statically built site (Astro, …): start a build when product content changes ([how](../docs/astro.md#7-rebuild-when-products-change)). Without Webflow, set the Webflow fields to `none`                                                                                     |
+| `DEPLOY_HOOK_MIN_SECONDS`                                                              | At most one build per this many seconds: a whole number from 0 to 86400 (default 60)                                                                                                                                                                                           |
+| `MAX_SUBREQUESTS`                                                                      | A paid Workers plan, to let each run do more: a whole number from 1 to 10000000 (default 45). `/check` reports a value it can't use, for this and `DEPLOY_HOOK_MIN_SECONDS`                                                                                                    |
 
 ## Costs
 

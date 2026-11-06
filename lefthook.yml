@@ -4,7 +4,7 @@ pre-commit:
   parallel: true
   commands:
     format:
-      glob: '*.{js,mjs,cjs,ts,json,yml,yaml,html}'
+      glob: '*.{js,mjs,cjs,ts,json,yml,yaml,html,md}'
       run: npx prettier --check {staged_files}
     lint:
       glob: '*.{js,mjs,cjs,ts}'
