@@ -250,7 +250,7 @@ test('.dev.vars.example: only the six fields a deploy needs, all empty and descr
   });
 });
 
-test('webhooks: the first reconcile registers them through the app, once; check reports them', async () => {
+test('webhooks: POST /reconcile registers them through the app, and again after Shopify removed them; check reports them', async () => {
   const apis = createMockApis({ products: [shopifyProduct(1)] });
   /** @type {Map<string, string>} */
   const entries = new Map();
@@ -275,7 +275,7 @@ test('webhooks: the first reconcile registers them through the app, once; check 
   let check = await jsonOf(
     await worker.fetch(new Request('https://w.test/check', { headers: auth }), wenv, noWaitUntil),
   );
-  assert.match(stringAt(answeredStep(check, 'Shopify webhooks'), 'message'), /not registered yet/);
+  assert.match(stringAt(answeredStep(check, 'Shopify webhooks'), 'message'), /not registered: PRODUCTS_CREATE/);
 
   const reconciled = await jsonOf(
     await worker.fetch(
@@ -293,9 +293,22 @@ test('webhooks: the first reconcile registers them through the app, once; check 
   const again = await jsonOf(
     await worker.fetch(new Request('https://w.test/reconcile', { method: 'POST', headers: auth }), wenv, noWaitUntil),
   );
-  assert.equal(fieldOf(recordAt(again, 'webhooks'), 'cached'), true);
+  assert.deepEqual(fieldOf(recordAt(again, 'webhooks'), 'created'), []);
   assert.equal(apis.shop.webhooks.length, 3, 'no duplicates');
 
+  check = await jsonOf(await worker.fetch(new Request('https://w.test/check', { headers: auth }), wenv, noWaitUntil));
+  assert.equal(fieldOf(answeredStep(check, 'Shopify webhooks'), 'level'), 'ok');
+
+  // Shopify deletes a subscription whose deliveries keep failing.
+  apis.shop.webhooks.splice(1, 1);
+  check = await jsonOf(await worker.fetch(new Request('https://w.test/check', { headers: auth }), wenv, noWaitUntil));
+  const removed = answeredStep(check, 'Shopify webhooks');
+  assert.match(stringAt(removed, 'message'), /not registered: PRODUCTS_UPDATE/);
+  assert.match(stringAt(removed, 'fix'), /POST \/reconcile/);
+  const recovered = await jsonOf(
+    await worker.fetch(new Request('https://w.test/reconcile', { method: 'POST', headers: auth }), wenv, noWaitUntil),
+  );
+  assert.deepEqual(fieldOf(recordAt(recovered, 'webhooks'), 'created'), ['PRODUCTS_UPDATE']);
   check = await jsonOf(await worker.fetch(new Request('https://w.test/check', { headers: auth }), wenv, noWaitUntil));
   assert.equal(fieldOf(answeredStep(check, 'Shopify webhooks'), 'level'), 'ok');
 });

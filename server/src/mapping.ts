@@ -183,16 +183,18 @@ export function normalizeConfig(raw: RawConfig = {}): SyncConfig {
 /**
  * A FIELD_MAP value as a source. JSON holds no functions, so anything but a string is a constant.
  *
+ * @param slug The field the value is mapped to, for the error.
  * @param value Any JSON value but `null`.
+ * @throws {SyncError} `FIELD_MAP` for anything `JSON.parse` does not yield.
  */
-function fieldSourceFromJson(value: unknown): FieldSource {
+function fieldSourceFromJson(slug: string, value: unknown): FieldSource {
   if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return value;
   if (Array.isArray(value)) {
     const list: readonly unknown[] = value;
     return list;
   }
-  // JSON.parse yields nothing else than the cases above, `null` and objects.
-  return value as Readonly<Record<string, unknown>>;
+  if (isRecord(value)) return value;
+  throw new SyncError(`FIELD_MAP "${slug}" is not a JSON value`, { code: 'FIELD_MAP' });
 }
 
 /** @throws {SyncError} `FIELD_MAP` when it is not a JSON object. */
@@ -225,7 +227,7 @@ export function applyEnv(raw: RawConfig = {}, env: CleanEnv = {}): RawConfig {
   if (env.FIELD_MAP) {
     for (const [slug, source] of Object.entries(parseFieldMap(env.FIELD_MAP))) {
       if (source === null) fields.delete(slug);
-      else fields.set(slug, fieldSourceFromJson(source));
+      else fields.set(slug, fieldSourceFromJson(slug, source));
     }
   }
   const withFields: RawConfig = { ...out, fields: Object.fromEntries(fields) };

@@ -1,9 +1,12 @@
 // The Node-only parts: the state file store and the config file.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { mkdtemp, readFile, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { promisify } from 'node:util';
 import { fileStore, loadConfig } from '../src/node.ts';
 import { asRecord, parseJson, waitFor } from './mocks.js';
 
@@ -44,6 +47,70 @@ test('file store: a state file that is not a JSON object is an error, never over
   const store = fileStore(path, { delayMs: 10_000 });
   await assert.rejects(store.get('k'), /does not hold a JSON object/);
   assert.equal(await readFile(path, 'utf8'), '[1, 2]');
+});
+
+/**
+ * Writes `count` keys named `prefix:i` to the state file at `path`, one flush each, from another Node process.
+ *
+ * @param {string} path
+ * @param {string} prefix
+ * @param {number} count
+ */
+function writeFromAnotherProcess(path, prefix, count) {
+  const store = pathToFileURL(join(import.meta.dirname, '../src/node.ts')).href;
+  const script = `
+    const { fileStore } = await import(${JSON.stringify(store)});
+    const store = fileStore(${JSON.stringify(path)}, { delayMs: 10_000 });
+    for (let i = 0; i < ${String(count)}; i++) {
+      await store.put(${JSON.stringify(prefix)} + ':' + i, i);
+      await store.flush();
+    }`;
+  return promisify(execFile)(process.execPath, [
+    '--experimental-strip-types',
+    '--no-warnings',
+    '--input-type=module',
+    '-e',
+    script,
+  ]);
+}
+
+test('file store: two processes writing at once both keep every key', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'tether-sync-'));
+  const path = join(dir, 'state.json');
+  const rounds = 200;
+  const here = fileStore(path, { delayMs: 10_000 });
+  const other = writeFromAnotherProcess(path, 'other', rounds);
+  for (let i = 0; i < rounds; i++) {
+    await here.put(`here:${String(i)}`, i);
+    await here.flush();
+  }
+  await other;
+  const disk = asRecord(parseJson(await readFile(path, 'utf8')), 'the state file');
+  assert.equal(Object.keys(disk).length, 2 * rounds, 'no write lost');
+});
+
+test('file store: a write waits for the lock another process holds, and takes over one left by a dead process', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'tether-sync-'));
+  const path = join(dir, 'state.json');
+  const store = fileStore(path, { delayMs: 10_000 });
+  await writeFile(`${path}.lock`, '');
+  await store.put('k', 1);
+  let written = false;
+  const flushed = store.flush().then(() => {
+    written = true;
+  });
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  assert.equal(written, false, 'waits while the lock is held');
+  await rm(`${path}.lock`);
+  await flushed;
+  assert.deepEqual(parseJson(await readFile(path, 'utf8')), { k: 1 });
+
+  await writeFile(`${path}.lock`, '');
+  const longAgo = new Date(Date.now() - 3600e3);
+  await utimes(`${path}.lock`, longAgo, longAgo);
+  await store.put('k', 2);
+  await store.flush();
+  assert.deepEqual(parseJson(await readFile(path, 'utf8')), { k: 2 });
 });
 
 test('config file: a value of the wrong type is named when the config loads', async () => {

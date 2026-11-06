@@ -24,13 +24,12 @@ export interface RetryEntry {
 }
 
 /**
- * A reconcile window stopped part-way: the page cursor, how many products of that page are done, and the newest
- * `updatedAt` seen so far.
+ * A reconcile window stopped part-way: where it starts, the cursor of the last product done (`null` before the first),
+ * and the newest `updatedAt` seen so far.
  */
 export interface ReconcilePage {
   since: string;
   after: string | null;
-  offset: number;
   newest: string;
 }
 
@@ -70,14 +69,17 @@ export async function readRetries(store: Store): Promise<RetryEntry[]> {
   return parseRetries(await store.get(RETRY_KEY));
 }
 
+/**
+ * A record may also hold `offset`: the products done of the page listed after `after`. It is ignored, so that page is
+ * synced again from its start; products already in sync cost no write.
+ */
 export async function readPage(store: Store): Promise<ReconcilePage | null> {
   const value = await store.get(PAGE_KEY);
   if (!isRecord(value) || typeof value['since'] !== 'string') return null;
-  const { since, after, offset, newest } = value;
+  const { since, after, newest } = value;
   return {
     since,
     after: typeof after === 'string' ? after : null,
-    offset: typeof offset === 'number' ? offset : 0,
     newest: typeof newest === 'string' ? newest : since,
   };
 }

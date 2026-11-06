@@ -167,19 +167,42 @@ function flagAt(body, key) {
 }
 
 /**
+ * A product's place in the `UPDATED_AT` order, ties broken by id. Shopify's cursors encode this place, not an index,
+ * so a cursor still points between the same two products after others were edited and moved to the end.
+ *
+ * @param {MockProduct} product
+ * @returns {[string, number]}
+ */
+const sortPlace = (product) => [product.updatedAt, Number(product.legacyResourceId)];
+
+/** @param {[string, number]} a @param {[string, number]} b */
+const comparePlaces = (a, b) => a[0].localeCompare(b[0]) || a[1] - b[1];
+
+/**
  * @param {MockShop} shop
  * @param {Record<string, unknown>} variables
  */
 function productsPage(shop, variables) {
-  let list = [...shop.products.values()].sort((a, b) => a.updatedAt.localeCompare(b.updatedAt));
+  let list = [...shop.products.values()].sort((a, b) => comparePlaces(sortPlace(a), sortPlace(b)));
   const search = variables['query'];
   const updatedSince = typeof search === 'string' ? /updated_at:>='([^']+)'/.exec(search)?.[1] : undefined;
   if (updatedSince) list = list.filter((product) => product.updatedAt >= updatedSince);
-  const start = variables['after'] ? Number(variables['after']) : 0;
-  const page = list.slice(start, start + numberAt(variables, 'first'));
-  const end = start + page.length;
+  const after = variables['after'];
+  if (typeof after === 'string') {
+    const [updatedAt, id] = asList(parseJson(after), 'a cursor');
+    /** @type {[string, number]} */
+    const place = [asString(updatedAt, "a cursor's updatedAt"), Number(id)];
+    list = list.filter((product) => comparePlaces(sortPlace(product), place) > 0);
+  }
+  const page = list.slice(0, numberAt(variables, 'first'));
+  const edges = page.map((node) => ({ cursor: JSON.stringify(sortPlace(node)), node }));
   return json(200, {
-    data: { products: { nodes: page, pageInfo: { hasNextPage: end < list.length, endCursor: String(end) } } },
+    data: {
+      products: {
+        edges,
+        pageInfo: { hasNextPage: page.length < list.length, endCursor: edges.at(-1)?.cursor ?? null },
+      },
+    },
   });
 }
 
@@ -284,12 +307,12 @@ function answerItem(wf, itemId, method, body) {
 
 /**
  * The Webflow Data API's collection routes.
- * @param {{ wf: MockWebflow, failCreateFor: string | null, failPublish: boolean }} state
+ * @param {{ wf: MockWebflow, failCreateFor: string | null, failPublish: boolean, refusePublishFor: string | null }} state
  * @param {URL} target
  * @param {string} method
  * @param {unknown} body
  */
-function answerWebflow({ wf, failCreateFor, failPublish }, target, method, body) {
+function answerWebflow({ wf, failCreateFor, failPublish, refusePublishFor }, target, method, body) {
   const path = target.pathname.replace(/^\/v2\/collections\/[^/]+/, '');
   if (path === '' && method === 'GET') return json(200, COLLECTION);
   if (path === '/items' && method === 'GET') {
@@ -302,8 +325,10 @@ function answerWebflow({ wf, failCreateFor, failPublish }, target, method, body)
   if (path === '/items/publish' && method === 'POST') {
     if (failPublish) return json(500, { message: 'publish failed' });
     const itemIds = listAt(body, 'itemIds').map((id, i) => asString(id, `itemIds[${i}]`));
-    itemIds.forEach((id) => wf.live.add(id));
-    return json(202, { publishedItemIds: itemIds, errors: [] });
+    const refused = itemIds.filter((id) => wf.items.get(id)?.fieldData['slug'] === refusePublishFor);
+    const published = itemIds.filter((id) => !refused.includes(id));
+    published.forEach((id) => wf.live.add(id));
+    return json(202, { publishedItemIds: published, errors: refused.map((itemId) => ({ itemId })) });
   }
   const liveId = /^\/items\/([^/]+)\/live$/.exec(path)?.[1];
   if (liveId && method === 'DELETE') {
@@ -335,7 +360,8 @@ export function createMockApis({
   /** @type {{ host: string, method: string, path: string, body: unknown, headers: HeadersInit | undefined }[]} */
   const calls = [];
   let limited = !rateLimitOnce;
-  const flags = { failPublish: false };
+  /** @type {{ failPublish: boolean, refusePublishFor: string | null }} `refusePublishFor`: a slug Webflow won't publish. */
+  const flags = { failPublish: false, refusePublishFor: null };
 
   /**
    * @param {RequestInfo | URL} url
@@ -357,7 +383,7 @@ export function createMockApis({
         limited = true;
         return json(429, { message: 'Too Many Requests' }, { 'retry-after': '2' });
       }
-      return answerWebflow({ wf, failCreateFor, failPublish: flags.failPublish }, target, method, body);
+      return answerWebflow({ wf, failCreateFor, ...flags }, target, method, body);
     }
     throw new Error(`unexpected fetch ${target.href}`);
   }

@@ -179,12 +179,15 @@ async function reconcile(setup: WorkerSetup, request: Request, env: WorkerEnv, u
     return Response.json({ error: MISSING_KV }, { status: 503 });
   }
   const app = appFor(setup, env, kvStore(namespace));
+  // Asks Shopify every time (one query): it deletes subscriptions whose deliveries keep failing, and this
+  // authenticated call is how the owner gets them back.
   let webhooks: Awaited<ReturnType<typeof ensureWebhooks>> | { error: string };
   try {
     webhooks = await ensureWebhooks({
       shopify: app.shopify,
       store: app.store,
       uri: `${url.origin}/webhooks/shopify`,
+      force: true,
     });
   } catch (error) {
     console.error('webhook registration', messageOf(error));

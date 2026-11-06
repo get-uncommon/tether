@@ -79,7 +79,14 @@ export function createSessionStore({
   fetch: Fetch;
 }) {
   const lifetimeMs = settings.sessionDays * 86400e3;
-  const keyOf = async (id: string) => `s:${toHex(await sha256(id))}`;
+  const lifetimeSeconds = lifetimeMs / 1000;
+  const hashOf = async (id: string) => toHex(await sha256(id));
+  const keyOf = async (id: string) => `s:${await hashOf(id)}`;
+  /**
+   * Written when a session ends, for its whole lifetime. KV has no compare-and-set, so a refresh that finishes after
+   * the session ended has written it back; it looks for this marker after its write and deletes the session again.
+   */
+  const endedKeyOf = async (id: string) => `ended:${await hashOf(id)}`;
 
   async function load(id: string): Promise<Session | null> {
     const key = await keyOf(id);
@@ -99,12 +106,14 @@ export function createSessionStore({
   }
 
   async function end(id: string): Promise<void> {
+    await store.put(await endedKeyOf(id), '1', lifetimeSeconds);
     await store.delete(await keyOf(id));
   }
 
   /**
    * The session with an access token that is good for a while, refreshing it when needed. `null` when Shopify
-   * refuses the refresh and no parallel request recovered it: the session is then ended.
+   * refuses the refresh and no parallel request recovered it (the session is then ended), or when the session ended
+   * while the refresh was in flight.
    */
   async function fresh(id: string, session: Session, origin: string): Promise<Session | null> {
     if (session.expiresAt > Date.now() + REFRESH_MARGIN_MS) return session;
@@ -135,7 +144,9 @@ export function createSessionStore({
       );
       const next = { ...session, ...sessionTokens(tokens, session) };
       await save(id, next);
-      return next;
+      if ((await store.get(await endedKeyOf(id))) === null) return next;
+      await store.delete(await keyOf(id));
+      return null;
     } catch (error) {
       if (!(error instanceof SessionEndedError)) throw error;
       // Shopify rotates the refresh token, so a request refreshing at the same moment as another is refused. Wait

@@ -7,6 +7,7 @@ import { mapProduct, withoutOwned, onlyExisting } from './mapping.ts';
 import { readProductState, readRetries, productKey, RETRY_KEY } from './sync-state.ts';
 import { sha256, toHex } from './crypto.ts';
 import { SyncError, httpStatusOf, numericId, scalarText, stableStringify } from './util.ts';
+import { messageOf } from './shared/error-message.ts';
 
 import type { ItemIndex } from './item-index.ts';
 import type { FieldData, SyncConfig } from './mapping.ts';
@@ -28,7 +29,15 @@ export type SyncResult =
   | { action: 'skipped'; reason: string; itemId?: undefined }
   | { action: SyncAction; itemId: string | null; dryRun: true; fieldData?: FieldData; reason?: undefined };
 
-/** What the engine's operations share. `toPublish` holds the states to store once their items are live. */
+/** An item written but not yet live: its product, and the state to store once it is. */
+interface PendingPublish {
+  /** The Shopify product's numeric id. */
+  productId: string;
+  key: string;
+  state: ProductState & { handle: string };
+}
+
+/** What the engine's operations share. `toPublish` holds the items to publish, by item id. */
 export interface SyncContext {
   cfg: SyncConfig;
   target: CmsTarget;
@@ -39,7 +48,7 @@ export interface SyncContext {
   dryRun: boolean;
   index: ItemIndex;
   stats: SyncStats;
-  toPublish: Map<string, { key: string; state: ProductState }>;
+  toPublish: Map<string, PendingPublish>;
   /** The collection's field slugs with `webflow.skipMissingFields`, or `null` to write every mapped field. */
   collectionFields: () => Promise<Set<string> | null>;
 }
@@ -142,22 +151,55 @@ function plannedAction(itemId: string | null, hide: boolean): SyncAction {
 }
 
 /**
+ * Items written but not confirmed live. Their states are not stored, so the next sync of these products writes and
+ * publishes them again.
+ */
+export class PublishError extends SyncError {
+  /** Shopify ids and handles. */
+  readonly products: { id: string; handle: string }[];
+  /** Webflow answered and left these items out; otherwise the publish call itself failed. */
+  readonly refused: boolean;
+
+  constructor(message: string, products: PendingPublish[], refused: boolean) {
+    super(message, { code: 'PUBLISH' });
+    this.name = 'PublishError';
+    this.products = products.map(({ productId, state }) => ({ id: productId, handle: state.handle }));
+    this.refused = refused;
+  }
+}
+
+/**
  * Publishes the items written since the last flush and stores their states. A state is stored when Webflow
  * confirms the item, or reports no errors at all.
  *
  * @returns The item ids sent.
+ * @throws {PublishError} When any item is not confirmed live.
  */
 export async function flushPublish(ctx: SyncContext): Promise<string[]> {
   if (!ctx.toPublish.size || ctx.dryRun) return [];
   const batch = ctx.toPublish;
   ctx.toPublish = new Map();
   const ids = [...batch.keys()];
-  const results = await ctx.target.publish(ids);
+  let results;
+  try {
+    results = await ctx.target.publish(ids);
+  } catch (err) {
+    throw new PublishError(`publish failed: ${messageOf(err)}`, [...batch.values()], false);
+  }
   const published = new Set(results.flatMap((result) => result.publishedItemIds));
   const errors = results.flatMap((result) => result.errors);
   for (const error of errors) ctx.log.warn('publish error', JSON.stringify(error));
-  for (const [itemId, { key, state }] of batch) {
-    if (published.has(itemId) || (!published.size && !errors.length)) await ctx.store.put(key, state);
+  const unconfirmed: PendingPublish[] = [];
+  for (const [itemId, pending] of batch) {
+    if (published.has(itemId) || (!published.size && !errors.length)) await ctx.store.put(pending.key, pending.state);
+    else unconfirmed.push(pending);
+  }
+  if (unconfirmed.length) {
+    throw new PublishError(
+      `Webflow did not publish ${String(unconfirmed.length)} of ${String(ids.length)} items`,
+      unconfirmed,
+      true,
+    );
   }
   return ids;
 }
@@ -189,7 +231,7 @@ export async function syncProduct(
   const next = { itemId, hash, handle: product.handle, at: timestamp(ctx) };
   if (!hide && cfg.webflow.publish) {
     // The hash is stored only once the item is live, so a failed publish is retried.
-    ctx.toPublish.set(itemId, { key, state: next });
+    ctx.toPublish.set(itemId, { productId: numericId(product.id), key, state: next });
     if (publishNow) await flushPublish(ctx);
   } else {
     await ctx.store.put(key, next);

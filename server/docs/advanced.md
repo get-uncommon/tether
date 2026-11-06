@@ -156,6 +156,8 @@ field) and prints how a sample product would be written. `--offline` skips the A
 prints the report. It never prints secret values.
 
 State (product → item id + hash, and the reconcile cursor) lives in `.tether-sync-state.json`.
+`serve` and a cron `reconcile` can share it: each write takes `.tether-sync-state.json.lock`
+first, and a lock older than 30 seconds, left by a process that died, is taken over.
 Losing it is harmless: the next run matches items by `shopify-id` again and rewrites each item once.
 
 A large first import runs at the throttle speed: 50 requests/minute ≈ 45 products/minute.
@@ -193,7 +195,9 @@ The Node CLI runs on any host with cron.
 ### 6. Shopify webhooks
 
 The Worker registers `products/create`, `products/update` and `products/delete` through the app on
-its first `POST /reconcile` (signed with the app's client secret, so no extra key). On a Node host,
+each `POST /reconcile` that finds one missing (signed with the app's client secret, so no extra key).
+Shopify deletes a subscription whose deliveries keep failing; when `/check` reports one missing, the
+same `POST /reconcile` brings it back. On a Node host,
 run `tether-sync webhooks https://your-host` once. Webhooks you create yourself under Settings →
 Notifications also work: put their signing key in `SHOPIFY_WEBHOOK_SECRET`. The endpoint answers within Shopify's 5-second limit
 and does the work afterwards. A failed webhook is picked up by the next reconcile. Bodies over
