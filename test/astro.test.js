@@ -856,94 +856,7 @@ test("analytics: Tether's own events become GA4 dataLayer events (view_item, add
   cfg.analytics = prev;
 });
 
-test('customer accounts: PKCE login URL, callback checks state/nonce, cart linked, logout', async () => {
-  const acc = await import('../src/account.js');
-  const nav = [];
-  cfg.account = { clientId: 'client-1', navigate: (u) => nav.push(u) };
-  const realFetch = globalThis.fetch;
-  let idTokenNonce = null;
-  globalThis.fetch = async (url, init) => {
-    const u = String(url);
-    const json = (data, status = 200) => ({ ok: status < 400, status, json: async () => data });
-    if (u.endsWith('/.well-known/openid-configuration'))
-      return json({
-        issuer: 'https://shopify.com/authentication/1',
-        authorization_endpoint: 'https://shopify.com/authentication/1/oauth/authorize',
-        token_endpoint: 'https://shopify.com/authentication/1/oauth/token',
-        end_session_endpoint: 'https://shopify.com/authentication/1/logout',
-        jwks_uri: 'https://shopify.com/authentication/1/.well-known/jwks.json',
-      });
-    if (u.endsWith('/.well-known/customer-account-api'))
-      return json({ graphql_api: 'https://shopify.com/1/account/customer/api/2026-10/graphql' });
-    if (u.endsWith('/oauth/token')) {
-      const body = new URLSearchParams(init.body);
-      assert.equal(init.headers, undefined, 'a simple request: no custom headers');
-      assert.equal(body.get('grant_type'), 'authorization_code');
-      assert.ok(body.get('code_verifier').length >= 43);
-      const payload = btoa(
-        JSON.stringify({
-          iss: 'https://shopify.com/authentication/1',
-          aud: 'client-1',
-          nonce: idTokenNonce,
-          sub: 'gid://shopify/Customer/1',
-          iat: Date.now() / 1000,
-          exp: Date.now() / 1000 + 3600,
-        }),
-      );
-      return json({ access_token: 'tok-1', refresh_token: 'ref-1', id_token: `x.${payload}.y`, expires_in: 3600 });
-    }
-    if (u.includes('/account/customer/api/')) {
-      assert.equal(init.headers.Authorization, 'tok-1');
-      return json({
-        data: {
-          customer: {
-            id: 'c1',
-            firstName: 'Ada',
-            lastName: 'L',
-            displayName: 'Ada L',
-            emailAddress: { emailAddress: 'a@x.test' },
-          },
-        },
-      });
-    }
-    return realFetch(url, init);
-  };
-  try {
-    await acc.login({ returnTo: 'https://astro.test/account' });
-    const authorize = new URL(nav.pop());
-    assert.equal(authorize.searchParams.get('code_challenge_method'), 'S256');
-    assert.equal(authorize.searchParams.get('client_id'), 'client-1');
-    const state = authorize.searchParams.get('state');
-    idTokenNonce = authorize.searchParams.get('nonce');
-    // A wrong state is ignored.
-    window.history.replaceState(null, '', '/account?code=abc&state=wrong');
-    assert.equal(await acc.handleCallback(), false);
-    window.history.replaceState(null, '', `/account?code=abc&state=${state}`);
-    let loginEvent = 0;
-    window.addEventListener('tether:account-login', () => {
-      loginEvent++;
-    });
-    assert.equal(await acc.handleCallback(), true);
-    assert.equal(loginEvent, 1, 'tether:account-login reaches window listeners');
-    assert.equal(window.location.search, '', 'code removed from the URL');
-    assert.equal(Tether.cart.customerAccessToken, 'tok-1');
-    assert.equal((await acc.customer()).firstName, 'Ada');
-    document.body.innerHTML =
-      '<span id="n" tether-account-bind="first-name"></span><p id="out" tether-show="logged-out">x</p>';
-    await acc.render(document);
-    assert.equal(document.getElementById('n').textContent, 'Ada');
-    assert.equal(window.getComputedStyle(document.getElementById('out')).display, 'none');
-    await acc.logout();
-    assert.match(nav.pop(), /\/logout\?id_token_hint=/);
-    assert.equal(Tether.cart.customerAccessToken, null);
-  } finally {
-    globalThis.fetch = realFetch;
-    cfg.account = null;
-    window.history.replaceState(null, '', '/');
-  }
-});
-
-test('customer accounts in server mode: no token in the browser, the Worker does the work', async () => {
+test('customer accounts: no token in the browser, the Worker does the work', async () => {
   const acc = await import('../src/account.js');
   const nav = [];
   cfg.account = { server: '/_tether/account', navigate: (u) => nav.push(u) }; // a path on this site works too
@@ -1012,8 +925,6 @@ test('customer accounts in server mode: no token in the browser, the Worker does
     noOrders = false;
     assert.equal(window.location.search, '', '?account=in removed');
     assert.equal(document.getElementById('n').textContent, 'Ada');
-    assert.equal(await acc.getToken(), null, 'never a token');
-    await assert.rejects(acc.query('{ customer { id } }'), /server mode/);
     const url = await Tether.cart.beforeCheckout();
     assert.match(url, /checkouts\/c\/1\?logged_in=true/);
     const stored = JSON.stringify({ ...window.localStorage }) + JSON.stringify({ ...window.sessionStorage });
@@ -1084,7 +995,7 @@ test('tether-products="url:q": a search results page on a static site', async ()
   window.history.replaceState(null, '', '/');
 });
 
-test('account pages (server mode): order page with returns, subscriptions with actions, addresses, profile', async () => {
+test('account pages: order page with returns, subscriptions with actions, addresses, profile', async () => {
   const acc = await import('../src/account.js?pages'); // a fresh instance: an earlier test logged out
   cfg.account = {
     server: '/_tether/account',

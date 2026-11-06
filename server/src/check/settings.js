@@ -137,7 +137,7 @@ function checkAccounts(steps, { rawEnv, worker, webhookUri }) {
   if (!settings) return;
   const problems = accountProblems(settings);
   for (const problem of problems)
-    steps.add(problem.severity === 'warning' ? 'warn' : 'error', 'Customer accounts', problem.message);
+    steps.add(problem.severity === 'warning' ? 'warn' : 'error', 'Customer accounts', problem.message, problem.fix);
   // The Worker refuses account requests without the namespace (account.js); elsewhere the host passes its own store.
   const unbound = worker && !kvBinding(rawEnv);
   if (unbound) {

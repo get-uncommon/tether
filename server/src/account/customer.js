@@ -1,18 +1,29 @@
 /**
- * The account routes for the logged-in customer: `/me`, `/orders`, `/cart` and the operations in
- * `server/src/shared/account-ops.js`. Each runs with the customer's own access token, from the session the cookie
- * leads to; without one, it answers as logged out.
+ * The account routes for the logged-in customer: `/me`, `/orders`, `/cart` and the operations in `operations.js`.
+ * Each runs with the customer's own access token, from the session the cookie leads to; without one, it answers as
+ * logged out.
  */
 
 /** @import { AccountRequest } from '../account.js' */
-/** @import { OperationCall } from '../shared/account-ops.js' */
+/** @import { OperationCall } from '../shared/account-routes.js' */
 /** @import { Session } from './session.js' */
 
-import { CUSTOMER_QUERY, ORDERS_QUERY } from '../shared/account-documents.js';
-import { InputError, operationCall, ops } from '../shared/account-ops.js';
+import { operationCall } from '../shared/account-routes.js';
+import { InputError, ops } from './operations.js';
 import { field, textOrNull } from '../shared/json.js';
 import { customerQuery, discover, linkCart, UnauthorizedError } from './shopify.js';
 import { CART_ID, jsonResponse, NO_STORE, readJsonObject, SESSION_COOKIE, setCookie } from './http.js';
+
+const MONEY = 'amount currencyCode';
+
+/** The customer's profile, as `/me` answers it. */
+const CUSTOMER_QUERY =
+  'query TetherCustomer { customer { id firstName lastName displayName emailAddress { emailAddress } defaultAddress { formatted } } }';
+
+/** The customer's recent orders, as `/orders` answers them. */
+const ORDERS_QUERY = `query TetherOrders($first: Int!) { customer { orders(first: $first, sortKey: PROCESSED_AT, reverse: true) {
+  nodes { id name processedAt financialStatus fulfillmentStatus statusPageUrl totalPrice { ${MONEY} }
+    lineItems(first: 20) { nodes { title variantTitle quantity image { url altText } } } } } } }`;
 
 /** Shopify refused the customer's access token: the session has been ended here too. */
 class CustomerLoggedOut extends Error {}
@@ -98,7 +109,7 @@ function loggedOut({ sessionId }, cors, status, extra = {}) {
 const DEFAULT_ORDERS = 10;
 const MAX_ORDERS = 50;
 
-/** @type {Map<string, CustomerRoute>} The routes besides the operations in account-ops.js. */
+/** @type {Map<string, CustomerRoute>} The routes besides the operations in operations.js. */
 const CUSTOMER_ROUTES = new Map([
   [
     'GET /me',

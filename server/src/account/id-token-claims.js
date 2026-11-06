@@ -1,9 +1,8 @@
 /**
- * The claim checks of the id token Shopify returns at login (OpenID Connect Core, section 3.1.3.7), for the browser
- * and the Worker. They say nothing about who wrote the token: the Worker runs them after checking its signature, and
- * the browser on a token it received straight from Shopify's token endpoint.
+ * The claim checks of the id token Shopify returns at login (OpenID Connect Core, section 3.1.3.7). They say nothing
+ * about who wrote the token, so `id-token.js` runs them after checking its signature.
  */
-import { isRecord, textOrNull } from './json.js';
+import { isRecord, textOrNull } from '../shared/json.js';
 
 /** Clock difference allowed between Shopify and the checking side for `iat` and `nbf`. */
 const CLOCK_SKEW_SECONDS = 300;

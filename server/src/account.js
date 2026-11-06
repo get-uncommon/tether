@@ -1,5 +1,5 @@
 /**
- * Customer accounts through the Worker (server mode): the visitor's browser never holds a Shopify token. The Worker
+ * Customer accounts through the Worker: the visitor's browser never holds a Shopify token. The Worker
  * logs the customer in with Shopify's Customer Account API (OAuth with PKCE, the id token's signature checked), keeps
  * the tokens sealed in KV, and gives the browser only an HttpOnly session cookie. The browser can then ask for a fixed
  * set of things: the navigations in `NAVIGATIONS` below, logout, and the routes in `account/customer.js`.
@@ -13,7 +13,7 @@
 /** @import { Session } from './account/session.js' */
 /** @import { ExpiringStore, MemoryEntries } from './account/kv.js' */
 
-import { authorizeUrl } from './shared/account-login.js';
+import { authorizeUrl } from './account/authorize.js';
 import { randomToken } from './shared/base64url.js';
 import { isRecord } from './shared/json.js';
 import { open, seal } from './crypto.js';

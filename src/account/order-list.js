@@ -11,7 +11,7 @@ import { fillLines } from './order-lines.js';
 
 /** How many orders `orders()` answers, and a `tether-orders` list shows, without being told. */
 export const DEFAULT_ORDER_COUNT = 10;
-/** The most orders one request asks for, in both modes: the Worker answers no more. */
+/** The most orders one request asks for: the Worker answers no more. */
 export const MAX_ORDER_COUNT = 50;
 
 /**

@@ -438,10 +438,13 @@ the elements added later are read and mounted on their own, once per burst of ad
 **Pinning a release.** `@0.6` takes every 0.6.x fix automatically, which is what most sites want.
 To pin exactly what runs, load a fixed release (`@v0.6.8`) and add the file's
 [`integrity`](https://www.srihash.org/) hash to the script tag (an `integrity` hash on `@0.6` breaks
-with the next fix). The optional parts load from the same folder as the core and are checked against
-hashes built into it, so a pinned core runs only the parts of its own release. A core on another
-origin than the page loads them with CORS (jsDelivr sends the headers; your own host must too). Parts
-loaded from a `partsUrl` are not hash-checked; it has to be https or on your own site.
+with the next fix). The optional parts load from the same folder as the core, or from `partsUrl`,
+and are always checked against hashes built into the core, so a core runs only the parts of its own
+release. A `partsUrl` therefore has to serve the files of the same release as the core: upload the
+whole folder of that release (every `tether.*.js` from its GitHub Release or `dist/`) and replace it
+together with the core. The browser refuses a part from another release, so it fails to load.
+Parts on another origin than the page load with CORS (jsDelivr sends the headers; your own host must
+too), and a `partsUrl` has to be https or on your own site.
 
 **Optional parts.** `Tether.diagnose()` and markets (`markets.detect`, `tether-country-select`,
 `Tether.setCountry()`) live in separate files that load on first use: `tether.diagnose.min.js` and

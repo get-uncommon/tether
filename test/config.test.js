@@ -111,28 +111,35 @@ test('account URLs must be on the site or https; the rest of the account options
   const { result, warned } = quietly(() =>
     resolveConfig({
       account: {
-        server: 'http://evil.test/_tether',
-        tokenUrl: 'javascript:alert(1)',
+        server: '/_tether/account',
         orderUrl: '/account/order?id={id}',
-        subscriptionsUrl: 'https://shopify.com/1/account/pages/subs',
-        callbackUrl: 'ftp://evil.test/back',
+        subscriptionsUrl: 'javascript:alert(1)',
+        paymentUrl: 'ftp://evil.test/pay',
         logoutUrl: 'http://localhost:4321/',
-        clientId: 42,
-        shopDomain: 'shop.myshopify.com',
-        remember: 'yes',
+        locale: 42,
         navigate,
       },
     }),
   );
   assert.deepEqual(result.account, {
+    server: '/_tether/account',
     orderUrl: '/account/order?id={id}',
-    subscriptionsUrl: 'https://shopify.com/1/account/pages/subs',
     logoutUrl: 'http://localhost:4321/',
-    shopDomain: 'shop.myshopify.com',
     navigate,
   });
-  assert.equal(warned.length, 5, warned.join('\n'));
+  assert.equal(warned.length, 3, warned.join('\n'));
   assert.equal(quietly(() => resolveConfig({ account: 'yes' })).result.account, null);
+});
+
+test('an account without a usable server is off, with a warning that says to set account.server', () => {
+  for (const account of [{ clientId: 'client-1', remember: true }, { server: 'http://evil.test/_tether' }]) {
+    const { result, warned } = quietly(() => resolveConfig({ account }));
+    assert.equal(result.account, null);
+    assert.ok(
+      warned.some((line) => line.includes('customer accounts need the Worker since 0.7.0: set account.server')),
+      warned.join('\n'),
+    );
+  }
 });
 
 test('markets and analytics keep the values of the right kind', () => {

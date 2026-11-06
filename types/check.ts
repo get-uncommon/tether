@@ -104,13 +104,12 @@ Tether.cart.setCustomer({ accessToken: null });
 Tether.cart.setCustomer({ beforeCheckout: async () => null });
 async function accountAndMarkets() {
   const loggedIn: boolean = await Tether.account.isLoggedIn();
-  const finished: boolean = await Tether.account.handleCallback();
   await Tether.account.render(document);
   const report = await Tether.diagnose({ silent: true });
   const inUse: string | null = report.market.country;
   const source = report.market.detected?.sources?.country;
   const detected = await Tether.detectMarket();
-  void [loggedIn, finished, inUse, source, detected.country];
+  void [loggedIn, inUse, source, detected.country];
 }
 void accountAndMarkets;
 

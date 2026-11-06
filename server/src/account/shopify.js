@@ -4,8 +4,8 @@
  */
 
 /** @import { ShopifyAccountSettings } from './settings.js' */
-/** @import { AccountEndpoints } from '../shared/discovery.js' */
-/** @import { TokenAnswer } from '../shared/token-answer.js' */
+/** @import { AccountEndpoints } from './discovery.js' */
+/** @import { TokenAnswer } from './token-answer.js' */
 
 import { CUSTOMER_ACCOUNT_API_VERSION } from '../shared/api-versions.js';
 import {
@@ -14,9 +14,9 @@ import {
   graphqlEndpoint,
   OPENID_CONFIGURATION,
   wellKnownUrl,
-} from '../shared/discovery.js';
+} from './discovery.js';
 import { textOrNull } from '../shared/json.js';
-import { tokenAnswer, tokenRefusal } from '../shared/token-answer.js';
+import { tokenAnswer, tokenRefusal } from './token-answer.js';
 import { asList, asRecord, responseJsonOrNull } from '../json.js';
 
 /** @typedef {AccountEndpoints} Discovery Shopify's endpoints for one shop. */

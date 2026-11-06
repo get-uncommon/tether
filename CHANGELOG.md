@@ -1,7 +1,58 @@
 # Changelog
 
-## Unreleased
+## 0.7.0 (unreleased)
 
+- **Breaking (script build):** every optional part carries the sha384 `integrity` hash from the
+  core's own build, a `partsUrl` included, and loads with CORS when it is on another origin. A
+  self-hosted `partsUrl` must serve the files of the same release as the core: upload the whole
+  folder of that release and replace it together with the core. A part from another release fails
+  to load. Watch builds (`--watch`) carry the hashes too, rebuilding the core when a part changes.
+  **Upgrade:** sites that load parts from beside the core (jsDelivr, or the whole release folder
+  self-hosted) need nothing; a `partsUrl` folder is updated with the core.
+- **Breaking (sync Worker updates):** a copy installs a release only from the signed
+  `tether-server-X.Y.Z.tar.gz` on its GitHub Release, after `gh attestation verify` checks that
+  Tether's release workflow built it from the tag's commit (still required to be on `main`). Run by
+  hand without the GitHub CLI, the updater refuses unless `--allow-unverified` is given; a check
+  that fails is always refused. Releases before 0.7.0 have no signed file and can't be installed by
+  the new updater. **Upgrade:** none needed. A copy on 0.6 moves to 0.7 when its `TETHER_VERSION`
+  says `0.7` (or `latest`): its own 0.6 updater installs 0.7.0 by commit as before, and from then on
+  every update is verified. The workflow's steps are unchanged, and `gh` comes with every GitHub
+  runner.
+- **Breaking (customer accounts):** accounts run only through the Worker (`account.server`), so no
+  customer token is ever kept in the browser. Browser mode is removed: the `account.clientId`,
+  `callbackUrl`, `tokenUrl`, `shopDomain` and `remember` options, and `Tether.account.query()`,
+  `getToken()` and `handleCallback()`. An `account` config without `server` warns "customer
+  accounts need the Worker since 0.7.0: set account.server" and loads nothing; a `Tether.account`
+  function called without it rejects with `NOT_CONFIGURED`. Types: `account.server` is required,
+  and the account answers keep their exact shapes. Visitors logged in through browser mode are
+  logged out. **Upgrade (sites with `account.clientId`):** set up accounts in the Worker
+  ([setup](docs/accounts.md#setup)): register `https://your-shop.com/_tether/account/callback` as
+  the callback URI in Shopify, give the Worker `ACCOUNT_CLIENT_ID`, `ACCOUNT_ORIGINS`,
+  `STOREFRONT_TOKEN` and `ACCOUNT_SECRET`, then replace the browser options with
+  `account: { server: '/_tether/account' }`. Code that called `Tether.account.query()` uses the
+  fixed functions (`customer()`, `orders()`, `order()`, …) instead. Sites already on
+  `account.server` only drop the removed options, which are ignored.
+- **Breaking (sync Worker):** customer accounts need `ACCOUNT_SECRET` (24+ random characters); the
+  session key no longer falls back to `SYNC_SECRET`, the `/reconcile` and `/check` password.
+  Without it the account routes answer 503 and log `account setup ACCOUNT_SECRET is not set`, and
+  `/check` shows an error step that says what to set. **Upgrade, once, before a Worker with
+  customer accounts runs 0.7.0:** if it has no `ACCOUNT_SECRET` yet, add one in Cloudflare → your
+  Worker → Settings → Variables and Secrets (`openssl rand -hex 24`, not the value of
+  `SYNC_SECRET`). 0.6 already uses it, so it can be set before the update. Changing the key logs
+  every customer out once. Self-updating copies follow the `0.6` range and get 0.7.0 only when
+  `TETHER_VERSION` is changed to `0.7`: set the secret first. A copy whose `TETHER_VERSION` is
+  `latest` updates by itself, so set the secret before 0.7.0 is released. Workers without customer
+  accounts, or with `ACCOUNT_SECRET` already set, need nothing.
+- Sync Worker updates: when a release ships a newer `.github/workflows/update-tether.yml` than the
+  copy's (its `# Tether workflow revision:` line), the update run prints a GitHub Actions warning
+  and adds the one-time manual step to the job summary. **Upgrade notes, for any later release that
+  raises it:** copy `server/.github/workflows/update-tether.yml` from that release over the same
+  file in your copy and commit it, once, by hand (GitHub doesn't let the workflow change its own
+  file; keep your own `cron` line). 0.7.0 ships revision 1, the same workflow every copy has.
+- Releases: `release.yml` builds `tether-server-X.Y.Z.tar.gz` (a `git archive` of the tag's
+  `server/`, the same bytes on every run), attests it (`actions/attest-build-provenance`, pinned)
+  and uploads it to the GitHub Release. The note below that parts from a `partsUrl`
+  load without a hash no longer holds.
 - Security: descriptions lose `id` attributes (they could clobber `window.<id>` and the site's own
   ids), inline style declarations that position content over the page or load from elsewhere
   (`position`, `top`/`right`/`bottom`/`left`/`inset`, `z-index`, any value with `url(`,
@@ -36,7 +87,7 @@
 - Types: the `.d.ts` files are checked against the source's JSDoc types (`npm run test:types`).
   Fixed drift: `TetherError.code` keeps its union (`TetherErrorCode | (string & {})`) and the
   constructor takes typed `errors`/`userErrors`/`code`; `Tether.config` is `ResolvedTetherConfig`;
-  `query()` and `account.query()` default to `unknown` and `on(name: string)` passes `unknown`
+  `query()` defaults to `unknown` and `on(name: string)` passes `unknown`
   instead of `any`; `onError` receives `unknown` (a handler may still type it narrower); cart
   changes that can answer without a cart return `ShopifyCart | null` and `checkout()` the checkout
   URL; `imageUrl()` returns `url` itself when it is empty; an `initialState` plan's price and an
@@ -67,15 +118,11 @@
   (http on localhost); invalid fields of `markets`, `analytics` and `account` are dropped.
 - Analytics: `shopify: { proxy: true }` is the documented form; any value still turns it on.
 - Customer accounts: a failed login fires `tether:account-error` with `{ error }`: `'error'` or
-  `'expired'` (`?account=error` / `?account=expired`) in server mode, Shopify's OAuth error code in
-  browser mode.
-- Customer accounts: both modes answer the same shapes and codes. `customer()` has one shape
-  (`id`, `firstName`, `lastName`, `displayName`, `emailAddress`, `defaultAddress`; missing fields are
-  `null`, and server mode now includes `id`); logged out, `customer()` is `null` and `orders()` `[]`.
-  Refused input is `INVALID` (with `userErrors`) in both modes, an unreachable endpoint `NETWORK`.
-- Customer accounts (browser mode): a token Shopify refuses is refreshed once, else the session
-  ends; `isLoggedIn()` sees a stored session before any request. When the cart can't be unlinked at
-  logout, it is forgotten on this device and the page shows an empty cart.
+  `'expired'` (`?account=error` / `?account=expired`).
+- Customer accounts: `customer()` has one shape (`id`, `firstName`, `lastName`, `displayName`,
+  `emailAddress`, `defaultAddress`; missing fields are `null`, and `id` is included); logged out,
+  `customer()` is `null` and `orders()` `[]`. Refused input is `INVALID` (with `userErrors`), an
+  unreachable Worker `NETWORK`.
 - Customer accounts (sync Worker): a refresh refused for any reason but `invalid_grant` answers 502
   and keeps the session; a session without a refresh token no longer asks Shopify; discovery falls
   back to the shop id only on a 403/430 from the store domain.

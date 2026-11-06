@@ -143,28 +143,18 @@ export interface TetherConfig {
     shopify?: boolean | { consent?: 'no-banner' | 'default-banner' | 'custom-banner'; proxy?: boolean };
     onEvent?: (name: string, data: Record<string, unknown>) => void;
   } | null;
-  /** Customer accounts (optional part): the Headless channel's Customer Account API client id, and options. */
+  /** Customer accounts (optional part), through your Worker: without `server` they are off. */
   account?: {
-    /** Browser mode: the Customer Account API client id. */
-    clientId?: string;
-    /** Server mode (recommended): the Worker's account routes, a URL or a path on this site ('/_tether/account'). */
-    server?: string;
+    /** The Worker's account routes, a URL or a path on this site ('/_tether/account'). */
+    server: string;
     /** Your own order page: tether-order-bind="url" links there, e.g. '/account/order?id={id}' (else Shopify's status page). */
     orderUrl?: string;
     /** Shopify's subscription management page (tether-account-link="subscriptions"); payment methods are changed there too. */
     subscriptionsUrl?: string;
     /** A separate page for payment methods (tether-account-link="payment"); default subscriptionsUrl. */
     paymentUrl?: string;
-    /** The page Shopify sends the visitor back to after login (registered as callback URI). Default: the current page. */
-    callbackUrl?: string;
     /** Where Shopify sends the visitor after logout (registered as logout URI). Default: the home page. */
     logoutUrl?: string;
-    /** Keep the login across tabs and browser restarts (localStorage instead of sessionStorage). */
-    remember?: boolean;
-    /** Your own token endpoint, if the browser can't call Shopify's (it forwards the form body). */
-    tokenUrl?: string;
-    /** The *.myshopify.com domain, if domain is something else. */
-    shopDomain?: string;
     locale?: string;
     /** Replaces location.assign for the login redirect (popups, tests). */
     navigate?: (url: string) => void;
@@ -491,7 +481,7 @@ export interface TetherEvents {
   error: { error: Error; context: string; key?: string };
   'account-login': Record<string, never>;
   'account-logout': Record<string, never>;
-  /** A login that failed: 'expired' or 'error' in server mode, Shopify's OAuth error code in browser mode. */
+  /** A login that failed: 'expired' (it took too long, or came back to another browser) or 'error'. */
   'account-error': { error: string };
   'account-updated': { what: 'profile' | 'addresses' | 'subscriptions' | 'orders' };
 }
@@ -528,21 +518,16 @@ export interface Tether {
   ): Promise<ShopifyProduct[]>;
   getScope(el: Element | null | undefined): ProductScope | null;
   addGroup(button: Element): Promise<ShopifyCart | null>;
-  /** Customer accounts (loads the account part): login(), logout(), customer(), orders(), query(gql, vars), getToken(). */
+  /** Customer accounts through your Worker (loads the account part). */
   account: {
     login(opts?: { returnTo?: string; locale?: string }): Promise<void>;
     logout(opts?: { returnTo?: string }): Promise<void>;
-    /** The logged-in customer; null when nobody is (both modes). */
+    /** The logged-in customer; null when nobody is. */
     customer(): Promise<AccountCustomer | null>;
-    /** The customer's most recent orders, newest first; [] when nobody is logged in (both modes). */
+    /** The customer's most recent orders, newest first; [] when nobody is logged in. */
     orders(opts?: { first?: number }): Promise<AccountOrder[]>;
-    /** Browser mode only (NOT_ALLOWED in server mode). */
-    query<T = unknown>(query: string, variables?: Record<string, unknown>): Promise<T>;
-    getToken(): Promise<string | null>;
-    /** True while a customer is logged in, as far as this page knows without asking. */
+    /** True when the Worker last said a customer is logged in; false before the page has asked it. */
     isLoggedIn(): Promise<boolean>;
-    /** Finishes a login coming back from Shopify (browser mode); true when there was one. */
-    handleCallback(): Promise<boolean>;
     /** Fills the account markup in root: logged-in/out content, the customer, orders and the account pages. */
     render(root?: ParentNode): Promise<void>;
     /** What mount() runs: finishes a login coming back on the first call, then renders root. */
@@ -674,7 +659,7 @@ export interface ImageRef {
   url: string;
   altText: string | null;
 }
-/** The logged-in customer, the same in server and browser mode. */
+/** The logged-in customer. */
 export interface AccountCustomer {
   id?: string;
   firstName: string | null;

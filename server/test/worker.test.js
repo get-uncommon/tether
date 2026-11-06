@@ -98,6 +98,11 @@ test('/check: a missing namespace is a warning for the sync and an error once ac
   const bound = await check({ ...accounts, TETHER_SYNC: kv() });
   assert.equal(bound.kv, true);
   assert.ok(!bound.steps.some((step) => /TETHER_SYNC/.test(step.message)));
+
+  const noSecret = await check({ ...accounts, ACCOUNT_SECRET: undefined, TETHER_SYNC: kv() });
+  assert.equal(noSecret.ok, false);
+  const secretStep = noSecret.steps.find((step) => step.level === 'error' && /ACCOUNT_SECRET/.test(step.message));
+  assert.match(secretStep?.fix ?? '', /Add the Worker secret ACCOUNT_SECRET, a random string of at least 24/);
 });
 
 test('the Worker and the browser script are released with one version', async (t) => {

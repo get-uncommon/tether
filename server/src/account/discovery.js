@@ -1,9 +1,8 @@
 /**
- * Shopify's Customer Account API endpoints for one shop, read from its two discovery documents, for the browser and
- * the Worker alike. Every endpoint must be https, because the tokens and the customer's data go there; an endpoint is
- * never guessed.
+ * Shopify's Customer Account API endpoints for one shop, read from its two discovery documents. Every endpoint must
+ * be https, because the tokens and the customer's data go there; an endpoint is never guessed.
  */
-import { field, textOrNull } from './json.js';
+import { field, textOrNull } from '../shared/json.js';
 
 /** The OpenID Connect discovery document: issuer, authorize, token, logout and signing-key endpoints. */
 export const OPENID_CONFIGURATION = 'openid-configuration';

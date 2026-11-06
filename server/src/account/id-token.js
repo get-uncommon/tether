@@ -7,7 +7,7 @@
 /** @import { Discovery, Fetch } from './shopify.js' */
 
 import { fromBase64Url } from '../shared/base64url.js';
-import { checkIdTokenClaims } from '../shared/id-token-claims.js';
+import { checkIdTokenClaims } from './id-token-claims.js';
 import { asList, field } from '../shared/json.js';
 import { asRecord, responseJsonOrNull } from '../json.js';
 import { JSON_HEADERS } from './shopify.js';

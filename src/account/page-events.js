@@ -17,7 +17,7 @@ import { renderSubscriptions } from './subscriptions-view.js';
 import { renderOrder } from './order-page.js';
 import { TetherError } from '../client.js';
 /** @import { ReturnLine } from './operations.js' */
-/** @import { SubscriptionAction } from '../../server/src/shared/account-ops.js' */
+/** @import { SubscriptionAction } from '../../server/src/shared/account-routes.js' */
 
 /** @type {readonly SubscriptionAction[]} */
 const SUBSCRIPTION_ACTIONS = ['pause', 'resume', 'skip', 'unskip', 'cancel'];

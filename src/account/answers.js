@@ -1,9 +1,8 @@
 /**
- * The account answers as typed values. The Worker (server mode) and Shopify (browser mode) send the documents of
- * account-documents.js and account-ops.js, and each answer is read once, field by field, so both modes return the
- * same shapes. Every field a document selects is kept. One that is missing or of another type reads as `null` (a
- * list as empty, a count as 0): a page with one blank field is better than no page. The ids the pages act on are
- * required, and an answer without one is an error. This module reads what the account part shows (the customer,
+ * The Worker's account answers as typed values. The Worker passes on what Shopify answers to its fixed documents, and
+ * each answer is read once, field by field. Every field a document selects is kept. One that is missing or of another
+ * type reads as `null` (a list as empty, a count as 0): a page with one blank field is better than no page. The ids
+ * the pages act on are required, and an answer without one is an error. This module reads what the account part shows (the customer,
  * their orders, Shopify's `userErrors`); page-answers.js reads the account pages' answers.
  */
 import { TetherError } from '../client.js';
@@ -13,7 +12,7 @@ import { field, isRecord, textOrNull } from '../../server/src/shared/json.js';
 
 /** @typedef {{ url: string, altText: string | null }} AccountImage */
 /**
- * @typedef {object} AccountCustomer The logged-in customer, the same in both modes.
+ * @typedef {object} AccountCustomer The logged-in customer.
  * @property {string} [id] The customer's gid; left out when the Worker's `/me` doesn't send it.
  * @property {string | null} firstName
  * @property {string | null} lastName
@@ -22,14 +21,14 @@ import { field, isRecord, textOrNull } from '../../server/src/shared/json.js';
  * @property {{ formatted: string[] } | null} defaultAddress
  */
 /**
- * @typedef {object} AccountOrderLine A line of `ORDERS_QUERY`.
+ * @typedef {object} AccountOrderLine A line of an order in the Worker's `/orders`.
  * @property {string | null} title
  * @property {string | null} variantTitle
  * @property {number} quantity
  * @property {AccountImage | null} image
  */
 /**
- * @typedef {object} AccountOrder A node of `ORDERS_QUERY`.
+ * @typedef {object} AccountOrder An order in the Worker's `/orders`.
  * @property {string} id
  * @property {string | null} name
  * @property {string | null} processedAt
@@ -112,46 +111,22 @@ export function imageOrNull(value) {
 }
 
 /**
- * @param {Record<string, unknown>} customer
- * @param {{ email: string | null, address: string[] | null }} contact Read from where each mode's answer has them.
+ * @param {unknown} value The `customer` of the Worker's `/me`, which flattens the email and the default address.
  * @returns {AccountCustomer}
  */
-function customerFrom(customer, { email, address }) {
+export function toAccountCustomer(value) {
+  const customer = isRecord(value) ? value : {};
   const id = textOrNull(customer['id']);
+  const email = textOrNull(customer['email']);
+  const address = customer['address'];
   return {
     ...(id === null ? {} : { id }),
     firstName: textOrNull(customer['firstName']),
     lastName: textOrNull(customer['lastName']),
     displayName: textOrNull(customer['displayName']),
     emailAddress: email === null ? null : { emailAddress: email },
-    defaultAddress: address === null ? null : { formatted: address },
+    defaultAddress: Array.isArray(address) ? { formatted: textList(address) } : null,
   };
-}
-
-/**
- * @param {unknown} value The `customer` of `CUSTOMER_QUERY`.
- * @returns {AccountCustomer | null}
- */
-export function toAccountCustomer(value) {
-  if (!isRecord(value)) return null;
-  const formatted = field(value['defaultAddress'], 'formatted');
-  return customerFrom(value, {
-    email: textOrNull(field(value['emailAddress'], 'emailAddress')),
-    address: Array.isArray(formatted) ? textList(formatted) : null,
-  });
-}
-
-/**
- * @param {unknown} value The `customer` of the Worker's `/me`, which flattens the email and the default address.
- * @returns {AccountCustomer}
- */
-export function toServerCustomer(value) {
-  const customer = isRecord(value) ? value : {};
-  const address = customer['address'];
-  return customerFrom(customer, {
-    email: textOrNull(customer['email']),
-    address: Array.isArray(address) ? textList(address) : null,
-  });
 }
 
 /**
@@ -182,7 +157,7 @@ const toAccountOrder = (value) => ({
 });
 
 /**
- * @param {unknown} value The nodes of `ORDERS_QUERY`.
+ * @param {unknown} value The `orders` of the Worker's `/orders`.
  * @returns {AccountOrder[]}
  * @throws {TetherError} For an order without an id.
  */

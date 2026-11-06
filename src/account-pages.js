@@ -1,7 +1,7 @@
 /**
  * Customer account pages, an optional part the account part loads on pages that use them: the order page with
- * returns, the profile form, addresses and subscriptions. The operations and their input checks are shared with the
- * Worker (server/src/shared/account-ops.js), so both modes do the same.
+ * returns, the profile form, addresses and subscriptions. Each operation is one of the Worker's fixed routes, which
+ * checks the input (account/operations.js).
  */
 import { reportError } from './config.js';
 import { qsa, sel } from './dom.js';

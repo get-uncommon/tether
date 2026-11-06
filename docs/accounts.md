@@ -3,22 +3,15 @@
 Login, the customer's name and orders, and a checkout that knows them (saved addresses and cards),
 with Shopify's [Customer Account API](https://shopify.dev/docs/api/customer). The account part
 (about 8 KB gzipped) loads only on pages that need it: pages with account markup, a login coming
-back (Shopify's answer to a login this tab started, or the Worker's `?account=`), and pages where
-the visitor may be logged in.
+back (the Worker's `?account=`), and pages where the visitor may be logged in.
 
-There are two ways to run it. **Use the server mode for live sites.**
+Accounts run through your own [sync Worker](../server/README.md). A customer token gives full access
+to that customer's account, and any script on a page can read what the page stores, so the token
+stays in the Worker and the browser holds only a cookie its scripts can't read.
 
-| | Server mode (recommended) | Browser mode |
-|---|---|---|
-| Where the login lives | your [sync Worker](../server/README.md), encrypted | the visitor's browser |
-| What the browser holds | a session cookie scripts can't read | the Shopify tokens |
-| A malicious script on your site | can't take the login away; while the page is open it can act as the customer there | could take the tokens and use them anywhere |
-| Setup | the Worker on your shop's domain (a route) | nothing extra |
+There's no Tether server: the data goes between the visitor, Shopify and your own Worker.
 
-Either way, there's no Tether server: the data goes between the visitor, Shopify and your own
-Worker.
-
-## Server mode
+## How it works
 
 The Worker does the login with Shopify (OAuth with PKCE, the id token's signature checked against
 Shopify's keys), keeps the tokens **encrypted** in its KV storage (AES-GCM, under a hash of the
@@ -36,8 +29,10 @@ cart, and log out; only from your site's address, and changes need a header othe
 - **Sessions end:** after `ACCOUNT_SESSION_DAYS` (14) from login, however much they're used, and
   as soon as Shopify ends them.
 - **What it can't stop:** a malicious script running on your own page can still act as the
-  customer while that page is open (read their profile and orders, link carts). Keep third-party
-  scripts off account pages, and use a Content-Security-Policy.
+  customer while that page is open (read their profile and orders, link carts), but it can't take
+  the login away. Keep third-party scripts off account pages, and use a Content-Security-Policy.
+
+## Setup
 
 ### 1. Shopify
 
@@ -64,13 +59,12 @@ Then the Worker's secrets (Settings → Variables and Secrets):
 | `ACCOUNT_CLIENT_SECRET` | the client secret (Confidential client only) |
 | `ACCOUNT_ORIGINS` | your site, e.g. `https://your-shop.com` (more with commas) |
 | `STOREFRONT_TOKEN` | the public Storefront token (to link carts, so checkout knows the customer) |
+| `ACCOUNT_SECRET` | required, 24+ random characters (`openssl rand -hex 24`), not the same as `SYNC_SECRET`: the sessions' encryption keys come from it. Without it the account routes answer 503. Changing it logs every customer out once |
 | `ACCOUNT_SESSION_DAYS` | optional, how long a login lasts at most (default 14) |
-| `ACCOUNT_SECRET` | recommended, 24+ random characters: the encryption key for sessions. Without it the key comes from `SYNC_SECRET`, which is also the password for `/reconcile` and `/check` |
 
-`SHOPIFY_DOMAIN` and `SYNC_SECRET` are already set; the encryption keys are derived from
-`SYNC_SECRET` (or `ACCOUNT_SECRET`). The Worker's `/check` (e.g. `https://tether-sync.your-name.workers.dev/check`,
-with `Authorization: Bearer YOUR_SYNC_SECRET`) says whether accounts are set up, whether the Worker
-answers on your domain, and which URLs to register in Shopify.
+`SHOPIFY_DOMAIN` is already set. The Worker's `/check` (e.g. `https://tether-sync.your-name.workers.dev/check`,
+with `Authorization: Bearer YOUR_SYNC_SECRET`) says whether accounts are set up, what is missing,
+whether the Worker answers on your domain, and which URLs to register in Shopify.
 
 ### 3. Your site
 
@@ -81,39 +75,7 @@ window.TETHER_CONFIG = {
 };
 ```
 
-The markup and JavaScript below are the same in both modes.
-
-## Browser mode
-
-For a quick start or a site without its own domain on Cloudflare. The login happens in the
-browser (OAuth with PKCE and `state`; the id token's claims checked as the Worker checks them:
-issuer, audience, authorized party, `nonce`, expiry, issue time, not-before and subject), and the browser
-holds the customer's tokens with their full scope: the same access server mode keeps in the Worker.
-
-**Where the tokens are kept, and what that risks.** The access token and the refresh token (and
-the id token, for Shopify's logout) are kept in Web Storage:
-
-- by default in `sessionStorage`: this tab only. **Closing the tab ends the login**, and a new
-  tab starts logged out;
-- with `account: { remember: true }` in `localStorage`: every tab, across restarts. The refresh
-  token stays on the device until the customer logs out or Shopify ends the session.
-
-Any script that runs on your pages can read either area, and could take the tokens to use them
-elsewhere: with `remember`, that includes the refresh token, which keeps working after the tab
-is closed. **Use server mode** when your pages render HTML you don't control (store descriptions,
-CMS rich text from others, user content) or load third-party scripts (analytics, chat, A/B
-testing, tag managers).
-
-1. Shopify: as above, client type **Public**, and the callback URI is the page visitors come back
-   to (e.g. `https://your-shop.com/account`).
-2. Your site: `account: { clientId: '…', callbackUrl: 'https://your-shop.com/account', logoutUrl: 'https://your-shop.com/' }`.
-
-Shopify only allows `https` addresses, no `localhost`: test on a staging domain or a tunnel.
-
-`account.tokenUrl` sends the token requests to another address, for a browser that can't reach
-Shopify's token endpoint. It must be your shop's own first-party endpoint that passes the form body
-on to Shopify unchanged: the browser takes the id token in its answer as Shopify's without checking
-a signature, which is safe only because the answer comes from Shopify over TLS.
+Without `server` accounts are off, and the console says so.
 
 ## Markup
 
@@ -273,12 +235,12 @@ message (e.g. "Zip is invalid") goes in `tether-form-error`.
 - **Payment method:** card details never touch your site. `tether-account-link="payment"` (or
   `"subscriptions"`) goes to Shopify's page for it (`paymentUrl`, default `subscriptionsUrl`).
 
-**Security (server mode):** each of these is one fixed operation in the Worker, with no query
+**Security:** each of these is one fixed operation in the Worker, with no query
 passthrough. Ids are checked for their type, address fields are limited to Shopify's address
 fields with bounded lengths, and a subscription is looked up through the logged-in customer before
 any action, so a customer can only act on their own orders, addresses and subscriptions (Shopify
 enforces the same through the customer's token). Every change needs the allowed origin and the
-`X-Tether-Account` header, like the routes above. Browser mode runs the same documents and checks.
+`X-Tether-Account` header, like the routes above.
 
 ## JavaScript
 
@@ -297,42 +259,32 @@ await Tether.account.requestReturn(order.id, [{ lineItemId: order.lineItems.node
 await Tether.account.logout();
 ```
 
-Logged out, `customer()` answers `null` and `orders()` `[]`, in both modes. Browser mode also
-has `Tether.account.query(gql, variables)` for any Customer Account API query; server mode answers
-only these fixed operations, on purpose (`query()` there rejects with `NOT_ALLOWED`).
+Logged out, `customer()` answers `null` and `orders()` `[]`. There is no query passthrough: the
+Worker answers only these fixed operations, on purpose.
 
 ### Errors
 
-Failures are `TetherError`s with a `code`, the same in both modes:
+Failures are `TetherError`s with a `code`:
 
 | `code` | When |
 |---|---|
 | `NOT_LOGGED_IN` | an action that needs a customer (order, profile, addresses, subscriptions, returns) while nobody is logged in |
 | `INVALID` | Shopify or the Worker refused the input; Shopify's messages (e.g. "Zip is invalid") are in `err.userErrors`. Also `orders({ first })` with a `first` that isn't a whole number from 1 to 50, before any request |
 | `NETWORK` | the Worker or Shopify couldn't be reached |
-| `HTTP_<status>` | the Worker answered with another error, e.g. `HTTP_502` when Shopify failed behind it |
-
-Browser mode adds `NOT_CONFIGURED` (no `account.clientId`), and two for a token request that
-Shopify refuses or fails. `SESSION_ENDED` is Shopify's `invalid_grant`: the login code or refresh
-token is no longer valid, so the visitor is logged out here. `TOKEN_FAILED` is any other refusal or
-failure, such as `invalid_client` or a wrong callback URI: a setup mistake, so the session is kept,
-as the Worker does in server mode, and the request fails with this error (for the page's account
-markup it goes to `onError`).
+| `HTTP_<status>` | the Worker answered with another error, e.g. `HTTP_502` when Shopify failed behind it, or `HTTP_503` while accounts aren't set up (its `/check` says what is missing) |
+| `NOT_CONFIGURED` | `account.server` isn't set |
 
 ### Events
 
 On `document`: `tether:account-login` after a login, `tether:account-logout`,
 `tether:account-updated` (`detail.what`: profile, addresses, subscriptions, orders), and
-`tether:account-error` with `{ error }` when a login didn't work. In server mode `error` is
-`'error'` (the login failed: the Worker sends the visitor back with `?account=error`) or
-`'expired'` (`?account=expired`: the login took longer than ten minutes, or came back to another
-browser). In browser mode it is the OAuth error code Shopify sends back, e.g. `access_denied`; a
-login that took longer than ten minutes, or whose answer doesn't check out, goes to `onError`
-instead, with no event.
+`tether:account-error` with `{ error }` when a login didn't work: `'error'` (the login failed: the
+Worker sends the visitor back with `?account=error`) or `'expired'` (`?account=expired`: the login
+took longer than ten minutes, or came back to another browser).
 
 ## Tested
 
-Server mode's unit tests run the whole flow against a simulated Shopify: the login (PKCE, nothing
+The unit tests run the whole flow against a simulated Shopify: the login (PKCE, nothing
 stored before the customer comes back, then only a session cookie), the profile and orders, cart
 linking, refresh, the session's lifetime, and logout. They also cover what it must refuse or
 survive:

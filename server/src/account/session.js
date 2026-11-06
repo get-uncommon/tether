@@ -6,7 +6,7 @@
 /** @import { ExpiringStore } from './kv.js' */
 /** @import { ReadyAccountSettings } from './settings.js' */
 /** @import { Discovery, Fetch } from './shopify.js' */
-/** @import { TokenAnswer } from '../shared/token-answer.js' */
+/** @import { TokenAnswer } from './token-answer.js' */
 
 import { isRecord } from '../shared/json.js';
 import { open, seal, sha256, toHex } from '../crypto.js';

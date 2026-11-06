@@ -1,10 +1,10 @@
-// The parsers in server/src/shared/ that the browser script and the Worker both use.
+// The JSON helpers in server/src/shared/, and the parsers of Shopify's login answers.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { asList, textOrNull } from '../src/shared/json.js';
-import { expiresInSeconds, tokenAnswer, tokenRefusal } from '../src/shared/token-answer.js';
-import { accountEndpoints, DiscoveryError, graphqlEndpoint, wellKnownUrl } from '../src/shared/discovery.js';
-import { checkIdTokenClaims } from '../src/shared/id-token-claims.js';
+import { expiresInSeconds, tokenAnswer, tokenRefusal } from '../src/account/token-answer.js';
+import { accountEndpoints, DiscoveryError, graphqlEndpoint, wellKnownUrl } from '../src/account/discovery.js';
+import { checkIdTokenClaims } from '../src/account/id-token-claims.js';
 
 test('textOrNull: a non-empty string, else null; asList: an array, else empty', () => {
   assert.deepEqual(['a', '', null, 3, undefined].map(textOrNull), ['a', null, null, null, null]);

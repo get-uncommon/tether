@@ -1,7 +1,7 @@
 /**
- * What tells a page that customer accounts are in use in this browser: the Web Storage keys the account part keeps,
- * and the Worker's `?account=` mark after a login. The core reads them to decide whether a page loads the part, and
- * the part writes them, so both take them from here.
+ * What tells a page that customer accounts are in use in this browser: the "may be logged in" hint the account part
+ * keeps in `localStorage`, and the Worker's `?account=` mark after a login. The core reads them to decide whether a
+ * page loads the part, and the part writes the hint, so both take them from here.
  */
 import { cfg } from './config.js';
 
@@ -12,14 +12,8 @@ import { cfg } from './config.js';
  * @typedef {'in' | 'expired' | 'error'} LoginOutcome
  */
 
-/** @returns {string} The browser-mode session's key. */
-export const sessionKey = () => `${cfg.prefix}:account:${cfg.domain}`;
-
-/** @returns {string} The key of the login in progress (browser mode), between leaving for Shopify and coming back. */
-export const pendingLoginKey = () => `${cfg.prefix}:account-login:${cfg.domain}`;
-
 /**
- * Server mode's "may be logged in" mark: it makes the core load the part on the next page, and holds no secret.
+ * The "may be logged in" hint's key: it makes the core load the part on the next page, and holds no secret.
  *
  * @returns {string}
  */

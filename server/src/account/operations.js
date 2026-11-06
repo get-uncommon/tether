@@ -3,10 +3,10 @@
  * Every operation runs with the logged-in customer's own Customer Account API token, and that token is what keeps
  * Shopify to that customer's data. Ids are also checked for their type, so a malformed id never reaches Shopify.
  *
- * The Worker runs them in server mode, behind the routes in `OPERATION_ROUTES`, and the browser runs the same
- * documents in browser mode.
+ * The browser asks for them through the routes in `shared/account-routes.js`.
  */
-import { field, isRecord } from './json.js';
+import { field, isRecord } from '../shared/json.js';
+/** @import { OperationInput, OperationName, SubscriptionAction } from '../shared/account-routes.js' */
 
 /**
  * Runs one of the documents below with the customer's token.
@@ -14,7 +14,6 @@ import { field, isRecord } from './json.js';
  * @typedef {(query: string, variables: Record<string, unknown>) => Promise<Record<string, unknown> | null>} Ask
  */
 
-/** @typedef {Record<string, unknown>} OperationInput */
 /** @typedef {Record<string, unknown>} OperationResult */
 /** @typedef {{ field?: string[] | null, message: string }} UserError */
 
@@ -100,8 +99,6 @@ const SUBSCRIPTION_ACTIONS = {
     input: 'billingCycle',
   },
 };
-
-/** @typedef {'pause' | 'resume' | 'skip' | 'unskip' | 'cancel'} SubscriptionAction */
 
 /** @param {unknown} value @returns {value is SubscriptionAction} */
 function isSubscriptionAction(value) {
@@ -237,7 +234,7 @@ function payloadOf(data, name) {
 
 /** @typedef {(ask: Ask, input: OperationInput) => Promise<OperationResult>} Operation */
 
-/** @satisfies {Record<string, Operation>} */
+/** @satisfies {Record<OperationName, Operation>} */
 export const ops = {
   async order(ask, { id }) {
     const data = await ask(QUERIES.order, { id: idOf('Order', id) });
@@ -327,69 +324,3 @@ export const ops = {
     return { return: field(payloadOf(data, 'orderRequestReturn'), 'return') };
   },
 };
-
-/** @typedef {keyof typeof ops} OperationName */
-/** @typedef {{ name: OperationName, input: OperationInput }} OperationCall */
-
-/**
- * The Worker's route for an operation: its method and path under `/_tether/account`, and the input fields it reads,
- * from the query string for a GET and from the JSON body for a POST.
- *
- * @template {OperationName} Name
- * @typedef {{ name: Name, method: 'GET' | 'POST', path: string, fields: readonly string[] }} OperationRoute
- */
-
-/** @satisfies {{ [Name in OperationName]: OperationRoute<Name> }} */
-export const OPERATION_ROUTES = {
-  order: { name: 'order', method: 'GET', path: '/order', fields: ['id'] },
-  addresses: { name: 'addresses', method: 'GET', path: '/addresses', fields: [] },
-  subscriptions: { name: 'subscriptions', method: 'GET', path: '/subscriptions', fields: [] },
-  profile: { name: 'profile', method: 'POST', path: '/profile', fields: ['firstName', 'lastName'] },
-  saveAddress: { name: 'saveAddress', method: 'POST', path: '/address', fields: ['id', 'address', 'isDefault'] },
-  deleteAddress: { name: 'deleteAddress', method: 'POST', path: '/address/delete', fields: ['id'] },
-  subscription: { name: 'subscription', method: 'POST', path: '/subscription', fields: ['id', 'action'] },
-  requestReturn: { name: 'requestReturn', method: 'POST', path: '/return', fields: ['orderId', 'lines'] },
-};
-
-/** The route of each `METHOD /path`. */
-const ROUTE_BY_REQUEST = new Map(
-  Object.values(OPERATION_ROUTES).map((route) => [`${route.method} ${route.path}`, route]),
-);
-
-/**
- * The operation a Worker request asks for, with its input read from the query string or the body.
- *
- * @param {string} method
- * @param {string} path The path under `/_tether/account`.
- * @param {URL} url
- * @param {Record<string, unknown>} body The JSON body of a POST; `{}` for a GET.
- * @returns {OperationCall | null} `null` when no operation has this method and path.
- */
-export function operationCall(method, path, url, body) {
-  const route = ROUTE_BY_REQUEST.get(`${method} ${path}`);
-  if (!route) return null;
-  /** @type {OperationInput} */
-  const input = {};
-  for (const name of route.fields) input[name] = route.method === 'GET' ? url.searchParams.get(name) : body[name];
-  return { name: route.name, input };
-}
-
-/**
- * The method and path (with its query string, for a GET) the browser requests an operation with in server mode. A
- * POST sends the input as its JSON body.
- *
- * @param {OperationName} name
- * @param {OperationInput} input
- * @returns {{ method: 'GET' | 'POST', path: string }}
- */
-export function operationRequest(name, input) {
-  const route = OPERATION_ROUTES[name];
-  if (route.method === 'POST') return { method: 'POST', path: route.path };
-  const query = new URLSearchParams();
-  for (const fieldName of route.fields) {
-    const value = input[fieldName];
-    if (typeof value === 'string' || typeof value === 'number') query.set(fieldName, String(value));
-  }
-  const search = query.toString();
-  return { method: 'GET', path: search ? `${route.path}?${search}` : route.path };
-}

@@ -1,7 +1,7 @@
 /** The customer-account settings of the Worker, read once from its env. */
 
 import { STOREFRONT_API_VERSION } from '../shared/api-versions.js';
-import { cleanEnv } from '../env.js';
+import { cleanEnv, MIN_SYNC_SECRET } from '../env.js';
 
 /**
  * What the requests to Shopify need.
@@ -15,13 +15,6 @@ import { cleanEnv } from '../env.js';
  */
 
 /**
- * The root of every sealing key. `SYNC_SECRET` is the fallback for Workers set up before `ACCOUNT_SECRET` existed:
- * changing the key logs every customer out, so it stays usable, with a warning.
- *
- * @typedef {{ kind: 'missing' } | { kind: 'set', value: string, source: 'ACCOUNT_SECRET' | 'SYNC_SECRET' }} AccountSecret
- */
-
-/**
  * How long a login lasts. `replaced`: ACCOUNT_SESSION_DAYS was set to something unusable, and `days` is used instead.
  *
  * @typedef {{ kind: 'as-set', days: number }
@@ -31,10 +24,12 @@ import { cleanEnv } from '../env.js';
 /**
  * @typedef {ShopifyAccountSettings & {
  *   origins: string[],
- *   secret: AccountSecret,
+ *   secret: string | null,
  *   sessionDays: SessionDays,
  * }} AccountSettings
- *   `origins`: the site's https origins, without a trailing slash, the first being the site's home.
+ *   `origins`: the site's https origins, without a trailing slash, the first being the site's home. `secret`:
+ *   ACCOUNT_SECRET, the root of every sealing key, kept apart from SYNC_SECRET (the password for /reconcile and
+ *   /check) so that password can't open customer sessions; `null` when it isn't set.
  */
 
 /**
@@ -47,7 +42,7 @@ import { cleanEnv } from '../env.js';
  * }} ReadyAccountSettings
  */
 
-/** @typedef {{ severity: 'error' | 'warning', message: string }} AccountProblem */
+/** @typedef {{ severity: 'error' | 'warning', message: string, fix?: string }} AccountProblem */
 
 const DEFAULT_SESSION_DAYS = 14;
 const MAX_SESSION_DAYS = 90;
@@ -70,16 +65,6 @@ function sessionDaysOf(raw) {
 }
 
 /**
- * @param {import('../env.js').CleanEnv} env
- * @returns {AccountSecret}
- */
-function secretOf(env) {
-  if (env.ACCOUNT_SECRET) return { kind: 'set', value: env.ACCOUNT_SECRET, source: 'ACCOUNT_SECRET' };
-  if (env.SYNC_SECRET) return { kind: 'set', value: env.SYNC_SECRET, source: 'SYNC_SECRET' };
-  return { kind: 'missing' };
-}
-
-/**
  * @param {Record<string, unknown>} rawEnv
  * @returns {AccountSettings | null} `null` when accounts are off (no ACCOUNT_CLIENT_ID).
  */
@@ -95,7 +80,7 @@ export function accountSettings(rawEnv) {
       .filter(Boolean),
     shopDomain: (env.SHOPIFY_DOMAIN ?? '').replace(/^https?:\/\//, '').replace(/\/$/, ''),
     storefrontToken: env.STOREFRONT_TOKEN ?? '',
-    secret: secretOf(env),
+    secret: env.ACCOUNT_SECRET ?? null,
     sessionDays: sessionDaysOf(env.ACCOUNT_SESSION_DAYS),
     apiVersion: env.STOREFRONT_API_VERSION ?? STOREFRONT_API_VERSION,
   };
@@ -142,15 +127,14 @@ export function accountProblems(settings) {
   const error = (/** @type {string} */ message) => problems.push({ severity: 'error', message });
   const warning = (/** @type {string} */ message) => problems.push({ severity: 'warning', message });
   siteAndShopProblems(settings, error, warning);
-  const { secret } = settings;
-  if (secret.kind === 'missing') {
-    error('ACCOUNT_SECRET (24+ random characters) is needed: the session encryption key comes from it');
-  } else if (secret.source === 'SYNC_SECRET') {
-    warning(
-      'Sessions are encrypted with a key from SYNC_SECRET, the password for /reconcile and /check, so anyone who has ' +
-        'that password can read customer sessions. Set ACCOUNT_SECRET (24+ random characters) to separate them; ' +
-        'changing it logs every customer out once.',
-    );
+  if (settings.secret === null) {
+    problems.push({
+      severity: 'error',
+      message: 'ACCOUNT_SECRET is not set: customer sessions are encrypted with it, so accounts answer 503.',
+      fix:
+        `Add the Worker secret ACCOUNT_SECRET, a random string of at least ${String(MIN_SYNC_SECRET)} characters ` +
+        '(e.g. `openssl rand -hex 24`), different from SYNC_SECRET. Changing it later logs every customer out once.',
+    });
   }
   return problems;
 }
@@ -166,9 +150,9 @@ export function readyAccountSettings(settings) {
   const { origins, secret, sessionDays } = settings;
   const [home, ...others] = origins;
   // accountProblems reports each of these as an error, so they are only missing alongside one.
-  if (errors.length || home === undefined || secret.kind === 'missing') return { kind: 'not-ready', errors };
+  if (errors.length || home === undefined || secret === null) return { kind: 'not-ready', errors };
   return {
     kind: 'ready',
-    settings: { ...settings, origins: [home, ...others], secret: secret.value, sessionDays: sessionDays.days },
+    settings: { ...settings, origins: [home, ...others], secret, sessionDays: sessionDays.days },
   };
 }

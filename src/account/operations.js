@@ -1,14 +1,12 @@
 /**
- * The account pages' operations, the same fixed ones in both modes: the Worker's routes in server mode, the Customer
- * Account API directly in browser mode, with the documents and input checks of account-ops.js either way. Each
- * result is read into its typed shape (page-answers.js), so both modes return the same values and fail with the same
- * `TetherError` codes: `NOT_LOGGED_IN`, `INVALID` for input that account-ops.js or Shopify refuses, `NETWORK`, and
+ * The account pages' operations: the Worker's fixed routes (shared/account-routes.js), which check the input and run
+ * the documents with the customer's token. Each result is read into its typed shape (page-answers.js), and a failure
+ * is a `TetherError`: `NOT_LOGGED_IN`, `INVALID` for input the Worker or Shopify refuses, `NETWORK`, and
  * `HTTP_<status>` for a request that failed.
  */
 import { TetherError } from '../client.js';
 import { emit } from '../dom.js';
-import { isRecord } from '../../server/src/shared/json.js';
-import { ops, operationRequest, InputError } from '../../server/src/shared/account-ops.js';
+import { operationRequest } from '../../server/src/shared/account-routes.js';
 import {
   toAccountAddress,
   toCustomerAddresses,
@@ -22,18 +20,29 @@ import {
 /** @import { ServerAnswer, ServerRequest } from './server-client.js' */
 /** @import { AccountCustomer } from './answers.js' */
 /** @import { AccountAddress, CustomerAddress, OrderDetail, SubscriptionChange, SubscriptionContract } from './page-answers.js' */
-/** @import { OperationName, SubscriptionAction } from '../../server/src/shared/account-ops.js' */
+/** @import { OperationName, SubscriptionAction } from '../../server/src/shared/account-routes.js' */
 
 /**
  * @typedef {object} PagesContext The account part's session, shared so both parts act as one customer.
- * @property {() => string} serverBase `''` in browser mode.
  * @property {(path: string, request?: ServerRequest) => Promise<ServerAnswer>} serverFetch
- * @property {(document: string, variables?: Record<string, unknown>) => Promise<unknown>} query
  * @property {() => Promise<AccountCustomer | null>} customer
  * @property {(root: ParentNode) => Promise<void>} bindCustomer
  * @property {() => void} reset Forgets the cached customer after a change of their data.
  */
-/** @typedef {Record<string, unknown>} AddressFields `CustomerAddressInput` fields; account-ops.js keeps only those. */
+/**
+ * @typedef {object} AddressFields Shopify's `CustomerAddressInput` fields; the Worker keeps only these, with bounded
+ *   lengths.
+ * @property {string} [firstName]
+ * @property {string} [lastName]
+ * @property {string} [company]
+ * @property {string} [address1]
+ * @property {string} [address2]
+ * @property {string} [city]
+ * @property {string} [zip]
+ * @property {string} [zoneCode]
+ * @property {string} [countryCode] Two letters.
+ * @property {string} [phoneNumber]
+ */
 /**
  * @typedef {object} ReturnLine
  * @property {string} lineItemId
@@ -66,44 +75,16 @@ export function pagesContext() {
 
 /**
  * @param {OperationName} name
- * @param {Record<string, unknown>} input
- * @returns {Promise<Record<string, unknown>>}
+ * @param {Record<string, unknown>} [input]
+ * @returns {Promise<Record<string, unknown>>} The operation's result fields, read by the caller.
+ * @throws {TetherError} With one of the codes in the file's comment.
  */
-async function runAtWorker(name, input) {
+async function run(name, input = {}) {
   const { serverFetch } = pagesContext();
   const { method, path } = operationRequest(name, input);
   const answer = await serverFetch(path, method === 'POST' ? { method, body: input } : {});
   if (answer.kind === 'logged-out') throw new TetherError('Not logged in', { code: 'NOT_LOGGED_IN', status: 401 });
   return answer.data;
-}
-
-/**
- * @param {OperationName} name
- * @param {Record<string, unknown>} input
- * @returns {Promise<Record<string, unknown>>}
- */
-async function runInBrowser(name, input) {
-  const { query } = pagesContext();
-  try {
-    return await ops[name](async (document, variables) => {
-      const data = await query(document, variables);
-      return isRecord(data) ? data : null;
-    }, input);
-  } catch (error) {
-    if (!(error instanceof InputError)) throw error;
-    const { userErrors } = error;
-    throw new TetherError(error.message, { code: 'INVALID', ...(userErrors.length > 0 && { userErrors }) });
-  }
-}
-
-/**
- * @param {OperationName} name
- * @param {Record<string, unknown>} [input]
- * @returns {Promise<Record<string, unknown>>} The operation's result fields, read by the caller.
- * @throws {TetherError} With one of the codes in the file's comment.
- */
-function run(name, input = {}) {
-  return pagesContext().serverBase() ? runAtWorker(name, input) : runInBrowser(name, input);
 }
 
 /** @param {ChangedData} what */

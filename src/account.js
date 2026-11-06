@@ -1,8 +1,8 @@
 /**
  * Customer accounts (Shopify Customer Account API), as an optional part: loaded only when `account` is configured
- * and the page uses it, or a login is in progress, or the visitor may be logged in.
+ * and the page uses it, or a login is coming back, or the visitor may be logged in.
  *
- *   window.TETHER_CONFIG = { …, account: { server: '/_tether/account' } }  // or { clientId: '…' } for browser mode
+ *   window.TETHER_CONFIG = { …, account: { server: '/_tether/account' } }
  *
  *   <button tether-account-login>Log in</button>
  *   <button tether-account-logout tether-show="logged-in">Log out</button>
@@ -12,10 +12,8 @@
  *   </div>
  *   <p tether-show="logged-out">…</p>
  *
- * Two modes, one interface: server mode (`account/server-client.js`), where the site's Worker holds the tokens, and
- * browser mode (`account/browser-session.js`), where this browser does the OAuth login itself. Shopify needs HTTPS
- * (no localhost: use a tunnel) and the site's origin, callback and logout URLs registered in the Headless channel's
- * Customer Account API settings. The order page, profile, addresses, subscriptions and returns are the
+ * The site's Worker logs the customer in and holds the tokens (`account/server-client.js` is this browser's side of
+ * it), so no token is ever in the browser. The order page, profile, addresses, subscriptions and returns are the
  * `account-pages` part, loaded only on pages that use them.
  */
 import { cfg, log, reportError } from './config.js';
@@ -24,19 +22,8 @@ import { sel, get, qsa, setText, show, emit } from './dom.js';
 import { Cart } from './cart.js';
 import { loadPart } from './lazy.js';
 import {
-  browserCustomer,
-  browserLogout,
-  browserOrders,
-  forgetBrowserCustomer,
-  getToken,
-  hasBrowserLogin,
-  query as browserQuery,
-} from './account/browser-session.js';
-import { browserLoginRedirect, handleCallback } from './account/browser-login.js';
-import {
   forgetServerLogin,
   isServerLoggedIn,
-  serverBase,
   serverCheckoutUrl,
   serverFetch,
   serverLogin,
@@ -50,9 +37,7 @@ import { isLoginOutcome } from './account-marks.js';
 /** @import { AccountCustomer, AccountOrder } from './account/answers.js' */
 /** @import { Parts } from './lazy.js' */
 /** @import { AddressFields, ReturnLine } from './account/operations.js' */
-/** @import { SubscriptionAction } from '../server/src/shared/account-ops.js' */
-
-export { getToken, handleCallback };
+/** @import { SubscriptionAction } from '../server/src/shared/account-routes.js' */
 
 /**
  * @typedef {{ kind: 'logged-in' } | { kind: 'logged-out' } | { kind: 'unknown', error: unknown }} LoginState
@@ -63,43 +48,29 @@ export { getToken, handleCallback };
 /** The attributes of the account pages, which are their own part. */
 const PAGE_ATTRIBUTES = ['order', 'addresses', 'subscriptions', 'profile-form', 'address-form'];
 
-/** @returns {boolean} True while a customer is logged in, as far as this page knows without asking. */
-export function isLoggedIn() {
-  return serverBase() ? isServerLoggedIn() : hasBrowserLogin();
-}
+/** @returns {boolean} True when the Worker last said a customer is logged in; false before it has been asked. */
+export const isLoggedIn = isServerLoggedIn;
 
 /**
- * To Shopify's login page; the visitor comes back to `account.callbackUrl` (default: this page).
+ * Through the Worker to Shopify's login page; the visitor comes back to `returnTo`.
  *
  * @param {{ returnTo?: string, locale?: string }} [options]
  * @returns {Promise<void>}
- * @throws {TetherError} `NOT_CONFIGURED` in browser mode without `account.clientId`.
+ * @throws {TetherError} `NOT_CONFIGURED` without `account.server`.
  */
-export async function login({ returnTo = window.location.href, locale } = {}) {
-  if (serverBase()) serverLoginRedirect({ returnTo, locale });
-  else await browserLoginRedirect({ returnTo, locale });
+export function login({ returnTo = window.location.href, locale } = {}) {
+  // In a promise, so a missing `account.server` rejects as it does for every other account function.
+  return new Promise((resolve) => {
+    serverLoginRedirect({ returnTo, locale });
+    resolve();
+  });
 }
 
 /**
- * Any Customer Account API query, in browser mode.
- *
- * @param {string} document
- * @param {Record<string, unknown>} [variables]
- * @returns {Promise<unknown>} The answer's `data`, whose shape the query text decides.
- * @throws {TetherError} `NOT_ALLOWED` in server mode, which answers only its fixed operations; `NOT_LOGGED_IN`.
+ * @returns {Promise<AccountCustomer | null>} The logged-in customer, `null` when nobody is.
+ * @throws {TetherError} When the Worker can't be reached or fails.
  */
-export async function query(document, variables = {}) {
-  if (serverBase()) {
-    throw new TetherError('Customer accounts: query() is for browser mode; server mode answers its fixed operations', {
-      code: 'NOT_ALLOWED',
-    });
-  }
-  return browserQuery(document, variables);
-}
-
-/** @returns {Promise<AccountCustomer | null>} The logged-in customer, `null` when nobody is. */
 export async function customer() {
-  if (!serverBase()) return browserCustomer();
   const me = await serverLogin();
   return me.loggedIn ? me.customer : null;
 }
@@ -116,7 +87,6 @@ export async function orders({ first = DEFAULT_ORDER_COUNT } = {}) {
       code: 'INVALID',
     });
   }
-  if (!serverBase()) return browserOrders(first);
   const answer = await serverFetch(`/orders?${new URLSearchParams({ first: String(first) }).toString()}`);
   return answer.kind === 'logged-out' ? [] : toAccountOrders(answer.data['orders']);
 }
@@ -128,16 +98,13 @@ export async function orders({ first = DEFAULT_ORDER_COUNT } = {}) {
  * @returns {Promise<void>}
  */
 export async function logout({ returnTo = cfg.account?.logoutUrl || `${window.location.origin}/` } = {}) {
-  const outcome = serverBase() ? await serverLogout(returnTo) : await browserLogout(returnTo);
-  if (outcome === 'stayed') await render(document);
+  if ((await serverLogout(returnTo)) === 'stayed') await render(document);
 }
 
 /** @returns {Promise<LoginState>} */
 async function loginState() {
   try {
-    if (serverBase()) return (await serverLogin()).loggedIn ? { kind: 'logged-in' } : { kind: 'logged-out' };
-    if (hasBrowserLogin() || (await getToken())) return { kind: 'logged-in' };
-    return { kind: 'logged-out' };
+    return (await serverLogin()).loggedIn ? { kind: 'logged-in' } : { kind: 'logged-out' };
   } catch (error) {
     return { kind: 'unknown', error };
   }
@@ -237,17 +204,7 @@ let pagesPart = null;
 /** @returns {Promise<Parts['account-pages']>} The account pages part, sharing this part's session. */
 function pages() {
   pagesPart ??= loadPart('account-pages').then((part) => {
-    part.setup({
-      serverBase,
-      serverFetch,
-      query,
-      customer,
-      bindCustomer,
-      reset: () => {
-        forgetBrowserCustomer();
-        forgetServerLogin();
-      },
-    });
+    part.setup({ serverFetch, customer, bindCustomer, reset: forgetServerLogin });
     return part;
   });
   return pagesPart;
@@ -321,43 +278,24 @@ function finishServerLogin() {
   }
 }
 
-/** Finishes a login that's coming back from the Worker, and lets the Worker link the cart at checkout. */
-function startServerMode() {
-  finishServerLogin();
-  Cart.setCustomer({ beforeCheckout: serverCheckoutUrl });
-}
-
-/** Finishes a login that's coming back from Shopify, and links the cart of a customer who is logged in. */
-async function startBrowserMode() {
-  try {
-    await handleCallback();
-  } catch (error) {
-    reportError(error, 'login');
-  }
-  if (Cart.customerAccessToken) return;
-  try {
-    const accessToken = await getToken();
-    if (accessToken) Cart.setCustomer({ accessToken });
-  } catch (error) {
-    reportError(error, 'account');
-  }
-}
-
 let started = false;
 
 /**
- * Called by the core on mount: on the first one, finishes a login that's coming back; then fills the page.
+ * Called by the core on mount: on the first one, finishes a login that's coming back and lets the Worker link the
+ * cart at checkout; then fills the page.
  *
  * @param {ParentNode} [root]
  * @returns {Promise<void>}
  */
 export async function mountAccount(root = document) {
-  if (!started) {
-    started = true;
-    document.addEventListener('click', onClick);
-    if (serverBase()) startServerMode();
-    else await startBrowserMode();
-    log('account', isLoggedIn() ? 'logged in' : 'logged out');
+  if (started) {
+    await render(root);
+    return;
   }
+  started = true;
+  document.addEventListener('click', onClick);
+  finishServerLogin();
+  Cart.setCustomer({ beforeCheckout: serverCheckoutUrl });
   await render(root);
+  log('account', isLoggedIn() ? 'logged in' : 'logged out');
 }

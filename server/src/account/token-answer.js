@@ -1,8 +1,7 @@
 /**
- * The answers of Shopify's Customer Account API token endpoint, read the same way by the browser (browser mode) and
- * the Worker (server mode): a grant that worked, or why it was refused.
+ * The answers of Shopify's Customer Account API token endpoint: a grant that worked, or why it was refused.
  */
-import { field, textOrNull } from './json.js';
+import { field, textOrNull } from '../shared/json.js';
 
 /**
  * A grant that worked.

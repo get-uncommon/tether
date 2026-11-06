@@ -1,8 +1,8 @@
 /**
  * Parsers for the options with structure, whose values become URLs, credentials, storage names or query text: the
- * store's domain, the metafields and the nested `account`, `markets` and `analytics` objects. `account.tokenUrl`
- * receives the login code and its verifier, and `account.server` becomes the base of credentialed requests, so a value
- * of the wrong kind is dropped (with a warning through `invalid`), never used. `config.js` resolves the rest.
+ * store's domain, the metafields and the nested `account`, `markets` and `analytics` objects. `account.server` becomes
+ * the base of credentialed requests, so a value of the wrong kind is dropped (with a warning through `invalid`), never
+ * used. `config.js` resolves the rest.
  */
 import { isRecord } from '../server/src/shared/json.js';
 /** @import { AccountConfig, AnalyticsConfig, MarketsConfig, MetafieldIdentifier, MetafieldRef } from './config.js' */
@@ -214,21 +214,19 @@ function sectionOption(name, value, schema, invalid) {
   return /** @type {Section} */ (section);
 }
 
-/** @type {Schema<AccountConfig>} */
+/** @type {Schema<Partial<AccountConfig>>} */
 const ACCOUNT = {
-  clientId: text,
   server: url,
   orderUrl: url,
   subscriptionsUrl: url,
   paymentUrl: url,
-  callbackUrl: url,
   logoutUrl: url,
-  remember: flag,
-  tokenUrl: url,
-  shopDomain: when(isHostname),
   locale: text,
   navigate: hook,
 };
+
+/** Customer tokens are never kept in the browser, so an `account` without the Worker is off. */
+const ACCOUNT_NEEDS_SERVER = 'customer accounts need the Worker since 0.7.0: set account.server';
 
 /** @type {Schema<LocaleMarket>} */
 const LOCALE_MARKET = { country: text, language: text, locale: text };
@@ -282,9 +280,19 @@ const ANALYTICS = {
 /**
  * @param {unknown} value
  * @param {Invalid} invalid
- * @returns {AccountConfig | null}
+ * @param {(message: string) => void} warn Says why an `account` without a usable `server` is off.
+ * @returns {AccountConfig | null} `null` without a usable `account.server`: nothing of the account part loads.
  */
-export const accountOption = (value, invalid) => sectionOption('account', value, ACCOUNT, invalid);
+export function accountOption(value, invalid, warn) {
+  const account = sectionOption('account', value, ACCOUNT, invalid);
+  if (account === null) return null;
+  const { server } = account;
+  if (server === undefined) {
+    warn(ACCOUNT_NEEDS_SERVER);
+    return null;
+  }
+  return { ...account, server };
+}
 
 /**
  * @param {unknown} value

@@ -39,17 +39,12 @@ import { toCountry, toLanguage } from './market-codes.js';
  */
 
 /**
- * @typedef {object} AccountConfig The optional customer accounts part.
- * @property {string} [clientId] Browser mode: the Customer Account API client id.
- * @property {string} [server] Server mode: the Worker's account routes, a URL or a path on this site.
+ * @typedef {object} AccountConfig The optional customer accounts part, which runs through the site's Worker.
+ * @property {string} server The Worker's account routes, a URL or a path on this site.
  * @property {string} [orderUrl] The site's own order page, with `{id}` for the numeric order id.
  * @property {string} [subscriptionsUrl] Shopify's subscription management page.
  * @property {string} [paymentUrl] A separate page for payment methods (default `subscriptionsUrl`).
- * @property {string} [callbackUrl] Where Shopify sends the visitor after login (default the current page).
  * @property {string} [logoutUrl] Where Shopify sends the visitor after logout (default the home page).
- * @property {boolean} [remember] Keep the login across tabs and restarts (localStorage, not sessionStorage).
- * @property {string} [tokenUrl] The site's own token endpoint, for when the browser can't call Shopify's.
- * @property {string} [shopDomain] The *.myshopify.com domain, when `domain` is another one.
  * @property {string} [locale] The language of Shopify's login pages.
  * @property {(url: string) => void} [navigate] Replaces `location.assign` for the login redirect (popups, tests).
  */
@@ -419,7 +414,7 @@ export function resolveConfig(options) {
     language: codeOption('language', options.language, toLanguage),
     markets: marketsOption(options.markets, dropped),
     analytics: analyticsOption(options.analytics, dropped),
-    account: accountOption(options.account, dropped),
+    account: accountOption(options.account, dropped, warn),
     prefix,
     storageKey:
       typeof options.storageKey === 'string' && options.storageKey ? options.storageKey : `${prefix}:cart:${domain}`,

@@ -1,5 +1,6 @@
-// Which pages load the account part for a login coming back. Its own file: the part finishes a login only on its
-// first mount, so these tests need a part no other test has mounted.
+// Which pages load the account part: a login coming back, the hint of one, and never a config without the Worker.
+// Its own file: the part finishes a login only on its first mount, so these tests need a part no other test has
+// mounted.
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
@@ -19,14 +20,14 @@ const { configure } = await import('../src/config.js');
 const { mountAccountIfUsed } = await import('../src/account-api.js');
 // Loaded up front, so a part that loads when it shouldn't is seen within `QUIET_MS`.
 await import('../src/account.js');
+const { forgetServerLogin } = await import('../src/account/server-client.js');
 
-const PENDING_KEY = 'tether:account-login:shop.test';
 /** How long a page that doesn't load the part is watched for it. */
 const QUIET_MS = 200;
 /** How long a page that loads the part may take to show it. */
 const LOAD_MS = 2000;
 
-// `debug`: the part's first mount logs, the one sign of it in browser mode without a session.
+// `debug`: the part's first mount logs.
 const testConfig = (account) => ({
   domain: 'shop.test',
   token: 't',
@@ -74,29 +75,32 @@ beforeEach(() => {
   document.body.innerHTML = '';
 });
 
-test('browser mode: a ?code= without this tab’s pending login does not load the part', async () => {
-  configure(testConfig({ clientId: 'client-1' }));
-  assert.equal(await partRanWithin('?code=SUMMER', QUIET_MS), false, 'a discount link');
-  assert.equal(await partRanWithin('?code=abc&state=xyz', QUIET_MS), false, 'another site’s OAuth callback');
+test('an account config without server warns once that accounts need the Worker, and loads nothing', async () => {
+  const warned = [];
+  const consoleWarn = console.warn;
+  console.warn = (...args) => warned.push(args.join(' '));
+  try {
+    configure(testConfig({ clientId: 'client-1' }));
+  } finally {
+    console.warn = consoleWarn;
+  }
+  assert.deepEqual(warned, ['[tether] customer accounts need the Worker since 0.7.0: set account.server']);
+  document.body.innerHTML = '<button tether-account-login>Log in</button>';
+  localStorage.setItem('tether:account-hint:shop.test', '1');
+  assert.equal(await partRanWithin('?account=in', QUIET_MS), false);
 });
 
-test('browser mode: a pending login without Shopify’s answer in the URL does not load the part', async () => {
-  configure(testConfig({ clientId: 'client-1' }));
-  sessionStorage.setItem(PENDING_KEY, JSON.stringify({ state: 's-1' }));
-  assert.equal(await partRanWithin('?code=SUMMER', QUIET_MS), false);
-});
-
-test('browser mode: Shopify’s answer to this tab’s login loads the part, which finishes the login', async () => {
-  configure(testConfig({ clientId: 'client-1' }));
-  const pending = { state: 's-1', nonce: 'n', verifier: 'v', redirect: 'https://site.test/account', returnTo: '' };
-  sessionStorage.setItem(PENDING_KEY, JSON.stringify({ ...pending, at: Date.now() }));
-  assert.equal(await partRanWithin('?error=access_denied&state=s-1', LOAD_MS), true);
-  assert.equal(sessionStorage.getItem(PENDING_KEY), null, 'the login is finished');
-});
-
-test('server mode: the Worker’s ?account= mark loads the part; a ?code= does not', async () => {
+test('the Worker’s ?account= mark loads the part; a ?code= does not', async () => {
   configure(testConfig({ server: '/_tether/account' }));
   assert.equal(await partRanWithin('?code=SUMMER', QUIET_MS), false);
   assert.equal(await partRanWithin('?account=settings', QUIET_MS), false, 'not one of the login outcomes');
   assert.equal(await partRanWithin('?account=in', LOAD_MS), true);
+});
+
+test('the hint that a customer may be logged in loads the part on a page without account markup', async () => {
+  configure(testConfig({ server: '/_tether/account' }));
+  // The part is already mounted: without its kept answer, rendering asks the Worker again.
+  forgetServerLogin();
+  localStorage.setItem('tether:account-hint:shop.test', '1');
+  assert.equal(await partRanWithin('', LOAD_MS), true);
 });

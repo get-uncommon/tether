@@ -7,7 +7,7 @@ import { cfg, reportError } from './config.js';
 import { attr } from './dom.js';
 import { loadPart } from './lazy.js';
 import { within } from './mounting.js';
-import { hintKey, isLoginOutcome, pendingLoginKey, sessionKey } from './account-marks.js';
+import { hintKey, isLoginOutcome } from './account-marks.js';
 /** @import { Parts } from './lazy.js' */
 
 /** @typedef {Parts['account']} AccountPart */
@@ -39,58 +39,31 @@ const accountSelector = () =>
   [...ACCOUNT_ATTRIBUTES.map((name) => `[${attr(name)}]`), `[${attr('show')}^="logged-"]`].join(',');
 
 /**
- * @param {'session' | 'local'} area
- * @param {string} key
- * @returns {boolean} True when `area` holds `key`; false where the browser blocks storage, which then holds nothing.
+ * Whether this browser keeps the "may be logged in" hint, so checkout on a page without account markup still knows
+ * the customer.
+ *
+ * @returns {boolean} False where the browser blocks storage, which then holds no hint.
  */
-function isStoredIfAllowed(area, key) {
+function hasLoginHintIfAllowed() {
   try {
-    return Boolean((area === 'local' ? localStorage : sessionStorage).getItem(key));
+    return Boolean(localStorage.getItem(hintKey()));
   } catch {
     return false;
   }
 }
 
 /**
- * Whether this browser keeps an account session or the hint of one, so checkout on a page without account markup
- * still knows the customer.
- *
- * @returns {boolean}
- */
-function hasSavedSession() {
-  return (
-    isStoredIfAllowed('session', sessionKey()) ||
-    isStoredIfAllowed('local', sessionKey()) ||
-    isStoredIfAllowed('local', hintKey())
-  );
-}
-
-/**
- * Whether this page is a login coming back: in server mode the Worker's `?account=` mark, in browser mode Shopify's
- * answer (`?state=` with `code` or `error`) to a login this tab started. A `?code=` alone is often something else,
- * such as a discount link, and doesn't load the part.
- *
- * @param {URLSearchParams} params The page's query.
- * @returns {boolean}
- */
-function isLoginCallback(params) {
-  if (cfg.account?.server) return isLoginOutcome(params.get('account'));
-  const answered = params.has('state') && (params.has('code') || params.has('error'));
-  return answered && isStoredIfAllowed('session', pendingLoginKey());
-}
-
-/**
  * Loads the account part and mounts it on `root`, when accounts are configured and the page needs them: account
- * markup in `root`, a login coming back (`isLoginCallback`), or a saved session.
+ * markup in `root`, a login coming back from the Worker (`?account=`), or the "may be logged in" hint.
  *
  * @param {ParentNode} root
  */
 export function mountAccountIfUsed(root) {
-  if (!cfg.account?.clientId && !cfg.account?.server) return;
+  if (!cfg.account) return;
   const needed =
     within(root, accountSelector()).length > 0 ||
-    isLoginCallback(new URLSearchParams(window.location.search)) ||
-    hasSavedSession();
+    isLoginOutcome(new URLSearchParams(window.location.search).get('account')) ||
+    hasLoginHintIfAllowed();
   if (!needed) return;
   loadPart('account')
     .then((part) => part.mountAccount(root))
@@ -125,10 +98,7 @@ function fromPart(name) {
 export const accountApi = {
   login: fromPart('login'),
   logout: fromPart('logout'),
-  handleCallback: fromPart('handleCallback'),
-  getToken: fromPart('getToken'),
   isLoggedIn: fromPart('isLoggedIn'),
-  query: fromPart('query'),
   customer: fromPart('customer'),
   orders: fromPart('orders'),
   order: fromPart('order'),
