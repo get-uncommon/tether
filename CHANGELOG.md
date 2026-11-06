@@ -2,6 +2,27 @@
 
 ## 0.7.0 (unreleased)
 
+**Before you update: one step for every deployed sync Worker.** Copies made from 0.6.1 to 0.6.8
+have `latest` in `TETHER_VERSION` unless it was changed, so they install 0.7.0 by themselves on
+their next scheduled update run (Mondays by default), and Cloudflare deploys it. Before that run:
+
+- **If the shop uses customer accounts:** add the Worker secret `ACCOUNT_SECRET` (24 or more random
+  characters, e.g. `openssl rand -hex 24`, not the value of `SYNC_SECRET`) in Cloudflare → your
+  Worker → Settings → Variables and Secrets. 0.6 already reads it, so it can be set now. Customers
+  are logged out once.
+- **Or, to wait:** write `0.6` in the copy's `TETHER_VERSION` file and commit it. The copy stays on
+  0.6 until the file says `0.7`.
+
+**If you do neither:** the Worker updates to 0.7.0 and keeps syncing products, answering webhooks
+and starting deploys. Only its customer account routes answer 503 with
+`accounts need the Worker secret ACCOUNT_SECRET (see /check)`, and `/check` shows the error, until
+the secret is added. Workers without customer accounts need nothing. After 0.7.0 is installed, every
+update run also asks you to copy the new update workflow file in, once, by hand (see "Sync Worker
+updates" below).
+
+Sites that load the script from jsDelivr as `@0.6` stay on 0.6 until they change the URL; `@latest`
+gets 0.7.0 at once. The breaking changes below list each one's upgrade step.
+
 - **Breaking (script build):** every optional part carries the sha384 `integrity` hash from the
   core's own build, a `partsUrl` included, and loads with CORS when it is on another origin. A
   self-hosted `partsUrl` must serve the files of the same release as the core: upload the whole
