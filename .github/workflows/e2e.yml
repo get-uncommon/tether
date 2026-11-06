@@ -1,8 +1,19 @@
 # Real-browser tests: the Astro starter in Chromium, WebKit, Firefox and a phone, against Shopify's
-# public demo store. Public repos run Actions for free. Nothing is uploaded (no storage used).
+# public demo store. Public repos run Actions for free. Nothing is uploaded (no storage used). A pull request runs it
+# when it changes what the browsers load or how the starter is built.
 name: e2e
 
 on:
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'server/src/shared/**'
+      - 'scripts/build.ts'
+      - 'e2e/**'
+      - 'examples/astro/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/e2e.yml'
   push:
     branches: [main]
   schedule:
@@ -11,6 +22,10 @@ on:
 
 permissions:
   contents: read
+
+concurrency:
+  group: e2e-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   browsers:

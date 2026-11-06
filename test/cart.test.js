@@ -11,6 +11,7 @@ import {
   attributesAt,
   jsonResponse,
   linesAt,
+  okWithDroppedBody,
   operationName,
   product,
 } from './fixtures.js';
@@ -229,11 +230,16 @@ test('a change without a clear answer is not sent again, and the cart is loaded 
   const lostAnswers = [
     { code: 'HTTP_504', lost: () => new Response('Gateway Timeout', { status: 504 }) },
     {
+      code: 'INVALID_RESPONSE',
+      lost: () => jsonResponse({ data: { cartLinesAdd: { cart: { id: 1 } } } }),
+    },
+    {
       code: 'NETWORK',
       lost: () => {
         throw new TypeError('Failed to fetch');
       },
     },
+    { code: 'NETWORK', lost: () => okWithDroppedBody() },
   ];
   for (const { code, lost } of lostAnswers) {
     await loadSaved(oneLine());

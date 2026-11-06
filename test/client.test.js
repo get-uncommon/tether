@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { withContext, request, hasData, operationOf, shaped, TetherError } from '../src/client.ts';
 import { resolveConfig } from '../src/config.ts';
 import { createStorefront } from '../src/server.ts';
-import { graphqlRequest, jsonResponse, product } from './fixtures.js';
+import { graphqlRequest, jsonResponse, okWithDroppedBody, product } from './fixtures.js';
 
 /**
  * A store's settings for `request`, with no cache and no retries.
@@ -81,6 +81,10 @@ test('an answer that is not in the GraphQL shape is a TetherError, not a crash',
     message: 'Invalid response (200)',
   });
   await assert.rejects(request(answering([1, 2]), '{ shop { name } }', {}, hasData), { name: 'TetherError' });
+  const notJson = (/** @type {number} */ status) =>
+    storefront('odd.test', async () => new Response('<html>', { status }));
+  await assert.rejects(request(notJson(200), '{ shop { name } }', {}, hasData), { code: 'INVALID_RESPONSE' });
+  await assert.rejects(request(notJson(400), '{ shop { name } }', {}, hasData), { code: 'HTTP_400' });
   await assert.rejects(
     request(answering({ errors: [{ code: 1 }, null, { message: 'Field missing' }] }), '{ x }', {}, hasData),
     {
@@ -136,7 +140,8 @@ test('an answer whose data lacks what the caller reads is refused like any other
   const conf = storefront('odd.test', async () => jsonResponse({ data: { shop: null } }));
   await assert.rejects(request(conf, '{ shop { name } }', {}, shaped({ shop: { name: 'string' } })), {
     name: 'TetherError',
-    code: 'HTTP_200',
+    code: 'INVALID_RESPONSE',
+    status: 200,
     message: 'Invalid response (200)',
   });
   await assert.rejects(
@@ -205,6 +210,13 @@ test('a mutation is not sent again after a 5xx or a network error, after which S
   ]);
   await assert.rejects(request(dropped.conf, MUTATION, {}, hasData, { operation: 'mutation' }), { code: 'NETWORK' });
   assert.equal(dropped.sent.count, 1);
+
+  const droppedBody = answeringInTurn([okWithDroppedBody, answered]);
+  await assert.rejects(request(droppedBody.conf, MUTATION, {}, hasData, { operation: 'mutation' }), {
+    code: 'NETWORK',
+    message: /^Network error/,
+  });
+  assert.equal(droppedBody.sent.count, 1);
 });
 
 test('a mutation is sent again after a 429 or THROTTLED, which Shopify answers without running it', async () => {
@@ -220,10 +232,12 @@ test('a mutation is sent again after a 429 or THROTTLED, which Shopify answers w
   assert.equal(throttled.sent.count, 2);
 });
 
-test('a query is sent again after a 5xx', async () => {
-  const { conf, sent } = answeringInTurn([gatewayTimeout, answered]);
-  assert.deepEqual(await request(conf, '{ shop { name } }', {}, hasData), { done: true });
-  assert.equal(sent.count, 2);
+test('a query is sent again after a 5xx or a body that stopped arriving', async () => {
+  for (const lost of [gatewayTimeout, okWithDroppedBody]) {
+    const { conf, sent } = answeringInTurn([lost, answered]);
+    assert.deepEqual(await request(conf, '{ shop { name } }', {}, hasData), { done: true });
+    assert.equal(sent.count, 2);
+  }
 });
 
 test("a document Tether didn't write is a mutation when it has the keyword outside strings and comments", async () => {

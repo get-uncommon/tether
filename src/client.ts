@@ -19,6 +19,7 @@ export type TetherErrorCode =
   | 'INVALID'
   | 'INVALID_COUNTRY'
   | 'INVALID_DISCOUNT'
+  | 'INVALID_RESPONSE'
   | 'ERROR'
   | `HTTP_${number}`;
 export interface GraphQLError {
@@ -41,17 +42,17 @@ interface TetherErrorDetails {
   /** The HTTP status of the response that failed. */
   status?: number;
   /** The GraphQL errors of that response. */
-  errors?: GraphQLError[];
+  errors?: readonly GraphQLError[];
   /** A mutation's user errors. */
   userErrors?: readonly UserError[];
 }
 
 export class TetherError extends Error {
-  override name = 'TetherError' as const;
-  code: TetherErrorCode;
-  status: number | undefined;
-  errors: GraphQLError[] | undefined;
-  userErrors: readonly UserError[] | undefined;
+  override readonly name = 'TetherError' as const;
+  readonly code: TetherErrorCode;
+  readonly status: number | undefined;
+  readonly errors: readonly GraphQLError[] | undefined;
+  readonly userErrors: readonly UserError[] | undefined;
 
   constructor(message: string, { status, errors, userErrors, code }: TetherErrorDetails = {}) {
     super(message);
@@ -72,7 +73,8 @@ export type DataCheck<T> = (data: unknown) => data is T;
 /**
  * The structure of JSON a check accepts: a `typeof` name, `'object'` for a plain object, `[item]` for a list of
  * items, an object's fields, or a check of its own. Fields it doesn't name aren't checked, so a shape names only what
- * its reader walks without a fallback.
+ * its reader walks without a fallback. A field's `undefined` is the type of one `ShapeOf` leaves out, and checks
+ * nothing.
  */
 export type Shape =
   | 'string'
@@ -81,34 +83,62 @@ export type Shape =
   | 'object'
   | ((value: unknown) => boolean)
   | readonly [Shape]
-  | { readonly [key: string]: Shape };
+  | { readonly [key: string]: Shape | undefined };
 
 /** @returns True when `value` has the structure `shape` describes. */
 export function matches(value: unknown, shape: Shape): boolean {
   if (typeof shape === 'function') return shape(value);
   if (typeof shape === 'string') return shape === 'object' ? isRecord(value) : typeof value === shape;
   if (isShapeList(shape)) return Array.isArray(value) && value.every((item) => matches(item, shape[0]));
-  return isRecord(value) && Object.entries(shape).every(([key, inner]) => matches(value[key], inner));
+  return (
+    isRecord(value) && Object.entries(shape).every(([key, inner]) => inner === undefined || matches(value[key], inner))
+  );
 }
 
 /** `Array.isArray` doesn't narrow a readonly tuple out of a union. */
 const isShapeList = (shape: Shape): shape is readonly [Shape] => Array.isArray(shape);
 
-/** @returns The shape of `null` or a value with the structure `shape` describes. */
+/**
+ * The shapes that describe a `T`: every structure such a shape names is one `T` declares at that place, and a check
+ * in it is a type guard for a type `T` accepts there. A shape for `T` therefore can't name a field `T` lacks or claim
+ * a type `T` contradicts, so a change to `T` that its shape no longer agrees with fails to compile. Fields of `T` the
+ * shape doesn't name stay unchecked (`Shape`).
+ */
+export type ShapeOf<T> = unknown extends T ? Shape : KnownShapeOf<T>;
+type KnownShapeOf<T> =
+  | DataCheck<T>
+  | (string extends T ? 'string' : never)
+  | (number extends T ? 'number' : never)
+  | (boolean extends T ? 'boolean' : never)
+  | ListShapeOf<T>
+  | FieldsShapeOf<T>;
+type ListShapeOf<T> = T extends readonly (infer Item)[] ? readonly [ShapeOf<Item>] : never;
+type FieldsShapeOf<T> = T extends readonly unknown[]
+  ? never
+  : T extends object
+    ? 'object' | { readonly [Key in keyof T]?: ShapeOf<T[Key]> }
+    : never;
+
+/** @returns A check that `value` is `null` or has the structure `shape` describes. */
 export const orNull =
-  (shape: Shape) =>
-  (value: unknown): boolean =>
+  <T>(shape: ShapeOf<T>): DataCheck<T | null> =>
+  (value): value is T | null =>
     value === null || matches(value, shape);
 
-/** @returns A check that `data` has the structure `shape` describes, which `T` states. */
+/**
+ * @returns A check that `data` has the structure `shape` describes. `ShapeOf` ties `shape` to `T`; fields `shape`
+ *   doesn't name are `T`'s claim.
+ */
 export const shaped =
-  <T>(shape: Shape): DataCheck<T> =>
+  <T>(shape: ShapeOf<T>): DataCheck<T> =>
   (data): data is T =>
     matches(data, shape);
 /**
- * What an operation does to the store, which decides what is safe to retry. A query only reads, so any failure is
- * retried. Shopify may have applied a mutation before a 5xx or a dropped connection, so a mutation is retried only
- * when Shopify answers that it didn't run it (429 or `THROTTLED`): sending it again could add a line twice.
+ * What an operation does to the store, which decides what is safe to retry. A query only reads, so a failure that may
+ * pass is retried: the network (no answer, or a body that stopped arriving), a 429, a 5xx and `THROTTLED`. Shopify may
+ * have applied a mutation before a 5xx or a dropped connection, so a mutation is retried only when Shopify answers
+ * that it didn't run it (429 or `THROTTLED`): sending it again could add a line twice. Other failures (a 4xx, a 430,
+ * an answer that isn't valid, other GraphQL errors) are never retried.
  */
 export type Operation = 'query' | 'mutation';
 
@@ -258,10 +288,14 @@ function toGraphQLResponse(json: unknown): GraphQLResponse | null {
   return { data, errors: errors.map(toGraphQLError) };
 }
 
-/** For a body that isn't JSON, isn't in the GraphQL shape or has `data` its caller's check refuses. */
+/**
+ * For a body that isn't JSON, isn't in the GraphQL shape or has `data` its caller's check refuses: `INVALID_RESPONSE`
+ * for a 2xx, after which Shopify may have run a mutation, else `HTTP_<status>`.
+ */
 function invalidResponse(res: Response, conf: StorefrontConfig): TetherError {
-  const text = res.ok ? `Invalid response (${res.status})` : statusText(res.status, conf);
-  return new TetherError(text, { status: res.status });
+  return res.ok
+    ? new TetherError(`Invalid response (${res.status})`, { code: 'INVALID_RESPONSE', status: res.status })
+    : new TetherError(statusText(res.status, conf), { status: res.status });
 }
 
 function graphQLFailure(res: Response, errors: GraphQLError[], conf: StorefrontConfig): TetherError {
@@ -283,6 +317,12 @@ type Attempt<T> =
  */
 type RetryPolicy = 'none' | 'not-run' | 'any';
 
+/** No answer arrived, or its body stopped arriving: retried when `retry` allows any retry, else `NETWORK`. */
+function networkFailure(error: unknown, retry: RetryPolicy): Attempt<never> {
+  if (retry === 'any') return { kind: 'retry', backoffMs: RETRY_BACKOFF_MS };
+  throw new TetherError(`Network error: ${messageOf(error)}`, { code: 'NETWORK' });
+}
+
 /** One request. Failures that retrying can't fix, or that `retry` doesn't allow retrying, throw. */
 async function attempt<T>(
   conf: StorefrontConfig,
@@ -299,10 +339,7 @@ async function attempt<T>(
       body: JSON.stringify({ query, variables }),
     });
   } catch (error) {
-    if (retry === 'any') return { kind: 'retry', backoffMs: RETRY_BACKOFF_MS };
-    throw new TetherError(`Network error: ${messageOf(error)}`, {
-      code: 'NETWORK',
-    });
+    return networkFailure(error, retry);
   }
   if (res.status === SECURITY_REJECTION) {
     throw new TetherError('Shopify security rejection (430)', { status: SECURITY_REJECTION });
@@ -314,8 +351,11 @@ async function attempt<T>(
   let json: unknown;
   try {
     json = await res.json();
-  } catch {
-    throw invalidResponse(res, conf);
+  } catch (error) {
+    // `json()` refuses a body that isn't JSON with a SyntaxError; it rejects with another error when the connection
+    // drops while the body streams in.
+    if (error instanceof SyntaxError) throw invalidResponse(res, conf);
+    return networkFailure(error, retry);
   }
   const body = toGraphQLResponse(json);
   if (!body) throw invalidResponse(res, conf);
@@ -342,8 +382,9 @@ async function attempt<T>(
  * `conf.retries`; which failures are retried is the operation's (`Operation`).
  *
  * @param isData Checks that `data` has what the caller then reads, so a malformed answer fails here.
- * @throws {TetherError} `NOT_CONFIGURED` without a domain or token, `NETWORK` when the store can't be reached,
- *   `HTTP_<status>` for an HTTP or GraphQL failure, or for `data` that `isData` refuses.
+ * @throws {TetherError} `NOT_CONFIGURED` without a domain or token, `NETWORK` when the store can't be reached or
+ *   the answer's body stops arriving, `INVALID_RESPONSE` for a 2xx whose body isn't valid (not JSON, not in the
+ *   GraphQL shape, or `data` that `isData` refuses), `HTTP_<status>` for any other HTTP or GraphQL failure.
  */
 export async function request<T>(
   conf: StorefrontConfig,
