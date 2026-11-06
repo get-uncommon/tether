@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { handleAccount } from '../src/account.ts';
 import { SHOP, env, shopify, req, configured, answer } from './account-fixtures.js';
+import { jsonOf, stringAt } from './mocks.js';
 
 test('settings: not set up -> 404; missing pieces -> 503 without details for the public', async () => {
   assert.equal((await answer(req('/me'), {}, {})).status, 404);
@@ -31,7 +32,7 @@ test('settings: ACCOUNT_SECRET is required, with no fallback to SYNC_SECRET; /ch
   try {
     const response = await answer(req('/me'), syncOnly, { memory: new Map() });
     assert.equal(response.status, 503);
-    const { error } = await response.json();
+    const error = stringAt(await jsonOf(response), 'error');
     assert.match(error, /Worker secret ACCOUNT_SECRET/, 'the one setting a Worker set up before 0.7.0 lacks is named');
     assert.doesNotMatch(error, /SYNC_SECRET|shop\.example|myshopify/);
   } finally {

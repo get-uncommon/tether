@@ -2,21 +2,13 @@
 import { test, before, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
-import { apparel, find, graphqlRequest, jsonResponse, product } from './fixtures.js';
+import { apparel, find, graphqlRequest, jsonResponse, product, pageGlobals } from './fixtures.js';
 import { asString, waitFor } from '../server/test/mocks.js';
 
 const dom = new JSDOM('<!doctype html><body><span tether-cart-count></span><main></main></body>', {
   url: 'https://site.test/',
 });
-Object.assign(globalThis, {
-  window: dom.window,
-  document: dom.window.document,
-  localStorage: dom.window.localStorage,
-  CustomEvent: dom.window.CustomEvent,
-  MutationObserver: dom.window.MutationObserver,
-  Option: dom.window['Option'],
-  getComputedStyle: dom.window.getComputedStyle,
-});
+Object.assign(globalThis, pageGlobals(dom.window));
 
 /** @type {string[]} The handles each products request asked for. */
 const requested = [];

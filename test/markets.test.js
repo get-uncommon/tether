@@ -2,23 +2,24 @@
 import { test, before, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
-import { cartFrom, detailOf, find, graphqlRequest, jsonResponse, operationName, product } from './fixtures.js';
-import { recordAt, stringAt, waitFor } from '../server/test/mocks.js';
+import {
+  cartFrom,
+  detailOf,
+  find,
+  graphqlRequest,
+  jsonResponse,
+  operationName,
+  pageGlobals,
+  product,
+} from './fixtures.js';
+import { fieldOf, parseJson, recordAt, stringAt, waitFor } from '../server/test/mocks.js';
 import { isRecord } from '../server/src/shared/json.ts';
 
 // A German Webflow locale page, with a saved cart from the Dutch market.
 const dom = new JSDOM('<!doctype html><html lang="de-DE"><body></body></html>', {
   url: 'https://site.test/de/product/coffee-box',
 });
-Object.assign(globalThis, {
-  window: dom.window,
-  document: dom.window.document,
-  localStorage: dom.window.localStorage,
-  CustomEvent: dom.window.CustomEvent,
-  MutationObserver: dom.window.MutationObserver,
-  Option: dom.window['Option'],
-  getComputedStyle: dom.window.getComputedStyle,
-});
+Object.assign(globalThis, pageGlobals(dom.window));
 
 /** @type {Partial<Record<string, number>>} */
 const delays = {}; // country -> ms, to simulate a slow response from the old market
@@ -387,7 +388,7 @@ test('setCountry: the money format follows the country (option or markets.locale
   cfg.markets.locales = { de: { country: 'DE', language: 'DE', locale: 'de-DE' } };
   await Tether.setCountry('DE', { language: null });
   assert.equal(Tether.config.locale, 'de-DE');
-  assert.equal(JSON.parse(String(localStorage.getItem('tether:market:shop.test'))).locale, 'de-DE');
+  assert.equal(fieldOf(parseJson(String(localStorage.getItem('tether:market:shop.test'))), 'locale'), 'de-DE');
   await Tether.setCountry('NL', { locale: 'nl-NL', language: null });
   assert.equal(Tether.config.locale, 'nl-NL');
 });

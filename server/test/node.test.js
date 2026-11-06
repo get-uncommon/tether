@@ -5,7 +5,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileStore, loadConfig } from '../src/node.ts';
-import { waitFor } from './mocks.js';
+import { asRecord, parseJson, waitFor } from './mocks.js';
 
 test('file store: a state file removed by another process leaves what this process holds', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'tether-sync-'));
@@ -64,7 +64,7 @@ test('file store: batched writes, merged with another process, survives a failed
   await second.put('reconcile:since', 'x');
   await second.flush();
   await first.flush();
-  const disk = JSON.parse(await readFile(path, 'utf8'));
+  const disk = asRecord(parseJson(await readFile(path, 'utf8')), 'the state file');
   assert.equal(Object.keys(disk).length, 101, "both processes' keys are kept");
   assert.deepEqual(await second.get('p:5'), { i: 5 }, "the second store sees the first's writes");
 

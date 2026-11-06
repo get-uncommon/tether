@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Tether, calls, server, setLivePrice, settle } from './astro-harness.js';
 import { find, jsonResponse, product } from './fixtures.js';
-import { waitFor } from '../server/test/mocks.js';
+import { fieldOf, parseJson, recordsAt, waitFor } from '../server/test/mocks.js';
 
 test('server: createStorefront(import.meta.env) maps the PUBLIC_SHOPIFY_* names and ignores other keys', () => {
   const importMetaEnv = {
@@ -70,9 +70,9 @@ test('server: hydrate() escapes </script> and carries the market', () => {
   const evil = { ...product, title: '</script><script>alert(1)</script>' };
   const tag = shop.hydrate(evil);
   assert.equal((tag.match(/<\/script>/g) ?? []).length, 1, 'only the real closing tag');
-  const json = JSON.parse(tag.replace(/^<script[^>]*>/, '').replace(/<\/script>$/, ''));
-  assert.equal(json.country, 'NL');
-  assert.equal(json.products[0].title, evil.title);
+  const json = parseJson(tag.replace(/^<script[^>]*>/, '').replace(/<\/script>$/, ''));
+  assert.equal(fieldOf(json, 'country'), 'NL');
+  assert.equal(fieldOf(recordsAt(json, 'products')[0], 'title'), evil.title);
 });
 
 /** @param {string} tag */

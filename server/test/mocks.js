@@ -62,6 +62,22 @@ export const numberAt = (value, key) => asNumber(fieldOf(value, key), key);
 export const recordsAt = (value, key) => listAt(value, key).map((item, i) => asRecord(item, `${key}[${i}]`));
 
 /**
+ * @param {string} text JSON.
+ * @returns {unknown} What it holds, for the readers above to check.
+ */
+export const parseJson = (text) => JSON.parse(text);
+
+/**
+ * @param {Response} response
+ * @returns {Promise<unknown>} Its JSON body, for the readers above to check.
+ */
+export async function jsonOf(response) {
+  /** @type {unknown} */
+  const body = await response.json();
+  return body;
+}
+
+/**
  * @param {RequestInfo | URL} input What a fake `fetch` was called with.
  * @returns {string} The URL it asks for.
  */
@@ -381,6 +397,16 @@ export const noWaitUntil = {
  */
 export function checkStep(report, title) {
   const step = report.steps.find((candidate) => candidate.title === title);
+  assert.ok(step, `no "${title}" step`);
+  return step;
+}
+
+/**
+ * @param {unknown} report A `/check` report as the Worker answers it, in JSON.
+ * @param {string} title
+ */
+export function answeredStep(report, title) {
+  const step = recordsAt(report, 'steps').find((candidate) => candidate['title'] === title);
   assert.ok(step, `no "${title}" step`);
   return step;
 }

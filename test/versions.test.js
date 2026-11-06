@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { VERSION_COPIES, syncVersions, versionMismatches } from '../scripts/versions.ts';
+import { asRecord, parseJson } from '../server/test/mocks.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -18,7 +19,7 @@ test('the release writes the package.json version into every copy', async () => 
   for (const file of ['package.json', ...VERSION_COPIES.map((versionCopy) => versionCopy.file)]) {
     await cp(join(ROOT, file), join(copy, file), { recursive: true });
   }
-  const pkg = JSON.parse(await readFile(join(copy, 'package.json'), 'utf8'));
+  const pkg = asRecord(parseJson(await readFile(join(copy, 'package.json'), 'utf8')), 'package.json');
   await writeFile(join(copy, 'package.json'), JSON.stringify({ ...pkg, version: '9.8.7' }, null, 2));
   assert.equal((await versionMismatches(copy)).length, VERSION_COPIES.length);
   assert.equal(await syncVersions(copy), '9.8.7');

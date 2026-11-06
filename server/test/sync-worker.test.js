@@ -2,7 +2,17 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createApp, memoryStore, signShopify, handleShopifyWebhook, createWorker } from '../src/index.ts';
-import { createMockApis, shopifyProduct, baseConfig, env, instantSleep } from './mocks.js';
+import {
+  createMockApis,
+  shopifyProduct,
+  baseConfig,
+  env,
+  instantSleep,
+  fieldOf,
+  jsonOf,
+  parseJson,
+  stringAt,
+} from './mocks.js';
 import { setup } from './sync-fixtures.js';
 
 /**
@@ -109,7 +119,7 @@ function kv() {
     async get(key, type) {
       const value = entries.get(key);
       if (value == null) return null;
-      return type === 'json' ? JSON.parse(value) : value;
+      return type === 'json' ? parseJson(value) : value;
     },
     async put(key, value) {
       writes++;
@@ -132,18 +142,19 @@ test('worker: webhook route with waitUntil, cron reconcile writes KV only on cha
 
   const health = await worker.fetch(new Request('https://sync.test/health'), wenv, ctx);
   const { VERSION } = await import('../src/version.ts');
-  const pkg = JSON.parse(
-    await (await import('node:fs/promises')).readFile(new URL('../package.json', import.meta.url), 'utf8'),
+  const version = stringAt(
+    parseJson(await (await import('node:fs/promises')).readFile(new URL('../package.json', import.meta.url), 'utf8')),
+    'version',
   );
-  assert.equal(VERSION, pkg.version, 'src/version.ts matches package.json');
+  assert.equal(VERSION, version, 'src/version.ts matches package.json');
   assert.deepEqual(await health.json(), { ok: true }, 'the version is not shown to strangers');
-  const publicCheck = await (await worker.fetch(new Request('https://sync.test/check'), wenv, ctx)).json();
-  assert.equal(publicCheck.version, undefined);
+  const publicCheck = await jsonOf(await worker.fetch(new Request('https://sync.test/check'), wenv, ctx));
+  assert.equal(fieldOf(publicCheck, 'version'), undefined);
   const auth = { authorization: `Bearer ${wenv.SYNC_SECRET}` };
-  const fullCheck = await (
-    await worker.fetch(new Request('https://sync.test/check', { headers: auth }), wenv, ctx)
-  ).json();
-  assert.equal(fullCheck.version, pkg.version, 'the version needs the bearer secret');
+  const fullCheck = await jsonOf(
+    await worker.fetch(new Request('https://sync.test/check', { headers: auth }), wenv, ctx),
+  );
+  assert.equal(fieldOf(fullCheck, 'version'), version, 'the version needs the bearer secret');
 
   const res = await worker.fetch(await webhook('products/update', { id: 1 }), wenv, ctx);
   assert.equal(res.status, 200);
@@ -193,7 +204,7 @@ test('concurrent create + update webhooks in two Worker invocations: one item (u
     async get(key, type) {
       const value = entries.get(key);
       if (value == null) return null;
-      return type === 'json' ? JSON.parse(value) : value;
+      return type === 'json' ? parseJson(value) : value;
     },
     async put(key, value) {
       entries.set(key, value);

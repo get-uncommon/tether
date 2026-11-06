@@ -13,7 +13,17 @@ import {
   normalizeProduct,
   toSlug,
 } from '../src/index.ts';
-import { createMockApis, shopifyProduct, baseConfig, env, instantSleep, recordAt, asString } from './mocks.js';
+import {
+  createMockApis,
+  shopifyProduct,
+  baseConfig,
+  env,
+  instantSleep,
+  recordAt,
+  asString,
+  asList,
+  fieldOf,
+} from './mocks.js';
 import { setup } from './sync-fixtures.js';
 
 // ---- pieces -----------------------------------------------------------------
@@ -261,10 +271,9 @@ test('reconcile retries failed products on the next run', async () => {
   const first = await sync.reconcile();
   assert.equal(first.failures.length, 1);
   assert.equal(first.changes, 1);
-  const retry = await store.get('reconcile:retry');
-  assert.ok(Array.isArray(retry));
+  const retry = asList(await store.get('reconcile:retry'), 'reconcile:retry');
   assert.deepEqual(
-    retry.map((entry) => entry.id),
+    retry.map((entry) => fieldOf(entry, 'id')),
     ['1'],
   );
 

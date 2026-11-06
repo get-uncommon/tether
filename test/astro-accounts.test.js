@@ -2,8 +2,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Tether, cfg, firstVariantId, rendered, seedCart } from './astro-harness.js';
-import { cartFrom, find, graphqlRequest, jsonResponse, product } from './fixtures.js';
-import { urlOf, waitFor } from '../server/test/mocks.js';
+import { cartFrom, find, jsonResponse, product } from './fixtures.js';
+import { asRecord, parseJson, urlOf, waitFor } from '../server/test/mocks.js';
 
 test("analytics: Tether's own events become GA4 dataLayer events (view_item, add_to_cart from cart changes, begin_checkout); look-alikes send nothing", async () => {
   /**
@@ -233,7 +233,8 @@ function accountPagesWorker(realFetch) {
     const path = target.pathname.slice('/_tether/account'.length);
     if (init.method === 'POST') {
       assert.equal(new Headers(init.headers).get('X-Tether-Account'), '1');
-      posts.push({ path, body: graphqlRequest(init) });
+      assert.ok(typeof init.body === 'string', 'a JSON body');
+      posts.push({ path, body: parseJson(init.body) });
     }
     const answer = answers[path];
     return answer ? answer() : jsonResponse({});
@@ -277,15 +278,24 @@ const button = (selector) => {
 };
 
 /**
+ * A fresh copy of src/account.ts is the same source, so its export has the same type: what is left to check is that it
+ * is there.
+ *
+ * @param {unknown} value
+ * @returns {value is typeof import('../src/account.ts').mountAccount}
+ */
+const isMountAccount = (value) => typeof value === 'function';
+
+/**
  * Mounts the account pages on an order page, with `check` run while the page is up.
  *
  * @param {(posts: { path: string, body: unknown }[]) => Promise<void>} check Given what the page posted so far.
  */
 async function onAccountPages(check) {
-  // A fresh instance, as an earlier test logged out; tsc can't resolve the query string, so the annotation types it.
+  // A fresh instance, as an earlier test logged out; tsc can't resolve the query string, so its export is checked.
   const freshAccount = '../src/account.ts?pages';
-  /** @type {typeof import('../src/account.ts')} */
-  const account = await import(freshAccount);
+  const mountAccount = asRecord(await import(freshAccount), 'the fresh account module')['mountAccount'];
+  assert.ok(isMountAccount(mountAccount));
   cfg.account = {
     server: '/_tether/account',
     orderUrl: '/account/order?id={id}',
@@ -297,7 +307,7 @@ async function onAccountPages(check) {
   try {
     window.history.replaceState(null, '', '/account/order?id=7');
     document.body.innerHTML = ACCOUNT_PAGES;
-    await account.mountAccount(document);
+    await mountAccount(document);
     await check(worker.posts);
   } finally {
     globalThis.fetch = realFetch;

@@ -5,7 +5,19 @@ import { existsSync } from 'node:fs';
 import defaultConfig from './default-config.js';
 import { createWorker } from '../src/index.ts';
 import { signShopify } from '../src/hmac.ts';
-import { createMockApis, shopifyProduct, instantSleep, noWaitUntil, urlOf } from './mocks.js';
+import {
+  createMockApis,
+  shopifyProduct,
+  instantSleep,
+  noWaitUntil,
+  urlOf,
+  asString,
+  fieldOf,
+  jsonOf,
+  parseJson,
+  recordsAt,
+  stringAt,
+} from './mocks.js';
 
 const SECRET = 'a-long-random-sync-secret-123';
 const env = {
@@ -19,7 +31,23 @@ const env = {
 };
 const auth = { authorization: `Bearer ${SECRET}` };
 
-/** @typedef {Awaited<ReturnType<typeof import('../src/check.ts').runCheck>> & { kv: boolean }} CheckAnswer */
+/**
+ * The `/check` answer the Worker sends with the bearer secret, read from its JSON.
+ *
+ * @param {unknown} answer
+ */
+function checkAnswerOf(answer) {
+  return {
+    ok: fieldOf(answer, 'ok'),
+    kv: fieldOf(answer, 'kv'),
+    steps: recordsAt(answer, 'steps').map((step) => ({
+      level: stringAt(step, 'level'),
+      title: stringAt(step, 'title'),
+      message: stringAt(step, 'message'),
+      fix: step['fix'] === undefined ? undefined : asString(step['fix'], 'fix'),
+    })),
+  };
+}
 
 /**
  * A KV namespace in memory.
@@ -34,7 +62,7 @@ function kv() {
     get: async (key, type) => {
       const value = map.get(key);
       if (value === undefined) return null;
-      return type === 'json' ? JSON.parse(value) : value;
+      return type === 'json' ? parseJson(value) : value;
     },
     put: async (key, value) => {
       map.set(key, value);
@@ -77,7 +105,7 @@ test('without the TETHER_SYNC namespace, POST /reconcile refuses to run and says
   });
   assert.ok(response);
   assert.equal(response.status, 503);
-  assert.match((await response.json()).error, /TETHER_SYNC/);
+  assert.match(stringAt(await jsonOf(response), 'error'), /TETHER_SYNC/);
   assert.ok(logged.some((line) => line.includes('reconcile: the TETHER_SYNC KV namespace is not bound')));
   assert.equal(apis.calls.length, 0, 'nothing is synced into a store that forgets it');
 });
@@ -103,14 +131,13 @@ test('the cron logs a failed reconcile and rethrows it, so Cloudflare marks the 
 test('/check: a missing namespace is a warning for the sync and an error once accounts are on', async () => {
   const apis = createMockApis({ products: [shopifyProduct(1)] });
   const worker = createWorker(defaultConfig, { fetch: apis.fetch, sleep: instantSleep });
-  /**
-   * @param {Record<string, unknown>} extra
-   * @returns {Promise<CheckAnswer>}
-   */
+  /** @param {Record<string, unknown>} extra */
   const check = async (extra) =>
-    (
-      await worker.fetch(new Request('https://w.test/check', { headers: auth }), { ...env, ...extra }, noWaitUntil)
-    ).json();
+    checkAnswerOf(
+      await jsonOf(
+        await worker.fetch(new Request('https://w.test/check', { headers: auth }), { ...env, ...extra }, noWaitUntil),
+      ),
+    );
 
   const sync = await check({});
   assert.equal(sync.kv, false);
@@ -179,12 +206,11 @@ test('with customer accounts but no ACCOUNT_SECRET only the account routes stop;
   const logged = await collectErrors(async () => {
     const login = await send('/_tether/account/login', { headers: { origin: 'https://w.test' } });
     assert.equal(login.status, 503);
-    assert.match((await login.json()).error, /accounts need the Worker secret ACCOUNT_SECRET/);
+    assert.match(stringAt(await jsonOf(login), 'error'), /accounts need the Worker secret ACCOUNT_SECRET/);
   });
   assert.ok(logged.some((line) => line.includes('account setup ACCOUNT_SECRET is not set')));
 
-  /** @type {CheckAnswer} */
-  const report = await (await send('/check', { headers: auth })).json();
+  const report = checkAnswerOf(await jsonOf(await send('/check', { headers: auth })));
   const errors = report.steps.filter((step) => step.level === 'error');
   assert.deepEqual(
     errors.map((step) => step.title),
@@ -194,7 +220,7 @@ test('with customer accounts but no ACCOUNT_SECRET only the account routes stop;
 
   const imported = await send('/reconcile?since=all', { method: 'POST', headers: auth });
   assert.equal(imported.status, 200);
-  assert.equal((await imported.json()).processed, 2);
+  assert.equal(fieldOf(await jsonOf(imported), 'processed'), 2);
   assert.ok(apis.webflowWrites().length > 0, 'the products reach Webflow');
   assert.equal(deploys.length, 1, 'the deploy hook starts a build');
 
@@ -223,18 +249,19 @@ test('with customer accounts but no ACCOUNT_SECRET only the account routes stop;
 test('the Worker and the browser script are released with one version', async (context) => {
   const { readFile } = await import('node:fs/promises');
   /** @param {string} path */
-  const json = async (path) => JSON.parse(await readFile(new URL(path, import.meta.url), 'utf8'));
+  const json = async (path) => parseJson(await readFile(new URL(path, import.meta.url), 'utf8'));
   const server = await json('../package.json');
   // A deployed copy holds only server/; whatever lies above it is not Tether's repository.
   const rootPackage = new URL('../../package.json', import.meta.url);
   const root = existsSync(rootPackage) ? await json(rootPackage.href) : null;
-  if (root?.name !== '@occluze/tether') {
+  if (root === null || fieldOf(root, 'name') !== '@occluze/tether') {
     context.skip('not in the Tether repository');
     return;
   }
-  assert.equal(server.version, root.version, 'server/package.json and the root package.json');
+  const rootVersion = fieldOf(root, 'version');
+  assert.equal(fieldOf(server, 'version'), rootVersion, 'server/package.json and the root package.json');
   const browserVersion = /export const VERSION = '([^']+)'/.exec(
     await readFile(new URL('../../src/index.ts', import.meta.url), 'utf8'),
   )?.[1];
-  assert.equal(browserVersion, root.version, 'src/index.ts and the root package.json');
+  assert.equal(browserVersion, rootVersion, 'src/index.ts and the root package.json');
 });

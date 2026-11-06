@@ -5,8 +5,8 @@ import { JSDOM, VirtualConsole } from 'jsdom';
 import { readFile } from 'node:fs/promises';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { find, graphqlRequest, jsonResponse, operationName, product } from './fixtures.js';
-import { waitFor } from '../server/test/mocks.js';
+import { builtTether, find, graphqlRequest, jsonResponse, operationName, partsOf, product } from './fixtures.js';
+import { fieldOf, waitFor } from '../server/test/mocks.js';
 
 const DIST = join(dirname(fileURLToPath(import.meta.url)), '..', '.test-dist');
 /** @type {import('jsdom').DOMWindow} */
@@ -67,7 +67,7 @@ before(async () => {
     win.addEventListener('load', resolve);
   });
   await waitFor(
-    () => Boolean(win['Tether']?.__parts?.markets) && (win.document.querySelector('select')?.options.length ?? 0) > 1,
+    () => Boolean(partsOf(win)?.markets) && (win.document.querySelector('select')?.options.length ?? 0) > 1,
     'the markets part (its own file) to fill the country select',
   );
 });
@@ -87,7 +87,7 @@ test('the markets part loads from its own file when the page has a country selec
     ['DE', 'NL'],
   );
   assert.ok([...win.document.scripts].some((script) => script.src.endsWith('tether.markets.min.js')));
-  assert.ok(win['Tether'].__parts.markets, 'registered');
+  assert.ok(partsOf(win)?.markets, 'registered');
 });
 
 test('a part beside the core loads with the integrity hash of the file built with it', async () => {
@@ -101,10 +101,10 @@ test('a part beside the core loads with the integrity hash of the file built wit
 
 test('the diagnose part loads on first call and shares the core (same config, same cache)', async () => {
   assert.ok(![...win.document.scripts].some((script) => script.src.includes('diagnose')), 'not loaded up front');
-  const report = await win['Tether'].diagnose({ silent: true });
+  const report = await builtTether(win).diagnose({ silent: true });
   assert.equal(report.reachable, true);
-  assert.equal(report.config.domain, 'shop.test');
-  assert.equal(report.products[0].title, 'Coffee Box');
+  assert.equal(report.config['domain'], 'shop.test');
+  assert.equal(fieldOf(report.products[0], 'title'), 'Coffee Box');
   assert.ok(ops.filter((sent) => sent.op === 'TetherProducts').length === 1, 'diagnose used the cached product');
 });
 

@@ -15,9 +15,17 @@ import {
   baseConfig,
   env,
   urlOf,
+  answeredStep,
+  asRecord,
+  fieldOf,
+  jsonOf,
+  parseJson,
+  recordAt,
+  recordsAt,
+  stringAt,
 } from './mocks.js';
+import { isRecord } from '../src/shared/json.ts';
 
-/** @typedef {Awaited<ReturnType<typeof runCheck>>} CheckReport */
 /** @typedef {typeof globalThis.fetch} Fetch */
 
 const COL = '0123456789abcdef01234567';
@@ -135,15 +143,15 @@ test('worker GET /check: config presence for anyone, API tests only with SYNC_SE
   const worker = createWorker(defaultConfig, { fetch: apis.fetch, sleep: instantSleep });
   const ctx = { waitUntil() {} };
   let res = await worker.fetch(new Request('https://sync.test/check'), deployEnv, ctx);
-  /** @type {{ config?: unknown, steps: Pick<import('../src/check/steps.ts').CheckStep, 'title' | 'level'>[] }} */
-  const publicBody = await res.json();
+  const publicBody = asRecord(await jsonOf(res), 'the public report');
   assert.equal(res.status, 200);
-  assert.ok(!publicBody.config, 'no field config without the secret');
+  assert.ok(!publicBody['config'], 'no field config without the secret');
+  const publicSteps = recordsAt(publicBody, 'steps');
   assert.ok(
-    publicBody.steps.every((step) => !('message' in step) && !('fix' in step)),
+    publicSteps.every((step) => !('message' in step) && !('fix' in step)),
     'only titles and levels for the public: messages name the store and the site',
   );
-  assert.ok(!publicBody.steps.some((step) => step.title === 'Shopify API'));
+  assert.ok(!publicSteps.some((step) => step['title'] === 'Shopify API'));
   assert.equal(apis.calls.length, 0);
 
   res = await worker.fetch(
@@ -151,10 +159,9 @@ test('worker GET /check: config presence for anyone, API tests only with SYNC_SE
     deployEnv,
     ctx,
   );
-  /** @type {CheckReport} */
-  const body = await res.json();
-  assert.ok(body.steps.some((step) => step.title === 'Shopify API' && step.level === 'ok'));
-  assert.ok(body.config?.fields['name']);
+  const body = await jsonOf(res);
+  assert.ok(recordsAt(body, 'steps').some((step) => step['title'] === 'Shopify API' && step['level'] === 'ok'));
+  assert.ok(recordAt(recordAt(body, 'config'), 'fields')['name']);
 
   res = await worker.fetch(new Request('https://sync.test/check'), {}, ctx);
   assert.equal(res.status, 503);
@@ -206,15 +213,14 @@ test('worker: placeholder SYNC_SECRET never unlocks /reconcile or the deep check
     noWaitUntil,
   );
   assert.equal(reconcile.status, 401);
-  /** @type {CheckReport} */
-  const check = await (
+  const check = await jsonOf(
     await worker.fetch(
       new Request('https://w.test/check', { headers: { authorization: 'Bearer choose-a-long-random-string' } }),
       wenv,
       noWaitUntil,
-    )
-  ).json();
-  assert.ok(!check.steps.some((step) => step.title === 'Shopify API'));
+    ),
+  );
+  assert.ok(!recordsAt(check, 'steps').some((step) => step['title'] === 'Shopify API'));
   assert.equal(apis.calls.length, 0);
 });
 
@@ -236,9 +242,11 @@ test('.dev.vars.example: only the six fields a deploy needs, all empty and descr
   lines.forEach((line) => {
     assert.match(line, /^[A-Z_]+=$/, line);
   });
-  const pkg = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
+  const pkg = parseJson(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
+  const bindings = recordAt(recordAt(pkg, 'cloudflare'), 'bindings');
   lines.forEach((line) => {
-    assert.ok(pkg.cloudflare.bindings[line.slice(0, -1)]?.description, `description for ${line}`);
+    const binding = bindings[line.slice(0, -1)];
+    assert.ok(isRecord(binding) && binding['description'], `description for ${line}`);
   });
 });
 
@@ -251,7 +259,7 @@ test('webhooks: the first reconcile registers them through the app, once; check 
     async get(key, type) {
       const value = entries.get(key);
       if (value == null) return null;
-      return type === 'json' ? JSON.parse(value) : value;
+      return type === 'json' ? parseJson(value) : value;
     },
     async put(key, value) {
       entries.set(key, value);
@@ -264,29 +272,32 @@ test('webhooks: the first reconcile registers them through the app, once; check 
   const wenv = { ...deployEnv, TETHER_SYNC };
   const auth = { authorization: `Bearer ${deployEnv.SYNC_SECRET}` };
 
-  /** @type {CheckReport} */
-  let check = await (
-    await worker.fetch(new Request('https://w.test/check', { headers: auth }), wenv, noWaitUntil)
-  ).json();
-  assert.match(checkStep(check, 'Shopify webhooks').message, /not registered yet/);
+  let check = await jsonOf(
+    await worker.fetch(new Request('https://w.test/check', { headers: auth }), wenv, noWaitUntil),
+  );
+  assert.match(stringAt(answeredStep(check, 'Shopify webhooks'), 'message'), /not registered yet/);
 
-  const reconciled = await (
+  const reconciled = await jsonOf(
     await worker.fetch(
       new Request('https://w.test/reconcile?since=all', { method: 'POST', headers: auth }),
       wenv,
       noWaitUntil,
-    )
-  ).json();
-  assert.deepEqual(reconciled.webhooks.created, ['PRODUCTS_CREATE', 'PRODUCTS_UPDATE', 'PRODUCTS_DELETE']);
+    ),
+  );
+  assert.deepEqual(fieldOf(recordAt(reconciled, 'webhooks'), 'created'), [
+    'PRODUCTS_CREATE',
+    'PRODUCTS_UPDATE',
+    'PRODUCTS_DELETE',
+  ]);
   assert.ok(apis.shop.webhooks.every((webhook) => webhook.uri === 'https://w.test/webhooks/shopify'));
-  const again = await (
-    await worker.fetch(new Request('https://w.test/reconcile', { method: 'POST', headers: auth }), wenv, noWaitUntil)
-  ).json();
-  assert.equal(again.webhooks.cached, true);
+  const again = await jsonOf(
+    await worker.fetch(new Request('https://w.test/reconcile', { method: 'POST', headers: auth }), wenv, noWaitUntil),
+  );
+  assert.equal(fieldOf(recordAt(again, 'webhooks'), 'cached'), true);
   assert.equal(apis.shop.webhooks.length, 3, 'no duplicates');
 
-  check = await (await worker.fetch(new Request('https://w.test/check', { headers: auth }), wenv, noWaitUntil)).json();
-  assert.equal(checkStep(check, 'Shopify webhooks').level, 'ok');
+  check = await jsonOf(await worker.fetch(new Request('https://w.test/check', { headers: auth }), wenv, noWaitUntil));
+  assert.equal(fieldOf(answeredStep(check, 'Shopify webhooks'), 'level'), 'ok');
 });
 
 test('webhooks signed with either the client secret or SHOPIFY_WEBHOOK_SECRET are accepted', async () => {

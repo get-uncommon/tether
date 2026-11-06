@@ -3,7 +3,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Tether, calls, firstVariantId, productScope, rendered, server } from './astro-harness.js';
 import { cartFrom, find, findAll, graphqlRequest, jsonResponse, linesAt, product } from './fixtures.js';
-import { recordAt, waitFor } from '../server/test/mocks.js';
+import { parseJson, recordAt, waitFor } from '../server/test/mocks.js';
+import { isProductShape } from '../src/product-shape.ts';
 
 /** @typedef {Parameters<Parameters<typeof import('../src/cart/store.ts').subscribe>[0]>[1]} CartMeta */
 /** @typedef {import('../src/fragments.ts').Product} Product */
@@ -140,12 +141,12 @@ test('cart warnings: less stock than asked is shown, and subscribe reports loade
 });
 
 test('another language: translated option names (Size -> Größe) still match the markup by position', async () => {
-  /** @type {Product} */
-  const de = JSON.parse(
+  const de = parseJson(
     JSON.stringify(product)
       .replace(/"Size"/g, '"Größe"')
       .replace(/"1kg"/g, '"1 kg"'),
   );
+  assert.ok(isProductShape(de));
   // The build (NL, English names) put its data in the page; the visitor is in another language.
   document.body.innerHTML = `${server.createStorefront({ domain: 'shop.test', token: 't', country: 'XX' }).hydrate(product)}
     <div tether-product="coffee-box">

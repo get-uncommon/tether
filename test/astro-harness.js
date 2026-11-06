@@ -11,8 +11,9 @@ import {
   linesAt,
   operationName,
   product,
+  pageGlobals,
 } from './fixtures.js';
-import { numberAt, recordAt, recordsAt, stringAt, waitFor } from '../server/test/mocks.js';
+import { numberAt, parseJson, recordAt, recordsAt, stringAt, waitFor } from '../server/test/mocks.js';
 
 // The failures these tests cause on purpose are checked through onError, states and events, not the console.
 captureTetherWarnings();
@@ -23,15 +24,7 @@ export const firstVariant = first;
 export const firstVariantId = first.id;
 
 const dom = new JSDOM('<!doctype html><body></body>', { url: 'https://astro.test/' });
-Object.assign(globalThis, {
-  window: dom.window,
-  document: dom.window.document,
-  localStorage: dom.window.localStorage,
-  CustomEvent: dom.window.CustomEvent,
-  MutationObserver: dom.window.MutationObserver,
-  Option: dom.window['Option'],
-  getComputedStyle: dom.window.getComputedStyle,
-});
+Object.assign(globalThis, pageGlobals(dom.window));
 
 /** @typedef {import('../src/cart/store.ts').ShopifyCart} ShopifyCart */
 /** @typedef {import('../src/fragments.ts').Product} Product */
@@ -54,9 +47,9 @@ export const setLivePrice = (amount) => {
 /**
  * @param {Product} sent
  * @param {string} amount
- * @returns {Product}
+ * @returns {unknown} The product as JSON for Shopify's answer, at that price.
  */
-const withPrice = (sent, amount) => JSON.parse(JSON.stringify(sent).replace(/"amount":"30"/g, `"amount":"${amount}"`));
+const withPrice = (sent, amount) => parseJson(JSON.stringify(sent).replace(/"amount":"30"/g, `"amount":"${amount}"`));
 /** @type {typeof globalThis.fetch} */
 globalThis.fetch = async (_url, init) => {
   const { query, variables } = graphqlRequest(init);
@@ -65,7 +58,7 @@ globalThis.fetch = async (_url, init) => {
   /** @param {unknown} data */
   const ok = (data) => jsonResponse({ data });
   if (op === 'TetherProducts') {
-    /** @type {Record<string, Product | null>} */
+    /** @type {Record<string, unknown>} */
     const data = {};
     Object.keys(variables).forEach((key) => {
       if (key.startsWith('h')) data[key] = variables[key] === product.handle ? withPrice(product, livePrice) : null;

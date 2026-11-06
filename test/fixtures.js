@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { asRecord, listAt, numberAt, recordsAt, stringAt } from '../server/test/mocks.js';
+import { asRecord, listAt, numberAt, parseJson, recordAt, recordsAt, stringAt } from '../server/test/mocks.js';
+import { isTetherInternals } from '../src/part-registry.ts';
 
 /**
  * @param {number | string} amount
@@ -297,6 +298,57 @@ export function captureTetherWarnings() {
 }
 
 /**
+ * The globals a test sets from a jsdom window, for the browser modules it imports.
+ *
+ * @param {import('jsdom').DOMWindow} window
+ */
+export const pageGlobals = (window) => ({
+  window,
+  document: window.document,
+  localStorage: window.localStorage,
+  CustomEvent: window.CustomEvent,
+  MutationObserver: window.MutationObserver,
+  /** @type {unknown} jsdom's window type leaves `Option` to an index signature; the DOM library types the global. */
+  Option: window['Option'],
+  getComputedStyle: window.getComputedStyle,
+});
+
+/**
+ * @param {import('jsdom').DOMWindow} window
+ * @returns {unknown} The `window.Tether` a script on the page set, which jsdom's window type leaves to an index signature.
+ */
+const tetherOf = (window) => window['Tether'];
+
+/**
+ * The parts a page's core script has registered so far.
+ *
+ * @param {import('jsdom').DOMWindow} window
+ * @returns {Partial<import('../src/lazy.ts').Parts> | undefined} `undefined` until the core script has run.
+ */
+export function partsOf(window) {
+  const tether = tetherOf(window);
+  return isTetherInternals(tether) ? tether.__parts : undefined;
+}
+
+/**
+ * The built core script is this source, so a `window.Tether` with the core's internals and its API is the core's.
+ *
+ * @param {unknown} value
+ * @returns {value is import('../src/index.ts').Tether & import('../src/lazy.ts').TetherInternals}
+ */
+const isCoreTether = (value) => isTetherInternals(value) && typeof Reflect.get(value, 'diagnose') === 'function';
+
+/**
+ * @param {import('jsdom').DOMWindow} window A page the built core script ran on.
+ * @returns The `window.Tether` it set up.
+ */
+export function builtTether(window) {
+  const tether = tetherOf(window);
+  assert.ok(isCoreTether(tether), "window.Tether is the core script's");
+  return tether;
+}
+
+/**
  * @param {unknown} body Sent as JSON.
  * @param {number} [status]
  */
@@ -311,7 +363,8 @@ export const jsonResponse = (body, status = 200) =>
  */
 export function graphqlRequest(init) {
   assert.ok(typeof init?.body === 'string', 'a GraphQL request has a JSON body');
-  return JSON.parse(init.body);
+  const request = parseJson(init.body);
+  return { query: stringAt(request, 'query'), variables: recordAt(request, 'variables') };
 }
 
 /**

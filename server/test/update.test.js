@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { parseJson, stringAt } from './mocks.js';
 import { listTags, newestPublished, releaseCommit, releasesInRange } from '../scripts/update-tether.ts';
 import {
   GitHubError,
@@ -85,7 +86,7 @@ test('updating a copy replaces the code and keeps config, wrangler ids and TETHE
       encoding: 'utf8',
     },
   );
-  const version = JSON.parse(await readFile(join(release, 'package.json'), 'utf8')).version;
+  const version = stringAt(parseJson(await readFile(join(release, 'package.json'), 'utf8')), 'version');
   assert.match(out, new RegExp(`updated=${version.replace(/\./g, '\\.')}`));
   assert.ok(existsSync(join(copy, 'src', 'entry.js')), 'new code in place');
   assert.ok(!existsSync(join(copy, 'src', 'old.js')), 'old code removed');
@@ -337,7 +338,7 @@ test('a signed release is unpacked only after its attestation verifies', async (
   await mkdir(accepted);
   const passing = { download, run: fakeGh({ kind: 'exited', status: 0, output: '' }).run };
   const server = await fetchSignedRelease(passing, release, accepted, 'require');
-  assert.equal(JSON.parse(await readFile(join(server, 'package.json'), 'utf8')).version, '0.7.1');
+  assert.equal(stringAt(parseJson(await readFile(join(server, 'package.json'), 'utf8')), 'version'), '0.7.1');
 });
 
 test('workflow revision: the line in the file, 1 without it', () => {
@@ -422,7 +423,7 @@ test('an update run by its workflow warns when the copy needs the release workfl
   assert.match(out, /^::warning title=Tether workflow file outdated::/m);
   assert.match(await readFile(summary, 'utf8'), /Update the workflow file once/);
   assert.equal(await readFile(join(copy, WORKFLOW_PATH), 'utf8'), copyWorkflow, 'the workflow file is never touched');
-  const version = JSON.parse(await readFile(join(release, 'package.json'), 'utf8')).version;
+  const version = stringAt(parseJson(await readFile(join(release, 'package.json'), 'utf8')), 'version');
   assert.equal(workflowVersion(out), version);
 });
 
@@ -433,7 +434,7 @@ test('an update run with nothing to install still warns while the copy has an ol
   await cp(root, copy, { recursive: true, filter: (source) => !source.includes('node_modules') });
   await mkdir(join(copy, '.github', 'workflows'), { recursive: true });
   await writeFile(join(copy, WORKFLOW_PATH), 'name: Update Tether\n');
-  const version = JSON.parse(await readFile(join(copy, 'package.json'), 'utf8')).version;
+  const version = stringAt(parseJson(await readFile(join(copy, 'package.json'), 'utf8')), 'version');
 
   const out = execFileSync(
     process.execPath,

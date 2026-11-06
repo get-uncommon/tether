@@ -14,9 +14,11 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import { KEPT, MANAGED } from '../server/scripts/update-tether.ts';
 import { SHIPPED_REVISION, workflowRevisionAt } from '../server/scripts/workflow-check.ts';
-import { fieldOf, numberAt, stringAt } from '../server/test/mocks.js';
+import { asRecord, fieldOf, numberAt, parseJson, stringAt } from '../server/test/mocks.js';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
+/** @param {string} folder A copy of server/. */
+const versionIn = async (folder) => fieldOf(parseJson(await readFile(join(folder, 'package.json'), 'utf8')), 'version');
 /**
  * One release for each updater a deployed copy can have:
  * - v0.6.7: 0.6.0 to 0.6.7 ship the same one, which downloads a release from codeload by its tag;
@@ -127,7 +129,7 @@ async function releaseFolder(target) {
     await cp(join(ROOT, 'server', name), join(target, name));
   }
   const pkgPath = join(target, 'package.json');
-  const pkg = JSON.parse(await readFile(pkgPath, 'utf8'));
+  const pkg = asRecord(parseJson(await readFile(pkgPath, 'utf8')), 'package.json');
   await writeFile(pkgPath, `${JSON.stringify({ ...pkg, version: RELEASE_VERSION }, null, 2)}\n`);
   const versionPath = join(target, 'src', 'version.ts');
   const source = await readFile(versionPath, 'utf8');
@@ -283,7 +285,7 @@ for (const { tag, route } of OLD_UPDATERS) {
             ? await updateThroughGitHub(copy, release, join(work, 'download'))
             : await node(copy, ['scripts/update-tether.mjs', '--from', release]);
         assert.match(update.stdout, new RegExp(`^updated=${RELEASE_VERSION.replaceAll('.', '\\.')}$`, 'm'));
-        assert.equal(JSON.parse(await readFile(join(copy, 'package.json'), 'utf8')).version, RELEASE_VERSION);
+        assert.equal(await versionIn(copy), RELEASE_VERSION);
         assert.equal(
           await readFile(join(copy, 'tether-sync.config.js'), 'utf8'),
           ownConfig,
@@ -324,8 +326,8 @@ for (const { tag, route } of OLD_UPDATERS) {
         const refused = join(work, 'refused');
         await cp(release, refused, { recursive: true });
         const refusedPkgPath = join(refused, 'package.json');
-        const refusedPkg = JSON.parse(await readFile(refusedPkgPath, 'utf8'));
-        delete refusedPkg.version;
+        const refusedPkg = asRecord(parseJson(await readFile(refusedPkgPath, 'utf8')), 'package.json');
+        delete refusedPkg['version'];
         await writeFile(refusedPkgPath, JSON.stringify(refusedPkg, null, 2));
         const summary = join(work, 'summary.md');
         const failed = await node(copy, ['scripts/update-tether.mjs', '--from', refused], { summary }).then(
@@ -343,7 +345,7 @@ for (const { tag, route } of OLD_UPDATERS) {
           assert.ok(!existsSync(summary), 'nothing to add to the summary');
         }
         assert.doesNotMatch(stdout, /^updated=/m, 'no workflow installs anything');
-        assert.equal(JSON.parse(await readFile(join(copy, 'package.json'), 'utf8')).version, RELEASE_VERSION);
+        assert.equal(await versionIn(copy), RELEASE_VERSION);
       } finally {
         await rm(work, { recursive: true, force: true });
       }

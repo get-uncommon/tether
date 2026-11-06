@@ -107,12 +107,6 @@ export default tseslint.config(
     rules: {
       // Tests write fixture markup, which is the test's own text, not Shopify's.
       'no-restricted-syntax': ['error', SWALLOWED_REJECTION],
-      // Tests read JSON bodies and page globals as they arrive and assert on them; the assertion is the check.
-      '@typescript-eslint/no-unsafe-argument': 'off',
-      '@typescript-eslint/no-unsafe-assignment': 'off',
-      '@typescript-eslint/no-unsafe-call': 'off',
-      '@typescript-eslint/no-unsafe-member-access': 'off',
-      '@typescript-eslint/no-unsafe-return': 'off',
       // A fake of an async API is async itself, so it rejects rather than throws, as the real one does.
       '@typescript-eslint/require-await': 'off',
       // A stub that does nothing is the point of the stub.

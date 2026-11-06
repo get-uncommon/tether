@@ -11,6 +11,9 @@ import {
   instantSleep,
   noWaitUntil,
   asList,
+  fieldOf,
+  jsonOf,
+  parseJson,
   stringAt,
 } from './mocks.js';
 
@@ -34,7 +37,7 @@ function kvNamespace() {
     async get(key, type) {
       const value = kv.get(key);
       if (value == null) return null;
-      return type === 'json' ? JSON.parse(value) : value;
+      return type === 'json' ? parseJson(value) : value;
     },
     async put(key, value) {
       kv.set(key, value);
@@ -126,8 +129,8 @@ test('POST /reconcile?since=all imports everything, and the cron finishes what o
     wenv,
     noWaitUntil,
   );
-  const first = await res.json();
-  assert.equal(first.complete, false, 'too much for one run');
+  const first = await jsonOf(res);
+  assert.equal(fieldOf(first, 'complete'), false, 'too much for one run');
   for (let i = 0; i < 10 && !(await worker.scheduled({}, wenv, { waitUntil() {} })).complete; i++);
   assert.equal(apis.wf.items.size, 10, 'cron finished the import');
   const since = kv.get('tether-sync:reconcile:since');

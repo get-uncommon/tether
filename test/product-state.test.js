@@ -3,19 +3,11 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
-import { apparel, find, findAll, jsonResponse, PLAN_2MONTH, PLAN_MONTH, product } from './fixtures.js';
+import { apparel, find, findAll, jsonResponse, PLAN_2MONTH, PLAN_MONTH, product, pageGlobals } from './fixtures.js';
 import { waitFor } from '../server/test/mocks.js';
 
 const dom = new JSDOM('<!doctype html><body></body>', { url: 'https://state.test/product/coffee-box' });
-Object.assign(globalThis, {
-  window: dom.window,
-  document: dom.window.document,
-  localStorage: dom.window.localStorage,
-  CustomEvent: dom.window.CustomEvent,
-  MutationObserver: dom.window.MutationObserver,
-  Option: dom.window['Option'],
-  getComputedStyle: dom.window.getComputedStyle,
-});
+Object.assign(globalThis, pageGlobals(dom.window));
 const realFetch = globalThis.fetch;
 globalThis.fetch = async () => jsonResponse({ data: { cart: null } });
 

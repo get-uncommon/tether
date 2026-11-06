@@ -14,7 +14,7 @@ import {
   settle,
 } from './astro-harness.js';
 import { cartFrom, find, graphqlRequest, jsonResponse, product } from './fixtures.js';
-import { numberAt, recordsAt, waitFor } from '../server/test/mocks.js';
+import { listAt, numberAt, parseJson, recordAt, recordsAt, waitFor } from '../server/test/mocks.js';
 
 test('cart: quick +/+ clicks add up (each builds on the last one asked for), the line is busy meanwhile', async () => {
   const cart = cartFrom([{ merchandiseId: firstVariantId, quantity: 1 }]);
@@ -215,7 +215,10 @@ test('hydrate({ card: true }) is smaller and still renders a card without a requ
   };
   /** @param {string} tag */
   const imageCount = (tag) =>
-    JSON.parse(tag.replace(/^<script[^>]*>|<\/script>$/g, '')).products[0].images.nodes.length;
+    listAt(
+      recordAt(recordsAt(parseJson(tag.replace(/^<script[^>]*>|<\/script>$/g, '')), 'products')[0], 'images'),
+      'nodes',
+    ).length;
   assert.equal(imageCount(shop.hydrate(many, { card: true })), 2);
   assert.equal(imageCount(shop.hydrate(many, { card: true, images: 3 })), 3);
   assert.equal(imageCount(shop.hydrate(many)), 4);

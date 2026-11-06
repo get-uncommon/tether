@@ -10,22 +10,15 @@ import {
   jsonResponse,
   operationName,
   product,
+  pageGlobals,
 } from './fixtures.js';
-import { waitFor } from '../server/test/mocks.js';
+import { fieldOf, parseJson, waitFor } from '../server/test/mocks.js';
 
 // The failures these tests cause on purpose are checked through onError, states and events, not the console.
 captureTetherWarnings();
 
 const dom = new JSDOM('<!doctype html><body></body>', { url: 'https://site.test/product?handle=coffee-box' });
-Object.assign(globalThis, {
-  window: dom.window,
-  document: dom.window.document,
-  localStorage: dom.window.localStorage,
-  CustomEvent: dom.window.CustomEvent,
-  MutationObserver: dom.window.MutationObserver,
-  Option: dom.window['Option'],
-  getComputedStyle: dom.window.getComputedStyle,
-});
+Object.assign(globalThis, pageGlobals(dom.window));
 
 let mode = 'ok'; // 'ok' | 'down' | 'unauthorized' | 'malformed'
 /** @type {{ op: string, variables: ReturnType<typeof graphqlRequest>['variables'] }[]} */
@@ -260,7 +253,10 @@ test('diagnose reports config, reachability, plans and markup problems', async (
   const report = await Tether.diagnose({ silent: true, now: new Date('2026-11-04') });
   assert.equal(
     report.version,
-    JSON.parse((await import('node:fs')).readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version,
+    fieldOf(
+      parseJson((await import('node:fs')).readFileSync(new URL('../package.json', import.meta.url), 'utf8')),
+      'version',
+    ),
   );
   assert.equal(report.reachable, true);
   assert.equal(report.shop?.name, 'Test shop');

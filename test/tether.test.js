@@ -13,19 +13,12 @@ import {
   PLAN_2MONTH,
   PLAN_MONTH,
   product,
+  pageGlobals,
 } from './fixtures.js';
 import { listAt, recordAt, recordsAt, stringAt, waitFor } from '../server/test/mocks.js';
 
 const dom = new JSDOM('<!doctype html><body></body>', { url: 'https://site.test/product/coffee-box' });
-Object.assign(globalThis, {
-  window: dom.window,
-  document: dom.window.document,
-  localStorage: dom.window.localStorage,
-  CustomEvent: dom.window.CustomEvent,
-  MutationObserver: dom.window.MutationObserver,
-  Option: dom.window['Option'],
-  getComputedStyle: dom.window.getComputedStyle,
-});
+Object.assign(globalThis, pageGlobals(dom.window));
 
 // ---- fake Storefront API ---------------------------------------------------
 /** @type {({ op: string } & ReturnType<typeof graphqlRequest>)[]} */

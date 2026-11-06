@@ -2,7 +2,7 @@
 // sends to the Worker's account routes.
 import assert from 'node:assert/strict';
 import { handleAccount, accountSettings, BASE } from '../src/account.ts';
-import { fieldOf, numberAt, recordAt, stringAt, urlOf } from './mocks.js';
+import { asRecord, asString, fieldOf, numberAt, parseJson, recordAt, stringAt, urlOf } from './mocks.js';
 
 export const SHOP = 'shop.myshopify.com';
 export const SITE = 'https://shop.example';
@@ -204,7 +204,9 @@ export function shopify({ tamper = false, wrongNonce = false, kid = 'k1', claims
    */
   const customerAccount = (init, headers) => {
     assert.ok(typeof init.body === 'string', 'a JSON body');
-    const { query, variables = {} } = JSON.parse(init.body);
+    const request = asRecord(parseJson(init.body), 'the request');
+    const query = asString(request['query'], 'query');
+    const variables = request['variables'] === undefined ? {} : asRecord(request['variables'], 'variables');
     const op = /(?:query|mutation)\s+(\w+)/.exec(query)?.[1];
     calls.push({ op, variables, auth: headers.get('Authorization') });
     const answer = op === undefined ? undefined : ACCOUNT_DATA[op];

@@ -1,20 +1,11 @@
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
-import { detailOf, find, jsonResponse } from './fixtures.js';
+import { detailOf, find, jsonResponse, pageGlobals } from './fixtures.js';
 import { urlOf } from '../server/test/mocks.js';
 
 const dom = new JSDOM('<!doctype html><body></body>', { url: 'https://site.test/account' });
-Object.assign(globalThis, {
-  window: dom.window,
-  document: dom.window.document,
-  localStorage: dom.window.localStorage,
-  sessionStorage: dom.window.sessionStorage,
-  CustomEvent: dom.window.CustomEvent,
-  MutationObserver: dom.window.MutationObserver,
-  Option: dom.window['Option'],
-  getComputedStyle: dom.window.getComputedStyle,
-});
+Object.assign(globalThis, { ...pageGlobals(dom.window), sessionStorage: dom.window.sessionStorage });
 
 const { configure } = await import('../src/config.ts');
 const { Cart } = await import('../src/cart.ts');
