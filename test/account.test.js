@@ -1,7 +1,7 @@
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
-import { find, jsonResponse } from './fixtures.js';
+import { detailOf, find, jsonResponse } from './fixtures.js';
 
 const dom = new JSDOM('<!doctype html><body></body>', { url: 'https://site.test/account' });
 Object.assign(globalThis, {
@@ -11,7 +11,7 @@ Object.assign(globalThis, {
   sessionStorage: dom.window.sessionStorage,
   CustomEvent: dom.window.CustomEvent,
   MutationObserver: dom.window.MutationObserver,
-  Option: dom.window.Option,
+  Option: dom.window['Option'],
   getComputedStyle: dom.window.getComputedStyle,
 });
 
@@ -23,7 +23,9 @@ const { TetherError } = await import('../src/client.ts');
 
 const CART_KEY = 'tether:cart:shop.test';
 const SERVER = { server: '/_tether/account' };
+/** @type {{ error: unknown, context: string }[]} */
 const reported = [];
+/** @param {string} id */
 const visible = (id) => window.getComputedStyle(find(`#${id}`)).display !== 'none';
 const ADA = {
   id: 'gid://shopify/Customer/1',
@@ -40,9 +42,11 @@ const ADA = {
  * @param {() => Promise<unknown>} run
  */
 async function eventsDuring(run) {
+  /** @type {{ name: string, detail: unknown }[]} */
   const seen = [];
   const names = ['tether:account-login', 'tether:account-error'];
-  const listener = (event) => seen.push({ name: event.type, detail: event.detail });
+  /** @param {Event} event */
+  const listener = (event) => seen.push({ name: event.type, detail: detailOf(event) });
   names.forEach((name) => document.addEventListener(name, listener));
   try {
     await run();
@@ -58,6 +62,10 @@ const testConfig = () => ({
   token: 't',
   autoMount: false,
   retries: 0,
+  /**
+   * @param {unknown} error
+   * @param {string} context
+   */
   onError: (error, context) => reported.push({ error, context }),
 });
 
@@ -86,7 +94,9 @@ test('a Worker outage is reported, not shown as a logout without a word', async 
     reported.map((entry) => entry.context),
     ['account'],
   );
-  assert.match(reported[0].error.message, /Failed to fetch/);
+  const [failure] = reported;
+  assert.ok(failure?.error instanceof Error);
+  assert.match(failure.error.message, /Failed to fetch/);
   assert.ok(visible('out') && !visible('in'), 'the logged-out content is the fallback');
   assert.equal(find('#order').getAttribute('tether-order-state'), 'error');
   assert.ok(visible('order-error') && visible('addresses-error'), 'the pages show their error state');
@@ -94,12 +104,17 @@ test('a Worker outage is reported, not shown as a logout without a word', async 
 
 test('a 401 is a logout, not a failure; a failing checkout link is left to the cart to report', async () => {
   configure({ ...testConfig(), account: SERVER });
+  /** @type {Record<string, () => Response>} */
   const answers = {
     '/me': () => jsonResponse({ loggedIn: true, customer: { firstName: 'Ada' } }),
     '/orders': () => jsonResponse({ loggedIn: false, orders: [] }, 401),
     '/cart': () => jsonResponse({ error: 'Shopify is down' }, 502),
   };
-  globalThis.fetch = async (url) => answers[new URL(url).pathname.replace('/_tether/account', '')]();
+  globalThis.fetch = async (url) => {
+    const answer = answers[new URL(String(url)).pathname.replace('/_tether/account', '')];
+    assert.ok(answer, `no answer for ${String(url)}`);
+    return answer();
+  };
   assert.deepEqual(await account.orders(), []);
   assert.equal(reported.length, 0);
   localStorage.setItem(CART_KEY, 'gid://shopify/Cart/1');
@@ -123,7 +138,7 @@ const LOGIN_OUTCOMES = [
 const freshAccount = (instance) => import(`../src/account.ts?account-${instance}`);
 
 for (const [outcome, events] of LOGIN_OUTCOMES) {
-  test(`?account=${outcome} from the Worker's login sends ${events[0].name}`, async () => {
+  test(`?account=${outcome} from the Worker's login sends ${events[0]?.name}`, async () => {
     configure({ ...testConfig(), account: SERVER });
     globalThis.fetch = async () => jsonResponse({ loggedIn: outcome === 'in', customer: { firstName: 'Ada' } });
     window.history.replaceState(null, '', `/account?account=${outcome}&page=2`);
@@ -198,7 +213,7 @@ test('orders({ first }) takes a whole number from 1 to 50, checked before any re
   document.body.innerHTML = '<div tether-orders tether-limit="100"><a></a></div>';
   globalThis.fetch = async (url) => {
     asked.push(String(url));
-    return new URL(url).pathname.endsWith('/me')
+    return new URL(String(url)).pathname.endsWith('/me')
       ? jsonResponse({ loggedIn: true, customer: ADA })
       : jsonResponse({ orders: [] });
   };
@@ -213,10 +228,11 @@ test('orders({ first }) takes a whole number from 1 to 50, checked before any re
 test('an answer without the ids the page acts on is an error, other fields read as null', async () => {
   configure({ ...testConfig(), account: SERVER });
   globalThis.fetch = async (url) =>
-    new URL(url).pathname.endsWith('/orders')
+    new URL(String(url)).pathname.endsWith('/orders')
       ? jsonResponse({ orders: [{ id: 'gid://shopify/Order/1', name: 7, lineItems: { nodes: [{ title: 'Tee' }] } }] })
       : jsonResponse({ order: { name: '#1' } });
   const [first] = await account.orders();
+  assert.ok(first, 'the order is read');
   assert.equal(first.name, null);
   assert.equal(first.totalPrice, null);
   assert.deepEqual(first.lineItems.nodes, [{ title: 'Tee', variantTitle: null, quantity: 0, image: null }]);
@@ -245,5 +261,6 @@ test('the part keeps no token in the browser, only the hint that a customer may 
   assert.equal(account.isLoggedIn(), true);
   assert.deepEqual(Object.keys(localStorage), ['tether:account-hint:shop.test']);
   assert.equal(sessionStorage.length, 0);
-  for (const removed of ['getToken', 'handleCallback', 'query']) assert.equal(account[removed], undefined, removed);
+  for (const removed of ['getToken', 'handleCallback', 'query'])
+    assert.equal(Reflect.get(account, removed), undefined, removed);
 });

@@ -20,8 +20,10 @@ function setup({
   hookStatus = 200,
 } = {}) {
   const apis = createMockApis({ products });
+  /** @type {number[]} */
   const hooks = [];
   let clock = Date.parse('2026-11-04T12:00:00Z');
+  /** @type {typeof globalThis.fetch} */
   const fetch = async (url, init) => {
     if (String(url) === HOOK) {
       hooks.push(clock);
@@ -36,110 +38,114 @@ function setup({
     hooks,
     store,
     make,
-    tick: (s) => {
-      clock += s * 1000;
+    /** @param {number} seconds */
+    tick: (seconds) => {
+      clock += seconds * 1000;
     },
     now: () => clock,
   };
 }
 
 test('deploy-only: the first import starts one build; running it again starts none', async () => {
-  const t = setup();
-  const app = t.make();
+  const harness = setup();
+  const app = harness.make();
   assert.equal(app.deployOnly, true);
-  const r = await app.sync.importAll();
-  assert.equal(r.stats.created, 2);
-  assert.equal(t.hooks.length, 1);
-  assert.deepEqual(r.deploy, { triggered: true });
-  const again = await t.make().sync.importAll();
+  const result = await app.sync.importAll();
+  assert.equal(result.stats.created, 2);
+  assert.equal(harness.hooks.length, 1);
+  assert.deepEqual(result.deploy, { triggered: true });
+  const again = await harness.make().sync.importAll();
   assert.equal(again.stats.unchanged, 2);
-  assert.equal(t.hooks.length, 1, 'nothing changed, no build');
-  assert.equal(t.apis.webflowWrites().length, 0, 'no Webflow calls at all');
+  assert.equal(harness.hooks.length, 1, 'nothing changed, no build');
+  assert.equal(harness.apis.webflowWrites().length, 0, 'no Webflow calls at all');
 });
 
 test('deploy-only: a content change starts a build, a stock-only change does not', async () => {
-  const t = setup();
-  await t.make().sync.importAll();
-  const before = t.hooks.length;
+  const harness = setup();
+  await harness.make().sync.importAll();
+  const before = harness.hooks.length;
   // Stock changes (availability, inventory) are live on the page through Tether: no rebuild.
-  const p1 = shopifyProduct(1);
-  p1.variants.nodes[0].availableForSale = false;
-  t.apis.shop.products.set(p1.id, p1);
-  const r1 = await t.make().sync.syncById(1);
-  assert.equal(r1.action, 'unchanged');
-  assert.equal(t.hooks.length, before);
+  const product = shopifyProduct(1);
+  const [variant] = product.variants.nodes;
+  assert.ok(variant);
+  variant.availableForSale = false;
+  harness.apis.shop.products.set(product.id, product);
+  const stockOnly = await harness.make().sync.syncById(1);
+  assert.equal(stockOnly.action, 'unchanged');
+  assert.equal(harness.hooks.length, before);
   // A new title is content: rebuild.
-  t.apis.shop.products.set(p1.id, { ...p1, title: 'New name' });
+  harness.apis.shop.products.set(product.id, { ...product, title: 'New name' });
   const app = createApp(
     defaultConfig,
     { ...shopEnv, DEPLOY_HOOK_MIN_SECONDS: '0' },
     {
-      store: t.store,
-      fetch: async (u, i) => (String(u) === HOOK ? (t.hooks.push(Date.now()), new Response('{}')) : t.apis.fetch(u, i)),
+      store: harness.store,
+      fetch: async (url, init) =>
+        String(url) === HOOK ? (harness.hooks.push(Date.now()), new Response('{}')) : harness.apis.fetch(url, init),
       sleep: instantSleep,
     },
   );
-  const r2 = await app.sync.syncById(1);
-  assert.equal(r2.action, 'updated');
-  assert.deepEqual(r2.deploy, { triggered: true });
-  assert.equal(t.hooks.length, before + 1);
+  const renamed = await app.sync.syncById(1);
+  assert.equal(renamed.action, 'updated');
+  assert.deepEqual(renamed.deploy, { triggered: true });
+  assert.equal(harness.hooks.length, before + 1);
 });
 
 test('deploy-only: changes within the interval wait for the next run, then give one build', async () => {
-  const t = setup();
+  const harness = setup();
   const realNow = Date.now;
-  Date.now = t.now;
+  Date.now = harness.now;
   try {
-    await t.make().sync.importAll();
-    assert.equal(t.hooks.length, 1);
-    t.tick(10);
-    t.apis.shop.products.set('gid://shopify/Product/1', shopifyProduct(1, { title: 'A' }));
-    const r1 = await t.make().sync.syncById(1);
-    assert.ok(r1.deploy && 'pending' in r1.deploy, 'noted, not built yet (60s interval)');
-    t.apis.shop.products.set('gid://shopify/Product/2', shopifyProduct(2, { title: 'B' }));
-    await t.make().sync.syncById(2);
-    assert.equal(t.hooks.length, 1);
-    t.tick(60);
-    const r3 = await t.make().sync.reconcile(); // the cron run
-    assert.deepEqual(r3.deploy, { triggered: true });
-    assert.equal(t.hooks.length, 2, 'two changes, one build');
+    await harness.make().sync.importAll();
+    assert.equal(harness.hooks.length, 1);
+    harness.tick(10);
+    harness.apis.shop.products.set('gid://shopify/Product/1', shopifyProduct(1, { title: 'A' }));
+    const first = await harness.make().sync.syncById(1);
+    assert.ok(first.deploy && 'pending' in first.deploy, 'noted, not built yet (60s interval)');
+    harness.apis.shop.products.set('gid://shopify/Product/2', shopifyProduct(2, { title: 'B' }));
+    await harness.make().sync.syncById(2);
+    assert.equal(harness.hooks.length, 1);
+    harness.tick(60);
+    const cron = await harness.make().sync.reconcile(); // the cron run
+    assert.deepEqual(cron.deploy, { triggered: true });
+    assert.equal(harness.hooks.length, 2, 'two changes, one build');
   } finally {
     Date.now = realNow;
   }
 });
 
 test('deploy-only: a failing hook is retried on the next run', async () => {
-  const t = setup({ hookStatus: 500 });
-  const r = await t.make().sync.importAll();
-  assert.ok(r.deploy && 'error' in r.deploy);
-  assert.match(r.deploy.error, /answered 500/);
-  assert.deepEqual(await t.store.get('deploy:state'), { dirty: true, lastAt: 0 });
+  const harness = setup({ hookStatus: 500 });
+  const result = await harness.make().sync.importAll();
+  assert.ok(result.deploy && 'error' in result.deploy);
+  assert.match(result.deploy.error, /answered 500/);
+  assert.deepEqual(await harness.store.get('deploy:state'), { dirty: true, lastAt: 0 });
 });
 
 test('deploy-only from the Deploy button: Webflow fields filled with "none" count as unset', async () => {
-  const t = setup({ env: { ...shopEnv, WEBFLOW_TOKEN: 'none', WEBFLOW_COLLECTION_ID: 'none' } });
-  const app = t.make();
+  const harness = setup({ env: { ...shopEnv, WEBFLOW_TOKEN: 'none', WEBFLOW_COLLECTION_ID: 'none' } });
+  const app = harness.make();
   assert.equal(app.deployOnly, true);
   await app.sync.importAll();
-  assert.equal(t.hooks.length, 1);
+  assert.equal(harness.hooks.length, 1);
 });
 
 test('Webflow + deploy hook: Webflow is written and a build starts', async () => {
-  const t = setup({
+  const harness = setup({
     config: baseConfig,
     env: { ...shopEnv, WEBFLOW_TOKEN: 'wf', SHOPIFY_DOMAIN: 'shop.myshopify.com' },
   });
-  const app = t.make();
+  const app = harness.make();
   assert.equal(app.deployOnly, false);
   await app.sync.importAll();
-  assert.equal(t.apis.wf.items.size, 2);
-  assert.equal(t.hooks.length, 1);
+  assert.equal(harness.apis.wf.items.size, 2);
+  assert.equal(harness.hooks.length, 1);
   assert.ok(app.webflow.requests > 0, 'the request count follows the Webflow client');
 });
 
 test('check in deploy-only mode: no Webflow errors, the hook is validated', async () => {
   const ok = await runCheck(defaultConfig, shopEnv, { deep: false });
-  assert.ok(!ok.steps.some((s) => /Webflow/.test(s.title)), ok.steps.map((s) => s.title).join(','));
+  assert.ok(!ok.steps.some((step) => /Webflow/.test(step.title)), ok.steps.map((step) => step.title).join(','));
   assert.match(checkStep(ok, 'Deploy hook').message, /no Webflow/);
   assert.equal(ok.ok, true);
   const bad = await runCheck(defaultConfig, { ...shopEnv, DEPLOY_HOOK_URL: 'http://insecure.test' }, { deep: false });

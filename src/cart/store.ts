@@ -7,6 +7,7 @@ import { cfg } from '../config.ts';
 import { emit } from '../dom.ts';
 import { isOpen } from './drawer.ts';
 import { renderCart, quantityOf, showSavedCount } from './render.ts';
+import { getStored, removeStored, setStored } from '../storage.ts';
 import type { CartWarning } from '../config.ts';
 import type { Image } from '../fragments.ts';
 import type { Money } from '../shopify-values.ts';
@@ -132,41 +133,18 @@ const statusOf = (cart: ShopifyCart | null): CartStatus => (cart ? { kind: 'read
 
 const seenKey = () => `${cfg.storageKey}:seen`;
 
-/** localStorage throws in private mode and where the visitor blocks site data: the cart then lasts for this page. */
-function readStorageIfAllowed(key: string): string | null {
-  try {
-    return localStorage.getItem(key);
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Like `readStorageIfAllowed`: without storage, nothing is remembered.
- *
- * @param value `null` removes the key.
- */
-function writeStorageIfAllowed(key: string, value: string | null) {
-  try {
-    if (value === null) localStorage.removeItem(key);
-    else localStorage.setItem(key, value);
-  } catch {
-    // Private mode or blocked storage: see readStorageIfAllowed.
-  }
-}
-
 /** The id of the visitor's cart, kept across pages. */
-export const savedCartId = (): string | null => readStorageIfAllowed(cfg.storageKey) || null;
+export const savedCartId = (): string | null => getStored(cfg.storageKey) || null;
 
 /** Forgets the saved cart, which Shopify no longer has. */
 export function forgetSavedCart(): void {
-  writeStorageIfAllowed(cfg.storageKey, null);
+  removeStored(cfg.storageKey);
 }
 
 /** Keeps a cart Shopify sent without showing it, for an answer a newer change will replace. */
 export function keepQuietly(cart: ShopifyCart | null): void {
   status = statusOf(cart);
-  if (cart) writeStorageIfAllowed(cfg.storageKey, cart.id);
+  if (cart) setStored(cfg.storageKey, cart.id);
 }
 
 /** Renders the document with the store's cart. */
@@ -193,7 +171,7 @@ export function announce(reason: string): void {
 export function commit(cart: ShopifyCart | null, reason: string): ShopifyCart | null {
   keepQuietly(cart);
   // Other tabs reload the cart on this storage event; the next page shows the count before its cart has loaded.
-  writeStorageIfAllowed(seenKey(), `${Date.now()}|${cart?.totalQuantity ?? 0}`);
+  setStored(seenKey(), `${Date.now()}|${cart?.totalQuantity ?? 0}`);
   announce(reason);
   return cart;
 }
@@ -206,11 +184,22 @@ export function settleLoad(
   announce('load');
 }
 
+/**
+ * The cart's count on the last page, from `<storageKey>:seen` (`<time>|<count>`).
+ *
+ * @returns `null` unless the count is a whole number: other scripts and other Tether versions write storage too.
+ */
+function lastKnownCount(): number | null {
+  const text = getStored(seenKey())?.split('|')[1] ?? '';
+  const count = Number(text);
+  return /^\d+$/.test(text) && Number.isSafeInteger(count) ? count : null;
+}
+
 /** Until the saved cart has loaded, the counts show the count it had on the last page instead of the page's 0. */
 export function showLastKnownCount(): void {
   if (status.kind !== 'unknown') return;
-  const count = readStorageIfAllowed(seenKey())?.split('|')[1];
-  if (count) showSavedCount(count);
+  const count = lastKnownCount();
+  if (count !== null) showSavedCount(count);
 }
 
 /** Sets Shopify's notes on the last change: each message once, in the site's words (`warningText`). */

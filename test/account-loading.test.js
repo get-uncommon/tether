@@ -29,6 +29,7 @@ const QUIET_MS = 200;
 const LOAD_MS = 2000;
 
 // `debug`: the part's first mount logs.
+/** @param {Record<string, unknown>} account Raw, as a site writes it. */
 const testConfig = (account) => ({
   domain: 'shop.test',
   token: 't',
@@ -50,6 +51,7 @@ function partRanWithin(search, waitMs) {
   window.history.replaceState(null, '', `/account${search}`);
   return new Promise((resolve) => {
     const consoleLog = console.log;
+    /** @param {boolean} ran */
     const finish = (ran) => {
       clearTimeout(timer);
       document.removeEventListener('tether:account-error', onEvent);
@@ -77,6 +79,7 @@ beforeEach(() => {
 });
 
 test('an account config without server warns once that accounts need the Worker, and loads nothing', async () => {
+  /** @type {string[]} */
   const warned = [];
   const consoleWarn = console.warn;
   console.warn = (...args) => warned.push(args.join(' '));

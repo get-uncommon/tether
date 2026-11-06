@@ -18,12 +18,15 @@ const env = {
 };
 const auth = { authorization: `Bearer ${SECRET}` };
 
+/** @typedef {Awaited<ReturnType<typeof import('../src/check.ts').runCheck>> & { kv: boolean }} CheckAnswer */
+
 /**
  * A KV namespace in memory.
  *
  * @returns {import('../src/env.ts').KvBinding & { map: Map<string, string> }}
  */
 function kv() {
+  /** @type {Map<string, string>} */
   const map = new Map();
   return {
     map,
@@ -41,8 +44,13 @@ function kv() {
   };
 }
 
-/** Runs `body` with console.error collected instead of printed. */
+/**
+ * Runs `body` with console.error collected instead of printed.
+ *
+ * @param {() => Promise<void>} body
+ */
 async function collectErrors(body) {
+  /** @type {string[]} */
   const lines = [];
   const realError = console.error;
   console.error = (...args) => lines.push(args.join(' '));
@@ -78,6 +86,7 @@ test('the cron logs a failed reconcile and rethrows it, so Cloudflare marks the 
     fetch: async () => new Response('down', { status: 503 }),
     sleep: instantSleep,
   });
+  /** @type {Promise<unknown>[]} */
   const tasks = [];
   const logged = await collectErrors(async () => {
     await assert.rejects(
@@ -93,6 +102,10 @@ test('the cron logs a failed reconcile and rethrows it, so Cloudflare marks the 
 test('/check: a missing namespace is a warning for the sync and an error once accounts are on', async () => {
   const apis = createMockApis({ products: [shopifyProduct(1)] });
   const worker = createWorker(defaultConfig, { fetch: apis.fetch, sleep: instantSleep });
+  /**
+   * @param {Record<string, unknown>} extra
+   * @returns {Promise<CheckAnswer>}
+   */
   const check = async (extra) =>
     (
       await worker.fetch(new Request('https://w.test/check', { headers: auth }), { ...env, ...extra }, noWaitUntil)
@@ -133,6 +146,7 @@ test('/check: a missing namespace is a warning for the sync and an error once ac
 test('with customer accounts but no ACCOUNT_SECRET only the account routes stop; sync, webhooks and deploys run', async () => {
   const hook = 'https://api.pages.test/deploy_hooks/abc';
   const apis = createMockApis({ products: [shopifyProduct(1), shopifyProduct(2)] });
+  /** @type {(RequestInfo | URL)[]} */
   const deploys = [];
   /** @type {typeof globalThis.fetch} */
   const fetchWithHook = async (url, init) => {
@@ -152,8 +166,13 @@ test('with customer accounts but no ACCOUNT_SECRET only the account routes stop;
     DEPLOY_HOOK_MIN_SECONDS: '0',
     TETHER_SYNC: kv(),
   };
+  /** @type {Promise<unknown>[]} */
   const tasks = [];
-  const context = { waitUntil: (task) => tasks.push(task) };
+  const context = { waitUntil: (/** @type {Promise<unknown>} */ task) => tasks.push(task) };
+  /**
+   * @param {string} path
+   * @param {RequestInit} [init]
+   */
   const send = (path, init) => worker.fetch(new Request(`https://w.test${path}`, init), accountsWithoutSecret, context);
 
   const logged = await collectErrors(async () => {
@@ -163,13 +182,14 @@ test('with customer accounts but no ACCOUNT_SECRET only the account routes stop;
   });
   assert.ok(logged.some((line) => /account setup ACCOUNT_SECRET is not set/.test(line)));
 
+  /** @type {CheckAnswer} */
   const report = await (await send('/check', { headers: auth })).json();
   const errors = report.steps.filter((step) => step.level === 'error');
   assert.deepEqual(
     errors.map((step) => step.title),
     ['Customer accounts'],
   );
-  assert.match(errors[0].message, /ACCOUNT_SECRET is not set/);
+  assert.match(errors[0]?.message ?? '', /ACCOUNT_SECRET is not set/);
 
   const imported = await send('/reconcile?since=all', { method: 'POST', headers: auth });
   assert.equal(imported.status, 200);
@@ -199,13 +219,14 @@ test('with customer accounts but no ACCOUNT_SECRET only the account routes stop;
   assert.equal(cron.stopped, null);
 });
 
-test('the Worker and the browser script are released with one version', async (t) => {
+test('the Worker and the browser script are released with one version', async (context) => {
   const { readFile } = await import('node:fs/promises');
+  /** @param {string} path */
   const json = async (path) => JSON.parse(await readFile(new URL(path, import.meta.url), 'utf8'));
   const server = await json('../package.json');
   // A deployed copy holds only server/; whatever lies above it is not Tether's repository.
   const root = await json('../../package.json').catch((error) => ({ unreadable: error }));
-  if (root.name !== '@occluze/tether') return t.skip('not in the Tether repository');
+  if (root.name !== '@occluze/tether') return context.skip('not in the Tether repository');
   assert.equal(server.version, root.version, 'server/package.json and the root package.json');
   const browserVersion = /export const VERSION = '([^']+)'/.exec(
     await readFile(new URL('../../src/index.ts', import.meta.url), 'utf8'),

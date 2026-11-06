@@ -15,8 +15,12 @@ import {
   toSlug,
   createWorker,
 } from '../src/index.ts';
-import { createMockApis, shopifyProduct, baseConfig, env, instantSleep } from './mocks.js';
+import { createMockApis, shopifyProduct, baseConfig, env, instantSleep, recordAt, asString } from './mocks.js';
 
+/**
+ * @param {Parameters<typeof createMockApis>[0] & { store?: import('../src/store.ts').Store }} [opts]
+ * @param {import('../src/mapping.ts').RawConfig} [config]
+ */
 const setup = (opts = {}, config = baseConfig) => {
   const apis = createMockApis(opts);
   const store = opts.store || memoryStore();
@@ -40,10 +44,10 @@ test('HMAC: valid signature passes, tampered body or wrong secret fails', async 
 test('mapping: sources, metafields, slug, owned fields and config checks', () => {
   const cfg = normalizeConfig(baseConfig);
   assert.deepEqual(cfg.shopify.metafields, ['custom.material']);
-  const p = normalizeProduct(shopifyProduct(7), cfg.shopify.metafields);
-  assert.equal(p.compareAtPrice, 15);
-  const fd = mapProduct(p, cfg);
-  assert.deepEqual(fd, {
+  const product = normalizeProduct(shopifyProduct(7), cfg.shopify.metafields);
+  assert.equal(product.compareAtPrice, 15);
+  const fieldData = mapProduct(product, cfg);
+  assert.deepEqual(fieldData, {
     name: 'Product 7',
     slug: 'product-7',
     'shopify-id': '7',
@@ -71,7 +75,7 @@ test('mapping: sources, metafields, slug, owned fields and config checks', () =>
       ],
     },
   );
-  const text = problems.map((p) => p.message).join('\n');
+  const text = problems.map((problem) => problem.message).join('\n');
   assert.match(text, /"gone" doesn't exist/);
   assert.match(text, /"price" is a Number field but maps "title"/);
   assert.match(text, /Required Webflow field "required-thing"/);
@@ -79,22 +83,23 @@ test('mapping: sources, metafields, slug, owned fields and config checks', () =>
 });
 
 test('throttle spaces requests and pauses after a 429', async () => {
-  let t = 0;
+  let clock = 0;
+  /** @type {number[]} */
   const waits = [];
-  const th = createThrottle({
+  const throttle = createThrottle({
     perMinute: 60,
-    now: () => t,
+    now: () => clock,
     sleep: async (ms) => {
       waits.push(ms);
-      t += ms;
+      clock += ms;
     },
   });
-  await th.wait();
-  await th.wait();
-  await th.wait();
+  await throttle.wait();
+  await throttle.wait();
+  await throttle.wait();
   assert.deepEqual(waits, [1000, 1000]);
-  th.pause(5000);
-  await th.wait();
+  throttle.pause(5000);
+  await throttle.wait();
   assert.equal(waits.at(-1), 5000);
 });
 
@@ -102,12 +107,12 @@ test('throttle spaces requests and pauses after a 429', async () => {
 
 test('import creates and publishes every product; running it again writes nothing', async () => {
   const { sync, wf, webflowWrites } = setup({ products: [shopifyProduct(1), shopifyProduct(2), shopifyProduct(3)] });
-  const r = await sync.importAll();
-  assert.equal(r.products, 3);
-  assert.equal(r.stats.created, 3);
+  const result = await sync.importAll();
+  assert.equal(result.products, 3);
+  assert.equal(result.stats.created, 3);
   assert.equal(wf.items.size, 3);
   assert.equal(wf.live.size, 3);
-  const publishes = webflowWrites().filter((c) => c.path.endsWith('/items/publish'));
+  const publishes = webflowWrites().filter((call) => call.path.endsWith('/items/publish'));
   assert.equal(publishes.length, 1, 'published in one batch');
 
   const before = webflowWrites().length;
@@ -121,29 +126,31 @@ test('state survives a new process (store), so a fresh run is still idempotent',
   const first = setup({ products: [shopifyProduct(1)], store });
   await first.sync.importAll();
   const second = createApp(baseConfig, env, { store, fetch: first.fetch, sleep: instantSleep });
-  const n = first.webflowWrites().length;
-  const r = await second.sync.importAll();
-  assert.equal(r.stats.unchanged, 1);
-  assert.equal(first.webflowWrites().length, n);
+  const writesBefore = first.webflowWrites().length;
+  const result = await second.sync.importAll();
+  assert.equal(result.stats.unchanged, 1);
+  assert.equal(first.webflowWrites().length, writesBefore);
 });
 
 test('update sends changed fields but never Webflow-owned ones', async () => {
   const { sync, shop, wf, webflowWrites } = setup({ products: [shopifyProduct(1)] });
   await sync.importAll();
-  const item = [...wf.items.values()][0];
-  item.fieldData.description = '<p>Edited in Webflow</p>';
+  const [item] = [...wf.items.values()];
+  assert.ok(item);
+  item.fieldData['description'] = '<p>Edited in Webflow</p>';
 
   shop.products.set(
     'gid://shopify/Product/1',
     shopifyProduct(1, { title: 'Renamed', descriptionHtml: '<p>New</p>', updatedAt: '2026-11-02T00:00:00Z' }),
   );
-  const r = await sync.syncById('1');
-  assert.equal(r.action, 'updated');
-  const patch = webflowWrites().find((c) => c.method === 'PATCH');
+  const result = await sync.syncById('1');
+  assert.equal(result.action, 'updated');
+  const patch = webflowWrites().find((call) => call.method === 'PATCH');
   assert.ok(patch);
-  assert.equal(patch.body.fieldData.name, 'Renamed');
-  assert.ok(!('description' in patch.body.fieldData));
-  assert.equal(item.fieldData.description, '<p>Edited in Webflow</p>');
+  const fieldData = recordAt(patch.body, 'fieldData');
+  assert.equal(fieldData['name'], 'Renamed');
+  assert.ok(!('description' in fieldData));
+  assert.equal(item.fieldData['description'], '<p>Edited in Webflow</p>');
   assert.ok(wf.live.has(item.id));
 });
 
@@ -155,22 +162,23 @@ test('matches existing items by shopify-id, adopts hand-made items by slug', asy
       { id: 'hand2', fieldData: { name: 'Made by hand', slug: 'product-2' } },
     ],
   });
-  const r = await sync.importAll();
-  assert.equal(r.stats.updated, 2);
-  assert.equal(r.stats.created || 0, 0);
-  assert.equal(wf.items.get('old1')?.fieldData.slug, 'new-handle', 'handle change follows to the slug');
+  const result = await sync.importAll();
+  assert.equal(result.stats.updated, 2);
+  assert.equal(result.stats.created || 0, 0);
+  assert.equal(wf.items.get('old1')?.fieldData['slug'], 'new-handle', 'handle change follows to the slug');
   assert.equal(wf.items.get('hand2')?.fieldData['shopify-id'], '2');
 });
 
 test('draft/archived products are archived and unpublished; reactivation restores them', async () => {
   const { sync, shop, wf } = setup({ products: [shopifyProduct(1), shopifyProduct(2, { status: 'DRAFT' })] });
-  const r = await sync.importAll();
-  assert.equal(r.stats.created, 1);
-  assert.equal(r.stats.skipped, 1, 'no item created for a draft');
+  const result = await sync.importAll();
+  assert.equal(result.stats.created, 1);
+  assert.equal(result.stats.skipped, 1, 'no item created for a draft');
 
   shop.products.set('gid://shopify/Product/1', shopifyProduct(1, { status: 'ARCHIVED' }));
   assert.equal((await sync.syncById('1')).action, 'archived');
-  const item = [...wf.items.values()][0];
+  const [item] = [...wf.items.values()];
+  assert.ok(item);
   assert.equal(item.isArchived, true);
   assert.equal(wf.live.has(item.id), false);
 
@@ -181,18 +189,19 @@ test('draft/archived products are archived and unpublished; reactivation restore
 });
 
 test('deleted products: archive (default) or delete', async () => {
-  const a = setup({ products: [shopifyProduct(1)] });
-  await a.sync.importAll();
-  assert.equal((await a.sync.removeProduct(1)).action, 'archived');
-  const item = [...a.wf.items.values()][0];
+  const archiving = setup({ products: [shopifyProduct(1)] });
+  await archiving.sync.importAll();
+  assert.equal((await archiving.sync.removeProduct(1)).action, 'archived');
+  const [item] = [...archiving.wf.items.values()];
+  assert.ok(item);
   assert.equal(item.isArchived, true);
-  assert.equal(a.wf.live.size, 0);
-  assert.equal((await a.sync.removeProduct(999)).action, 'skipped');
+  assert.equal(archiving.wf.live.size, 0);
+  assert.equal((await archiving.sync.removeProduct(999)).action, 'skipped');
 
-  const d = setup({ products: [shopifyProduct(1)] }, { ...baseConfig, onDelete: 'delete' });
-  await d.sync.importAll();
-  assert.equal((await d.sync.removeProduct('gid://shopify/Product/1')).action, 'deleted');
-  assert.equal(d.wf.items.size, 0);
+  const deleting = setup({ products: [shopifyProduct(1)] }, { ...baseConfig, onDelete: 'delete' });
+  await deleting.sync.importAll();
+  assert.equal((await deleting.sync.removeProduct('gid://shopify/Product/1')).action, 'deleted');
+  assert.equal(deleting.wf.items.size, 0);
 });
 
 test('import --prune archives items whose product is gone', async () => {
@@ -200,8 +209,8 @@ test('import --prune archives items whose product is gone', async () => {
     products: [shopifyProduct(1)],
     items: [{ id: 'orphan', fieldData: { name: 'Gone', slug: 'gone', 'shopify-id': '42' } }],
   });
-  const r = await sync.importAll({ prune: true });
-  assert.equal(r.pruned.length, 1);
+  const result = await sync.importAll({ prune: true });
+  assert.equal(result.pruned.length, 1);
   assert.equal(wf.items.get('orphan')?.isArchived, true);
 });
 
@@ -218,8 +227,8 @@ test('dry run writes nothing', async () => {
   const apis = createMockApis({ products: [shopifyProduct(1)] });
   const store = memoryStore();
   const app = createApp(baseConfig, env, { store, fetch: apis.fetch, dryRun: true, sleep: instantSleep });
-  const r = await app.sync.importAll();
-  assert.equal(r.stats.created, 1);
+  const result = await app.sync.importAll();
+  assert.equal(result.stats.created, 1);
   assert.equal(apis.webflowWrites().length, 0);
   assert.equal(store.map.size, 0);
 });
@@ -227,32 +236,32 @@ test('dry run writes nothing', async () => {
 // ---- reconcile --------------------------------------------------------------
 
 test('reconcile: only products updated since the cursor, budgeted, resumable, idempotent', async () => {
-  const products = [1, 2, 3, 4, 5].map((n) => shopifyProduct(n));
+  const products = [1, 2, 3, 4, 5].map((number) => shopifyProduct(number));
   const { sync, store, shop, wf } = setup({ products }, { ...baseConfig, reconcile: { overlapMinutes: 0 } });
   await store.put('reconcile:since', '2026-11-01T00:00:03Z');
 
-  const r1 = await sync.reconcile({ maxChanges: 2 });
-  assert.equal(r1.changes, 2);
-  assert.equal(r1.complete, false);
-  assert.equal(r1.until, '2026-11-01T00:00:04Z');
+  const first = await sync.reconcile({ maxChanges: 2 });
+  assert.equal(first.changes, 2);
+  assert.equal(first.complete, false);
+  assert.equal(first.until, '2026-11-01T00:00:04Z');
   assert.equal(wf.items.size, 2, 'products 3 and 4');
 
-  const r2 = await sync.reconcile({ maxChanges: 2 });
-  assert.equal(r2.complete, true);
-  assert.equal(r2.changes, 1, 'product 5; 4 is re-read but unchanged');
+  const second = await sync.reconcile({ maxChanges: 2 });
+  assert.equal(second.complete, true);
+  assert.equal(second.changes, 1, 'product 5; 4 is re-read but unchanged');
   assert.equal(wf.items.size, 3);
 
-  const r3 = await sync.reconcile();
-  assert.equal(r3.changes, 0);
+  const third = await sync.reconcile();
+  assert.equal(third.changes, 0);
   assert.equal(await store.get('reconcile:since'), '2026-11-01T00:00:05Z');
 
   shop.products.set(
     'gid://shopify/Product/1',
     shopifyProduct(1, { title: 'Late edit', updatedAt: '2026-11-03T00:00:00Z' }),
   );
-  const r4 = await sync.reconcile();
-  assert.equal(r4.changes, 1);
-  assert.equal(r4.until, '2026-11-03T00:00:00Z');
+  const afterEdit = await sync.reconcile();
+  assert.equal(afterEdit.changes, 1);
+  assert.equal(afterEdit.until, '2026-11-03T00:00:00Z');
 });
 
 test('reconcile retries failed products on the next run', async () => {
@@ -261,17 +270,19 @@ test('reconcile retries failed products on the next run', async () => {
     failCreateFor: 'bad',
   });
   await store.put('reconcile:since', '2026-01-01T00:00:00Z');
-  const r1 = await sync.reconcile();
-  assert.equal(r1.failures.length, 1);
-  assert.equal(r1.changes, 1);
+  const first = await sync.reconcile();
+  assert.equal(first.failures.length, 1);
+  assert.equal(first.changes, 1);
+  const retry = await store.get('reconcile:retry');
+  assert.ok(Array.isArray(retry));
   assert.deepEqual(
-    (await store.get('reconcile:retry')).map((f) => f.id),
+    retry.map((entry) => entry.id),
     ['1'],
   );
 
   shop.products.set('gid://shopify/Product/1', shopifyProduct(1, { handle: 'fixed' }));
-  const r2 = await sync.reconcile();
-  assert.equal(r2.failures.length, 0);
+  const retried = await sync.reconcile();
+  assert.equal(retried.failures.length, 0);
   assert.deepEqual(await store.get('reconcile:retry'), []);
 });
 
@@ -279,7 +290,7 @@ test('Webflow 429 is retried after Retry-After', async () => {
   const { sync, wf, calls } = setup({ products: [shopifyProduct(1)], rateLimitOnce: true });
   await sync.importAll();
   assert.equal(wf.items.size, 1);
-  assert.ok(calls.filter((c) => c.host === 'api.webflow.com').length >= 3);
+  assert.ok(calls.filter((call) => call.host === 'api.webflow.com').length >= 3);
 });
 
 test('client credentials grant: token fetched once and sent to the Admin API', async () => {
@@ -291,10 +302,10 @@ test('client credentials grant: token fetched once and sent to the Admin API', a
   );
   await app.sync.importAll();
   await app.sync.syncById(1);
-  const tokenCalls = apis.calls.filter((c) => c.path === '/admin/oauth/access_token');
+  const tokenCalls = apis.calls.filter((call) => call.path === '/admin/oauth/access_token');
   assert.equal(tokenCalls.length, 1);
-  assert.match(tokenCalls[0].body, /grant_type=client_credentials/);
-  const admin = apis.calls.find((c) => c.path.startsWith('/admin/api/2026-07/'));
+  assert.match(asString(tokenCalls[0]?.body, 'the token request'), /grant_type=client_credentials/);
+  const admin = apis.calls.find((call) => call.path.startsWith('/admin/api/2026-07/'));
   assert.ok(admin);
   assert.equal(new Headers(admin.headers).get('X-Shopify-Access-Token'), 'shpat_fresh');
   assert.deepEqual(app.webhookSecrets, ['csecret'], 'app webhooks are signed with the client secret');
@@ -309,6 +320,7 @@ test('client credentials grant: token fetched once and sent to the Admin API', a
  */
 async function webhook(topic, payload, { secret = 'whsec', shop = 'shop.myshopify.com' } = {}) {
   const body = JSON.stringify(payload);
+  /** @type {Record<string, string>} */
   const headers = { 'x-shopify-topic': topic, 'x-shopify-hmac-sha256': await signShopify(body, secret) };
   if (shop) headers['x-shopify-shop-domain'] = shop;
   return new Request('https://sync.test/webhooks/shopify', { method: 'POST', body, headers });
@@ -324,51 +336,54 @@ test('webhook: verifies HMAC and shop, syncs update, archives on delete', async 
   const { app, wf, shop } = setup({ products: [shopifyProduct(1)] });
   const opts = { sync: app.sync, secrets: app.webhookSecrets, shopDomain: 'shop.myshopify.com', sleep: instantSleep };
 
-  let r = await handleShopifyWebhook(await webhook('products/update', { id: 1 }, { secret: 'wrong' }), opts);
-  assert.equal(r.response.status, 401);
-  r = await handleShopifyWebhook(await webhook('products/update', { id: 1 }, { shop: 'evil.myshopify.com' }), opts);
-  assert.equal(r.response.status, 403);
-  r = await handleShopifyWebhook(await webhook('products/update', { id: 1 }, { shop: null }), opts);
-  assert.equal(r.response.status, 403, 'a signed webhook without a shop header is not accepted');
-  r = await handleShopifyWebhook(await webhook('orders/create', { id: 1 }), opts);
-  assert.equal(r.response.status, 200);
-  assert.equal(r.task, undefined);
+  let handled = await handleShopifyWebhook(await webhook('products/update', { id: 1 }, { secret: 'wrong' }), opts);
+  assert.equal(handled.response.status, 401);
+  handled = await handleShopifyWebhook(
+    await webhook('products/update', { id: 1 }, { shop: 'evil.myshopify.com' }),
+    opts,
+  );
+  assert.equal(handled.response.status, 403);
+  handled = await handleShopifyWebhook(await webhook('products/update', { id: 1 }, { shop: null }), opts);
+  assert.equal(handled.response.status, 403, 'a signed webhook without a shop header is not accepted');
+  handled = await handleShopifyWebhook(await webhook('orders/create', { id: 1 }), opts);
+  assert.equal(handled.response.status, 200);
+  assert.equal(handled.task, undefined);
 
-  r = await handleShopifyWebhook(
+  handled = await handleShopifyWebhook(
     await webhook('products/update', { id: 1, admin_graphql_api_id: 'gid://shopify/Product/1' }),
     opts,
   );
-  assert.equal(r.response.status, 200);
-  assert.equal((await acceptedTask(r)).action, 'created');
+  assert.equal(handled.response.status, 200);
+  assert.equal((await acceptedTask(handled)).action, 'created');
 
   // create arrives right after update for a new product: no duplicate item
-  r = await handleShopifyWebhook(
+  handled = await handleShopifyWebhook(
     await webhook('products/create', { id: 1, admin_graphql_api_id: 'gid://shopify/Product/1' }),
     opts,
   );
-  assert.equal((await acceptedTask(r)).action, 'unchanged');
+  assert.equal((await acceptedTask(handled)).action, 'unchanged');
   assert.equal(wf.items.size, 1);
 
   shop.products.delete('gid://shopify/Product/1');
-  r = await handleShopifyWebhook(await webhook('products/delete', { id: 1 }), opts);
-  assert.equal((await acceptedTask(r)).action, 'archived');
+  handled = await handleShopifyWebhook(await webhook('products/delete', { id: 1 }), opts);
+  assert.equal((await acceptedTask(handled)).action, 'archived');
 });
 
 test('webhook: an unsigned topic header cannot delete a live product (Shopify is asked)', async () => {
   const { app, wf } = setup({ products: [shopifyProduct(1)] });
   const opts = { sync: app.sync, secrets: app.webhookSecrets, shopDomain: 'shop.myshopify.com', sleep: instantSleep };
-  let r = await handleShopifyWebhook(
+  let handled = await handleShopifyWebhook(
     await webhook('products/update', { id: 1, admin_graphql_api_id: 'gid://shopify/Product/1' }),
     opts,
   );
-  assert.equal((await acceptedTask(r)).action, 'created');
+  assert.equal((await acceptedTask(handled)).action, 'created');
   // The same signed body, replayed with the topic header changed to products/delete.
-  r = await handleShopifyWebhook(
+  handled = await handleShopifyWebhook(
     await webhook('products/delete', { id: 1, admin_graphql_api_id: 'gid://shopify/Product/1' }),
     opts,
   );
-  assert.equal(r.response.status, 200);
-  assert.notEqual((await acceptedTask(r)).action, 'archived');
+  assert.equal(handled.response.status, 200);
+  assert.notEqual((await acceptedTask(handled)).action, 'archived');
   const [item] = [...wf.items.values()];
   assert.ok(item && !item.isArchived, 'the live item stays');
 });
@@ -382,33 +397,34 @@ test('concurrent create + update webhooks for a new product make one item', asyn
     sleep: instantSleep,
     createDelayMs: 0,
   };
-  const [a, b] = await Promise.all([
+  const [created, updated] = await Promise.all([
     handleShopifyWebhook(await webhook('products/create', { id: 9 }), opts),
     handleShopifyWebhook(await webhook('products/update', { id: 9 }), opts),
   ]);
-  await Promise.all([a.task, b.task]);
+  await Promise.all([created.task, updated.task]);
   assert.equal(wf.items.size, 1);
 });
 
 /** @returns {import('../src/env.ts').KvBinding & { readonly writes: number }} */
 function kv() {
-  const m = new Map();
+  /** @type {Map<string, string>} */
+  const entries = new Map();
   let writes = 0;
   return {
     get writes() {
       return writes;
     },
-    async get(k, type) {
-      const v = m.get(k);
-      if (v == null) return null;
-      return type === 'json' ? JSON.parse(v) : v;
+    async get(key, type) {
+      const value = entries.get(key);
+      if (value == null) return null;
+      return type === 'json' ? JSON.parse(value) : value;
     },
-    async put(k, v) {
+    async put(key, value) {
       writes++;
-      m.set(k, v);
+      entries.set(key, value);
     },
-    async delete(k) {
-      m.delete(k);
+    async delete(key) {
+      entries.delete(key);
     },
   };
 }
@@ -418,8 +434,9 @@ test('worker: webhook route with waitUntil, cron reconcile writes KV only on cha
   const worker = createWorker(baseConfig, { fetch: apis.fetch, sleep: instantSleep });
   const TETHER_SYNC = kv();
   const wenv = { ...env, TETHER_SYNC, SYNC_SECRET: 's3cret-s3cret-s3cret-s3cret' };
+  /** @type {Promise<unknown>[]} */
   const pending = [];
-  const ctx = { waitUntil: (p) => pending.push(p) };
+  const ctx = { waitUntil: (/** @type {Promise<unknown>} */ promise) => pending.push(promise) };
 
   const health = await worker.fetch(new Request('https://sync.test/health'), wenv, ctx);
   const { VERSION } = await import('../src/version.ts');
@@ -442,11 +459,11 @@ test('worker: webhook route with waitUntil, cron reconcile writes KV only on cha
   assert.equal(apis.wf.items.size, 1);
 
   await TETHER_SYNC.put('tether-sync:reconcile:since', JSON.stringify('2026-01-01T00:00:00Z'));
-  const r1 = await worker.scheduled({ cron: '*/10 * * * *' }, wenv, ctx);
-  assert.equal(r1.changes, 0, 'already synced by the webhook');
+  const afterWebhook = await worker.scheduled({ cron: '*/10 * * * *' }, wenv, ctx);
+  assert.equal(afterWebhook.changes, 0, 'already synced by the webhook');
   const writes = TETHER_SYNC.writes;
-  const r2 = await worker.scheduled({}, wenv, ctx);
-  assert.equal(r2.changes, 0);
+  const quiet = await worker.scheduled({}, wenv, ctx);
+  assert.equal(quiet.changes, 0);
   assert.equal(TETHER_SYNC.writes, writes, 'quiet runs write nothing to KV');
 
   const denied = await worker.fetch(new Request('https://sync.test/reconcile', { method: 'POST' }), wenv, ctx);
@@ -469,32 +486,35 @@ test('a failed publish is not committed, so the next run publishes again', async
   assert.equal(wf.items.size, 1);
   assert.equal(wf.live.size, 0);
   flags.failPublish = false;
-  const r = await sync.importAll();
-  assert.equal(r.stats.updated, 1, 'not "unchanged": it was never live');
+  const result = await sync.importAll();
+  assert.equal(result.stats.updated, 1, 'not "unchanged": it was never live');
   assert.equal(wf.items.size, 1, 'found the created item, no duplicate');
   assert.equal(wf.live.size, 1);
 });
 
 test('concurrent create + update webhooks in two Worker invocations: one item (unique slug)', async () => {
   const apis = createMockApis({ products: [shopifyProduct(5)] });
-  const kv = new Map();
+  /** @type {Map<string, string>} */
+  const entries = new Map();
   /** @type {import('../src/env.ts').KvBinding} */
   const TETHER_SYNC = {
-    async get(k, t) {
-      const v = kv.get(k);
-      if (v == null) return null;
-      return t === 'json' ? JSON.parse(v) : v;
+    async get(key, type) {
+      const value = entries.get(key);
+      if (value == null) return null;
+      return type === 'json' ? JSON.parse(value) : value;
     },
-    async put(k, v) {
-      kv.set(k, v);
+    async put(key, value) {
+      entries.set(key, value);
     },
-    async delete(k) {
-      kv.delete(k);
+    async delete(key) {
+      entries.delete(key);
     },
   };
   const worker = createWorker(baseConfig, { fetch: apis.fetch, sleep: instantSleep });
+  /** @type {Promise<unknown>[]} */
   const tasks = [];
-  const ctx = { waitUntil: (p) => tasks.push(p) };
+  const ctx = { waitUntil: (/** @type {Promise<unknown>} */ promise) => tasks.push(promise) };
+  /** @param {string} topic */
   const hook = async (topic) => {
     const body = JSON.stringify({ id: 5 });
     return new Request('https://w.test/webhooks/shopify', {
@@ -520,24 +540,25 @@ test('slug conflict with a stale index: refreshes, finds the item by shopify-id,
   const apis = createMockApis({ products: [shopifyProduct(5)] });
   const storeB = memoryStore();
   await storeB.put('index', { at: new Date().toISOString(), byId: {}, bySlug: {} }); // fresh but stale cache
-  const a = createApp(baseConfig, env, { store: memoryStore(), fetch: apis.fetch, sleep: instantSleep });
-  const b = createApp(baseConfig, env, { store: storeB, fetch: apis.fetch, sleep: instantSleep });
-  assert.equal((await a.sync.syncById(5)).action, 'created');
-  assert.equal((await b.sync.syncById(5)).action, 'updated');
+  const fresh = createApp(baseConfig, env, { store: memoryStore(), fetch: apis.fetch, sleep: instantSleep });
+  const stale = createApp(baseConfig, env, { store: storeB, fetch: apis.fetch, sleep: instantSleep });
+  assert.equal((await fresh.sync.syncById(5)).action, 'created');
+  assert.equal((await stale.sync.syncById(5)).action, 'updated');
   assert.equal(apis.wf.items.size, 1);
 });
 
 test('caches: the Shopify token and the item index are reused across invocations', async () => {
   const apis = createMockApis({ products: [shopifyProduct(1), shopifyProduct(2)] });
   const store = memoryStore();
-  const cc = { WEBFLOW_TOKEN: 'wf', SHOPIFY_CLIENT_ID: 'id', SHOPIFY_CLIENT_SECRET: 'sec' };
-  const run = () => createApp(baseConfig, cc, { store, fetch: apis.fetch, sleep: instantSleep }).sync.syncById(1);
+  const clientCredentials = { WEBFLOW_TOKEN: 'wf', SHOPIFY_CLIENT_ID: 'id', SHOPIFY_CLIENT_SECRET: 'sec' };
+  const run = () =>
+    createApp(baseConfig, clientCredentials, { store, fetch: apis.fetch, sleep: instantSleep }).sync.syncById(1);
   await run();
   await store.delete('p:1'); // force a lookup on the next run
   await run();
-  assert.equal(apis.calls.filter((c) => c.path === '/admin/oauth/access_token').length, 1);
+  assert.equal(apis.calls.filter((call) => call.path === '/admin/oauth/access_token').length, 1);
   assert.equal(
-    apis.calls.filter((c) => c.method === 'GET' && c.path.includes('/items?')).length,
+    apis.calls.filter((call) => call.method === 'GET' && call.path.includes('/items?')).length,
     1,
     'collection listed once',
   );
@@ -562,7 +583,7 @@ test('prune with onDelete "unpublish" does not repeat itself', async () => {
     { ...baseConfig, onDelete: 'unpublish' },
   );
   assert.equal((await sync.importAll({ prune: true })).pruned.length, 1);
-  const n = webflowWrites().length;
+  const writesBefore = webflowWrites().length;
   assert.equal((await sync.importAll({ prune: true })).pruned.length, 0);
-  assert.equal(webflowWrites().length, n);
+  assert.equal(webflowWrites().length, writesBefore);
 });

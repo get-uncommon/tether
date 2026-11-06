@@ -5,6 +5,7 @@ import { storeHtmlFragment } from '../src/store-html.ts';
 import { find } from './fixtures.js';
 
 const { document } = new JSDOM('<!doctype html><body></body>').window;
+/** @param {string} html */
 const render = (html) => {
   const box = document.createElement('div');
   box.append(storeHtmlFragment(html, document));
@@ -153,6 +154,15 @@ test('transforms, motion paths, negative margins and viewport sizes are removed;
   ]);
 });
 
+test('container-query sizes are removed like viewport sizes: outside a size container they are the window’s', () => {
+  const box = render(
+    '<div style="width: calc(100cqw - 2px); min-height: 100cqh; max-width: 100cqw; color: red">a</div>' +
+      '<div style="inline-size: 100CQI; block-size: 100cqb; min-width: 50cqmin; max-height: 50cqmax; padding: 8px">b</div>',
+  );
+  const styles = [...box.children].map((element) => element.getAttribute('style'));
+  assert.deepEqual(styles, ['color: red;', 'padding: 8px;']);
+});
+
 test('inline styles keep their look but cannot place content over the page or fetch anything', () => {
   const box = render(
     '<p style="color: red; position: fixed; inset: 0; top: 0; left: 0; z-index: 2147483647; font-weight: bold">a</p>' +
@@ -238,6 +248,7 @@ test('a modest outline, shadow or filter on an image or a callout looks as writt
 });
 
 const site = new JSDOM('<!doctype html><body></body>', { url: 'https://shop.test/products/coffee' }).window.document;
+/** @param {string} html */
 const renderOnSite = (html) => {
   const box = site.createElement('div');
   box.append(storeHtmlFragment(html, site));
@@ -286,6 +297,6 @@ test('an embed keeps only the player permissions it asks for: camera, microphone
       '<iframe src="https://www.youtube.com/embed/b" allow="camera; microphone"></iframe>',
   );
   const [first, second] = box.querySelectorAll('iframe');
-  assert.equal(first.getAttribute('allow'), 'autoplay; fullscreen; encrypted-media; picture-in-picture');
-  assert.equal(second.hasAttribute('allow'), false);
+  assert.equal(first?.getAttribute('allow'), 'autoplay; fullscreen; encrypted-media; picture-in-picture');
+  assert.equal(second?.hasAttribute('allow'), false);
 });

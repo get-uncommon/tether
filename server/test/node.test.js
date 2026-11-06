@@ -22,6 +22,7 @@ test('file store: a state file removed by another process leaves what this proce
 
 test('file store: a timed write that fails is logged, and kept for the next flush', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'tether-sync-'));
+  /** @type {unknown[]} */
   const errors = [];
   const store = fileStore(join(dir, 'missing-dir', 'state.json'), {
     delayMs: 1,
@@ -30,7 +31,9 @@ test('file store: a timed write that fails is logged, and kept for the next flus
   await store.put('k', 1);
   await waitFor(() => errors.length > 0, 'the timed write to fail');
   assert.equal(errors.length, 1);
-  assert.match(errors[0], /write failed, retried on the next change/);
+  const [message] = errors;
+  assert.ok(typeof message === 'string');
+  assert.match(message, /write failed, retried on the next change/);
   await assert.rejects(store.flush(), 'the key is still waiting to be written');
 });
 
@@ -55,15 +58,15 @@ test('config file: a value of the wrong type is named when the config loads', as
 test('file store: batched writes, merged with another process, survives a failed write', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'tether-sync-'));
   const path = join(dir, 'state.json');
-  const a = fileStore(path, { delayMs: 10_000 });
-  const b = fileStore(path, { delayMs: 10_000 });
-  for (let i = 0; i < 100; i++) await a.put(`p:${i}`, { i });
-  await b.put('reconcile:since', 'x');
-  await b.flush();
-  await a.flush();
+  const first = fileStore(path, { delayMs: 10_000 });
+  const second = fileStore(path, { delayMs: 10_000 });
+  for (let i = 0; i < 100; i++) await first.put(`p:${i}`, { i });
+  await second.put('reconcile:since', 'x');
+  await second.flush();
+  await first.flush();
   const disk = JSON.parse(await readFile(path, 'utf8'));
   assert.equal(Object.keys(disk).length, 101, "both processes' keys are kept");
-  assert.deepEqual(await b.get('p:5'), { i: 5 }, "b sees a's writes");
+  assert.deepEqual(await second.get('p:5'), { i: 5 }, "the second store sees the first's writes");
 
   const bad = fileStore(join(dir, 'missing-dir', 'state.json'), { delayMs: 10_000 });
   await bad.put('k', 1);

@@ -6,8 +6,8 @@ import { test, expect } from '@playwright/test';
 const MONORAIL = /monorail-edge\.shopifysvc\.com/;
 
 test.beforeEach(async ({ page }) => {
-  await page.route(/checkout\.hydrogen\.shop|\/cart\/c\//, (r) =>
-    r.fulfill({ status: 200, contentType: 'text/html', body: 'checkout' }),
+  await page.route(/checkout\.hydrogen\.shop|\/cart\/c\//, (route) =>
+    route.fulfill({ status: 200, contentType: 'text/html', body: 'checkout' }),
   );
 });
 
@@ -16,10 +16,11 @@ test('script tag: optional parts load from their own files (search, extras), var
   isMobile,
 }) => {
   test.skip(isMobile, 'desktop flow');
+  /** @type {string[]} */
   const parts = [];
-  page.on('request', (r) => {
-    const m = r.url().match(/tether\.(\w+)\.min\.js/);
-    if (m) parts.push(m[1]);
+  page.on('request', (request) => {
+    const part = request.url().match(/tether\.(\w+)\.min\.js/)?.[1];
+    if (part) parts.push(part);
   });
   await page.goto('/plain/?handle=the-h2-snowboard');
   await expect(page.locator('#pdp')).toHaveAttribute('tether-state', 'ready');
@@ -47,16 +48,16 @@ test('GA4: dataLayer gets view_item, add_to_cart and begin_checkout in a real br
   await page.goto('/plain/?handle=the-h2-snowboard');
   await expect(page.locator('#pdp')).toHaveAttribute('tether-state', 'ready');
   await expect
-    .poll(() => page.evaluate(() => (window.dataLayer || []).map((x) => x.event).filter(Boolean)))
+    .poll(() => page.evaluate(() => (window.dataLayer || []).map((entry) => entry.event).filter(Boolean)))
     .toContain('view_item');
   await page.locator('#pdp [tether-add-to-cart]').click();
   await expect
-    .poll(() => page.evaluate(() => window.dataLayer.map((x) => x.event).filter(Boolean)), { timeout: 15000 })
+    .poll(() => page.evaluate(() => window.dataLayer.map((entry) => entry.event).filter(Boolean)), { timeout: 15000 })
     .toContain('add_to_cart');
-  const add = await page.evaluate(() => window.dataLayer.find((x) => x.event === 'add_to_cart'));
+  const add = await page.evaluate(() => window.dataLayer.find((entry) => entry.event === 'add_to_cart'));
   assert.ok(add?.ecommerce);
   expect(add.ecommerce.currency).toBe('EUR');
-  expect(add.ecommerce.items[0].item_name).toMatch(/H2/);
+  expect(add.ecommerce.items[0]?.item_name).toMatch(/H2/);
   await page.locator('[tether-checkout]').click();
   await page.waitForURL(/checkout/);
 });
@@ -70,8 +71,8 @@ test('other market on a static page: html.tether-market-pending until the live p
     window.__classes = [];
     // The init script runs before <html> exists: watch the whole document for it.
     new MutationObserver((list) =>
-      list.forEach((m) => {
-        if (m.target === document.documentElement) window.__classes.push(document.documentElement.className);
+      list.forEach((mutation) => {
+        if (mutation.target === document.documentElement) window.__classes.push(document.documentElement.className);
       }),
     ).observe(document, { attributes: true, subtree: true, attributeFilter: ['class'] });
   });
@@ -81,7 +82,7 @@ test('other market on a static page: html.tether-market-pending until the live p
     .poll(() => page.evaluate(() => document.documentElement.classList.contains('tether-market-pending')))
     .toBe(false);
   const history = await page.evaluate(() => window.__classes);
-  expect(history.some((c) => c.includes('tether-market-pending'))).toBe(true);
+  expect(history.some((className) => className.includes('tether-market-pending'))).toBe(true);
   await expect(page.locator('article [tether-bind="price"]').first()).toContainText(/\d,\d\d\s?€/); // German format
 });
 
@@ -90,15 +91,16 @@ test("Shopify analytics: Shopify's own scripts load, nothing is sent before cons
   isMobile,
 }) => {
   test.skip(isMobile, 'desktop flow');
+  /** @type {string[]} */
   const sent = [];
-  await page.route(MONORAIL, (r) => {
-    sent.push(r.request().postData() || '');
-    return r.fulfill({ status: 200, contentType: 'application/json', body: '{"result":[]}' });
+  await page.route(MONORAIL, (route) => {
+    sent.push(route.request().postData() || '');
+    return route.fulfill({ status: 200, contentType: 'application/json', body: '{"result":[]}' });
   });
   const scripts = [];
-  page.on('request', (r) => {
-    if (/cdn\.shopify\.com\/(storefront\/analytics|shopifycloud\/consent-tracking-api)/.test(r.url()))
-      scripts.push(r.url());
+  page.on('request', (request) => {
+    if (/cdn\.shopify\.com\/(storefront\/analytics|shopifycloud\/consent-tracking-api)/.test(request.url()))
+      scripts.push(request.url());
   });
   await page.goto('/plain/?handle=the-h2-snowboard&shopify=1');
   await expect(page.locator('#pdp')).toHaveAttribute('tether-state', 'ready');

@@ -15,6 +15,8 @@ import type { ExpiringStore, MemoryEntries } from './account/kv.ts';
 import { authorizeUrl } from './account/authorize.ts';
 import { randomToken } from './base64url.ts';
 import { isRecord } from './shared/json.ts';
+import { toCountry, toLanguage } from './shared/market-codes.ts';
+import type { CountryCode, LanguageCode } from './shared/market-codes.ts';
 import { open, seal } from './crypto.ts';
 import { messageOf } from './shared/error-message.ts';
 import { kvBinding } from './env.ts';
@@ -122,6 +124,28 @@ async function sealForCookie(
   return home;
 }
 
+/** Longest part of an ignored login parameter that goes into the log. */
+const LOGGED_VALUE_LENGTH = 40;
+
+/**
+ * The language and country of Shopify's login page, from the login link the browser builds. A value that isn't a
+ * code is left out, so Shopify shows its default rather than a market the page didn't mean.
+ */
+function loginMarket(params: URLSearchParams): { language: LanguageCode | null; country: CountryCode | null } {
+  return { language: loginCode(params, 'locale', toLanguage), country: loginCode(params, 'country', toCountry) };
+}
+
+/** One code of {@link loginMarket}, logging a value that doesn't parse. */
+function loginCode<Code>(params: URLSearchParams, name: string, parse: (value: string) => Code | null): Code | null {
+  const raw = params.get(name);
+  if (!raw) return null;
+  const code = parse(raw);
+  if (code === null) {
+    console.warn(`account login: ignored ${name} ${JSON.stringify(raw.slice(0, LOGGED_VALUE_LENGTH))}, not a code`);
+  }
+  return code;
+}
+
 async function login({ request, url, settings, fetch: fetchImpl, callbackUrl }: AccountRequest): Promise<Response> {
   const discovery = await discover(settings, fetchImpl);
   const pending: PendingLogin = {
@@ -132,19 +156,13 @@ async function login({ request, url, settings, fetch: fetchImpl, callbackUrl }: 
     // The Referer is whatever the browser sent: like `returnTo`, it only counts when it is on one of the site's origins.
     returnTo: safeReturn(url.searchParams.get('returnTo') ?? request.headers.get('referer') ?? '', settings),
   };
-  const locale = (url.searchParams.get('locale') ?? '').replace(/[^a-zA-Z-]/g, '').slice(0, 8);
-  const country = (url.searchParams.get('country') ?? '')
-    .replace(/[^A-Za-z]/g, '')
-    .slice(0, 2)
-    .toUpperCase();
   const authorize = await authorizeUrl(discovery.authorizationEndpoint, {
     clientId: settings.clientId,
     redirectUri: callbackUrl,
     state: pending.state,
     nonce: pending.nonce,
     verifier: pending.verifier,
-    locale,
-    country,
+    ...loginMarket(url.searchParams),
   });
   // Nothing is stored before the customer comes back: the pending login is sealed into a cookie in this browser,
   // which also stops another browser from completing it (login CSRF).

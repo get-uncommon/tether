@@ -37,6 +37,7 @@ test('withContext leaves out a country or language that is not a code, so page i
 });
 
 test('a token without inventory access costs one extra request per store, then Tether writes queries without the field', async () => {
+  /** @type {string[]} */
   const queries = [];
   const conf = storefront('no-inventory.test', async (_url, init) => {
     const { query } = graphqlRequest(init);
@@ -46,7 +47,9 @@ test('a token without inventory access costs one extra request per store, then T
     }
     return jsonResponse({ data: { product: { id: '1' } } });
   });
+  /** @type {boolean[]} */
   const accessSeen = [];
+  /** @param {import('../src/client.ts').StoreAccess} access */
   const query = (access) => {
     accessSeen.push(access.inventory);
     return `query P { product(handle: "x") { id variants(first: 1) { nodes { id ${access.inventory ? 'quantityAvailable' : ''} } } } }`;
@@ -55,7 +58,7 @@ test('a token without inventory access costs one extra request per store, then T
   assert.equal(queries.length, 2);
   assert.deepEqual(await request(conf, query, {}, hasData, { context: false }), { product: { id: '1' } });
   assert.equal(queries.length, 3, 'the second query goes out without the field at once');
-  assert.doesNotMatch(queries[2], /quantityAvailable/);
+  assert.doesNotMatch(queries[2] ?? '', /quantityAvailable/);
   assert.deepEqual(accessSeen, [true, false, false]);
 
   const ownQuery = 'query Own { product(handle: "x") { variants(first: 1) { nodes { quantityAvailable } } } }';
@@ -71,6 +74,7 @@ test('a token without inventory access costs one extra request per store, then T
 });
 
 test('an answer that is not in the GraphQL shape is a TetherError, not a crash', async () => {
+  /** @param {unknown} body */
   const answering = (body) => storefront('odd.test', async () => jsonResponse(body));
   await assert.rejects(request(answering({ errors: 'boom' }), '{ shop { name } }', {}, hasData), {
     name: 'TetherError',
@@ -102,7 +106,9 @@ test('request errors are TetherErrors with a code', async () => {
     code: 'NETWORK',
   });
   const unauthorized = async () => jsonResponse({}, 401);
-  const error = await request(storefront('down.test', unauthorized), '{ shop { name } }', {}, hasData).catch((e) => e);
+  const error = await request(storefront('down.test', unauthorized), '{ shop { name } }', {}, hasData).catch(
+    (failure) => failure,
+  );
   assert.ok(error instanceof TetherError);
   assert.equal(error.code, 'HTTP_401');
   assert.equal(error.status, 401);
@@ -145,6 +151,7 @@ test('an answer whose data lacks what the caller reads is refused like any other
 });
 
 test('the server catalog refuses a product missing fields, and reads a node of another type as no product', async () => {
+  /** @param {unknown} data */
   const answering = (data) =>
     createStorefront({ domain: 'shop.test', token: 't', retries: 0, fetch: async () => jsonResponse({ data }) });
   const invalid = { name: 'TetherError', message: 'Invalid response (200)' };

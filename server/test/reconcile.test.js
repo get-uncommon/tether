@@ -3,8 +3,21 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createApp, memoryStore, createWorker, signShopify } from '../src/index.ts';
-import { createMockApis, shopifyProduct, baseConfig, env, instantSleep, noWaitUntil } from './mocks.js';
+import {
+  createMockApis,
+  shopifyProduct,
+  baseConfig,
+  env,
+  instantSleep,
+  noWaitUntil,
+  asList,
+  stringAt,
+} from './mocks.js';
 
+/**
+ * @param {Parameters<typeof createMockApis>[0] & { store?: import('../src/store.ts').Store }} [opts]
+ * @param {import('../src/mapping.ts').RawConfig} [config]
+ */
 const setup = (opts = {}, config = baseConfig) => {
   const apis = createMockApis(opts);
   const store = opts.store || memoryStore();
@@ -14,19 +27,20 @@ const setup = (opts = {}, config = baseConfig) => {
 
 /** A KV namespace over a map of the JSON texts it holds. */
 function kvNamespace() {
+  /** @type {Map<string, string>} */
   const kv = new Map();
   /** @type {import('../src/env.ts').KvBinding} */
   const TETHER_SYNC = {
-    async get(k, t) {
-      const v = kv.get(k);
-      if (v == null) return null;
-      return t === 'json' ? JSON.parse(v) : v;
+    async get(key, type) {
+      const value = kv.get(key);
+      if (value == null) return null;
+      return type === 'json' ? JSON.parse(value) : value;
     },
-    async put(k, v) {
-      kv.set(k, v);
+    async put(key, value) {
+      kv.set(key, value);
     },
-    async delete(k) {
-      kv.delete(k);
+    async delete(key) {
+      kv.delete(key);
     },
   };
   return { kv, TETHER_SYNC };
@@ -40,10 +54,10 @@ test('reconcile: many unchanged products never stall the cursor (page position i
   await store.put('reconcile:since', '2026-11-01T09:00:00Z');
   const seen = [];
   for (let run = 0; run < 10; run++) {
-    const r = await sync.reconcile({ maxProducts: 10 });
-    seen.push(r.complete);
-    if (r.complete) break;
-    assert.equal(r.stopped, 'products');
+    const result = await sync.reconcile({ maxProducts: 10 });
+    seen.push(result.complete);
+    if (result.complete) break;
+    assert.equal(result.stopped, 'products');
   }
   assert.equal(seen.at(-1), true, `finished after ${seen.length} runs`);
   assert.ok(seen.length <= 5);
@@ -55,9 +69,9 @@ test('reconcile: overlap catches a product indexed late, just before the cursor'
   const { sync, store, shop, wf } = setup({ products: [shopifyProduct(1)] });
   await store.put('reconcile:since', '2026-11-02T12:00:00Z');
   shop.products.set('gid://shopify/Product/9', shopifyProduct(9, { updatedAt: '2026-11-02T11:58:00Z' }));
-  const r = await sync.reconcile();
-  assert.equal(r.changes, 1);
-  assert.ok([...wf.items.values()].some((it) => it.fieldData.slug === 'product-9'));
+  const result = await sync.reconcile();
+  assert.equal(result.changes, 1);
+  assert.ok([...wf.items.values()].some((item) => item.fieldData['slug'] === 'product-9'));
 });
 
 test('reconcile: a Shopify error saves progress instead of throwing', async () => {
@@ -66,9 +80,9 @@ test('reconcile: a Shopify error saves progress instead of throwing', async () =
   app.shopify.listProducts = async () => {
     throw new Error('boom');
   };
-  const r = await sync.reconcile();
-  assert.equal(r.complete, false);
-  assert.equal(r.stopped, 'error');
+  const result = await sync.reconcile();
+  assert.equal(result.complete, false);
+  assert.equal(result.stopped, 'error');
   assert.equal(await store.get('reconcile:since'), '2026-01-01T00:00:00Z');
 });
 
@@ -82,16 +96,16 @@ test('subrequest budget: a Worker reconcile stops before the limit and resumes n
   const runs = [];
   for (let i = 0; i < 10; i++) {
     const before = apis.calls.length;
-    const r = await worker.scheduled({}, wenv, { waitUntil() {} });
-    runs.push({ r, used: apis.calls.length - before });
-    if (r.complete) break;
+    const result = await worker.scheduled({}, wenv, { waitUntil() {} });
+    runs.push({ result, used: apis.calls.length - before });
+    if (result.complete) break;
   }
   assert.ok(runs.length > 1, 'needed more than one run');
   assert.ok(
     runs.every(({ used }) => used <= 15),
-    `subrequests per run: ${runs.map((x) => x.used)}`,
+    `subrequests per run: ${runs.map((run) => run.used)}`,
   );
-  assert.equal(runs[runs.length - 1].r.complete, true);
+  assert.equal(runs.at(-1)?.result.complete, true);
   assert.equal(apis.wf.items.size, 12);
 });
 
@@ -116,7 +130,9 @@ test('POST /reconcile?since=all imports everything, and the cron finishes what o
   assert.equal(first.complete, false, 'too much for one run');
   for (let i = 0; i < 10 && !(await worker.scheduled({}, wenv, { waitUntil() {} })).complete; i++);
   assert.equal(apis.wf.items.size, 10, 'cron finished the import');
-  assert.equal(JSON.parse(kv.get('tether-sync:reconcile:since')), '2025-09-01T00:00:00Z');
+  const since = kv.get('tether-sync:reconcile:since');
+  assert.ok(since !== undefined);
+  assert.equal(JSON.parse(since), '2025-09-01T00:00:00Z');
   const bad = await worker.fetch(
     new Request('https://w.test/reconcile?since=yesterday', {
       method: 'POST',
@@ -134,16 +150,17 @@ test('webhook failure is queued for the next reconcile', async () => {
   const worker = createWorker(baseConfig, { fetch: apis.fetch, sleep: instantSleep });
   /** @type {import('../src/env.ts').KvBinding} */
   const kv = {
-    async get(k) {
-      return store.get(k);
+    async get(key) {
+      return store.get(key);
     },
-    async put(k, v) {
-      return store.put(k, JSON.parse(v));
+    async put(key, value) {
+      return store.put(key, JSON.parse(value));
     },
-    async delete(k) {
-      return store.delete(k);
+    async delete(key) {
+      return store.delete(key);
     },
   };
+  /** @type {Promise<unknown>[]} */
   const tasks = [];
   const body = JSON.stringify({ id: 1 });
   await worker.fetch(
@@ -157,12 +174,12 @@ test('webhook failure is queued for the next reconcile', async () => {
       },
     }),
     { ...env, TETHER_SYNC: kv },
-    { waitUntil: (p) => tasks.push(p) },
+    { waitUntil: (/** @type {Promise<unknown>} */ promise) => tasks.push(promise) },
   );
   await Promise.all(tasks);
   assert.deepEqual(
     // The retry queue as the reconcile stores it.
-    /** @type {{ id: string }[]} */ (await store.get('tether-sync:reconcile:retry')).map((r) => r.id),
+    asList(await store.get('tether-sync:reconcile:retry'), 'the retry queue').map((entry) => stringAt(entry, 'id')),
     ['1'],
   );
 });

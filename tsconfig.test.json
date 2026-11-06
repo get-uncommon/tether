@@ -7,11 +7,6 @@
     "tsBuildInfoFile": "node_modules/.cache/tsc/test.tsbuildinfo",
     "allowJs": true,
     "checkJs": true,
-    // A test's helpers and callbacks go unannotated, and its array and record reads fail the test when they miss; a
-    // fake passed where the source expects a type is still checked against it.
-    "noImplicitAny": false,
-    "noUncheckedIndexedAccess": false,
-    "noPropertyAccessFromIndexSignature": false,
     "lib": ["ES2023", "DOM", "DOM.Iterable"],
     "types": ["node"]
   },

@@ -11,7 +11,7 @@
  * would let a description borrow the site's own overlay or modal classes; and every style that takes content out of
  * the flow (`position`, `inset`, `z-index`), moves it from where the flow put it (transforms, motion paths, negative
  * margins, and negative indents and spacing beyond the small values that tighten text, `NEGATIVE_LIMITS`), copies it
- * elsewhere (reflections) or sizes it to the window (viewport units).
+ * elsewhere (reflections) or sizes it to the window (viewport and container-query units).
  * Outlines, shadows, filters, border-image and mask-border outsets, text decoration and text stroke paint beyond their
  * element, so they are kept only while every number they give is a pixel length of a few dozen pixels at most
  * (`MAX_PAINT_PX`): enough to set off an image or a callout, too little to cover the page.
@@ -83,8 +83,11 @@ const OUT_OF_PLACE_PROPERTIES = new Set([
   '-webkit-box-reflect',
 ]);
 const OUT_OF_PLACE_PREFIXES = ['inset', 'transform', 'translate', 'rotate', 'scale', 'offset'];
-/** A length in viewport units (`100vw`, `50dvh`, `10vmax`), which sizes content to the window, not the description. */
-const VIEWPORT_LENGTH = /\d(?:[sld]?v(?:w|h|i|b|min|max))\b/i;
+/**
+ * A length in viewport units (`100vw`, `50dvh`, `10vmax`) or container-query units (`100cqw`), which sizes content to
+ * the window, not the description: outside a size container, a container-query unit is a small-viewport unit.
+ */
+const VIEWPORT_LENGTH = /\d(?:[sld]?v|cq)(?:w|h|i|b|min|max)\b/i;
 /**
  * Style properties, without a `-webkit-` prefix, that paint beyond their element's box by as far as their numbers
  * say: outlines and their offset, shadows, `filter` (`drop-shadow()`, `blur()`), text decoration and its offset, text

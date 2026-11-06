@@ -8,11 +8,13 @@ import {
   detailOf,
   find,
   graphqlRequest,
+  attributesAt,
   jsonResponse,
+  linesAt,
   operationName,
   product,
 } from './fixtures.js';
-import { waitFor } from '../server/test/mocks.js';
+import { asString, listAt, recordAt, stringAt, waitFor } from '../server/test/mocks.js';
 
 // The failures these tests cause on purpose are checked through onError, states and events, not the console.
 captureTetherWarnings();
@@ -35,12 +37,19 @@ const { TetherError } = await import('../src/client.ts');
 const { isGreaterAmount } = await import('../src/amounts.ts');
 
 const KEY = 'tether:cart:shop.test';
-const VARIANT = product.variants.nodes[0].id;
+const VARIANT = product.variants.nodes[0]?.id ?? '';
+/** @type {{ error: unknown, context: string }[]} */
 const reported = [];
+/** @typedef {ReturnType<typeof graphqlRequest>['variables']} Variables */
+/** @type {{ op: string, variables: Variables }[]} */
 const calls = [];
-/** op name -> (variables) => response body, or a Promise of one */
+/** @type {Partial<Record<string, (variables: Variables) => unknown>>} op name -> response body, or a Promise of one */
 let answers = {};
 
+/**
+ * @param {RequestInfo | URL} _url
+ * @param {RequestInit} [init]
+ */
 globalThis.fetch = async (_url, init) => {
   const { query, variables } = graphqlRequest(init);
   const op = operationName(query);
@@ -51,19 +60,28 @@ globalThis.fetch = async (_url, init) => {
   return jsonResponse(body);
 };
 
+/**
+ * @param {string} name
+ * @param {import('../src/cart/store.ts').ShopifyCart | null} cart
+ * @param {import('../src/client.ts').UserError[]} [userErrors]
+ */
 const payload = (name, cart, userErrors = []) => ({ data: { [name]: { cart, userErrors, warnings: [] } } });
 const oneLine = (quantity = 1) => cartFrom([{ merchandiseId: VARIANT, quantity }]);
-/** Loads `cart` as the saved cart, the way a page with a cart starts. */
+/**
+ * Loads `cart` as the saved cart, the way a page with a cart starts.
+ *
+ * @param {import('../src/cart/store.ts').ShopifyCart | null} cart
+ */
 const loadSaved = async (cart) => {
   localStorage.setItem(KEY, 'gid://shopify/Cart/abc');
-  answers.TetherCart = () => ({ data: { cart } });
+  answers['TetherCart'] = () => ({ data: { cart } });
   await Cart.init();
 };
 const deferred = () => {
   /** @type {(value?: unknown) => void} */
   let resolve = () => {};
-  const promise = new Promise((r) => {
-    resolve = r;
+  const promise = new Promise((settle) => {
+    resolve = settle;
   });
   return { promise, resolve };
 };
@@ -98,36 +116,37 @@ test('status: unknown before the first load, empty without a saved cart', async 
 
 test('status: ready with the saved cart; error (cart kept) when Shopify cannot be reached', async () => {
   localStorage.setItem(KEY, 'gid://shopify/Cart/abc');
-  answers.TetherCart = () => ({ data: { cart: oneLine(2) } });
+  answers['TetherCart'] = () => ({ data: { cart: oneLine(2) } });
   await Cart.init();
   assert.equal(Cart.status.kind, 'ready');
   assert.equal(Cart.count, 2);
   assert.equal(Cart.lastError, null);
 
-  answers.TetherCart = () => ({ errors: [{ message: 'Internal error' }] });
+  answers['TetherCart'] = () => ({ errors: [{ message: 'Internal error' }] });
   await Cart.init();
   assert.equal(Cart.status.kind, 'error');
   assert.match(String(Cart.lastError), /Internal error/);
   assert.equal(Cart.state, null);
   assert.equal(Cart.id(), 'gid://shopify/Cart/abc', 'the saved cart is probably fine');
-  assert.equal(reported.at(-1).context, 'cart load failed');
+  assert.equal(reported.at(-1)?.context, 'cart load failed');
 });
 
 test('status: a failed change shows cart-error and keeps the cart; the next success clears it', async () => {
   document.body.innerHTML = '<p id="err" tether-show="cart-error">x</p>';
   localStorage.setItem(KEY, 'gid://shopify/Cart/abc');
-  answers.TetherCart = () => ({ data: { cart: oneLine(1) } });
+  answers['TetherCart'] = () => ({ data: { cart: oneLine(1) } });
   await Cart.init();
+  /** @type {unknown[]} */
   const errors = [];
-  document.addEventListener('tether:cart-error', (e) => errors.push(detailOf(e).error));
-  answers.Tether_cartLinesAdd = () => payload('cartLinesAdd', null, [{ field: ['lines'], message: 'Sold out' }]);
+  document.addEventListener('tether:cart-error', (event) => errors.push(detailOf(event)['error']));
+  answers['Tether_cartLinesAdd'] = () => payload('cartLinesAdd', null, [{ field: ['lines'], message: 'Sold out' }]);
   await assert.rejects(Cart.add(VARIANT), /Sold out/);
   assert.equal(Cart.status.kind, 'error');
   assert.equal(Cart.count, 1, 'the cart as Shopify last sent it');
   assert.equal(errors.length, 1);
   assert.notEqual(find('#err').style.display, 'none');
 
-  answers.Tether_cartLinesAdd = () => payload('cartLinesAdd', oneLine(2));
+  answers['Tether_cartLinesAdd'] = () => payload('cartLinesAdd', oneLine(2));
   await Cart.add(VARIANT);
   assert.equal(Cart.status.kind, 'ready');
   assert.equal(Cart.lastError, null);
@@ -136,14 +155,15 @@ test('status: a failed change shows cart-error and keeps the cart; the next succ
 
 test('serial: each task starts once the one before has settled, failed or not', async () => {
   const run = serial();
+  /** @type {string[]} */
   const order = [];
   const first = deferred();
-  const a = run(async () => {
+  const failing = run(async () => {
     order.push('a start');
     await first.promise;
     throw new Error('a failed');
   });
-  const b = run(async () => {
+  const second = run(async () => {
     order.push('b start');
     return 'b';
   });
@@ -151,18 +171,19 @@ test('serial: each task starts once the one before has settled, failed or not', 
   await new Promise(setImmediate);
   assert.deepEqual(order, ['a start'], 'b waits for a');
   first.resolve();
-  await assert.rejects(a, /a failed/);
-  assert.equal(await b, 'b');
+  await assert.rejects(failing, /a failed/);
+  assert.equal(await second, 'b');
   assert.deepEqual(order, ['a start', 'b start']);
 });
 
 test('queue: quick changes reach Shopify one after another, each with the cart as it is by then', async () => {
   localStorage.setItem(KEY, 'gid://shopify/Cart/abc');
   const slow = deferred();
+  /** @type {import('../src/cart/store.ts').Attribute[]} */
   let attributes = [];
-  answers.Tether_cartAttributesUpdate = async (variables) => {
+  answers['Tether_cartAttributesUpdate'] = async (variables) => {
     if (!attributes.length) await slow.promise;
-    attributes = variables.attributes;
+    attributes = attributesAt(variables, 'attributes');
     return payload('cartAttributesUpdate', { ...oneLine(), attributes });
   };
   const first = Cart.setAttributes({ gift: 'yes' });
@@ -171,7 +192,7 @@ test('queue: quick changes reach Shopify one after another, each with the cart a
   assert.equal(calls.length, 1, 'the second change waits');
   slow.resolve();
   await Promise.all([first, second]);
-  assert.deepEqual(calls[1].variables.attributes, [
+  assert.deepEqual(calls[1]?.variables['attributes'], [
     { key: 'gift', value: 'yes' },
     { key: 'wrap', value: 'blue' },
   ]);
@@ -179,7 +200,7 @@ test('queue: quick changes reach Shopify one after another, each with the cart a
 
 test('expired cart: a query answering cart: null forgets the saved cart', async () => {
   localStorage.setItem(KEY, 'gid://shopify/Cart/old');
-  answers.TetherCart = () => ({ data: { cart: null } });
+  answers['TetherCart'] = () => ({ data: { cart: null } });
   await Cart.init();
   assert.deepEqual(Cart.status, { kind: 'empty' });
   assert.equal(Cart.id(), null);
@@ -188,11 +209,13 @@ test('expired cart: a query answering cart: null forgets the saved cart', async 
 
 test('forgetSaved: drops the saved cart and shows an empty one, as a load of no cart does', async () => {
   localStorage.setItem(KEY, 'gid://shopify/Cart/abc');
-  answers.TetherCart = () => ({ data: { cart: oneLine(2) } });
+  answers['TetherCart'] = () => ({ data: { cart: oneLine(2) } });
   await Cart.init();
   assert.equal(Cart.count, 2);
+  /** @type {unknown[]} */
   const updates = [];
-  const listener = (event) => updates.push(event.detail);
+  /** @param {Event} event */
+  const listener = (event) => updates.push(detailOf(event));
   document.addEventListener('tether:cart-updated', listener);
   Cart.forgetSaved();
   document.removeEventListener('tether:cart-updated', listener);
@@ -207,13 +230,14 @@ test('forgetSaved: drops the saved cart and shows an empty one, as a load of no 
 
 test('expired cart: a cartId user error creates a new cart with the same lines', async () => {
   localStorage.setItem(KEY, 'gid://shopify/Cart/old');
-  answers.Tether_cartLinesAdd = () =>
+  answers['Tether_cartLinesAdd'] = () =>
     payload('cartLinesAdd', null, [{ field: ['cartId'], message: 'The specified cart does not exist.' }]);
-  answers.Tether_cartCreate = (variables) => payload('cartCreate', cartFrom(variables.input.lines));
+  answers['Tether_cartCreate'] = (variables) =>
+    payload('cartCreate', cartFrom(linesAt(recordAt(variables, 'input'), 'lines')));
   const cart = await Cart.add(VARIANT, 3);
   assert.equal(cart.totalQuantity, 3);
   assert.deepEqual(
-    calls.map((c) => c.op),
+    calls.map((call) => call.op),
     ['Tether_cartLinesAdd', 'Tether_cartCreate'],
   );
   assert.equal(Cart.id(), 'gid://shopify/Cart/abc');
@@ -221,8 +245,9 @@ test('expired cart: a cartId user error creates a new cart with the same lines',
 
 test('expired cart: a GraphQL error naming the cart id is recognised by its message', async () => {
   localStorage.setItem(KEY, 'gid://shopify/Cart/old');
-  answers.Tether_cartNoteUpdate = () => ({ errors: [{ message: 'The specified cart does not exist.' }] });
-  answers.Tether_cartCreate = (variables) => payload('cartCreate', { ...oneLine(), note: variables.input.note });
+  answers['Tether_cartNoteUpdate'] = () => ({ errors: [{ message: 'The specified cart does not exist.' }] });
+  answers['Tether_cartCreate'] = (variables) =>
+    payload('cartCreate', { ...oneLine(), note: stringAt(recordAt(variables, 'input'), 'note') });
   const cart = await Cart.setNote('hello');
   assert.ok(cart);
   assert.equal(cart.note, 'hello');
@@ -230,12 +255,12 @@ test('expired cart: a GraphQL error naming the cart id is recognised by its mess
 
 test('expired cart: an error about a line is not mistaken for a missing cart', async () => {
   localStorage.setItem(KEY, 'gid://shopify/Cart/abc');
-  answers.Tether_cartLinesAdd = () =>
+  answers['Tether_cartLinesAdd'] = () =>
     payload('cartLinesAdd', null, [
       { field: ['lines', '0', 'merchandiseId'], message: 'The merchandise does not exist.' },
     ]);
   await assert.rejects(Cart.add(VARIANT), /merchandise does not exist/);
-  assert.ok(!calls.some((c) => c.op === 'Tether_cartCreate'));
+  assert.ok(!calls.some((call) => call.op === 'Tether_cartCreate'));
   assert.equal(Cart.id(), 'gid://shopify/Cart/abc');
 });
 
@@ -248,24 +273,25 @@ test('isCartGone: the network, the token and other errors keep the saved cart', 
 
 test('checkout: a failing account step is reported and Shopify checkout is used instead', async () => {
   await loadSaved(oneLine());
-  answers.TetherCheckout = () => ({ data: { cart: { checkoutUrl: 'https://shop.test/checkouts/1' } } });
+  answers['TetherCheckout'] = () => ({ data: { cart: { checkoutUrl: 'https://shop.test/checkouts/1' } } });
   Cart.setCheckoutResolver(async () => {
     throw new Error('account server down');
   });
+  /** @type {string[]} */
   const urls = [];
-  document.addEventListener('tether:checkout', (e) => urls.push(detailOf(e).url), { once: true });
+  document.addEventListener('tether:checkout', (event) => urls.push(stringAt(detailOf(event), 'url')), { once: true });
   const url = await Cart.checkout('_self');
   assert.equal(url, 'https://shop.test/checkouts/1');
   assert.deepEqual(urls, [url]);
   assert.deepEqual(
-    reported.map((r) => r.context),
+    reported.map((report) => report.context),
     ['account checkout'],
   );
 });
 
 test("checkout: the account's URL wins, and the cart's unneeded request failing is not a failure", async () => {
   await loadSaved(oneLine());
-  answers.TetherCheckout = () => ({ errors: [{ message: 'Internal error' }] });
+  answers['TetherCheckout'] = () => ({ errors: [{ message: 'Internal error' }] });
   Cart.setCheckoutResolver(async () => 'https://shop.test/checkouts/c/2?key=k');
   const url = await Cart.checkout('_self');
   assert.equal(url, 'https://shop.test/checkouts/c/2?key=k&logged_in=true');
@@ -274,7 +300,7 @@ test("checkout: the account's URL wins, and the cart's unneeded request failing 
 
 test("checkout: null from the account uses the cart's URL, without the login parameter", async () => {
   await loadSaved(oneLine());
-  answers.TetherCheckout = () => ({ data: { cart: { checkoutUrl: 'https://shop.test/checkouts/1' } } });
+  answers['TetherCheckout'] = () => ({ data: { cart: { checkoutUrl: 'https://shop.test/checkouts/1' } } });
   Cart.setCheckoutResolver(async () => null);
   assert.equal(await Cart.checkout('_self'), 'https://shop.test/checkouts/1');
   Cart.setCheckoutResolver(null);
@@ -284,10 +310,10 @@ test("checkout: null from the account uses the cart's URL, without the login par
 
 test('checkout: without any checkout URL the failure is reported and nothing opens', async () => {
   await loadSaved(oneLine());
-  answers.TetherCheckout = () => ({ errors: [{ message: 'Internal error' }] });
+  answers['TetherCheckout'] = () => ({ errors: [{ message: 'Internal error' }] });
   assert.equal(await Cart.checkout('_self'), null);
   assert.deepEqual(
-    reported.map((r) => r.context),
+    reported.map((report) => report.context),
     ['checkout failed'],
   );
 });
@@ -295,12 +321,13 @@ test('checkout: without any checkout URL the failure is reported and nothing ope
 test('applyDiscount: a refused code is removed again; a failed removal is reported, the rejection says why', async () => {
   localStorage.setItem(KEY, 'gid://shopify/Cart/abc');
   let removals = 0;
-  answers.Tether_cartDiscountCodesUpdate = (variables) => {
-    if (!variables.discountCodes.length) {
+  answers['Tether_cartDiscountCodesUpdate'] = (variables) => {
+    const codes = listAt(variables, 'discountCodes').map((code, i) => asString(code, `discountCodes[${i}]`));
+    if (!codes.length) {
       removals += 1;
       return { errors: [{ message: 'Internal error' }] };
     }
-    const discountCodes = variables.discountCodes.map((code) => ({ code, applicable: false }));
+    const discountCodes = codes.map((code) => ({ code, applicable: false }));
     return payload('cartDiscountCodesUpdate', { ...oneLine(), discountCodes });
   };
   await assert.rejects(
@@ -309,7 +336,7 @@ test('applyDiscount: a refused code is removed again; a failed removal is report
   );
   assert.equal(removals, 1);
   assert.deepEqual(
-    reported.map((r) => r.context),
+    reported.map((report) => report.context),
     ['removing a discount code Shopify refused'],
   );
 });

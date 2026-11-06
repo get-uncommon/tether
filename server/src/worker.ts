@@ -22,6 +22,7 @@ import { handleShopifyWebhook } from './webhook.ts';
 import { bearerMatches } from './hmac.ts';
 import { runCheck } from './check.ts';
 import { cleanEnv, kvBinding } from './env.ts';
+import { maxSubrequests } from './settings.ts';
 import { ensureWebhooks } from './webhooks.ts';
 import { VERSION } from './version.ts';
 import { messageOf } from './shared/error-message.ts';
@@ -52,9 +53,6 @@ const consoleLog = {
  */
 const MISSING_KV =
   'the TETHER_SYNC KV namespace is not bound: the sync keeps nothing between runs. Add it in Cloudflare → your Worker → Bindings, as in wrangler.jsonc';
-
-/** Subrequests one invocation may make. Cloudflare's free plan allows 50; the rest is headroom. */
-const DEFAULT_MAX_SUBREQUESTS = 45;
 
 /** A fetch that counts its requests, so the sync can stop before Cloudflare's subrequest limit and resume next run. */
 function countingFetch(inner: Fetch | undefined, limit: number) {
@@ -92,8 +90,7 @@ interface WorkerSetup {
 }
 
 function appFor({ config, fetch, sleep }: WorkerSetup, env: WorkerEnv, store: Store, mode: 'job' | 'webhook' = 'job') {
-  const limit = parseInt(cleanEnv(env).MAX_SUBREQUESTS ?? '', 10) || DEFAULT_MAX_SUBREQUESTS;
-  const counted = countingFetch(fetch, limit);
+  const counted = countingFetch(fetch, maxSubrequests(cleanEnv(env)));
   return createApp(config, env, {
     store,
     fetch: counted.fetch,

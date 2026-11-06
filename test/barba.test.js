@@ -12,6 +12,7 @@ Object.assign(globalThis, {
 const { barbaPreset } = await import('../src/presets/barba.ts');
 
 test('barba preset: no auto-mount, the scroll lock it took is the one it releases', () => {
+  /** @type {string[][]} */
   const log = [];
   const preset = barbaPreset({
     lockScroll: (drawer) => log.push(['lock', drawer.id]),
@@ -29,6 +30,7 @@ test('barba preset: no auto-mount, the scroll lock it took is the one it release
 });
 
 test('barba preset: layout changes resize Lenis and refresh ScrollTrigger, an instance or the class', () => {
+  /** @type {string[]} */
   const log = [];
   /** @param {import('../src/presets/barba.ts').BarbaPresetOptions} options */
   const layoutChange = (options) => barbaPreset(options).onLayoutChange('x');
@@ -57,12 +59,25 @@ test('barba preset: a value where a getter belongs is refused when the preset is
 });
 
 test('barba preset: lines animate with GSAP when they have a height; otherwise leave at once', () => {
+  /** @type {unknown[][]} */
   const tweens = [];
+  /** @typedef {Record<string, string | number | (() => void)>} TweenVars GSAP's vars, as the preset passes them. */
   const gsap = {
-    fromTo: (_node, from, to) => tweens.push(['fromTo', from.height, to.duration]),
+    /**
+     * @param {HTMLElement} _node
+     * @param {TweenVars} from
+     * @param {TweenVars} to
+     */
+    fromTo: (_node, from, to) => tweens.push(['fromTo', from['height'], to['duration']]),
+    /**
+     * @param {HTMLElement} _node
+     * @param {TweenVars} to
+     */
     to: (_node, to) => {
-      tweens.push(['to', to.height]);
-      to.onComplete();
+      tweens.push(['to', to['height']]);
+      const onComplete = to['onComplete'];
+      assert.ok(typeof onComplete === 'function', 'the leave tween says when it is done');
+      onComplete();
     },
   };
   let resized = 0;

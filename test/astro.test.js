@@ -12,13 +12,18 @@ import {
   findAll,
   graphqlRequest,
   jsonResponse,
+  linesAt,
   operationName,
   product,
 } from './fixtures.js';
-import { waitFor } from '../server/test/mocks.js';
+import { numberAt, recordAt, recordsAt, stringAt, waitFor } from '../server/test/mocks.js';
 
 // The failures these tests cause on purpose are checked through onError, states and events, not the console.
 captureTetherWarnings();
+
+const [firstVariant] = product.variants.nodes;
+assert.ok(firstVariant);
+const firstVariantId = firstVariant.id;
 
 const dom = new JSDOM('<!doctype html><body></body>', { url: 'https://astro.test/' });
 Object.assign(globalThis, {
@@ -27,38 +32,55 @@ Object.assign(globalThis, {
   localStorage: dom.window.localStorage,
   CustomEvent: dom.window.CustomEvent,
   MutationObserver: dom.window.MutationObserver,
-  Option: dom.window.Option,
+  Option: dom.window['Option'],
   getComputedStyle: dom.window.getComputedStyle,
 });
 
+/** @typedef {import('../src/cart/store.ts').ShopifyCart} ShopifyCart */
+/** @typedef {import('../src/fragments.ts').Product} Product */
+/** @typedef {Parameters<Parameters<typeof import('../src/cart/store.ts').subscribe>[0]>[1]} CartMeta */
+
+/** @type {(ReturnType<typeof graphqlRequest> & { op: string })[]} */
 const calls = [];
-/** The cart "Shopify" has for the saved id: `seedCart` sets it. */
+/**
+ * The cart "Shopify" has for the saved id: `seedCart` sets it.
+ *
+ * @type {ShopifyCart | null}
+ */
 let savedCart = null;
 let livePrice = '30'; // what "Shopify" returns now (the server-rendered copy may be older)
-const withPrice = (p, amount) => JSON.parse(JSON.stringify(p).replace(/"amount":"30"/g, `"amount":"${amount}"`));
+/**
+ * @param {Product} sent
+ * @param {string} amount
+ * @returns {Product}
+ */
+const withPrice = (sent, amount) => JSON.parse(JSON.stringify(sent).replace(/"amount":"30"/g, `"amount":"${amount}"`));
+/** @type {typeof globalThis.fetch} */
 globalThis.fetch = async (_url, init) => {
   const { query, variables } = graphqlRequest(init);
   const op = operationName(query);
   calls.push({ op, query, variables });
+  /** @param {unknown} data */
   const ok = (data) => jsonResponse({ data });
   if (op === 'TetherProducts') {
+    /** @type {Record<string, Product | null>} */
     const data = {};
-    Object.keys(variables).forEach((k) => {
-      if (k.startsWith('h')) data[k] = variables[k] === product.handle ? withPrice(product, livePrice) : null;
+    Object.keys(variables).forEach((key) => {
+      if (key.startsWith('h')) data[key] = variables[key] === product.handle ? withPrice(product, livePrice) : null;
     });
     return ok(data);
   }
   if (op === 'TetherServerProduct')
-    return ok({ product: variables.handle === product.handle ? withPrice(product, livePrice) : null });
-  if (op === 'TetherServerProductById') return ok({ node: variables.id === product.id ? product : null });
+    return ok({ product: variables['handle'] === product.handle ? withPrice(product, livePrice) : null });
+  if (op === 'TetherServerProductById') return ok({ node: variables['id'] === product.id ? product : null });
   if (op === 'TetherServerProducts') {
     const all = Array.from({ length: 5 }, (_, i) => ({
       ...product,
       id: `gid://shopify/Product/${i + 1}`,
       handle: `p-${i + 1}`,
     }));
-    const start = variables.after ? Number(variables.after) : 0;
-    const page = all.slice(start, start + variables.first);
+    const start = variables['after'] ? Number(variables['after']) : 0;
+    const page = all.slice(start, start + numberAt(variables, 'first'));
     return ok({
       products: {
         nodes: page,
@@ -69,7 +91,7 @@ globalThis.fetch = async (_url, init) => {
   if (op === 'TetherPredictive')
     return ok({
       predictiveSearch: {
-        products: variables.q.startsWith('cof')
+        products: stringAt(variables, 'q').startsWith('cof')
           ? [
               {
                 id: product.id,
@@ -82,24 +104,38 @@ globalThis.fetch = async (_url, init) => {
             ]
           : [],
         collections: [],
-        queries: variables.q.startsWith('cof') ? [{ text: 'coffee beans' }] : [],
+        queries: stringAt(variables, 'q').startsWith('cof') ? [{ text: 'coffee beans' }] : [],
       },
     });
   if (op === 'TetherSearch') return ok({ products: { nodes: [], pageInfo: { hasNextPage: false, endCursor: null } } });
-  if (op === 'TetherCart') return ok({ cart: variables.id === savedCart?.id ? savedCart : null });
-  if (op === 'Tether_cartCreate') return ok({ cartCreate: { cart: cartFrom(variables.input.lines), userErrors: [] } });
+  if (op === 'TetherCart') return ok({ cart: variables['id'] === savedCart?.id ? savedCart : null });
+  if (op === 'Tether_cartCreate')
+    return ok({ cartCreate: { cart: cartFrom(linesAt(recordAt(variables, 'input'), 'lines')), userErrors: [] } });
   if (op === 'Tether_cartLinesAdd')
-    return ok({ cartLinesAdd: { cart: cartFrom([...variables.lines, ...variables.lines]), userErrors: [] } });
+    return ok({
+      cartLinesAdd: {
+        cart: cartFrom([...linesAt(variables, 'lines'), ...linesAt(variables, 'lines')]),
+        userErrors: [],
+      },
+    });
   if (op === 'Tether_cartLinesUpdate') {
-    await new Promise((r) => setTimeout(r, 30)); // a slow network, so clicks overlap
-    const c = cartFrom([{ merchandiseId: product.variants.nodes[0].id, quantity: variables.lines[0].quantity }]);
-    c.lines.nodes[0].id = variables.lines[0].id;
-    return ok({ cartLinesUpdate: { cart: c, userErrors: [] } });
+    await new Promise((resolve) => setTimeout(resolve, 30)); // a slow network, so clicks overlap
+    const [update] = recordsAt(variables, 'lines');
+    assert.ok(update);
+    const cart = cartFrom([{ merchandiseId: firstVariantId, quantity: numberAt(update, 'quantity') }]);
+    const [line] = cart.lines.nodes;
+    assert.ok(line);
+    line.id = stringAt(update, 'id');
+    return ok({ cartLinesUpdate: { cart, userErrors: [] } });
   }
   throw new Error(`unexpected ${op}`);
 };
 
-/** Starts the page with `cart` saved, as a visitor coming back to it. */
+/**
+ * Starts the page with `cart` saved, as a visitor coming back to it.
+ *
+ * @param {ShopifyCart} cart
+ */
 async function seedCart(cart) {
   savedCart = cart;
   window.localStorage.setItem(cfg.storageKey, cart.id);
@@ -107,13 +143,33 @@ async function seedCart(cart) {
 }
 
 /** For a check that nothing more happens: a request that shouldn't go out leaves no condition to wait for. */
-const settle = (ms = 60) => new Promise((r) => setTimeout(r, ms));
+const settle = (ms = 60) => new Promise((resolve) => setTimeout(resolve, ms));
 /** Waits until the first `selector` on the page has rendered. */
 const rendered = (selector = '[tether-product]') =>
   waitFor(() => document.querySelector(selector)?.getAttribute('tether-state') === 'ready', `${selector} to render`);
+/** The scope of the first product on the page, which the test has rendered. */
+function productScope() {
+  const scope = Tether.getScope(document.querySelector('[tether-product]'));
+  assert.ok(scope, 'a rendered product');
+  return scope;
+}
+/**
+ * @param {unknown} value
+ * @param {string} name
+ * @returns {unknown} The field `name` of `value`, `undefined` when `value` isn't an object.
+ */
+function fieldOf(value, name) {
+  return typeof value === 'object' && value !== null ? Reflect.get(value, name) : undefined;
+}
+/** @type {typeof import('../src/index.ts').default} */
 let Tether;
+/** @type {typeof import('../src/server.ts')} */
 let server;
-/** The live config: `Tether.config` is a read-only view of it. */
+/**
+ * The live config: `Tether.config` is a read-only view of it.
+ *
+ * @type {import('../src/config.ts').TetherConfig}
+ */
 let cfg;
 
 before(async () => {
@@ -131,12 +187,13 @@ beforeEach(() => {
 // ---- server module ---------------------------------------------------------
 
 test('server: createStorefront(import.meta.env) maps the PUBLIC_SHOPIFY_* names and ignores other keys', () => {
-  const shop = server.createStorefront({
+  const importMetaEnv = {
     PUBLIC_SHOPIFY_DOMAIN: 'https://x.myshopify.com/',
     PUBLIC_SHOPIFY_STOREFRONT_TOKEN: 'tok',
     MODE: 'production',
     BASE_URL: '/',
-  });
+  };
+  const shop = server.createStorefront(importMetaEnv);
   assert.equal(shop.config.domain, 'x.myshopify.com');
   assert.equal(shop.config.token, 'tok');
   assert.ok(!('MODE' in shop.config));
@@ -144,6 +201,7 @@ test('server: createStorefront(import.meta.env) maps the PUBLIC_SHOPIFY_* names 
 });
 
 test('server: the config is resolved as the browser’s: an invalid count falls back to its default', () => {
+  // @ts-expect-error -- the invalid count this test passes on purpose
   const shop = server.createStorefront({ domain: 'shop.test', token: 't', imagesFirst: -1, variantsFirst: 'many' });
   assert.equal(shop.config.imagesFirst, 25);
   assert.equal(shop.config.variantsFirst, 100);
@@ -153,22 +211,22 @@ test('server: same product query as the browser, so hydrated data has the same s
   const { productFragment } = await import('../src/fragments.ts');
   const shop = server.createStorefront({ domain: 'shop.test', token: 't', fetch: globalThis.fetch });
   await shop.getProduct('coffee-box');
-  assert.ok(calls[0].query.includes(productFragment(shop.config)));
+  assert.ok(calls[0]?.query.includes(productFragment(shop.config)));
   assert.equal(productFragment(shop.config), productFragment(), 'same defaults as the browser config');
 });
 
 test('server: getProduct by handle / id / URL, null when missing; allProducts pages through everything', async () => {
   const shop = server.createStorefront({ domain: 'shop.test', token: 't', pageSize: 2 });
-  assert.equal((await shop.getProduct('coffee-box')).title, 'Coffee Box');
-  assert.equal((await shop.getProduct('1')).handle, 'coffee-box');
-  assert.equal((await shop.getProduct('https://shop.test/products/coffee-box?x=1')).handle, 'coffee-box');
+  assert.equal((await shop.getProduct('coffee-box'))?.title, 'Coffee Box');
+  assert.equal((await shop.getProduct('1'))?.handle, 'coffee-box');
+  assert.equal((await shop.getProduct('https://shop.test/products/coffee-box?x=1'))?.handle, 'coffee-box');
   assert.equal(await shop.getProduct('nope'), null);
   const all = await shop.allProducts();
   assert.deepEqual(
-    all.map((p) => p.handle),
+    all.map((listed) => listed.handle),
     ['p-1', 'p-2', 'p-3', 'p-4', 'p-5'],
   );
-  assert.equal(calls.filter((c) => c.op === 'TetherServerProducts').length, 3);
+  assert.equal(calls.filter((call) => call.op === 'TetherServerProducts').length, 3);
 });
 
 test('server: formatMoney, productUrl, plans helpers', () => {
@@ -182,6 +240,7 @@ test('server: formatMoney, productUrl, plans helpers', () => {
 test('server: productUrl encodes the handle and gives no URL without the handle or id the path needs', () => {
   assert.equal(server.productUrl('a/b', { productPath: '/products/' }), '/products/a%2Fb');
   assert.equal(server.productUrl('', { productPath: '/products' }), null);
+  // @ts-expect-error -- a product without a handle, as a CMS can hand over
   assert.equal(server.productUrl(null, { productPath: '/products' }), null);
   assert.equal(server.productUrl('x', { productPath: '/p/{id}' }), null);
   assert.equal(server.productUrl('', { productPath: '/p/{id}', id: 'gid://shopify/Product/7' }), '/p/7');
@@ -199,6 +258,7 @@ test('server: hydrate() escapes </script> and carries the market', () => {
 
 // ---- hydration in the browser ----------------------------------------------
 
+/** @param {string} tag */
 const page = (tag) => `${tag}
   <div tether-product="coffee-box"><h1 tether-bind="title">Coffee Box</h1><span id="price" tether-bind="price">€ 30,00</span></div>`;
 
@@ -216,7 +276,7 @@ test('hydration: server-rendered product renders with no request, then one backg
   assert.equal(root.getAttribute('tether-state'), 'ready', 'rendered from the server data, no loading state');
   assert.match(find('#price').textContent, /30/);
   await waitFor(() => /25/.test(find('#price').textContent ?? ''), 'the background refresh');
-  assert.equal(calls.filter((c) => c.op === 'TetherProducts').length, 1, 'exactly one background refresh');
+  assert.equal(calls.filter((call) => call.op === 'TetherProducts').length, 1, 'exactly one background refresh');
   assert.match(find('#price').textContent, /25/, 'live price after the refresh');
 });
 
@@ -230,23 +290,24 @@ test('hydration: the next page of a View Transition visit keeps the copy loaded 
   document.body.innerHTML = page(shop.hydrate(old));
   Tether.mount(document);
   await waitFor(() => /22/.test(find('#price').textContent ?? ''), "page 1's refresh");
-  const before = calls.filter((c) => c.op === 'TetherProducts').length;
+  const before = calls.filter((call) => call.op === 'TetherProducts').length;
   // page 2 carries the same stale build data
   Tether.unmount();
   document.body.innerHTML = page(shop.hydrate(old));
   Tether.mount(document);
   await settle();
-  assert.equal(calls.filter((c) => c.op === 'TetherProducts').length, before, 'no second refresh');
+  assert.equal(calls.filter((call) => call.op === 'TetherProducts').length, before, 'no second refresh');
   assert.match(find('#price').textContent, /22/, 'shows the live copy, not the build');
 });
 
 test('hydration: a server-rendered image with the same URL is not loaded again', async () => {
   const shop = server.createStorefront({ domain: 'shop.test', token: 't', country: 'NL' });
-  const p = await shop.getProduct('coffee-box');
-  const url = p.featuredImage?.url || p.images?.nodes?.[0]?.url;
+  const served = await shop.getProduct('coffee-box');
+  assert.ok(served);
+  const url = served.featuredImage?.url || served.images.nodes[0]?.url;
   if (!url) return; // mock without images
   const src = shop.imageUrl(url, { width: 800 });
-  document.body.innerHTML = `${shop.hydrate(p)}<div tether-product="coffee-box"><img id="im" tether-bind="image" src="${src}" alt="x"></div>`;
+  document.body.innerHTML = `${shop.hydrate(served)}<div tether-product="coffee-box"><img id="im" tether-bind="image" src="${src}" alt="x"></div>`;
   const img = find('#im');
   Tether.mount(document);
   await settle();
@@ -258,8 +319,8 @@ test('hydration: data made for another market is ignored (Tether fetches its own
   const shop = server.createStorefront({ domain: 'shop.test', token: 't', country: 'DE' });
   document.body.innerHTML = page(shop.hydrate(product));
   Tether.mount(document);
-  await waitFor(() => calls.some((c) => c.op === 'TetherProducts'), 'the request for this market');
-  assert.equal(calls.filter((c) => c.op === 'TetherProducts').length, 1);
+  await waitFor(() => calls.some((call) => call.op === 'TetherProducts'), 'the request for this market');
+  assert.equal(calls.filter((call) => call.op === 'TetherProducts').length, 1);
 });
 
 test('hydration: revalidate:false skips the background refresh', async () => {
@@ -286,6 +347,7 @@ test('astro:page-load mounts the new page; astro:before-swap closes the cart', a
 
 test('cart.subscribe gives the cart now and after every change; unsubscribe stops it', async () => {
   localStorage.clear();
+  /** @type {number[]} */
   const seen = [];
   const off = Tether.cart.subscribe((_cart, meta) => seen.push(meta.count));
   await Tether.cart.add({ variantId: '10' });
@@ -301,24 +363,28 @@ test('cart.subscribe gives the cart now and after every change; unsubscribe stop
 test('integration: injects the page script with .env values, drops functions with a warning', async () => {
   const { default: tether } = await import('../src/astro.ts');
   const prev = { ...process.env };
-  process.env.PUBLIC_SHOPIFY_DOMAIN = 'env-shop.myshopify.com';
-  process.env.PUBLIC_SHOPIFY_STOREFRONT_TOKEN = 'env-token';
+  process.env['PUBLIC_SHOPIFY_DOMAIN'] = 'env-shop.myshopify.com';
+  process.env['PUBLIC_SHOPIFY_STOREFRONT_TOKEN'] = 'env-token';
+  /** @type {{ stage: string, code: string }[]} */
   const scripts = [];
+  /** @type {string[]} */
   const warnings = [];
   // @ts-expect-error -- a function can't reach the page: the integration drops it with a warning
   await tether({ country: 'NL', onError: () => {} }).hooks['astro:config:setup']({
     injectScript: (stage, code) => scripts.push({ stage, code }),
     command: 'build',
     config: { root: pathToFileURL(join(tmpdir(), 'astro-site/')) },
-    logger: { warn: (m) => warnings.push(m) },
+    logger: { warn: (message) => warnings.push(message) },
   });
   process.env = prev;
   assert.deepEqual(
-    scripts.map((x) => x.stage),
+    scripts.map((script) => script.stage),
     ['head-inline', 'page'],
   );
-  assert.match(scripts[0].code, /TETHER_INTEGRATION/, 'no second auto-start from window.TETHER_CONFIG');
-  const page = scripts[1].code;
+  const [inline, pageScript] = scripts;
+  assert.ok(inline && pageScript);
+  assert.match(inline.code, /TETHER_INTEGRATION/, 'no second auto-start from window.TETHER_CONFIG');
+  const page = pageScript.code;
   assert.match(page, /import Tether from '@occluze\/tether'/);
   assert.match(page, /"domain":"env-shop\.myshopify\.com"/);
   assert.match(page, /"country":"NL"/);
@@ -329,14 +395,15 @@ test('integration: injects the page script with .env values, drops functions wit
 test('integration: warns clearly when the store is missing', async () => {
   const { default: tether } = await import('../src/astro.ts');
   const prev = { ...process.env };
-  delete process.env.PUBLIC_SHOPIFY_DOMAIN;
-  delete process.env.PUBLIC_SHOPIFY_STOREFRONT_TOKEN;
+  delete process.env['PUBLIC_SHOPIFY_DOMAIN'];
+  delete process.env['PUBLIC_SHOPIFY_STOREFRONT_TOKEN'];
+  /** @type {string[]} */
   const warnings = [];
   await tether().hooks['astro:config:setup']({
     injectScript() {},
     command: 'dev',
     config: { root: pathToFileURL(join(tmpdir(), 'none/')) },
-    logger: { warn: (m) => warnings.push(m) },
+    logger: { warn: (message) => warnings.push(message) },
   });
   process.env = prev;
   assert.match(warnings.join(' '), /PUBLIC_SHOPIFY_DOMAIN and PUBLIC_SHOPIFY_STOREFRONT_TOKEN/);
@@ -354,18 +421,21 @@ test('integration: reads .env, .env.local and .env.production like Vite (process
   );
   await writeFile(join(dir, '.env.production'), 'PUBLIC_SHOPIFY_DOMAIN=prod.myshopify.com\n');
   const prev = { ...process.env };
-  delete process.env.PUBLIC_SHOPIFY_DOMAIN;
-  delete process.env.PUBLIC_SHOPIFY_STOREFRONT_TOKEN;
+  delete process.env['PUBLIC_SHOPIFY_DOMAIN'];
+  delete process.env['PUBLIC_SHOPIFY_STOREFRONT_TOKEN'];
+  /** @type {string[]} */
   const scripts = [];
   await tether().hooks['astro:config:setup']({
-    injectScript: (_s, c) => scripts.push(c),
+    injectScript: (_stage, code) => scripts.push(code),
     command: 'build',
     config: { root: pathToFileURL(`${dir}/`) },
     logger: { warn() {} },
   });
   process.env = prev;
-  assert.match(scripts[1], /"domain":"prod\.myshopify\.com"/, '.env.production wins over .env');
-  assert.match(scripts[1], /"token":"quoted-token"/);
+  const pageScript = scripts[1];
+  assert.ok(pageScript);
+  assert.match(pageScript, /"domain":"prod\.myshopify\.com"/, '.env.production wins over .env');
+  assert.match(pageScript, /"token":"quoted-token"/);
 });
 
 test('integration: --mode picks the .env file; shop.config.js changes restart the dev server', async () => {
@@ -382,16 +452,18 @@ test('integration: --mode picks the .env file; shop.config.js changes restart th
   await writeFile(join(dir, 'src', 'shop.config.js'), 'export default {};\n');
   const prev = { ...process.env };
   const argv = process.argv;
-  delete process.env.PUBLIC_SHOPIFY_DOMAIN;
-  delete process.env.PUBLIC_SHOPIFY_STOREFRONT_TOKEN;
+  delete process.env['PUBLIC_SHOPIFY_DOMAIN'];
+  delete process.env['PUBLIC_SHOPIFY_STOREFRONT_TOKEN'];
   process.argv = [...argv, '--mode', 'staging'];
+  /** @type {string[]} */
   const scripts = [];
+  /** @type {string[]} */
   const watched = [];
   try {
     await tether().hooks['astro:config:setup']({
-      injectScript: (_s, c) => scripts.push(c),
+      injectScript: (_stage, code) => scripts.push(code),
       command: 'dev',
-      addWatchFile: (f) => watched.push(String(f)),
+      addWatchFile: (file) => watched.push(String(file)),
       config: { root: pathToFileURL(`${dir}/`) },
       logger: { warn() {} },
     });
@@ -399,7 +471,7 @@ test('integration: --mode picks the .env file; shop.config.js changes restart th
     process.env = prev;
     process.argv = argv;
   }
-  assert.match(scripts[1], /"domain":"staging\.myshopify\.com"/);
+  assert.match(scripts[1] ?? '', /"domain":"staging\.myshopify\.com"/);
   assert.deepEqual(watched, [join(dir, 'src', 'shop.config.js')]);
 });
 
@@ -416,15 +488,17 @@ test('tether-show: elements hidden before the script ran (class, inline style, h
     </div>`;
   Tether.mount(document);
   await rendered();
-  const vis = (id) => window.getComputedStyle(find(`#${id}`)).display !== 'none';
-  assert.ok(vis('a'), 'class-hidden shown');
-  assert.ok(vis('b'), 'inline display:none shown');
-  assert.ok(vis('c'), 'hidden attribute shown');
+  /** @param {string} id */
+  const visible = (id) => window.getComputedStyle(find(`#${id}`)).display !== 'none';
+  assert.ok(visible('a'), 'class-hidden shown');
+  assert.ok(visible('b'), 'inline display:none shown');
+  assert.ok(visible('c'), 'hidden attribute shown');
   assert.equal(find('#e').style.display, 'inline-flex', 'tether-display when CSS hides it');
-  assert.ok(!vis('d'), 'false condition stays hidden');
+  assert.ok(!visible('d'), 'false condition stays hidden');
 });
 
 test('cart.subscribe hears the saved cart once it has loaded', async () => {
+  /** @type {number[]} */
   const seen = [];
   const off = Tether.cart.subscribe((_cart, { count }) => seen.push(count));
   document.dispatchEvent(new window.CustomEvent('tether:cart-updated', { detail: {} })); // sanity: listener works
@@ -438,7 +512,7 @@ test('cart: line links keep the chosen variant; checkout is marked disabled whil
     <div tether-cart-lines><div><a tether-line="url">x</a></div></div>`;
   Tether.cart.forgetSaved();
   assert.equal(find('#co').getAttribute('aria-disabled'), 'true');
-  const cart = await Tether.cart.add(product.variants.nodes[0].id, 1);
+  const cart = await Tether.cart.add(firstVariantId, 1);
   assert.ok(cart);
   assert.equal(find('#co').getAttribute('aria-disabled'), 'false');
   assert.match(find('[tether-line="url"]').getAttribute('href') ?? '', /\/products?\/coffee-box\?variant=\d+$/);
@@ -453,8 +527,8 @@ test('server initialState() matches what the browser shows first (variant, price
       ...product,
       sellingPlanGroups: { nodes: [] },
       variants: {
-        nodes: product.variants.nodes.map((v, i) => ({
-          ...v,
+        nodes: product.variants.nodes.map((variant, i) => ({
+          ...variant,
           availableForSale: i > 0,
           quantityAvailable: 3,
           sellingPlanAllocations: { nodes: [] },
@@ -462,6 +536,7 @@ test('server initialState() matches what the browser shows first (variant, price
       },
     },
   ];
+  /** @type {import('../src/product-state.ts').ShowCondition[]} */
   const keys = [
     'in-stock',
     'out-of-stock',
@@ -474,25 +549,24 @@ test('server initialState() matches what the browser shows first (variant, price
     'one-time-selected',
     'has-variants',
   ];
-  for (const p of cases) {
-    const st = shop.initialState(p);
+  for (const [index, shown] of cases.entries()) {
+    const state = shop.initialState(shown);
     Tether.clearProductCache();
-    Tether.primeProduct(p);
-    document.body.innerHTML = `<div tether-product="${p.handle}"><span id="price" tether-bind="price"></span>
-      ${keys.map((k) => `<i data-k="${k}" tether-show="${k}"></i>`).join('')}</div>`;
+    Tether.primeProduct(shown);
+    document.body.innerHTML = `<div tether-product="${shown.handle}"><span id="price" tether-bind="price"></span>
+      ${keys.map((key) => `<i data-key="${key}" tether-show="${key}"></i>`).join('')}</div>`;
     Tether.mount(document);
     await rendered();
     assert.equal(
       find('#price').textContent,
-      shop.formatMoney(st.price),
-      `price (${p.requiresSellingPlan ? 'plan' : 'one-time'})`,
+      shop.formatMoney(state.price),
+      `price (${shown.requiresSellingPlan ? 'plan' : 'one-time'})`,
     );
-    for (const el of findAll('[data-k]')) {
-      const { k } = el.dataset;
-      assert.ok(k);
-      assert.equal(el.style.display !== 'none', st.show[k], `${k} for case ${cases.indexOf(p)}`);
+    for (const key of keys) {
+      const element = find(`[data-key="${key}"]`);
+      assert.equal(element.style.display !== 'none', state.show[key], `${key} for case ${index}`);
     }
-    assert.equal(Tether.getScope(document.querySelector('[tether-product]')).variant.id, st.variant.id);
+    assert.equal(productScope().variant?.id, state.variant.id);
   }
 });
 
@@ -502,7 +576,7 @@ test('cart warnings: less stock than asked is shown, and subscribe reports loade
     const { query, variables } = graphqlRequest(init);
     if (/Tether_cartLinesAdd|Tether_cartCreate/.test(query)) {
       assert.match(query, /warnings \{ code message target \}/);
-      const lines = variables.lines || variables.input.lines;
+      const lines = variables['lines'] ? linesAt(variables, 'lines') : linesAt(recordAt(variables, 'input'), 'lines');
       const key = /cartCreate/.test(query) ? 'cartCreate' : 'cartLinesAdd';
       return jsonResponse({
         data: {
@@ -518,13 +592,15 @@ test('cart warnings: less stock than asked is shown, and subscribe reports loade
   };
   try {
     document.body.innerHTML = '<p id="w" tether-show="cart-warning" hidden><span tether-cart-warning></span></p>';
+    /** @type {CartMeta[]} */
     const metas = [];
-    const off = Tether.cart.subscribe((_c, m) => metas.push(m));
-    await Tether.cart.add(product.variants.nodes[0].id, 5);
+    const off = Tether.cart.subscribe((_cart, meta) => metas.push(meta));
+    await Tether.cart.add(firstVariantId, 5);
     off();
     const meta = metas.at(-1);
+    assert.ok(meta);
     assert.equal(meta.loaded, true);
-    assert.equal(meta.warnings[0].code, 'MERCHANDISE_NOT_ENOUGH_STOCK');
+    assert.equal(meta.warnings[0]?.code, 'MERCHANDISE_NOT_ENOUGH_STOCK');
     assert.notEqual(window.getComputedStyle(find('#w')).display, 'none');
     assert.equal(find('[tether-cart-warning]').textContent, 'Only 1 left');
   } finally {
@@ -534,6 +610,7 @@ test('cart warnings: less stock than asked is shown, and subscribe reports loade
 
 test('another language: translated option names (Size -> Größe) still match the markup by position', async () => {
   const shop = server.createStorefront({ domain: 'shop.test', token: 't', country: 'DE', language: 'DE' });
+  /** @type {Product} */
   const de = JSON.parse(
     JSON.stringify(product)
       .replace(/"Size"/g, '"Größe"')
@@ -549,11 +626,10 @@ test('another language: translated option names (Size -> Größe) still match th
   Tether.primeProduct(de);
   Tether.mount(document);
   await rendered();
-  const btns = findAll('[tether-option-list] [tether-option-value]');
-  assert.equal(btns.length, 2, 'values from the translated product');
-  btns[1].click();
-  const scope = Tether.getScope(document.querySelector('[tether-product]'));
-  assert.equal(scope.variant.selectedOptions[0].value, '1 kg');
+  const buttons = findAll('[tether-option-list] [tether-option-value]');
+  assert.equal(buttons.length, 2, 'values from the translated product');
+  buttons[1]?.click();
+  assert.equal(productScope().variant?.selectedOptions[0]?.value, '1 kg');
   assert.equal(find('#sel').textContent, '1 kg');
   void shop;
 });
@@ -561,9 +637,9 @@ test('another language: translated option names (Size -> Größe) still match th
 // ---- reported by the 10 store builders / shoppers ---------------------------
 
 test('cart: quick +/+ clicks add up (each builds on the last one asked for), the line is busy meanwhile', async () => {
-  const cart = cartFrom([{ merchandiseId: product.variants.nodes[0].id, quantity: 1 }]);
+  const cart = cartFrom([{ merchandiseId: firstVariantId, quantity: 1 }]);
   await seedCart(cart);
-  const lineId = cart.lines.nodes[0].id;
+  const lineId = cart.lines.nodes[0]?.id;
   document.body.innerHTML = `<div tether-cart-lines><div><span tether-line="quantity"></span><button tether-line-plus>+</button></div></div>`;
   Tether.cart.render();
   const line = find('[tether-cart-lines] > *');
@@ -573,33 +649,38 @@ test('cart: quick +/+ clicks add up (each builds on the last one asked for), the
   assert.equal(find('[tether-line="quantity"]', line).textContent, '3', 'shown at once');
   assert.ok(line.classList.contains('is-busy'));
   await waitFor(() => !find('[tether-cart-lines] > *').classList.contains('is-busy'), 'the update to finish');
-  const updates = calls.filter((c) => c.op === 'Tether_cartLinesUpdate').map((c) => c.variables.lines[0].quantity);
+  const updates = calls
+    .filter((call) => call.op === 'Tether_cartLinesUpdate')
+    .map((call) => numberAt(recordsAt(call.variables, 'lines')[0], 'quantity'));
   assert.deepEqual(updates, [3], 'only the latest target is sent');
-  assert.equal(Tether.cart.lines[0].quantity, 3);
+  assert.equal(Tether.cart.lines[0]?.quantity, 3);
   assert.ok(!find('[tether-cart-lines] > *').classList.contains('is-busy'));
   void lineId;
 });
 
 test('cart: + + + - while Shopify answers slowly: the count never steps past the target', async () => {
   const realFetch = globalThis.fetch;
+  /** @type {number[]} */
   const sent = [];
   globalThis.fetch = async (url, init) => {
     const { query, variables } = graphqlRequest(init);
     if (/cartLinesUpdate/.test(query)) {
-      sent.push(variables.lines[0].quantity);
-      await new Promise((r) => setTimeout(r, 30)); // a slow network, so clicks overlap
-      const c = cartFrom([{ merchandiseId: product.variants.nodes[0].id, quantity: variables.lines[0].quantity }]);
-      return jsonResponse({ data: { cartLinesUpdate: { cart: c, userErrors: [], warnings: [] } } });
+      const quantity = numberAt(recordsAt(variables, 'lines')[0], 'quantity');
+      sent.push(quantity);
+      await new Promise((resolve) => setTimeout(resolve, 30)); // a slow network, so clicks overlap
+      const cart = cartFrom([{ merchandiseId: firstVariantId, quantity }]);
+      return jsonResponse({ data: { cartLinesUpdate: { cart, userErrors: [], warnings: [] } } });
     }
     return realFetch(url, init);
   };
   try {
-    await seedCart(cartFrom([{ merchandiseId: product.variants.nodes[0].id, quantity: 1 }]));
+    await seedCart(cartFrom([{ merchandiseId: firstVariantId, quantity: 1 }]));
     document.body.innerHTML =
       '<span tether-cart-count></span><div tether-cart-lines><div><span tether-line="quantity"></span><button tether-line-plus>+</button><button tether-line-minus>-</button></div></div>';
     Tether.cart.render();
+    /** @type {(number | undefined)[]} */
     const counts = [];
-    const off = Tether.cart.subscribe((c) => counts.push(c?.totalQuantity));
+    const off = Tether.cart.subscribe((cart) => counts.push(cart?.totalQuantity));
     const plus = find('[tether-line-plus]');
     plus.click();
     await waitFor(() => sent.length === 1, 'the first update to be sent');
@@ -615,7 +696,7 @@ test('cart: + + + - while Shopify answers slowly: the count never steps past the
     assert.deepEqual(sent, [2, 3], 'the first, then only the latest');
     assert.equal(find('[tether-cart-count]').textContent, '3');
     assert.ok(
-      counts.every((n) => n <= 3),
+      counts.every((count) => count !== undefined && count <= 3),
       `counts seen: ${counts}`,
     );
   } finally {
@@ -625,9 +706,10 @@ test('cart: + + + - while Shopify answers slowly: the count never steps past the
 
 test('cart.open() works without a tether-cart-drawer (framework carts), subscribe reports it', async () => {
   document.body.innerHTML = '';
+  /** @type {boolean | null} */
   let open = null;
-  const off = Tether.cart.subscribe((_c, m) => {
-    open = m.open;
+  const off = Tether.cart.subscribe((_cart, meta) => {
+    open = meta.open;
   });
   Tether.cart.open();
   assert.equal(Tether.cart.isOpen(), true);
@@ -638,13 +720,31 @@ test('cart.open() works without a tether-cart-drawer (framework carts), subscrib
 });
 
 test('options: a value no variant has is ignored; an impossible combination keeps the most choices', async () => {
-  const two = JSON.parse(JSON.stringify(product));
+  const two = structuredClone(product);
   two.options = [
-    { name: 'Size', optionValues: [{ name: '250g' }, { name: '1kg' }] },
-    { name: 'Roast', optionValues: [{ name: 'Light' }, { name: 'Dark' }, { name: 'Ember' }] },
+    {
+      name: 'Size',
+      optionValues: [
+        { name: '250g', swatch: null },
+        { name: '1kg', swatch: null },
+      ],
+    },
+    {
+      name: 'Roast',
+      optionValues: [
+        { name: 'Light', swatch: null },
+        { name: 'Dark', swatch: null },
+        { name: 'Ember', swatch: null },
+      ],
+    },
   ];
-  const mk = (i, size, roast) => ({
-    ...two.variants.nodes[0],
+  /**
+   * @param {number} i
+   * @param {string} size
+   * @param {string} roast
+   */
+  const variantOf = (i, size, roast) => ({
+    ...firstVariant,
     id: `gid://shopify/ProductVariant/9${i}`,
     availableForSale: true,
     selectedOptions: [
@@ -652,17 +752,17 @@ test('options: a value no variant has is ignored; an impossible combination keep
       { name: 'Roast', value: roast },
     ],
   });
-  two.variants.nodes = [mk(1, '250g', 'Light'), mk(2, '1kg', 'Light'), mk(3, '1kg', 'Dark')];
+  two.variants.nodes = [variantOf(1, '250g', 'Light'), variantOf(2, '1kg', 'Light'), variantOf(3, '1kg', 'Dark')];
   Tether.clearProductCache();
   Tether.primeProduct(two);
   document.body.innerHTML = '<div tether-product="coffee-box"></div>';
   Tether.mount(document);
   await rendered();
-  const scope = Tether.getScope(document.querySelector('[tether-product]'));
+  const scope = productScope();
   scope.select('Size', '1kg');
-  assert.equal(scope.variant.id, 'gid://shopify/ProductVariant/92');
+  assert.equal(scope.variant?.id, 'gid://shopify/ProductVariant/92');
   scope.select('Roast', 'Ember'); // no variant at all
-  assert.equal(scope.variant.id, 'gid://shopify/ProductVariant/92', 'choice kept');
+  assert.equal(scope.variant?.id, 'gid://shopify/ProductVariant/92', 'choice kept');
   scope.select('Size', '250g');
   scope.select('Roast', 'Dark'); // 250g/Dark doesn't exist -> 1kg/Dark
   assert.deepEqual(scope.selected, { Size: '1kg', Roast: 'Dark' });
@@ -685,7 +785,7 @@ test('variantUrl: the choice goes into ?variant= after a change (not on first re
   await rendered();
   await settle(); // time for the extras part to write a URL, which it must not
   assert.equal(window.location.search, '', 'nothing on first render');
-  Tether.getScope(document.querySelector('[tether-product]')).select('Size', '1kg');
+  productScope().select('Size', '1kg');
   await waitFor(() => /variant=\d+/.test(window.location.search), 'the extras part to write the URL');
   await Tether.init({ domain: 'shop.test', token: 't', autoMount: false, country: 'NL', locale: 'nl-NL' });
   window.history.replaceState(null, '', '/');
@@ -700,16 +800,16 @@ test('tether-show="list-empty" with a hidden attribute is shown for an empty lis
 
 test('initialState has has-savings, plenty-in-stock, a plain unavailable map, and honours lowStock', () => {
   const shop = server.createStorefront({ domain: 'shop.test', token: 't', lowStock: 2 });
-  const p = JSON.parse(JSON.stringify(product));
-  p.variants.nodes.forEach((v) => {
-    v.quantityAvailable = 3;
+  const inStock = structuredClone(product);
+  inStock.variants.nodes.forEach((variant) => {
+    variant.quantityAvailable = 3;
   });
-  const st = shop.initialState(p);
-  assert.equal(typeof st.show['has-savings'], 'boolean');
-  assert.equal(st.show['low-stock'], false, '3 > lowStock 2');
-  assert.equal(st.show['plenty-in-stock'], true);
-  assert.ok(Array.isArray(st.unavailable.Size));
-  assert.doesNotThrow(() => JSON.stringify(st.unavailable));
+  const state = shop.initialState(inStock);
+  assert.equal(typeof state.show['has-savings'], 'boolean');
+  assert.equal(state.show['low-stock'], false, '3 > lowStock 2');
+  assert.equal(state.show['plenty-in-stock'], true);
+  assert.ok(Array.isArray(state.unavailable['Size']));
+  assert.doesNotThrow(() => JSON.stringify(state.unavailable));
 });
 
 test('hydrate({ card: true }) is smaller and still renders a card without a request', async () => {
@@ -727,43 +827,36 @@ test('hydrate({ card: true }) is smaller and still renders a card without a requ
   const many = {
     ...product,
     images: {
-      nodes: ['a', 'b', 'c', 'd'].map((n) => ({
-        url: `https://cdn.shopify.com/${n}.jpg`,
+      nodes: ['a', 'b', 'c', 'd'].map((name) => ({
+        url: `https://cdn.shopify.com/${name}.jpg`,
         altText: null,
         width: 10,
         height: 10,
       })),
     },
   };
-  const imgs = (tag) => JSON.parse(tag.replace(/^<script[^>]*>|<\/script>$/g, '')).products[0].images.nodes.length;
-  assert.equal(imgs(shop.hydrate(many, { card: true })), 2);
-  assert.equal(imgs(shop.hydrate(many, { card: true, images: 3 })), 3);
-  assert.equal(imgs(shop.hydrate(many)), 4);
+  /** @param {string} tag */
+  const imageCount = (tag) =>
+    JSON.parse(tag.replace(/^<script[^>]*>|<\/script>$/g, '')).products[0].images.nodes.length;
+  assert.equal(imageCount(shop.hydrate(many, { card: true })), 2);
+  assert.equal(imageCount(shop.hydrate(many, { card: true, images: 3 })), 3);
+  assert.equal(imageCount(shop.hydrate(many)), 4);
 });
 
 test('queries carry a maxAge bucket (Shopify caches identical query texts); mutations and maxAge: 0 do not', async () => {
+  /** @type {string[]} */
   const bodies = [];
-  const shop = server.createStorefront({
-    domain: 'shop.test',
-    token: 't',
-    fetch: async (_u, i) => {
-      bodies.push(JSON.parse(i.body).query);
-      return jsonResponse({ data: { product: null } });
-    },
-  });
+  /** @type {typeof globalThis.fetch} */
+  const fetch = async (_url, init) => {
+    bodies.push(graphqlRequest(init).query);
+    return jsonResponse({ data: { product: null } });
+  };
+  const shop = server.createStorefront({ domain: 'shop.test', token: 't', fetch });
   await shop.getProduct('x');
-  assert.match(bodies[0], / #\d+$/);
-  const none = server.createStorefront({
-    domain: 'shop.test',
-    token: 't',
-    maxAge: 0,
-    fetch: async (_u, i) => {
-      bodies.push(JSON.parse(i.body).query);
-      return jsonResponse({ data: { product: null } });
-    },
-  });
+  assert.match(bodies[0] ?? '', / #\d+$/);
+  const none = server.createStorefront({ domain: 'shop.test', token: 't', maxAge: 0, fetch });
   await none.getProduct('x');
-  assert.doesNotMatch(bodies[1], /#\d+$/);
+  assert.doesNotMatch(bodies[1] ?? '', /#\d+$/);
   await none.query('mutation M { a }').catch(() => {});
   assert.doesNotMatch(bodies[2] || '', /#\d+$/);
 });
@@ -775,15 +868,21 @@ test('jsonLd: Product / ProductGroup with offers per variant, safe to put in HTM
     siteUrl: 'https://shop.example',
     productPath: '/products',
   });
-  const d = shop.jsonLdData(product);
-  assert.ok(['Product', 'ProductGroup'].includes(d['@type']));
-  const offers = d.offers ? [d.offers] : d.hasVariant.map((v) => v.offers);
+  const data = shop.jsonLdData(product);
+  assert.ok(data);
+  assert.ok(['Product', 'ProductGroup'].includes(String(data['@type'])));
+  const offers = data['offers']
+    ? [data['offers']]
+    : [data['hasVariant']].flat().map((variant) => fieldOf(variant, 'offers'));
   assert.ok(
     offers.every(
-      (o) => o.price && o.priceCurrency && /schema.org\/(InStock|OutOfStock|BackOrder)/.test(o.availability),
+      (offer) =>
+        fieldOf(offer, 'price') &&
+        fieldOf(offer, 'priceCurrency') &&
+        /schema.org\/(InStock|OutOfStock|BackOrder)/.test(String(fieldOf(offer, 'availability'))),
     ),
   );
-  assert.match(d.url, /^https:\/\/shop\.example\/products\/coffee-box$/);
+  assert.match(String(data['url']), /^https:\/\/shop\.example\/products\/coffee-box$/);
   const evil = { ...product, title: '</script><script>alert(1)</script>' };
   assert.ok(!/<\/script><script>/.test(shop.jsonLd(evil).slice(30, -9)), 'escaped');
 });
@@ -800,8 +899,9 @@ test('search as you type: results while typing, arrow keys, Escape, stale answer
   const input = find('[tether-search-input]');
   await waitFor(() => input.getAttribute('role') === 'combobox', 'the search part to load');
   assert.ok(input instanceof window.HTMLInputElement);
-  const type = (v) => {
-    input.value = v;
+  /** @param {string} text */
+  const type = (text) => {
+    input.value = text;
     input.dispatchEvent(new window.Event('input', { bubbles: true }));
   };
   type('c');
@@ -809,7 +909,7 @@ test('search as you type: results while typing, arrow keys, Escape, stale answer
   type('cof');
   const root = find('[tether-search]');
   await waitFor(() => root.getAttribute('tether-search-state') === 'ready', 'the results');
-  assert.equal(calls.filter((c) => c.op === 'TetherPredictive').length, 1, 'debounced: one request');
+  assert.equal(calls.filter((call) => call.op === 'TetherPredictive').length, 1, 'debounced: one request');
   const link = find('[tether-search-products] a');
   assert.equal(find('[tether-search-bind="title"]', link).textContent, product.title);
   assert.match(link.getAttribute('href') ?? '', /coffee-box/);
@@ -839,13 +939,19 @@ test('a page built for another market: html.tether-market-pending until the live
 // ---- analytics, customer accounts -------------------------------------------
 
 test("analytics: Tether's own events become GA4 dataLayer events (view_item, add_to_cart from cart changes, begin_checkout); look-alikes send nothing", async () => {
+  /**
+   * What the analytics part pushes for GA4.
+   *
+   * @type {{ event?: string, ecommerce?: { items: { quantity: number }[], value: unknown } | null }[]}
+   */
   const dataLayer = [];
   Object.assign(window, { dataLayer });
-  const a = await import('../src/analytics.ts');
+  const analytics = await import('../src/analytics.ts');
   const prev = cfg.analytics;
   cfg.analytics = { dataLayer: true };
-  const q = [];
-  await a.startAnalytics(q);
+  /** @type {Event[]} */
+  const queue = [];
+  await analytics.startAnalytics(queue);
   Tether.clearProductCache();
   Tether.primeProduct(product);
   document.body.innerHTML = '<div tether-product="coffee-box"></div>';
@@ -854,40 +960,45 @@ test("analytics: Tether's own events become GA4 dataLayer events (view_item, add
   const root = find('[tether-product]');
   const { ownEvent } = await import('../src/dom.ts');
   // Look-alike events from another script, whatever their detail, send nothing and don't throw.
-  q.push(new window.CustomEvent('tether:cart-updated', { detail: null }));
-  q.push(new window.CustomEvent('tether:checkout', { detail: { cart: cartFrom([]) } }));
-  q.push(ownEvent('product-ready', { product, scope: Tether.getScope(root) }));
-  const line = (qty) => cartFrom([{ merchandiseId: product.variants.nodes[0].id, quantity: qty }]);
-  q.push(ownEvent('cart-updated', { cart: line(1), reason: 'load' }));
-  q.push(ownEvent('cart-updated', { cart: line(3), reason: 'add' }));
-  q.push(ownEvent('checkout', { cart: line(3), url: 'https://shop.test/checkout/abc' }));
-  const events = dataLayer.filter((x) => x.event).map((x) => x.event);
+  queue.push(new window.CustomEvent('tether:cart-updated', { detail: null }));
+  queue.push(new window.CustomEvent('tether:checkout', { detail: { cart: cartFrom([]) } }));
+  const scope = Tether.getScope(root);
+  assert.ok(scope);
+  queue.push(ownEvent('product-ready', { product, scope }));
+  /** @param {number} quantity */
+  const line = (quantity) => cartFrom([{ merchandiseId: firstVariantId, quantity }]);
+  queue.push(ownEvent('cart-updated', { cart: line(1), reason: 'load' }));
+  queue.push(ownEvent('cart-updated', { cart: line(3), reason: 'add' }));
+  queue.push(ownEvent('checkout', { cart: line(3), url: 'https://shop.test/checkout/abc' }));
+  const events = dataLayer.filter((entry) => entry.event).map((entry) => entry.event);
   assert.deepEqual(events, ['view_item', 'add_to_cart', 'begin_checkout']);
-  const add = dataLayer.find((x) => x.event === 'add_to_cart');
-  assert.equal(add.ecommerce.items[0].quantity, 2, 'the difference');
-  assert.equal(typeof add.ecommerce.value, 'number');
+  const add = dataLayer.find((entry) => entry.event === 'add_to_cart');
+  assert.equal(add?.ecommerce?.items[0]?.quantity, 2, 'the difference');
+  assert.equal(typeof add?.ecommerce?.value, 'number');
   assert.ok(
-    dataLayer.some((x) => x.ecommerce === null),
+    dataLayer.some((entry) => entry.ecommerce === null),
     'cleared before each push',
   );
   cfg.analytics = prev;
 });
 
 test('customer accounts: no token in the browser, the Worker does the work', async () => {
-  const acc = await import('../src/account.ts');
+  const account = await import('../src/account.ts');
+  /** @type {string[]} */
   const nav = [];
-  cfg.account = { server: '/_tether/account', navigate: (u) => nav.push(u) }; // a path on this site works too
+  cfg.account = { server: '/_tether/account', navigate: (url) => nav.push(url) }; // a path on this site works too
   const realFetch = globalThis.fetch;
   const asked = [];
   let noOrders = false;
   globalThis.fetch = async (url, init = {}) => {
-    const u = String(url);
-    if (u.startsWith('https://astro.test/_tether/account')) {
-      asked.push({ path: new URL(u).pathname.split('/').pop(), init });
+    const target = String(url);
+    if (target.startsWith('https://astro.test/_tether/account')) {
+      asked.push({ path: new URL(target).pathname.split('/').pop(), init });
       assert.equal(init.credentials, 'include');
-      const json = (d) => jsonResponse(d);
-      if (u.endsWith('/me')) return json({ loggedIn: true, customer: { firstName: 'Ada', email: 'ada@x.test' } });
-      if (u.includes('/orders'))
+      /** @param {unknown} data */
+      const json = (data) => jsonResponse(data);
+      if (target.endsWith('/me')) return json({ loggedIn: true, customer: { firstName: 'Ada', email: 'ada@x.test' } });
+      if (target.includes('/orders'))
         return json({
           orders: noOrders
             ? []
@@ -911,18 +1022,20 @@ test('customer accounts: no token in the browser, the Worker does the work', asy
                 },
               ],
         });
-      if (u.endsWith('/cart')) {
-        assert.equal(init.headers['X-Tether-Account'], '1');
+      if (target.endsWith('/cart')) {
+        assert.equal(new Headers(init.headers).get('X-Tether-Account'), '1');
         return json({ linked: true, checkoutUrl: 'https://shop.test/checkouts/c/1' });
       }
-      if (u.endsWith('/logout')) return json({ logoutUrl: 'https://shopify.com/logout?x' });
+      if (target.endsWith('/logout')) return json({ logoutUrl: 'https://shopify.com/logout?x' });
     }
     return realFetch(url, init);
   };
   try {
-    await seedCart(cartFrom([{ merchandiseId: product.variants.nodes[0].id, quantity: 1 }]));
-    await acc.login();
-    const to = new URL(nav.pop());
+    await seedCart(cartFrom([{ merchandiseId: firstVariantId, quantity: 1 }]));
+    await account.login();
+    const loginUrl = nav.pop();
+    assert.ok(loginUrl);
+    const to = new URL(loginUrl);
     assert.equal(to.pathname, '/_tether/account/login');
     assert.equal(to.searchParams.get('cart'), null, 'no cart on the login link (linked through POST /cart)');
     window.history.replaceState(null, '', '/account?account=in');
@@ -930,14 +1043,15 @@ test('customer accounts: no token in the browser, the Worker does the work', asy
       <ul tether-orders><li><span tether-order-bind="name"></span><img id="oi" tether-order-bind="image">
         <div tether-order-lines><p><span tether-order-line="quantity"></span>x <span tether-order-line="title"></span> <span tether-order-line="variant-title"></span></p></div></li></ul>
       <p id="ol" tether-show="orders-loading"></p><p id="oe" tether-show="orders-empty"></p>`;
-    await acc.mountAccount(document);
+    await account.mountAccount(document);
+    /** @param {string} id */
     const visible = (id) => window.getComputedStyle(find(`#${id}`)).display !== 'none';
     assert.match(find('#oi').getAttribute('src') ?? '', /tee\.jpg/);
     assert.equal(find('[tether-order-lines] p').textContent.replace(/\s+/g, ' ').trim(), '2x Tee M');
     assert.ok(!visible('ol') && !visible('oe'));
     assert.equal(find('[tether-order-bind="name"]').textContent, '#1001');
     noOrders = true;
-    await acc.render(document);
+    await account.render(document);
     assert.ok(visible('oe'), 'no orders yet');
     noOrders = false;
     assert.equal(window.location.search, '', '?account=in removed');
@@ -949,8 +1063,8 @@ test('customer accounts: no token in the browser, the Worker does the work', asy
       !/access|refresh|token/i.test(stored.replace(/account-hint/g, '')),
       'nothing secret stored in the browser',
     );
-    await acc.logout();
-    assert.match(nav.pop(), /shopify\.com\/logout/);
+    await account.logout();
+    assert.match(nav.pop() ?? '', /shopify\.com\/logout/);
   } finally {
     globalThis.fetch = realFetch;
     cfg.account = null;
@@ -962,38 +1076,33 @@ test('customer accounts: no token in the browser, the Worker does the work', asy
 test('a rejected token says why: Shopify sends 401 with an empty message', async () => {
   const fetch = async () => jsonResponse({ errors: [{ message: '', extensions: { code: 'UNAUTHORIZED' } }] }, 401);
   const shop = server.createStorefront({ domain: 'wrong.myshopify.com', token: 'shpat_abc', fetch });
-  await assert.rejects(shop.getProduct('x'), (err) => {
-    assert.ok(err instanceof Error);
-    assert.match(err.message, /rejected the Storefront token for wrong\.myshopify\.com \(401\)/);
-    assert.match(err.message, /not an Admin API token/);
+  await assert.rejects(shop.getProduct('x'), (error) => {
+    assert.ok(error instanceof Error);
+    assert.match(error.message, /rejected the Storefront token for wrong\.myshopify\.com \(401\)/);
+    assert.match(error.message, /not an Admin API token/);
     return true;
   });
   const empty = server.createStorefront({
     domain: 'wrong.myshopify.com',
     token: 't',
-    fetch: async () => ({
-      ok: false,
-      status: 403,
-      json: async () => {
-        throw new Error('no json');
-      },
-    }),
+    fetch: async () => new Response('not json', { status: 403 }),
   });
   await assert.rejects(empty.getProduct('x'), /rejected the Storefront token .*\(403\)/);
 });
 
 test('image size attributes: max-width, or valid HTML tether-max-width / data-max-width', async () => {
   const { cdnUrl } = await import('../src/dom.ts');
-  const img = (a) => {
-    const el = document.createElement('img');
-    Object.entries(a).forEach(([k, v]) => el.setAttribute(k, v));
-    return el;
+  /** @param {Record<string, string>} attributes */
+  const img = (attributes) => {
+    const element = document.createElement('img');
+    Object.entries(attributes).forEach(([name, value]) => element.setAttribute(name, value));
+    return element;
   };
-  const u = 'https://cdn.shopify.com/a.jpg';
-  assert.match(cdnUrl(u, img({ 'max-width': '400' })), /width=400/);
-  assert.match(cdnUrl(u, img({ 'tether-max-width': '500' })), /width=500/);
+  const url = 'https://cdn.shopify.com/a.jpg';
+  assert.match(cdnUrl(url, img({ 'max-width': '400' })), /width=400/);
+  assert.match(cdnUrl(url, img({ 'tether-max-width': '500' })), /width=500/);
   assert.match(
-    cdnUrl(u, img({ 'data-max-width': '600', 'data-crop': 'center', 'data-max-height': '600' })),
+    cdnUrl(url, img({ 'data-max-width': '600', 'data-crop': 'center', 'data-max-height': '600' })),
     /width=600/,
   );
 });
@@ -1003,9 +1112,9 @@ test('tether-products="url:q": a search results page on a static site', async ()
   calls.length = 0;
   document.body.innerHTML = '<div tether-products="url:q"><div tether-list><div></div></div></div>';
   Tether.mount(document);
-  await waitFor(() => calls.some((c) => c.op === 'TetherSearch'), 'the search request');
-  const search = calls.find((c) => c.op === 'TetherSearch');
-  assert.equal(search?.variables.query, 'tee shirt');
+  await waitFor(() => calls.some((call) => call.op === 'TetherSearch'), 'the search request');
+  const search = calls.find((call) => call.op === 'TetherSearch');
+  assert.equal(search?.variables['query'], 'tee shirt');
   window.history.replaceState(null, '', '/');
 });
 
@@ -1013,23 +1122,26 @@ test('account pages: order page with returns, subscriptions with actions, addres
   // A fresh instance, as an earlier test logged out; tsc can't resolve the query string, so the annotation types it.
   const freshAccount = '../src/account.ts?pages';
   /** @type {typeof import('../src/account.ts')} */
-  const acc = await import(freshAccount);
+  const account = await import(freshAccount);
   cfg.account = {
     server: '/_tether/account',
     orderUrl: '/account/order?id={id}',
     subscriptionsUrl: 'https://shopify.com/1/account/pages/subs',
   };
   const realFetch = globalThis.fetch;
+  /** @type {{ path: string, body: unknown }[]} */
   const posts = [];
   let status = 'ACTIVE';
-  const money = (a) => ({ amount: a, currencyCode: 'EUR' });
+  /** @param {string} amount */
+  const money = (amount) => ({ amount, currencyCode: 'EUR' });
   globalThis.fetch = async (url, init = {}) => {
-    const u = new URL(String(url), 'https://astro.test');
-    if (!u.pathname.startsWith('/_tether/account')) return realFetch(url, init);
-    const path = u.pathname.slice('/_tether/account'.length);
-    const ok = (d) => jsonResponse(d);
+    const target = new URL(String(url), 'https://astro.test');
+    if (!target.pathname.startsWith('/_tether/account')) return realFetch(url, init);
+    const path = target.pathname.slice('/_tether/account'.length);
+    /** @param {unknown} data */
+    const ok = (data) => jsonResponse(data);
     if (init.method === 'POST') {
-      assert.equal(init.headers['X-Tether-Account'], '1');
+      assert.equal(new Headers(init.headers).get('X-Tether-Account'), '1');
       posts.push({ path, body: graphqlRequest(init) });
     }
     if (path === '/me')
@@ -1140,66 +1252,86 @@ test('account pages: order page with returns, subscriptions with actions, addres
       <form tether-address-form><input name="address1" value="x"><p tether-form-error></p><button>Save</button></form>
       <form tether-profile-form><input name="firstName"><input name="lastName"></form>`;
     // A router on document that registered first (Astro's ClientRouter) must see the submit handled.
+    /** @type {boolean | null} */
     let routerSaw = null;
-    const router = (e) => {
-      routerSaw = e.defaultPrevented;
+    /** @param {Event} event */
+    const router = (event) => {
+      routerSaw = event.defaultPrevented;
     };
     document.addEventListener('submit', router);
-    await acc.mountAccount(document);
-    const $ = (q) => document.querySelector(q);
-    const visible = (el) => window.getComputedStyle(el).display !== 'none';
-    assert.equal($('#subs').getAttribute('href'), 'https://shopify.com/1/account/pages/subs');
+    await account.mountAccount(document);
+    /** @param {string} selector */
+    const visible = (selector) => window.getComputedStyle(find(selector)).display !== 'none';
+    /** @param {string} selector */
+    const input = (selector) => {
+      const element = find(selector);
+      assert.ok(element instanceof window.HTMLInputElement, `${selector} is an input`);
+      return element;
+    };
+    /** @param {string} selector */
+    const button = (selector) => {
+      const element = find(selector);
+      assert.ok(element instanceof window.HTMLButtonElement, `${selector} is a button`);
+      return element;
+    };
+    assert.equal(find('#subs').getAttribute('href'), 'https://shopify.com/1/account/pages/subs');
     assert.equal(
-      $('[tether-orders] a').getAttribute('href'),
+      find('[tether-orders] a').getAttribute('href'),
       '/account/order?id=7',
       "list links to the site's own order page",
     );
-    assert.equal($('[tether-order] h1').textContent, '#1007');
-    assert.equal($('#ship').textContent, 'Street 1, Utrecht');
-    assert.equal($('[tether-order-line="title"]').textContent, 'Tee');
-    assert.equal($('[tether-fulfillment-bind="company"]').textContent, 'PostNL');
-    assert.equal($('[tether-fulfillment-bind="url"]').getAttribute('href'), 'https://track.example/3S123');
-    assert.equal($('[tether-return-quantity]').max, '2');
-    assert.equal($('[tether-return-reason]').options.length, 1);
-    assert.ok(visible($('#ret')));
-    assert.ok(!visible($('[tether-order-show="loading"]')));
+    assert.equal(find('[tether-order] h1').textContent, '#1007');
+    assert.equal(find('#ship').textContent, 'Street 1, Utrecht');
+    assert.equal(find('[tether-order-line="title"]').textContent, 'Tee');
+    assert.equal(find('[tether-fulfillment-bind="company"]').textContent, 'PostNL');
+    assert.equal(find('[tether-fulfillment-bind="url"]').getAttribute('href'), 'https://track.example/3S123');
+    assert.equal(input('[tether-return-quantity]').max, '2');
+    const reason = find('[tether-return-reason]');
+    assert.ok(reason instanceof window.HTMLSelectElement);
+    assert.equal(reason.options.length, 1);
+    assert.ok(visible('#ret'));
+    assert.ok(!visible('[tether-order-show="loading"]'));
     // Subscriptions: rendered, states, actions follow the status.
-    assert.equal($('[tether-subscription-bind="status"]').textContent, 'active');
-    assert.equal($('[tether-subscription-bind="interval"]').textContent, 'month');
-    assert.ok(!visible($('#sl')) && !visible($('#se')));
-    assert.equal($('#resume').disabled, true);
-    $('#pause').click();
-    await waitFor(() => $('[tether-subscription-bind="status"]').textContent === 'paused', 'the pause to finish');
-    assert.deepEqual(posts.find((p) => p.path === '/subscription').body, {
+    assert.equal(find('[tether-subscription-bind="status"]').textContent, 'active');
+    assert.equal(find('[tether-subscription-bind="interval"]').textContent, 'month');
+    assert.ok(!visible('#sl') && !visible('#se'));
+    assert.equal(button('#resume').disabled, true);
+    find('#pause').click();
+    await waitFor(() => find('[tether-subscription-bind="status"]').textContent === 'paused', 'the pause to finish');
+    assert.deepEqual(posts.find((post) => post.path === '/subscription')?.body, {
       id: 'gid://shopify/SubscriptionContract/5',
       action: 'pause',
     });
-    assert.equal($('[tether-subscription-bind="status"]').textContent, 'paused');
-    assert.ok(visible($('[tether-subscription-show="paused"]')));
-    assert.equal($('#pause').disabled, true);
+    assert.equal(find('[tether-subscription-bind="status"]').textContent, 'paused');
+    assert.ok(visible('[tether-subscription-show="paused"]'));
+    assert.equal(button('#pause').disabled, true);
     // Return request: only lines with a quantity.
-    $('[tether-return-quantity]').value = '1';
-    $('#ret').click();
-    await waitFor(() => visible($('#done')), 'the return request to finish');
-    assert.deepEqual(posts.find((p) => p.path === '/return').body, {
+    input('[tether-return-quantity]').value = '1';
+    find('#ret').click();
+    await waitFor(() => visible('#done'), 'the return request to finish');
+    assert.deepEqual(posts.find((post) => post.path === '/return')?.body, {
       orderId: 'gid://shopify/Order/7',
       lines: [
         { lineItemId: 'gid://shopify/LineItem/1', quantity: 1, reasonId: 'gid://shopify/ReturnReasonDefinition/1' },
       ],
     });
-    assert.ok(visible($('#done')));
+    assert.ok(visible('#done'));
     // Addresses: list with default; a Shopify error shows in the form.
-    assert.equal($('[tether-address-bind="formatted"]').textContent, 'Street 1, Utrecht');
-    assert.ok(visible($('[tether-address-show="default"]')));
-    $('[tether-address-form]').dispatchEvent(new window.Event('submit', { cancelable: true, bubbles: true }));
-    $('[tether-address-form]').dispatchEvent(new window.Event('submit', { cancelable: true, bubbles: true })); // Enter twice
+    assert.equal(find('[tether-address-bind="formatted"]').textContent, 'Street 1, Utrecht');
+    assert.ok(visible('[tether-address-show="default"]'));
+    find('[tether-address-form]').dispatchEvent(new window.Event('submit', { cancelable: true, bubbles: true }));
+    find('[tether-address-form]').dispatchEvent(new window.Event('submit', { cancelable: true, bubbles: true })); // Enter twice
     document.removeEventListener('submit', router);
     assert.equal(routerSaw, true, 'account forms are handled in the capture phase, before a router');
-    await waitFor(() => $('[tether-address-form]').getAttribute('tether-form-state') === 'error', "Shopify's error");
-    assert.equal($('[tether-address-form] [tether-form-error]').textContent, 'City is required');
-    assert.equal(posts.filter((p) => p.path === '/address').length, 1, 'a second submit while sending sends nothing');
+    await waitFor(() => find('[tether-address-form]').getAttribute('tether-form-state') === 'error', "Shopify's error");
+    assert.equal(find('[tether-address-form] [tether-form-error]').textContent, 'City is required');
+    assert.equal(
+      posts.filter((post) => post.path === '/address').length,
+      1,
+      'a second submit while sending sends nothing',
+    );
     // Profile form prefilled.
-    assert.equal($('[tether-profile-form] [name="firstName"]').value, 'Ada');
+    assert.equal(input('[tether-profile-form] [name="firstName"]').value, 'Ada');
   } finally {
     globalThis.fetch = realFetch;
     cfg.account = null;
@@ -1210,22 +1342,28 @@ test('account pages: order page with returns, subscriptions with actions, addres
 test('integration: a secret Shopify token is never written into pages, and a non-PUBLIC name is flagged', async () => {
   const { default: tether } = await import('../src/astro.ts');
   const prev = { ...process.env };
+  /**
+   * @param {string[]} warnings
+   * @param {string[]} [scripts]
+   */
   const setup = (warnings, scripts = []) =>
     tether().hooks['astro:config:setup']({
       injectScript: (_stage, code) => scripts.push(code),
       command: 'build',
       config: { root: pathToFileURL(join(tmpdir(), 'astro-secret/')) },
-      logger: { warn: (m) => warnings.push(m) },
+      logger: { warn: (message) => warnings.push(message) },
     });
   try {
-    delete process.env.PUBLIC_SHOPIFY_STOREFRONT_TOKEN;
-    process.env.PUBLIC_SHOPIFY_DOMAIN = 'shop.myshopify.com';
-    process.env.SHOPIFY_STOREFRONT_TOKEN = 'shpat_0123456789abcdef';
+    delete process.env['PUBLIC_SHOPIFY_STOREFRONT_TOKEN'];
+    process.env['PUBLIC_SHOPIFY_DOMAIN'] = 'shop.myshopify.com';
+    process.env['SHOPIFY_STOREFRONT_TOKEN'] = 'shpat_0123456789abcdef';
+    /** @type {string[]} */
     const scripts = [];
     await assert.rejects(setup([], scripts), /secret token/);
     assert.ok(!scripts.join('').includes('shpat_'), 'nothing was injected');
 
-    process.env.SHOPIFY_STOREFRONT_TOKEN = '0123456789abcdef0123456789abcdef';
+    process.env['SHOPIFY_STOREFRONT_TOKEN'] = '0123456789abcdef0123456789abcdef';
+    /** @type {string[]} */
     const warnings = [];
     await setup(warnings);
     assert.match(warnings.join(' '), /SHOPIFY_STOREFRONT_TOKEN is written into every page/);

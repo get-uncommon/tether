@@ -1,9 +1,10 @@
 /**
  * The login request to Shopify's Customer Account API authorize endpoint (OAuth 2.0 with PKCE and OpenID Connect). The
- * caller keeps its own pending login and cleans the visitor's locale and country before passing them in.
+ * caller keeps its own pending login and parses the visitor's language and country before passing them in.
  */
 import { toBase64Url } from '../base64url.ts';
 import { sha256 } from '../crypto.ts';
+import type { CountryCode, LanguageCode } from '../shared/market-codes.ts';
 
 /** What a login asks for: the id token (`openid`), the email claim, and the whole Customer Account API. */
 const LOGIN_SCOPE = 'openid email customer-account-api:full';
@@ -19,10 +20,16 @@ interface LoginRequest {
   nonce: string;
   /** The PKCE code verifier; only its S256 challenge is sent. */
   verifier: string;
-  /** The login page's language, already cleaned. */
-  locale?: string | undefined;
-  /** The login page's two-letter country, already cleaned. */
-  country?: string | undefined;
+  /** The login page's language. */
+  language: LanguageCode | null;
+  /** The login page's country. */
+  country: CountryCode | null;
+}
+
+/** The `locale` Shopify's login page takes: a language tag, `PT_BR` → `pt-BR`, `DE` → `de`. */
+function localeTag(language: LanguageCode): string {
+  const [primary = '', region] = language.split('_');
+  return region === undefined ? primary.toLowerCase() : `${primary.toLowerCase()}-${region}`;
 }
 
 /** The PKCE S256 challenge: base64url of the verifier's SHA-256 (RFC 7636 §4.2). */
@@ -47,7 +54,7 @@ export async function authorizeUrl(authorizationEndpoint: string, login: LoginRe
     code_challenge: await codeChallenge(login.verifier),
     code_challenge_method: 'S256',
   };
-  if (login.locale) params['locale'] = login.locale;
+  if (login.language) params['locale'] = localeTag(login.language);
   if (login.country) params['region_country'] = login.country;
   for (const [name, value] of Object.entries(params)) url.searchParams.set(name, value);
   return url.toString();

@@ -2,7 +2,8 @@
 import assert from 'node:assert/strict';
 import { test, expect } from '@playwright/test';
 
-const shopify = (req) => /myshopify\.com\/api\/.*graphql/.test(req.url());
+/** @param {import('@playwright/test').Request} request */
+const shopify = (request) => /myshopify\.com\/api\/.*graphql/.test(request.url());
 
 test.beforeEach(async ({ page }) => {
   // Never leave for Shopify's checkout: answer it here instead.
@@ -13,8 +14,8 @@ test.beforeEach(async ({ page }) => {
 
 test('home: server-rendered cards are live after one Shopify request', async ({ page }) => {
   const requests = [];
-  page.on('request', (r) => {
-    if (shopify(r)) requests.push(r);
+  page.on('request', (request) => {
+    if (shopify(request)) requests.push(request);
   });
   await page.goto('/');
   await expect(page.locator('a.card').first()).toHaveAttribute('tether-state', 'ready');
@@ -46,7 +47,7 @@ test('product: variant changes the price, add to cart opens the drawer, quick cl
 
   await page.keyboard.press('Escape');
   await expect(drawer).not.toHaveClass(/is-open/);
-  expect(await drawer.evaluate((d) => d instanceof HTMLElement && d.inert)).toBe(true);
+  expect(await drawer.evaluate((element) => element instanceof HTMLElement && element.inert)).toBe(true);
 });
 
 test('sold out: the button is disabled from the first paint', async ({ page }) => {

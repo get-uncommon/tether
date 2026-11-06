@@ -155,6 +155,15 @@ async function packageVersion(path: string): Promise<string> {
   return version;
 }
 
+/** The copy {@link install} writes to, and the rename it swaps entries with. */
+export interface InstallTarget {
+  root: string;
+  rename: (from: string, to: string) => Promise<void>;
+}
+
+/** This deployed copy. */
+const OWN_COPY: InstallTarget = { root: ROOT, rename };
+
 /**
  * Moves each staged entry into the copy, the copy's own entry out of the way first. When a rename fails, the entries
  * already swapped are put back, so the copy is either all old or all new.
@@ -162,22 +171,23 @@ async function packageVersion(path: string): Promise<string> {
  * @param staged The folder holding the release's entries.
  * @param previous An empty folder for the copy's current entries.
  */
-async function swapIn(names: string[], staged: string, previous: string): Promise<void> {
+async function swapIn(target: InstallTarget, names: string[], staged: string, previous: string): Promise<void> {
+  const { root } = target;
   const moved: string[] = [];
   try {
     for (const name of names) {
-      if (existsSync(join(ROOT, name))) await rename(join(ROOT, name), join(previous, name));
+      if (existsSync(join(root, name))) await target.rename(join(root, name), join(previous, name));
       moved.push(name);
-      await rename(join(staged, name), join(ROOT, name));
+      await target.rename(join(staged, name), join(root, name));
     }
   } catch (error) {
-    await putBack(moved.reverse(), previous, error);
+    await putBack(target, moved.reverse(), previous, error);
     throw error;
   }
 }
 
 /** Putting the copy's own entries back failed: the copy is half updated, and its own entries are kept for a person. */
-class RollbackError extends Error {}
+export class RollbackError extends Error {}
 
 /**
  * Restores the copy's own entries after a failed swap.
@@ -187,11 +197,12 @@ class RollbackError extends Error {}
  * @param swapError Named in the message: it is why the copy was being put back.
  * @throws A {@link RollbackError}.
  */
-async function putBack(names: string[], previous: string, swapError: unknown): Promise<void> {
+async function putBack(target: InstallTarget, names: string[], previous: string, swapError: unknown): Promise<void> {
+  const { root } = target;
   try {
     for (const name of names) {
-      await rm(join(ROOT, name), { recursive: true, force: true });
-      if (existsSync(join(previous, name))) await rename(join(previous, name), join(ROOT, name));
+      await rm(join(root, name), { recursive: true, force: true });
+      if (existsSync(join(previous, name))) await target.rename(join(previous, name), join(root, name));
     }
   } catch (error) {
     const why = `the update failed (${messageOf(swapError)}) and putting the copy back failed (${messageOf(error)})`;
@@ -204,9 +215,12 @@ async function putBack(names: string[], previous: string, swapError: unknown): P
  * staged inside the copy, so the swap is a rename on one file system.
  *
  * @param source The release's `server/` folder.
+ * @throws The swap's error after putting the copy back, or a {@link RollbackError} when that failed too; the work
+ *   folder (`.tether-update-*`) is kept only then.
  */
-async function install(source: string): Promise<void> {
-  const work = await mkdtemp(join(ROOT, '.tether-update-'));
+export async function install(source: string, target: InstallTarget = OWN_COPY): Promise<void> {
+  const { root } = target;
+  const work = await mkdtemp(join(root, '.tether-update-'));
   let keepWork = false;
   try {
     const staged = join(work, 'new');
@@ -215,7 +229,7 @@ async function install(source: string): Promise<void> {
     await mkdir(previous);
     const names = MANAGED.filter((name) => existsSync(join(source, name)));
     for (const name of names) await cp(join(source, name), join(staged, name), { recursive: true });
-    await swapIn(names, staged, previous);
+    await swapIn(target, names, staged, previous);
   } catch (error) {
     keepWork = error instanceof RollbackError;
     throw error;
@@ -223,8 +237,8 @@ async function install(source: string): Promise<void> {
     if (!keepWork) await rm(work, { recursive: true, force: true });
   }
   for (const name of KEPT) {
-    const missing = !existsSync(join(ROOT, name)) && existsSync(join(source, name));
-    if (missing && name !== 'TETHER_VERSION') await cp(join(source, name), join(ROOT, name));
+    const missing = !existsSync(join(root, name)) && existsSync(join(source, name));
+    if (missing && name !== 'TETHER_VERSION') await cp(join(source, name), join(root, name));
   }
 }
 

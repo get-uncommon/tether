@@ -6,9 +6,9 @@ import { SHOP, env, shopify, req, configured, answer } from './account-fixtures.
 
 test('settings: not set up -> 404; missing pieces -> 503 without details for the public', async () => {
   assert.equal((await answer(req('/me'), {}, {})).status, 404);
-  const r = await answer(req('/me'), { ACCOUNT_CLIENT_ID: 'x', SHOPIFY_DOMAIN: SHOP }, {});
-  assert.equal(r.status, 503);
-  assert.doesNotMatch(JSON.stringify(await r.json()), /ACCOUNT_ORIGINS|SYNC_SECRET/);
+  const response = await answer(req('/me'), { ACCOUNT_CLIENT_ID: 'x', SHOPIFY_DOMAIN: SHOP }, {});
+  assert.equal(response.status, 503);
+  assert.doesNotMatch(JSON.stringify(await response.json()), /ACCOUNT_ORIGINS|SYNC_SECRET/);
   assert.equal(await handleAccount(new Request('https://x/other'), env, {}), null, 'other routes pass through');
 });
 
@@ -18,18 +18,20 @@ test('settings: ACCOUNT_SECRET is required, with no fallback to SYNC_SECRET; /ch
   const syncOnly = { ...withoutSecret, SYNC_SECRET: 'a-long-sync-secret-of-24-plus-chars' };
   assert.deepEqual(configured(syncOnly).secret, { kind: 'missing' }, 'SYNC_SECRET is never a session key');
   const [problem] = accountProblems(configured(syncOnly));
+  assert.ok(problem);
   assert.equal(problem.severity, 'error');
   assert.match(problem.message, /ACCOUNT_SECRET is not set/);
   assert.match(problem.fix ?? '', /ACCOUNT_SECRET, a random string of at least 24 characters/);
   assert.match(problem.fix ?? '', /logs every customer out once/);
 
+  /** @type {string[]} */
   const logged = [];
   const realError = console.error;
   console.error = (...args) => logged.push(args.join(' '));
   try {
-    const r = await answer(req('/me'), syncOnly, { memory: new Map() });
-    assert.equal(r.status, 503);
-    const { error } = await r.json();
+    const response = await answer(req('/me'), syncOnly, { memory: new Map() });
+    assert.equal(response.status, 503);
+    const { error } = await response.json();
     assert.match(error, /Worker secret ACCOUNT_SECRET/, 'the one setting a Worker set up before 0.7.0 lacks is named');
     assert.doesNotMatch(error, /SYNC_SECRET|shop\.example|myshopify/);
   } finally {
@@ -50,6 +52,7 @@ test('settings: an ACCOUNT_SECRET equal to SYNC_SECRET is refused, so the /check
   const shared = { ...env, SYNC_SECRET: env.ACCOUNT_SECRET };
   assert.deepEqual(configured(shared).secret, { kind: 'same-as-sync-secret' });
   const [problem, ...others] = accountProblems(configured(shared));
+  assert.ok(problem);
   assert.deepEqual(others, []);
   assert.equal(problem.severity, 'error');
   assert.match(problem.message, /ACCOUNT_SECRET is the same as SYNC_SECRET/);
@@ -58,9 +61,9 @@ test('settings: an ACCOUNT_SECRET equal to SYNC_SECRET is refused, so the /check
   const realError = console.error;
   console.error = () => {};
   try {
-    const r = await answer(req('/me'), shared, { memory: new Map() });
-    assert.equal(r.status, 503);
-    assert.deepEqual(await r.json(), { error: 'accounts are not set up (see /check)' });
+    const response = await answer(req('/me'), shared, { memory: new Map() });
+    assert.equal(response.status, 503);
+    assert.deepEqual(await response.json(), { error: 'accounts are not set up (see /check)' });
   } finally {
     console.error = realError;
   }
@@ -68,6 +71,7 @@ test('settings: an ACCOUNT_SECRET equal to SYNC_SECRET is refused, so the /check
 
 test('settings: unusable ACCOUNT_SESSION_DAYS and SHOPIFY_DOMAIN are reported, not silently replaced', async () => {
   const { accountProblems } = await import('../src/account.ts');
+  /** @param {Record<string, string>} overrides */
   const problems = (overrides) => accountProblems(configured({ ...env, ...overrides }));
   /** @type {[string, number][]} */
   const sessionDays = [
@@ -79,25 +83,36 @@ test('settings: unusable ACCOUNT_SESSION_DAYS and SHOPIFY_DOMAIN are reported, n
   for (const [raw, days] of sessionDays) {
     const settings = configured({ ...env, ACCOUNT_SESSION_DAYS: raw });
     assert.equal(settings.sessionDays.days, days, raw);
-    assert.ok(problems({ ACCOUNT_SESSION_DAYS: raw }).some((p) => p.severity === 'warning' && p.message.includes(raw)));
+    assert.ok(
+      problems({ ACCOUNT_SESSION_DAYS: raw }).some(
+        (problem) => problem.severity === 'warning' && problem.message.includes(raw),
+      ),
+    );
   }
   assert.deepEqual(configured({ ...env, ACCOUNT_SESSION_DAYS: '30' }).sessionDays, { kind: 'as-set', days: 30 });
   for (const domain of ['shop.myshopify.com/admin', 'shop .myshopify.com', 'shop.myshopify.com?x=1']) {
     assert.ok(
-      problems({ SHOPIFY_DOMAIN: domain }).some((p) => p.severity === 'error' && /SHOPIFY_DOMAIN/.test(p.message)),
+      problems({ SHOPIFY_DOMAIN: domain }).some(
+        (problem) => problem.severity === 'error' && /SHOPIFY_DOMAIN/.test(problem.message),
+      ),
       domain,
     );
   }
-  assert.ok(!problems({ SHOPIFY_DOMAIN: 'https://shop.myshopify.com/' }).some((p) => /SHOPIFY_DOMAIN/.test(p.message)));
+  assert.ok(
+    !problems({ SHOPIFY_DOMAIN: 'https://shop.myshopify.com/' }).some((problem) =>
+      /SHOPIFY_DOMAIN/.test(problem.message),
+    ),
+  );
 });
 
 test('without the TETHER_SYNC namespace the Worker refuses accounts instead of keeping sessions in memory', async () => {
+  /** @type {string[]} */
   const logged = [];
   const realError = console.error;
   console.error = (...args) => logged.push(args.join(' '));
   try {
-    const r = await answer(req('/login'), env, { fetch: shopify().fetch });
-    assert.equal(r.status, 503);
+    const response = await answer(req('/login'), env, { fetch: shopify().fetch });
+    assert.equal(response.status, 503);
     const notNamespace = await answer(req('/login'), { ...env, TETHER_SYNC: 'a-string' }, {});
     assert.equal(notNamespace.status, 503, 'a setting by that name that is no namespace is not one');
   } finally {

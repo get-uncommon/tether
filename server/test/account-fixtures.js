@@ -13,7 +13,10 @@ export const env = {
   STOREFRONT_TOKEN: 'public-token',
   ACCOUNT_SECRET: 'a-long-account-secret-of-24-plus-chars',
 };
+/** @param {Uint8Array} bytes */
 const b64url = (bytes) => Buffer.from(bytes).toString('base64url');
+/** @param {unknown} value */
+const b64urlJson = (value) => b64url(new TextEncoder().encode(JSON.stringify(value)));
 const { privateKey, publicKey } = await crypto.subtle.generateKey(
   { name: 'RSASSA-PKCS1-v1_5', modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: 'SHA-256' },
   true,
@@ -25,27 +28,44 @@ const jwk = { ...(await crypto.subtle.exportKey('jwk', publicKey)), kid: 'k1', a
  * @param {{ tamper?: boolean, kid?: string | null }} [options]
  */
 export async function idToken(claims, { tamper = false, kid = 'k1' } = {}) {
-  const h = b64url(JSON.stringify(kid ? { alg: 'RS256', kid } : { alg: 'RS256' }));
-  const p = b64url(JSON.stringify(claims));
-  const sig = new Uint8Array(
-    await crypto.subtle.sign('RSASSA-PKCS1-v1_5', privateKey, new TextEncoder().encode(`${h}.${p}`)),
+  const header = b64urlJson(kid ? { alg: 'RS256', kid } : { alg: 'RS256' });
+  const payload = b64urlJson(claims);
+  const signature = new Uint8Array(
+    await crypto.subtle.sign('RSASSA-PKCS1-v1_5', privateKey, new TextEncoder().encode(`${header}.${payload}`)),
   );
-  if (tamper) sig[5] ^= 1;
-  return `${h}.${p}.${b64url(sig)}`;
+  const sent = tamper ? signature.map((byte, index) => (index === 5 ? byte ^ 1 : byte)) : signature;
+  return `${header}.${payload}.${b64url(sent)}`;
 }
 
 /** @typedef {{ tamper?: boolean, wrongNonce?: boolean, kid?: string | null, claims?: Record<string, unknown> }} ShopifyOptions */
 
+/**
+ * A request the simulated Shopify received: each one by its URL, and each Customer Account API call again by its
+ * operation.
+ *
+ * @typedef {{ url: string, init: RequestInit, op?: undefined, variables?: undefined, auth?: undefined }
+ *   | { op: string | undefined, variables: Record<string, unknown>, auth: string | null, url?: undefined,
+ *       init?: undefined }} ShopifyCall
+ */
+
 /** @param {ShopifyOptions} [options] */
 export function shopify({ tamper = false, wrongNonce = false, kid = 'k1', claims = {} } = {}) {
+  /** @type {ShopifyCall[]} */
   const calls = [];
+  /** @type {string | null} */
   let lastNonce = null;
+  /** @type {typeof globalThis.fetch} */
   const fetch = async (url, init = {}) => {
-    const u = String(url);
-    calls.push({ url: u, init });
+    const target = String(url);
+    calls.push({ url: target, init });
+    const headers = new Headers(init.headers);
+    /**
+     * @param {unknown} data
+     * @param {number} [status]
+     */
     const ok = (data, status = 200) =>
       new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json' } });
-    if (u.endsWith('/.well-known/openid-configuration')) {
+    if (target.endsWith('/.well-known/openid-configuration')) {
       return ok({
         issuer: 'https://shopify.com/authentication/1',
         authorization_endpoint: 'https://shopify.com/authentication/1/oauth/authorize',
@@ -54,12 +74,13 @@ export function shopify({ tamper = false, wrongNonce = false, kid = 'k1', claims
         jwks_uri: 'https://shopify.com/authentication/1/.well-known/jwks.json',
       });
     }
-    if (u.endsWith('/.well-known/customer-account-api'))
+    if (target.endsWith('/.well-known/customer-account-api'))
       return ok({ graphql_api: 'https://shopify.com/1/account/customer/api/2026-10/graphql' });
-    if (u.endsWith('/jwks.json')) return ok({ keys: [jwk] });
-    if (u.endsWith('/oauth/token')) {
-      const body = new URLSearchParams(init.body);
-      assert.equal(init.headers.Origin, SITE, 'the site origin, as Shopify expects');
+    if (target.endsWith('/jwks.json')) return ok({ keys: [jwk] });
+    if (target.endsWith('/oauth/token')) {
+      const body = init.body;
+      assert.ok(body instanceof URLSearchParams, 'a form body');
+      assert.equal(headers.get('Origin'), SITE, 'the site origin, as Shopify expects');
       if (body.get('grant_type') === 'refresh_token') return ok({ access_token: 'access-2', expires_in: 3600 });
       const token = await idToken(
         {
@@ -75,10 +96,12 @@ export function shopify({ tamper = false, wrongNonce = false, kid = 'k1', claims
       );
       return ok({ access_token: 'access-1', refresh_token: 'refresh-1', id_token: token, expires_in: 3600 });
     }
-    if (u.includes('/account/customer/api/')) {
-      const { query: q, variables: v = {} } = JSON.parse(init.body);
-      const op = (q.match(/(?:query|mutation)\s+(\w+)/) || [])[1];
-      calls.push({ op, variables: v, auth: init.headers.Authorization });
+    if (target.includes('/account/customer/api/')) {
+      assert.ok(typeof init.body === 'string', 'a JSON body');
+      const { query, variables = {} } = JSON.parse(init.body);
+      const op = query.match(/(?:query|mutation)\s+(\w+)/)?.[1];
+      calls.push({ op, variables, auth: headers.get('Authorization') });
+      /** @param {string} id */
       const mine = (id) =>
         ['gid://shopify/Order/1', 'gid://shopify/SubscriptionContract/1', 'gid://shopify/CustomerAddress/1'].includes(
           id,
@@ -86,9 +109,9 @@ export function shopify({ tamper = false, wrongNonce = false, kid = 'k1', claims
       if (op === 'TetherOrder')
         return ok({
           data: {
-            order: mine(v.id)
+            order: mine(variables.id)
               ? {
-                  id: v.id,
+                  id: variables.id,
                   name: '#1001',
                   lineItems: { nodes: [{ id: 'gid://shopify/LineItem/1', title: 'Tee', quantity: 1 }] },
                   returnInformation: {
@@ -124,43 +147,52 @@ export function shopify({ tamper = false, wrongNonce = false, kid = 'k1', claims
         return ok({
           data: {
             customer: {
-              subscriptionContract: mine(v.id)
-                ? { id: v.id, status: 'ACTIVE', upcomingBillingCycles: { nodes: [{ cycleIndex: 3, skipped: false }] } }
+              subscriptionContract: mine(variables.id)
+                ? {
+                    id: variables.id,
+                    status: 'ACTIVE',
+                    upcomingBillingCycles: { nodes: [{ cycleIndex: 3, skipped: false }] },
+                  }
                 : null,
             },
           },
         });
-      if (op === 'TetherProfile') return ok({ data: { customerUpdate: { customer: v.input, userErrors: [] } } });
+      if (op === 'TetherProfile')
+        return ok({ data: { customerUpdate: { customer: variables.input, userErrors: [] } } });
       if (op === 'TetherAddressCreate')
         return ok({
           data: {
             customerAddressCreate: {
-              customerAddress: { id: 'gid://shopify/CustomerAddress/9', ...v.address },
-              userErrors: v.address.city ? [] : [{ field: ['city'], message: 'City is required' }],
+              customerAddress: { id: 'gid://shopify/CustomerAddress/9', ...variables.address },
+              userErrors: variables.address.city ? [] : [{ field: ['city'], message: 'City is required' }],
             },
           },
         });
       if (op === 'TetherAddressUpdate')
-        return ok({ data: { customerAddressUpdate: { customerAddress: { id: v.id, ...v.address }, userErrors: [] } } });
+        return ok({
+          data: {
+            customerAddressUpdate: { customerAddress: { id: variables.id, ...variables.address }, userErrors: [] },
+          },
+        });
       if (op === 'TetherAddressDelete')
-        return ok({ data: { customerAddressDelete: { deletedAddressId: v.id, userErrors: [] } } });
+        return ok({ data: { customerAddressDelete: { deletedAddressId: variables.id, userErrors: [] } } });
       if (op === 'TetherPause')
         return ok({
-          data: { subscriptionContractPause: { contract: { id: v.id, status: 'PAUSED' }, userErrors: [] } },
+          data: { subscriptionContractPause: { contract: { id: variables.id, status: 'PAUSED' }, userErrors: [] } },
         });
       if (op === 'TetherResume')
         return ok({
-          data: { subscriptionContractActivate: { contract: { id: v.id, status: 'ACTIVE' }, userErrors: [] } },
+          data: { subscriptionContractActivate: { contract: { id: variables.id, status: 'ACTIVE' }, userErrors: [] } },
         });
       if (op === 'TetherCancel')
         return ok({
-          data: { subscriptionContractCancel: { contract: { id: v.id, status: 'CANCELLED' }, userErrors: [] } },
+          data: { subscriptionContractCancel: { contract: { id: variables.id, status: 'CANCELLED' }, userErrors: [] } },
         });
       if (op === 'TetherSkip')
         return ok({
           data: {
             subscriptionBillingCycleSkip: {
-              billingCycle: { cycleIndex: v.input.selector.index, skipped: true },
+              billingCycle: { cycleIndex: variables.input.selector.index, skipped: true },
               userErrors: [],
             },
           },
@@ -171,7 +203,7 @@ export function shopify({ tamper = false, wrongNonce = false, kid = 'k1', claims
             orderRequestReturn: { return: { id: 'gid://shopify/Return/1', status: 'REQUESTED' }, userErrors: [] },
           },
         });
-      if (/TetherOrders/.test(q))
+      if (/TetherOrders/.test(query))
         return ok({
           data: {
             customer: {
@@ -192,19 +224,20 @@ export function shopify({ tamper = false, wrongNonce = false, kid = 'k1', claims
         },
       });
     }
-    if (u.includes(`${SHOP}/api/`))
+    if (target.includes(`${SHOP}/api/`))
       return ok({
         data: {
           cartBuyerIdentityUpdate: { cart: { checkoutUrl: 'https://shop.example/checkouts/c/1' }, userErrors: [] },
         },
       });
-    throw new Error(`unexpected ${u}`);
+    throw new Error(`unexpected ${target}`);
   };
   return {
     fetch,
     calls,
-    setNonce: (n) => {
-      lastNonce = n;
+    /** @param {string | null} nonce */
+    setNonce: (nonce) => {
+      lastNonce = nonce;
     },
   };
 }
@@ -244,8 +277,15 @@ export function configured(rawEnv) {
   return settings;
 }
 
-export const cookiesOf = (res) => res.headers.getSetCookie?.() || [res.headers.get('set-cookie')].filter(Boolean);
-export const pick = (res, name) => (cookiesOf(res).find((c) => c.startsWith(`${name}=`)) || '').split(';')[0];
+/** @param {Response} res */
+export const cookiesOf = (res) => res.headers.getSetCookie();
+/**
+ * @param {Response} res
+ * @param {string} name
+ * @returns {string} The cookie's `name=value`, or `''` when `res` doesn't set it.
+ */
+export const pick = (res, name) =>
+  (cookiesOf(res).find((cookie) => cookie.startsWith(`${name}=`)) ?? '').split(';')[0] ?? '';
 
 /**
  * Every request these tests send is under the account routes' base, which `handleAccount` always answers.
@@ -269,7 +309,8 @@ export async function answer(request, environment, options) {
 export async function loginFlow({ memory = new Map(), wrapFetch = (inner) => inner, sessionCookie, ...opts } = {}) {
   const sh = shopify(opts);
   const fetch = wrapFetch(sh.fetch);
-  const run = (r) => answer(r, env, { fetch, memory });
+  /** @param {Request} request */
+  const run = (request) => answer(request, env, { fetch, memory });
   const start = await run(req(`/login?returnTo=${encodeURIComponent(`${SITE}/account`)}`));
   const authorize = new URL(location(start));
   sh.setNonce(authorize.searchParams.get('nonce'));
@@ -289,6 +330,7 @@ export async function loginFlow({ memory = new Map(), wrapFetch = (inner) => inn
   };
 }
 
+/** @param {import('../src/account/kv.ts').MemoryEntries} memory */
 export const sessionKeys = (memory) => [...memory.keys()].filter((key) => key.startsWith('s:'));
 
 /**
@@ -298,7 +340,9 @@ export const sessionKeys = (memory) => [...memory.keys()].filter((key) => key.st
  */
 export async function loginFrom(returnTo) {
   const sh = shopify();
-  const run = (r) => answer(r, env, { fetch: sh.fetch, memory: new Map() });
+  /** @param {Request} request */
+  const run = (request) => answer(request, env, { fetch: sh.fetch, memory: new Map() });
+  /** @type {string[]} */
   const warned = [];
   const realWarn = console.warn;
   console.warn = (...args) => warned.push(args.join(' '));

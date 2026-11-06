@@ -11,6 +11,7 @@ import { emit } from '../dom.ts';
 import { isRecord, textOrNull } from '../../server/src/shared/json.ts';
 import { messageOf } from '../../server/src/shared/error-message.ts';
 import { hintKey } from '../account-marks.ts';
+import { removeStored, setStored } from '../storage.ts';
 import { toAccountCustomer, toUserErrors } from './answers.ts';
 import type { AccountCustomer } from './answers.ts';
 
@@ -42,13 +43,9 @@ function serverBase(): string {
  * Keeps the hint that makes the core load the part on the next page; without storage it is not kept (see the file's
  * comment).
  */
-function setLoginHintIfAllowed(loggedIn: boolean): void {
-  try {
-    if (loggedIn) window.localStorage.setItem(hintKey(), '1');
-    else window.localStorage.removeItem(hintKey());
-  } catch {
-    // Private mode or blocked storage: see the file's comment.
-  }
+function setLoginHint(loggedIn: boolean): void {
+  if (loggedIn) setStored(hintKey(), '1');
+  else removeStored(hintKey());
 }
 
 /** @throws {TetherError} `NETWORK` when the request fails before an answer. */
@@ -113,7 +110,7 @@ export async function serverLogin(): Promise<ServerLogin> {
         ? { loggedIn: true, customer: toAccountCustomer(answer.data['customer']) }
         : { loggedIn: false };
   }
-  setLoginHintIfAllowed(known.loggedIn);
+  setLoginHint(known.loggedIn);
   return known;
 }
 
@@ -177,7 +174,7 @@ export async function serverCheckoutUrl(): Promise<string | null> {
 export async function serverLogout(returnTo: string): Promise<'redirected' | 'stayed'> {
   const answer = await serverFetch('/logout', { method: 'POST', body: { returnTo, cartId: Cart.id() } });
   known = null;
-  setLoginHintIfAllowed(false);
+  setLoginHint(false);
   emit('account-logout', {});
   const logoutUrl = answer.kind === 'answer' ? textOrNull(answer.data['logoutUrl']) : null;
   if (!logoutUrl) return 'stayed';

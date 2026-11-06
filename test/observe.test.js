@@ -1,9 +1,9 @@
 // `observe`: elements added to the page later are mounted on their own, not by rescanning the whole document.
-import { test, before } from 'node:test';
+import { test, before, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
 import { apparel, find, graphqlRequest, jsonResponse, product } from './fixtures.js';
-import { waitFor } from '../server/test/mocks.js';
+import { asString, waitFor } from '../server/test/mocks.js';
 
 const dom = new JSDOM('<!doctype html><body><span tether-cart-count></span><main></main></body>', {
   url: 'https://site.test/',
@@ -14,24 +14,32 @@ Object.assign(globalThis, {
   localStorage: dom.window.localStorage,
   CustomEvent: dom.window.CustomEvent,
   MutationObserver: dom.window.MutationObserver,
-  Option: dom.window.Option,
+  Option: dom.window['Option'],
   getComputedStyle: dom.window.getComputedStyle,
 });
 
 /** @type {string[]} The handles each products request asked for. */
 const requested = [];
+/**
+ * @param {RequestInfo | URL} _url
+ * @param {RequestInit} [init]
+ */
 globalThis.fetch = async (_url, init) => {
   const { variables } = graphqlRequest(init);
+  /** @type {Record<string, import('../src/fragments.ts').Product | null>} */
   const data = {};
-  for (const [key, handle] of Object.entries(variables)) {
+  for (const [key, value] of Object.entries(variables)) {
     if (!key.startsWith('h')) continue;
+    const handle = asString(value, key);
     requested.push(handle);
     data[key] = [product, apparel].find((candidate) => candidate.handle === handle) ?? null;
   }
   return jsonResponse({ data });
 };
 
+/** @type {typeof import('../src/index.ts').default} */
 let Tether;
+/** @type {typeof import('../src/server.ts')} */
 let server;
 
 before(async () => {
@@ -53,16 +61,25 @@ before(async () => {
  * @returns {Promise<string[]>} The selectors queried on the whole document while `run` ran.
  */
 async function documentQueries(run) {
+  /** @type {string[]} */
   const selectors = [];
   const { querySelectorAll } = document;
-  document.querySelectorAll = function (selector) {
-    selectors.push(selector);
-    return querySelectorAll.call(this, selector);
-  };
+  const spy = mock.method(
+    document,
+    'querySelectorAll',
+    /**
+     * @this {Document}
+     * @param {string} selector
+     */
+    function (selector) {
+      selectors.push(selector);
+      return querySelectorAll.call(this, selector);
+    },
+  );
   try {
     await run(selectors);
   } finally {
-    document.querySelectorAll = querySelectorAll;
+    spy.mock.restore();
   }
   return selectors;
 }
@@ -105,6 +122,7 @@ test('a hydrate entry without the lists a render walks is skipped, and the produ
   requested.length = 0;
   const truncated = { id: apparel.id, handle: apparel.handle, title: apparel.title };
   const box = document.createElement('div');
+  // @ts-expect-error -- a product without the lists, as an older or hand-written hydrate entry has it
   box.innerHTML = `${shop.hydrate(truncated)}<div tether-product="tee"><span tether-bind="title"></span></div>`;
   find('main').append(box);
   await waitFor(() => find('[tether-bind="title"]', box).textContent !== '', 'the product to load');

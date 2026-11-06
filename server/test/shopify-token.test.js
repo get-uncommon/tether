@@ -8,18 +8,26 @@ const TOKEN = 'shpca_live-admin-token';
 
 /** A store that hands out TOKEN for client credentials and answers the shop query. */
 function fakeShopify() {
+  /** @type {(string | null)[]} */
   const tokenRequests = [];
+  /** @type {typeof globalThis.fetch} */
   const fetch = async (url, init) => {
-    if (url.endsWith('/admin/oauth/access_token')) {
-      tokenRequests.push(new URLSearchParams(init.body).get('client_secret'));
+    if (String(url).endsWith('/admin/oauth/access_token')) {
+      const body = init?.body;
+      assert.ok(typeof body === 'string', 'a form body');
+      tokenRequests.push(new URLSearchParams(body).get('client_secret'));
       return Response.json({ access_token: TOKEN, expires_in: 86399 });
     }
-    assert.equal(init.headers['X-Shopify-Access-Token'], TOKEN);
+    assert.equal(new Headers(init?.headers).get('X-Shopify-Access-Token'), TOKEN);
     return Response.json({ data: { shop: { name: 'Shop', myshopifyDomain: 'shop.myshopify.com' } } });
   };
   return { fetch, tokenRequests };
 }
 
+/**
+ * @param {import('../src/store.ts').Store} store
+ * @param {typeof globalThis.fetch} fetch
+ */
 const client = (store, fetch, clientSecret = 'client-secret') =>
   createShopify({ domain: 'shop.myshopify.com', clientId: 'id', clientSecret, tokenStore: store, fetch });
 
@@ -49,15 +57,19 @@ test('a cached token from another app secret, or one stored in the clear, is not
 test('a cached token Shopify rejects is replaced in the store, so the next run does not hit the 401 again', async () => {
   const store = memoryStore();
   let issued = 'revoked-token';
+  /** @type {string[]} */
   const tokenRequests = [];
+  /** @type {(string | null)[]} */
   const rejected = [];
+  /** @type {typeof globalThis.fetch} */
   const fetch = async (url, init) => {
-    if (url.endsWith('/admin/oauth/access_token')) {
+    if (String(url).endsWith('/admin/oauth/access_token')) {
       tokenRequests.push(issued);
       return Response.json({ access_token: issued, expires_in: 86399 });
     }
-    if (init.headers['X-Shopify-Access-Token'] !== TOKEN) {
-      rejected.push(init.headers['X-Shopify-Access-Token']);
+    const token = new Headers(init?.headers).get('X-Shopify-Access-Token');
+    if (token !== TOKEN) {
+      rejected.push(token);
       return new Response('Unauthorized', { status: 401 });
     }
     return Response.json({ data: { shop: { name: 'Shop', myshopifyDomain: 'shop.myshopify.com' } } });

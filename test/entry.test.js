@@ -19,7 +19,9 @@ Object.assign(globalThis, {
 });
 globalThis.fetch = async () => jsonResponse({ data: { cart: null } });
 
+/** @type {{ error: unknown, context: string }[]} */
 const errors = [];
+/** @type {typeof import('../src/index.ts').default} */
 let Tether;
 
 before(async () => {
@@ -33,7 +35,7 @@ before(async () => {
 });
 
 test('Tether.account is a plain object of the account part’s functions, not a thenable', async () => {
-  assert.equal(Tether.account.then, undefined);
+  assert.equal(Reflect.get(Tether.account, 'then'), undefined);
   assert.equal(await Tether.account, Tether.account);
   assert.deepEqual(Object.keys(Tether.account).sort(), [
     'addresses',
@@ -53,7 +55,7 @@ test('Tether.account is a plain object of the account part’s functions, not a 
     'updateProfile',
   ]);
   const part = await import('../src/account.ts');
-  for (const name of Object.keys(Tether.account)) assert.equal(typeof part[name], 'function', name);
+  for (const name of Object.keys(Tether.account)) assert.equal(typeof Reflect.get(part, name), 'function', name);
   assert.equal(await Tether.account.isLoggedIn(), part.isLoggedIn());
 });
 
@@ -66,11 +68,12 @@ test('a failure in the extras part is reported, not swallowed', async () => {
   emit('variant-changed', {}, find('#p'));
   await waitFor(() => errors.length > 0, 'the extras part to report its failure');
   assert.equal(errors.length, 1);
-  assert.equal(errors[0].context, 'extras');
+  assert.equal(errors[0]?.context, 'extras');
 });
 
 test('Tether.on hears only the events Tether dispatched: a forged tether:cart-updated never reaches the listener', async () => {
   const { emit } = await import('../src/dom.ts');
+  /** @type {unknown[]} */
   const heard = [];
   const off = Tether.on('cart-updated', ({ cart, reason }) => heard.push({ cart, reason }));
   document.dispatchEvent(new window.Event('tether:cart-updated'));
