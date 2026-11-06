@@ -41,9 +41,27 @@ export const coreModules = {
 const self = typeof document !== 'undefined' ? document.currentScript?.src || '' : '';
 const parts = {};
 
+/**
+ * The folder parts load from: `partsUrl`, else the core script's own folder. A `partsUrl` must be https or on this
+ * site, because the parts run with the same access as the core (the account part holds customer sessions).
+ */
+function partsFolder() {
+  if (!cfg.partsUrl) return self.replace(/[^/]*$/, '');
+  const folder = new URL(String(cfg.partsUrl), document.baseURI);
+  if (folder.protocol !== 'https:' && folder.origin !== window.location.origin) {
+    throw new Error(`partsUrl must be https or on this site: ${folder.href}`);
+  }
+  return folder.href;
+}
+
 export function loadPart(name) {
   if (parts[name]) return parts[name];
-  const base = cfg.partsUrl || self.replace(/[^/]*$/, '');
+  let base;
+  try {
+    base = partsFolder();
+  } catch (error) {
+    return Promise.reject(error instanceof Error ? error : new Error(String(error)));
+  }
   const min = /\.min\.js(\?|$)/.test(self) || !self ? '.min' : '';
   const url = `${base.replace(/\/?$/, '/')}tether.${name}${min}.js`;
   parts[name] = new Promise((resolve, reject) => {
