@@ -9,6 +9,7 @@
  * Scope needed: read_products (add read_inventory if you map inventory).
  */
 import { SyncError, sleep as realSleep } from './util.js';
+import { open, seal } from './crypto.js';
 
 export const DEFAULT_API_VERSION = '2026-07';
 
@@ -42,6 +43,11 @@ export function productFragment({ metafields = [], inventory = false, mediaFirst
 }`;
 }
 
+// The client-credentials token is cached sealed with the client secret, which only Worker secrets hold: KV values
+// can be read in Cloudflare's dashboard, secrets can't.
+const TOKEN_KEY = 'shopify:token';
+const TOKEN_PURPOSE = 'shopify-token';
+
 export function createShopify({
   domain,
   adminToken,
@@ -70,7 +76,7 @@ export function createShopify({
   async function token() {
     if (cached && cached.expires > now() + 60000) return cached.token;
     if (!cached && tokenStore) {
-      const saved = await tokenStore.get('shopify:token');
+      const saved = await open(clientSecret, TOKEN_PURPOSE, TOKEN_KEY, await tokenStore.get(TOKEN_KEY));
       if (saved?.token && saved.expires > now() + 60000) {
         cached = saved;
         return saved.token;
@@ -92,7 +98,7 @@ export function createShopify({
       });
     const json = await res.json();
     cached = { token: json.access_token, expires: now() + (json.expires_in || 86399) * 1000 };
-    if (tokenStore) await tokenStore.put('shopify:token', cached);
+    if (tokenStore) await tokenStore.put(TOKEN_KEY, await seal(clientSecret, TOKEN_PURPOSE, TOKEN_KEY, cached));
     return cached.token;
   }
 
