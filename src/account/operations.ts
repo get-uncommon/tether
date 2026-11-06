@@ -7,7 +7,15 @@
 import { TetherError } from '../client.ts';
 import { emit } from '../dom.ts';
 import { operationRequest } from '../../server/src/shared/account-routes.ts';
-import type { OperationName, SubscriptionAction } from '../../server/src/shared/account-routes.ts';
+import type {
+  AddressFields,
+  OperationInputs,
+  OperationName,
+  ReturnLine,
+  SubscriptionAction,
+} from '../../server/src/shared/account-routes.ts';
+
+export type { AddressFields, ReturnLine };
 import {
   toAccountAddress,
   toCustomerAddresses,
@@ -39,28 +47,6 @@ interface PagesContext {
   reset: () => void;
 }
 
-/** Shopify's `CustomerAddressInput` fields; the Worker keeps only these, with bounded lengths. */
-export interface AddressFields {
-  firstName?: string;
-  lastName?: string;
-  company?: string;
-  address1?: string;
-  address2?: string;
-  city?: string;
-  zip?: string;
-  zoneCode?: string;
-  /** Two letters. */
-  countryCode?: string;
-  phoneNumber?: string;
-}
-
-export interface ReturnLine {
-  lineItemId: string;
-  quantity: number;
-  reasonId?: string;
-  note?: string;
-}
-
 /** `tether:account-updated`'s `what`. */
 type ChangedData = 'profile' | 'addresses' | 'subscriptions' | 'orders';
 
@@ -81,7 +67,10 @@ export function pagesContext(): PagesContext {
  * @returns The operation's result fields, read by the caller.
  * @throws {TetherError} With one of the codes in the file's comment.
  */
-async function run(name: OperationName, input: Record<string, unknown> = {}): Promise<Record<string, unknown>> {
+async function run<Name extends OperationName>(
+  name: Name,
+  input: OperationInputs[Name],
+): Promise<Record<string, unknown>> {
   const { serverFetch } = pagesContext();
   const { method, path } = operationRequest(name, input);
   const answer = await serverFetch(path, method === 'POST' ? { method, body: input } : {});
@@ -116,7 +105,7 @@ export async function updateProfile({
 
 /** @returns The customer's addresses, the default one marked `isDefault`. */
 export async function addresses(): Promise<CustomerAddress[]> {
-  const result = await run('addresses');
+  const result = await run('addresses', {});
   return toCustomerAddresses(result['addresses']);
 }
 
@@ -138,7 +127,7 @@ export async function deleteAddress(id: string): Promise<string> {
 }
 
 export async function subscriptions(): Promise<SubscriptionContract[]> {
-  const result = await run('subscriptions');
+  const result = await run('subscriptions', {});
   return toSubscriptionContracts(result['subscriptions']);
 }
 

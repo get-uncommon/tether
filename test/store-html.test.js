@@ -163,6 +163,58 @@ test('inline styles keep their look but cannot place content over the page or fe
   assert.deepEqual(styles, ['color: red; font-weight: bold;', 'margin: 4px;', null, null]);
 });
 
+test('an outline or shadow large enough to paint over the page is removed; the link it framed stays', () => {
+  const box = render(
+    '<p style="outline: 5000px solid #fff; box-shadow: 0 0 0 9999px #fff; font-size: 40px">Session expired. ' +
+      '<a href="https://evil.example/login">Log in</a></p>',
+  );
+  assert.equal(
+    box.innerHTML,
+    '<p style="font-size: 40px;">Session expired. <a href="https://evil.example/login">Log in</a></p>',
+  );
+});
+
+test('outlines, shadows, filters, outsets and text decoration are removed past a few dozen pixels or in any unit but px', () => {
+  const declarations = [
+    'outline-offset: 5000px',
+    'outline: 5e3px solid red',
+    'outline: 2em solid red',
+    'box-shadow: 0 0 0 calc(1px * 9999) #fff',
+    'box-shadow: 0 0 0 var(--spread) #fff',
+    'box-shadow: -41px 0 #000',
+    'text-shadow: 5000px 0 #000',
+    'filter: drop-shadow(5000px 0 0 red)',
+    'filter: blur(1rem)',
+    'border-image-outset: 5000px',
+    'border-image: linear-gradient(red, red) 1 / 1 / 5000px',
+    'mask-border-outset: 5000px',
+    'text-underline-offset: 5000px',
+    'text-decoration-thickness: 5000px',
+    '-webkit-text-stroke: 5000px red',
+  ];
+  const box = render(declarations.map((declaration) => `<p style="${declaration}; color: red">x</p>`).join(''));
+  assert.deepEqual(
+    [...box.children].map((element) => element.getAttribute('style')),
+    declarations.map(() => 'color: red;'),
+  );
+});
+
+test('a modest outline, shadow or filter on an image or a callout looks as written', () => {
+  const styles = [
+    'outline: 2px solid #c00; outline-offset: 4px;',
+    'box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2), inset 0 0 0 1px #eee;',
+    'text-shadow: 1px 1px 2px #000;',
+    'filter: drop-shadow(0 2px 8px #0003) hue-rotate(90deg) brightness(110%);',
+    'text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 2px;',
+    'box-shadow: -40px 0 #000;',
+  ];
+  const box = render(styles.map((style) => `<img src="https://cdn.shopify.com/a.png" style="${style}">`).join(''));
+  assert.deepEqual(
+    [...box.children].map((element) => element.getAttribute('style')),
+    styles,
+  );
+});
+
 const site = new JSDOM('<!doctype html><body></body>', { url: 'https://shop.test/products/coffee' }).window.document;
 const renderOnSite = (html) => {
   const box = site.createElement('div');

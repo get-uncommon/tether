@@ -197,6 +197,8 @@ function variantOf(scope: ProductScope, product: ShopifyProduct): ShopifyVariant
 }
 // @ts-expect-error: Tether.on listens only to the events Tether dispatches
 api.on('my-event', (detail) => console.log(detail));
+// @ts-expect-error: the `<script>` build's part registry is internal, not part of the published type
+void api.__parts;
 // @ts-expect-error: TetherError is a type here; the class is Tether.TetherError
 void ({} instanceof TetherError);
 void [resolved.prefix, country, first, answers, added, variantOf];

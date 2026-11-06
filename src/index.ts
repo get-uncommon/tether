@@ -22,7 +22,7 @@ import {
 } from './loader.ts';
 import * as plans from './selling-plans.ts';
 import { resolveProductKey } from './status.ts';
-import { sel, emit, isOwnEvent, ANALYTICS_EVENTS, formatMoney, imageUrl } from './dom.ts';
+import { sel, emit, isOwnEvent, ANALYTICS_EVENTS, formatMoney, imageUrl, pageGlobal } from './dom.ts';
 import { loadPart, coreModules } from './lazy.ts';
 import {
   mountedLists,
@@ -47,6 +47,7 @@ import type { ShopifyCart } from './cart/store.ts';
 import type { ProductScope } from './product.ts';
 import type { DiagnoseOptions } from './diagnose.ts';
 import type { TetherEvents } from './markup.ts';
+import type { TetherInternals } from './lazy.ts';
 
 export { addGroup, setCountry };
 
@@ -99,13 +100,6 @@ export const VERSION = '0.6.8';
 
 /** Milliseconds `observe` waits after the last added node, so a burst of additions mounts once. */
 const OBSERVE_DEBOUNCE_MS = 50;
-
-/**
- * What the page set on `window` for Tether: `TETHER_CONFIG`, the site's config, and `TETHER_INTEGRATION`, set by a
- * framework integration (Astro) that starts Tether itself. The page's own script wrote them, so they are read as
- * unknown and `configure()` validates the config.
- */
-const pageGlobal = (name: 'TETHER_CONFIG' | 'TETHER_INTEGRATION'): unknown => Reflect.get(window, name);
 
 /** @returns The keys of `window.TETHER_CONFIG`, none when it is no object. */
 function pageConfig(): Readonly<Record<string, unknown>> {
@@ -350,7 +344,7 @@ function on<Name extends keyof TetherEvents>(
   };
 }
 
-export const api = {
+const publicApi = {
   VERSION,
   init,
   mount,
@@ -383,14 +377,16 @@ export const api = {
   detectMarket,
   getLocalization,
   diagnose,
-  __core: coreModules,
-  // The `<script>` build's parts register here when their file has loaded.
-  __parts: {} as Record<string, unknown>,
   on,
 };
 
 /** `window.Tether`, and what `import Tether from '@occluze/tether'` gives. */
-export type Tether = typeof api;
+export type Tether = typeof publicApi;
+
+const internals: TetherInternals = { __core: coreModules, __parts: {} };
+
+/** `Tether`, also carrying `TetherInternals`, which the published type leaves out. */
+export const api: Tether = Object.assign(publicApi, internals);
 
 /** @alias `api`, for `import Tether from '@occluze/tether'`. */
 export default api;
