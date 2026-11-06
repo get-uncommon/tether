@@ -18,6 +18,7 @@ import {
   setImage,
   show,
   setSelected,
+  setTrustedHtml,
   repeat,
   productUrl,
   notifyLayoutChanged,
@@ -390,7 +391,7 @@ export class ProductScope {
       if (txt !== undefined) return setText(el, txt);
       switch (key) {
         case 'description':
-          el.innerHTML = p.descriptionHtml || '';
+          setTrustedHtml(el, p.descriptionHtml);
           return undefined;
         case 'published-at':
           return setText(el, formatDate(p.publishedAt));
@@ -466,13 +467,13 @@ export class ProductScope {
     this.$(`select${sel('option')}`).forEach((s) => {
       const opt = p.options.find((o) => o.name === this.optName(get(s, 'option')));
       if (!opt) return show(s, false);
-      s.innerHTML = '';
+      s.replaceChildren();
       opt.optionValues.forEach((v) => s.appendChild(new Option(v.name, v.name)));
       return undefined;
     });
 
     this.$(`select${sel('variant-select')}`).forEach((s) => {
-      s.innerHTML = '';
+      s.replaceChildren();
       p.variants.nodes.forEach((v) => s.appendChild(new Option(v.title, v.id)));
     });
 
@@ -490,7 +491,7 @@ export class ProductScope {
     });
 
     this.$(`select${sel('plan')}`).forEach((s) => {
-      s.innerHTML = '';
+      s.replaceChildren();
       if (!p.requiresSellingPlan && get(s, 'plan') !== 'subscription-only') {
         s.appendChild(new Option(s.getAttribute(attr('one-time-label')) || 'One-time purchase', ''));
       }

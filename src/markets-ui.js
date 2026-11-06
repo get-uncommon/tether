@@ -45,7 +45,7 @@ function renderCountrySelects(root = document) {
           .split(/[\s,]+/)
           .filter(Boolean);
         const list = only.length ? only.map((c) => countries.find((x) => x.isoCode === c)).filter(Boolean) : countries;
-        s.innerHTML = '';
+        s.replaceChildren();
         list.forEach((c) => s.appendChild(new Option(fill(tpl, c), c.isoCode)));
         s.value = current;
         if (s.value !== current) s.selectedIndex = -1; // a country the store doesn't sell to

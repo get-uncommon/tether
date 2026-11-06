@@ -708,7 +708,7 @@ function renderLine(node, line) {
         ];
         const sig = want.map((w) => w.value).join('|');
         if (select.dataset.tetherSig !== sig) {
-          select.innerHTML = '';
+          select.replaceChildren();
           want.forEach((w) => {
             const o = document.createElement('option');
             o.value = w.value;

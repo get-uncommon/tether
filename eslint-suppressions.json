@@ -492,7 +492,7 @@
       "count": 1
     },
     "@typescript-eslint/prefer-nullish-coalescing": {
-      "count": 10
+      "count": 9
     },
     "@typescript-eslint/restrict-plus-operands": {
       "count": 1
@@ -722,7 +722,7 @@
       "count": 1
     },
     "@typescript-eslint/prefer-nullish-coalescing": {
-      "count": 33
+      "count": 32
     },
     "@typescript-eslint/restrict-plus-operands": {
       "count": 1
@@ -793,11 +793,6 @@
       "count": 1
     },
     "no-useless-assignment": {
-      "count": 1
-    }
-  },
-  "test/astro.test.js": {
-    "no-restricted-syntax": {
       "count": 1
     }
   },

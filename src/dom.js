@@ -116,6 +116,16 @@ export function setImage(el, url, alt) {
   }
 }
 
+/**
+ * Writes HTML that the configured Shopify store authored (product and collection descriptions) into `el`. Store staff
+ * who can edit products can therefore run script on this site, as in any Shopify theme. This is the only place
+ * Tether writes HTML; everything else from Shopify is text (`setText`).
+ */
+export function setTrustedHtml(el, html) {
+  // eslint-disable-next-line no-restricted-syntax -- the one sanctioned HTML sink, documented above
+  el.innerHTML = html ?? '';
+}
+
 export function setText(el, v) {
   const text = v == null ? '' : String(v);
   if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') el.value = text;
@@ -185,7 +195,7 @@ function template(container) {
   if (!templates.has(container)) {
     const tpl = container.firstElementChild?.cloneNode(true) ?? null;
     templates.set(container, tpl);
-    container.innerHTML = '';
+    container.replaceChildren();
   }
   return templates.get(container);
 }
@@ -197,7 +207,7 @@ export function repeat(container, items, render) {
     if (items.length) warn('repeater without a template child', container);
     return;
   }
-  container.innerHTML = '';
+  container.replaceChildren();
   items.forEach((item, i) => {
     const node = tpl.cloneNode(true);
     render(node, item, i);

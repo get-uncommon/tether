@@ -93,12 +93,22 @@ export default tseslint.config(
             "CallExpression[callee.property.name='catch'] > ArrowFunctionExpression[body.type='BlockStatement'][body.body.length=0]",
           message: "Don't swallow a rejection. Report it, or ignore it through a helper whose name says why.",
         },
+        {
+          selector:
+            "AssignmentExpression > MemberExpression.left[property.name=/^(innerHTML|outerHTML)$/], CallExpression > MemberExpression.callee[property.name='insertAdjacentHTML']",
+          message: 'HTML from Shopify goes through setTrustedHtml() in src/dom.js; everything else is text.',
+        },
       ],
     },
   },
   {
     files: ['test/**', 'server/test/**', 'e2e/**'],
-    rules: { 'max-lines-per-function': 'off', 'max-lines': 'off', 'max-statements-per-line': 'off' },
+    rules: {
+      'max-lines-per-function': 'off',
+      'max-lines': 'off',
+      'max-statements-per-line': 'off',
+      'no-restricted-syntax': 'off',
+    },
   },
   prettier,
 );
