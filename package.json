@@ -167,5 +167,8 @@
     "ignoreBinaries": [
       "tsc"
     ]
+  },
+  "overrides": {
+    "minimatch": "11.0.5"
   }
 }

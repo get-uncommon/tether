@@ -43,6 +43,8 @@ get 0.8.0 with `npm install @occluze/tether@^0.8.0`.
   Release doesn't ship; take the ES module build from npm. The release workflow refuses a tag whose
   commit isn't on `main` (or on its `release/X.Y` branch when that exists) before publishing
   anything, since copies refuse such a tag and it would block every copy in its range.
+- Repository: the development tools' `minimatch` is overridden to 11.0.5 (GHSA-g3hv-75wg-m249, a
+  denial of service through glob patterns), so `npm audit` is clean; CI fails on any new advisory.
 - Types: `tether:cart-updated`'s `reason` is the exported `CartUpdateReason` (`load`, `add`,
   `update`, `remove`, `note`, `attributes`, `discount`, `buyer-identity`, `pending`, `settled`), and
   the reference lists when each one fires.
