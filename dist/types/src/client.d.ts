@@ -124,10 +124,15 @@ export declare function request<T>(conf: StorefrontConfig, query: QueryText, var
 export declare function gql<T>(query: QueryText, variables: Record<string, unknown>, isData: DataCheck<T>, options?: RequestOptions): Promise<T>;
 /** The check of `Tether.query()` and the server's `query()`, whose callers read `data` themselves. */
 export declare const hasData: (data: unknown) => data is object;
-/** `Tether.query()` and the server's `query()`: a document Tether didn't write, sent with `conf`. */
-export declare function untypedQuery<T>(conf: StorefrontConfig, text: string, variables?: Record<string, unknown>, options?: Omit<RequestOptions, 'operation'>): Promise<T>;
+/**
+ * `Tether.query()` and the server's `query()`: a document Tether didn't write, sent with `conf`.
+ *
+ * @returns Shopify's `data`, checked only for being an object: the caller's own query decides its shape, so the caller
+ *   checks the fields it reads.
+ */
+export declare function untypedQuery(conf: StorefrontConfig, text: string, variables?: Record<string, unknown>, options?: Omit<RequestOptions, 'operation'>): Promise<object>;
 /** `Tether.query()`: `untypedQuery` with the browser's shared config. */
-export declare function query<T>(text: string, variables?: Record<string, unknown>, options?: Omit<RequestOptions, 'operation'>): Promise<T>;
+export declare function query(text: string, variables?: Record<string, unknown>, options?: Omit<RequestOptions, 'operation'>): Promise<object>;
 /**
  * @param payload A mutation's payload.
  * @param name The mutation, for the error message.

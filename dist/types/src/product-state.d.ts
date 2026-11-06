@@ -98,7 +98,9 @@ export declare function initialChoice(product: Product, { variant, sellingPlan, 
  * @returns `null` for a product without variants.
  */
 export declare function productView(product: Product, choice: ProductChoice, lowStock: number): ProductView | null;
-/** The `tether-bind` values that follow the variant and purchase. Thunks, so only the binds on the page are computed. */
+/**
+ * The `tether-bind` values that follow the variant and purchase. Thunks, so only the binds on the page are computed.
+ */
 export declare function variantBindTexts(view: ProductView, format: Formatters): Map<string, () => BindText>;
 /**
  * The `tether-plan-bind` values of one plan in a plan list, for the variant.

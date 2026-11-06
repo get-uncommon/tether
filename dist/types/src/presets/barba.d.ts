@@ -21,7 +21,9 @@
  *   Tether.unmount();
  */
 import type { TetherConfig } from '../config.js';
-/** `gsap`, `lenis` and `scrollTrigger` are getters, read each time they are used, so an instance made later is found. */
+/**
+ * `gsap`, `lenis` and `scrollTrigger` are getters, read each time they are used, so an instance made later is found.
+ */
 interface BarbaPresetOptions {
     /** Default `window.gsap`. */
     gsap?: () => unknown;

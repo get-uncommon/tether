@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.8.0 (unreleased)
+## 0.8.0 (2026-11-06)
 
 A minor release because `Tether.query()`'s types changed (below); nothing else breaks.
 

@@ -1,1 +1,0 @@
-import{g as e}from"./chunk-RJY76ESL.js";import{r as o}from"./chunk-QDHLXXAZ.js";var c=()=>`${o.prefix}:account-hint:${o.domain}`;function i(r){e(r,"sessionStorage"),e(r,"localStorage")}function m(){i(`${o.prefix}:account:${o.domain}`),i(`${o.prefix}:account-login:${o.domain}`)}var s=r=>r==="in"||r==="expired"||r==="error";export{c as a,m as b,s as c};

@@ -46,7 +46,9 @@ export declare const pageGlobal: (name: "TETHER_CONFIG" | "TETHER_INTEGRATION" |
  * `onLayoutChange` (else refreshes ScrollTrigger) and emits `tether:layout-changed`, also when either of those throws.
  */
 export declare function notifyLayoutChanged(reason: string): void;
-/** Notifies a layout change (`<reason>:images`) once every image in `root` that is still loading has loaded or failed. */
+/**
+ * Notifies a layout change (`<reason>:images`) once every image in `root` that is still loading has loaded or failed.
+ */
 export declare function watchImages(root: ParentNode, reason: string): void;
 /**
  * Runs `task` with `aria-busy` on `el`; does nothing while `el` is already busy.

@@ -6,7 +6,7 @@
 **Shopify products, cart and subscriptions in Webflow or Astro, with HTML attributes.**
 
 [![npm](https://img.shields.io/npm/v/@occluze/tether?colorA=000000&colorB=3DE72E)](https://www.npmjs.com/package/@occluze/tether)
-[![size](https://img.shields.io/badge/gzipped-29%20KB-3DE72E?labelColor=000000)](https://cdn.jsdelivr.net/gh/ravi-klaassens/tether@0.7/dist/tether.min.js)
+[![size](https://img.shields.io/badge/gzipped-29%20KB-3DE72E?labelColor=000000)](https://cdn.jsdelivr.net/gh/ravi-klaassens/tether@0.8/dist/tether.min.js)
 [![license](https://img.shields.io/npm/l/@occluze/tether?colorA=000000&colorB=3DE72E)](LICENSE)
 
 ## Install
@@ -14,10 +14,10 @@
 Script tag, for Webflow or any page without a build step:
 
 ```html
-<script src="https://cdn.jsdelivr.net/gh/ravi-klaassens/tether@0.7/dist/tether.min.js" defer></script>
+<script src="https://cdn.jsdelivr.net/gh/ravi-klaassens/tether@0.8/dist/tether.min.js" defer></script>
 ```
 
-`@0.7` gets every 0.7.x fix automatically (recommended), `@v0.7.2` pins one release, `@latest`
+`@0.8` gets every 0.8.x fix automatically (recommended), `@v0.8.0` pins one release, `@latest`
 always takes the newest ([versions and self-hosting](docs/webflow.md#versions-and-self-hosting)).
 
 npm, for Astro, Vite or another bundler or framework (TypeScript types included):
@@ -45,7 +45,7 @@ from Shopify's Headless channel ([how to get it](docs/webflow.md#1-connect-shopi
     productPath: '/product',     // your Webflow product template
   };
 </script>
-<script src="https://cdn.jsdelivr.net/gh/ravi-klaassens/tether@0.7/dist/tether.min.js" defer></script>
+<script src="https://cdn.jsdelivr.net/gh/ravi-klaassens/tether@0.8/dist/tether.min.js" defer></script>
 ```
 
 Then add attributes in the Designer (Element → Settings → Custom attributes):

@@ -141,11 +141,10 @@
       return null;
     }
     const section = {};
-    const readers = schema;
-    for (const [key, read] of Object.entries(readers)) {
+    for (const key in schema) {
       const field2 = value[key];
       if (field2 === void 0) continue;
-      const parsed = read(field2);
+      const parsed = schema[key](field2);
       if (parsed === void 0) invalid(`${name}.${key}`, field2);
       else section[key] = parsed;
     }
@@ -332,12 +331,12 @@
       if (!(key in DEFAULTS)) warn(`unknown option ${JSON.stringify(key)}: ignored`);
     }
   }
-  function hookOption(value) {
-    return typeof value === "function" ? value : null;
-  }
-  function hookOptions(options) {
-    const hooks = Object.fromEntries(HOOK_OPTIONS.map((name) => [name, hookOption(options[name])]));
-    return hooks;
+  function setHook(config, name, value) {
+    if (typeof value === "function") {
+      config[name] = value;
+    } else if (value !== void 0 && value !== null) {
+      dropped(name, value);
+    }
   }
   function countOption(name, value) {
     if (typeof value === "number" && Number.isInteger(value) && value >= 0) return value;
@@ -381,7 +380,6 @@
     const prefix = typeof options.prefix === "string" && PREFIX.test(options.prefix) ? options.prefix : invalidOption("prefix", options.prefix, DEFAULTS.prefix);
     const resolved = {
       ...DEFAULTS,
-      ...hookOptions(options),
       domain,
       apiVersion: apiVersionOption(options.apiVersion),
       country: codeOption("country", options.country, toCountry),
@@ -401,6 +399,7 @@
     for (const name of COUNT_OPTIONS) resolved[name] = countOption(name, options[name]);
     for (const name of SWITCH_OPTIONS) resolved[name] = switchOption(name, options[name]);
     for (const name of TEXT_OPTIONS) resolved[name] = textOption(name, options[name]);
+    for (const name of HOOK_OPTIONS) setHook(resolved, name, options[name]);
     return resolved;
   }
   var parseMarkets = (value) => marketsOption(value, dropped);
@@ -4016,7 +4015,7 @@
   }
 
   // src/index.ts
-  var VERSION = "0.7.2";
+  var VERSION = "0.8.0";
   var OBSERVE_DEBOUNCE_MS = 50;
   function pageConfig() {
     const config = pageGlobal("TETHER_CONFIG");

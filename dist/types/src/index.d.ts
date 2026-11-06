@@ -17,7 +17,7 @@ export type { MarketsConfig, CartWarning } from './config.js';
 export type { Money } from './shopify-values.js';
 export type { Image as ShopifyImage, Metafield as ShopifyMetafield, Product as ShopifyProduct, ProductVariant as ShopifyVariant, SellingPlan as ShopifySellingPlanNode, SellingPlanAdjustmentValue, SellingPlanAllocation as ShopifySellingPlanAllocation, SellingPlanGroup as ShopifySellingPlanGroup, } from './fragments.js';
 export type { PlanInGroup as ShopifySellingPlan, PlanAdjustment, ProductWithPlans, VariantWithPlans, } from './selling-plans.js';
-export type { CartStatus, CartVariant as ShopifyCartVariant, ShopifyCart, ShopifyCartLine } from './cart/store.js';
+export type { CartStatus, CartUpdateReason, CartVariant as ShopifyCartVariant, ShopifyCart, ShopifyCartLine, } from './cart/store.js';
 export type { Attributes, LineSpec as LineInput } from './cart/mutations.js';
 export type { TetherError, TetherErrorCode, GraphQLError, UserError } from './client.js';
 export type { ProductScope } from './product.js';
@@ -33,7 +33,7 @@ export type { AddressFields as CustomerAddressInput } from './account/operations
 export type { CustomerAddress, Fulfillment, MailingAddress, OrderDetail, OrderDetailLine, SubscriptionContract, SubscriptionLine, } from './account/page-answers.js';
 /** The helpers for selling plans, `Tether.plans`. */
 export type SellingPlanHelpers = typeof plans;
-export declare const VERSION = "0.7.2";
+export declare const VERSION = "0.8.0";
 /**
  * Mounts every product scope and product list inside `root`. Safe to call repeatedly.
  *

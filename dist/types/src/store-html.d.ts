@@ -24,10 +24,10 @@
  * action, an email gate). An origin a site adds is trusted the same way.
  *
  * Not prevented: content wider than the description (a table or embed on a narrow screen, or a box given a large
- * width in pixels) overflows beside it, as in any HTML, and a capped shadow or outline still paints just past it. Tether
- * doesn't clip the element it fills (`contain: paint`, `overflow`), because that would cut off those wide tables and
- * embeds, stop margins collapsing through it and make it contain floats, changing how ordinary descriptions look. A
- * site that wants the clip sets it on that element in its own CSS.
+ * width in pixels) overflows beside it, as in any HTML, and a capped shadow or outline still paints just past it.
+ * Tether doesn't clip the element it fills (`contain: paint`, `overflow`), because that would cut off those wide
+ * tables and embeds, stop margins collapsing through it and make it contain floats, changing how ordinary
+ * descriptions look. A site that wants the clip sets it on that element in its own CSS.
  */
 /**
  * Store HTML as a fragment of content elements only.

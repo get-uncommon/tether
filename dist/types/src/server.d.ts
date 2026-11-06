@@ -42,8 +42,8 @@ interface HydrateOptions {
     images?: number;
 }
 /**
- * @returns `productPath` `/products` → `/products/<handle>`; templates with `{handle}` and `{id}` work too. `null` when
- *   the path needs a handle or an id that is empty.
+ * @returns `productPath` `/products` → `/products/<handle>`; templates with `{handle}` and `{id}` work too. `null`
+ *   when the path needs a handle or an id that is empty.
  */
 export declare function productUrl(handle: string, { productPath, id }?: {
     productPath?: string;
@@ -82,7 +82,7 @@ export declare function createStorefront(options?: StorefrontOptions): {
         id: string;
     } | null | undefined, intent?: "RELATED" | "COMPLEMENTARY") => Promise<Product[]>;
     config: ServerConfig;
-    query: <T>(query: string, variables?: Record<string, unknown>, requestOptions?: {
+    query: (query: string, variables?: Record<string, unknown>, requestOptions?: {
         context?: boolean;
-    }) => Promise<T>;
+    }) => Promise<object>;
 };

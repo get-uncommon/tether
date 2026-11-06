@@ -147,14 +147,20 @@ export declare function forgetSavedCart(): void;
 export declare function keepQuietly(cart: ShopifyCart | null): void;
 /** Renders the document with the store's cart. */
 export declare function render(): void;
+/**
+ * Why `tether:cart-updated` fired: `load` when the saved cart was loaded, failed to load or was forgotten; `pending`
+ * when quick clicks changed a quantity Shopify doesn't have yet, and `settled` once their last request is done; any
+ * other value names the change Shopify just answered. `docs/reference.md` lists them.
+ */
+export type CartUpdateReason = 'load' | 'add' | 'update' | 'remove' | 'note' | 'attributes' | 'discount' | 'buyer-identity' | 'pending' | 'settled';
 /** @param reason The `reason` of `tether:cart-updated`. */
-export declare function announce(reason: string): void;
+export declare function announce(reason: CartUpdateReason): void;
 /**
  * Keeps a cart Shopify sent after a change, shows it, and tells this page and the visitor's other tabs.
  *
  * @returns `cart`.
  */
-export declare function commit(cart: ShopifyCart | null, reason: string): ShopifyCart | null;
+export declare function commit(cart: ShopifyCart | null, reason: CartUpdateReason): ShopifyCart | null;
 /** The outcome of loading the saved cart: the cart, `null` when there is none, or the failure. */
 export declare function settleLoad(outcome: {
     kind: 'loaded';

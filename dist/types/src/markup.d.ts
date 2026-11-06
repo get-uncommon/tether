@@ -1,4 +1,4 @@
-import type { ShopifyCart } from './cart/store.js';
+import type { CartUpdateReason, ShopifyCart } from './cart/store.js';
 import type { CartLineInput } from './cart/mutations.js';
 import type { CartWarning } from './config.js';
 import type { Product, ProductVariant } from './fragments.js';
@@ -23,8 +23,8 @@ export declare function qsa(root: ParentNode | null | undefined, selector: strin
 export declare const scoped: (root: Element | null | undefined, selector: string, scopeSelector: string) => HTMLElement[];
 /**
  * The events Tether dispatches, as `<prefix>:<name>` (`tether:cart-updated`), bubbling up to `document`, with the
- * detail each carries. `emit` takes only these, and `Tether.on()` passes on only the events `emit` dispatched, so a listener gets the
- * detail its event really has.
+ * detail each carries. `emit` takes only these, and `Tether.on()` passes on only the events `emit` dispatched, so a
+ * listener gets the detail its event really has.
  */
 export interface TetherEvents {
     ready: {
@@ -68,7 +68,7 @@ export interface TetherEvents {
     };
     'cart-updated': {
         cart: ShopifyCart | null;
-        reason: string;
+        reason: CartUpdateReason;
     };
     'cart-toggled': {
         open: boolean;
@@ -125,7 +125,9 @@ export declare const ANALYTICS_EVENTS: readonly ["product-ready", "list-ready", 
 export type AnalyticsEventName = (typeof ANALYTICS_EVENTS)[number];
 /** @returns The bubbling event `<prefix>:<name>`, known to `isOwnEvent`. */
 export declare function ownEvent<Name extends keyof TetherEvents>(name: Name, detail: TetherEvents[Name]): CustomEvent<TetherEvents[Name]>;
-/** @returns True for an event `ownEvent` created as `name`, false for any other, such as one another script dispatched. */
+/**
+ * @returns True for an event `ownEvent` created as `name`, false for any other, such as one another script dispatched.
+ */
 export declare function isOwnEvent<Name extends keyof TetherEvents>(event: Event, name: Name): event is CustomEvent<TetherEvents[Name]>;
 /** Dispatches the bubbling event `<prefix>:<name>`. */
 export declare function emit<Name extends keyof TetherEvents>(name: Name, detail: TetherEvents[Name], target?: EventTarget): void;
