@@ -3,16 +3,18 @@ import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
 import {
   cartFrom,
+  fakeLine,
   find,
   findAll,
   graphqlRequest,
   jsonResponse,
+  linesAt,
   operationName,
   PLAN_2MONTH,
   PLAN_MONTH,
   product,
 } from './fixtures.js';
-import { waitFor } from '../server/test/mocks.js';
+import { listAt, recordAt, recordsAt, stringAt, waitFor } from '../server/test/mocks.js';
 
 const dom = new JSDOM('<!doctype html><body></body>', { url: 'https://site.test/product/coffee-box' });
 Object.assign(globalThis, {
@@ -21,53 +23,68 @@ Object.assign(globalThis, {
   localStorage: dom.window.localStorage,
   CustomEvent: dom.window.CustomEvent,
   MutationObserver: dom.window.MutationObserver,
-  Option: dom.window.Option,
+  Option: dom.window['Option'],
   getComputedStyle: dom.window.getComputedStyle,
 });
 
 // ---- fake Storefront API ---------------------------------------------------
+/** @type {({ op: string } & ReturnType<typeof graphqlRequest>)[]} */
 const calls = [];
+/** @type {import('./fixtures.js').FakeLine[]} */
 let cartLines = [];
+/**
+ * @param {RequestInfo | URL} _url
+ * @param {RequestInit} [init]
+ */
 globalThis.fetch = async (_url, init) => {
   const { query, variables } = graphqlRequest(init);
   const op = operationName(query);
   calls.push({ op, query, variables });
+  /** @param {unknown} data */
   const ok = (data) => jsonResponse({ data });
   const payload = () => ({ cart: cartFrom(cartLines), userErrors: [] });
 
   switch (op) {
     case 'TetherProducts': {
+      /** @type {Record<string, import('../src/fragments.ts').Product | null>} */
       const data = {};
-      Object.keys(variables).forEach((k) => {
-        if (k.startsWith('h')) data[k] = variables[k] === product.handle ? product : null;
+      Object.keys(variables).forEach((key) => {
+        if (key.startsWith('h')) data[key] = variables[key] === product.handle ? product : null;
       });
       return ok(data);
     }
     case 'TetherCart':
       return ok({ cart: cartLines.length ? cartFrom(cartLines) : null });
     case 'Tether_cartCreate':
-      cartLines = [...variables.input.lines];
+      cartLines = linesAt(recordAt(variables, 'input'), 'lines');
       return ok({ cartCreate: payload() });
     case 'Tether_cartLinesAdd':
-      cartLines = [...cartLines, ...variables.lines];
+      cartLines = [...cartLines, ...linesAt(variables, 'lines')];
       return ok({ cartLinesAdd: payload() });
     case 'Tether_cartLinesUpdate': {
-      variables.lines.forEach((u) => {
-        const i = Number(u.id.split('/').pop()) - 1;
-        cartLines[i] = { ...cartLines[i], ...u };
-        if (u.sellingPlanId === null) delete cartLines[i].sellingPlanId;
+      recordsAt(variables, 'lines').forEach((patch) => {
+        const id = stringAt(patch, 'id');
+        const index = Number(id.split('/').pop()) - 1;
+        const line = cartLines[index];
+        assert.ok(line, `no line ${id}`);
+        const updated = fakeLine({ ...line, ...patch }, id);
+        if (updated.sellingPlanId === null) delete updated.sellingPlanId;
+        cartLines[index] = updated;
       });
       return ok({ cartLinesUpdate: payload() });
     }
     case 'Tether_cartLinesRemove':
-      cartLines = cartLines.filter((_, i) => !variables.lineIds.includes(`gid://shopify/CartLine/${i + 1}`));
+      cartLines = cartLines.filter((_, i) => !listAt(variables, 'lineIds').includes(`gid://shopify/CartLine/${i + 1}`));
       return ok({ cartLinesRemove: payload() });
     default:
       throw new Error(`unexpected op ${op}`);
   }
 };
 
-/** @returns A check that turns true once the document has sent `type` after this call. */
+/**
+ * @param {string} type
+ * @returns A check that turns true once the document has sent `type` after this call.
+ */
 function sent(type) {
   let seen = false;
   document.addEventListener(
@@ -83,10 +100,12 @@ function sent(type) {
 /** Waits until every product scope on the page has loaded. */
 const productsReady = () =>
   waitFor(
-    () => findAll('[tether-product]').every((el) => el.getAttribute('tether-state') === 'ready'),
+    () => findAll('[tether-product]').every((element) => element.getAttribute('tether-state') === 'ready'),
     'the products to load',
   );
+/** @type {typeof import('../src/index.ts').default} */
 let Tether;
+/** @type {typeof Tether.plans} */
 let plans;
 
 before(async () => {
@@ -109,23 +128,23 @@ beforeEach(() => {
 // ---- pure helpers ----------------------------------------------------------
 
 test('withContext adds @inContext to the operation', () => {
-  const q = Tether.withContext('query A($id: ID!) { x }\nfragment F on Product { id }', {
+  const query = Tether.withContext('query A($id: ID!) { x }\nfragment F on Product { id }', {
     country: 'nl',
     language: 'nl',
   });
-  assert.match(q, /^query A\(\$id: ID!\) @inContext\(country: NL, language: NL\) \{/);
+  assert.match(query, /^query A\(\$id: ID!\) @inContext\(country: NL, language: NL\) \{/);
 });
 
 test('selling plan helpers', () => {
   const [v250, v1kg] = product.variants.nodes;
   assert.equal(plans.allPlans(product).length, 2);
-  assert.equal(plans.planPrice(v250, PLAN_MONTH).amount, '27');
-  assert.deepEqual(plans.planSavings(v250, PLAN_MONTH).percentage, 10);
+  assert.equal(plans.planPrice(v250, PLAN_MONTH)?.amount, '27');
+  assert.deepEqual(plans.planSavings(v250, PLAN_MONTH)?.percentage, 10);
   assert.equal(plans.allocationFor(v1kg, PLAN_MONTH), null);
   assert.equal(plans.plansForVariant(product, v1kg).length, 1);
-  assert.equal(plans.findPlan(product, 'every month').id, PLAN_MONTH);
-  assert.equal(plans.findPlan(product, '2 months').id, PLAN_2MONTH);
-  assert.equal(plans.findPlan(product, '111').id, PLAN_MONTH);
+  assert.equal(plans.findPlan(product, 'every month')?.id, PLAN_MONTH);
+  assert.equal(plans.findPlan(product, '2 months')?.id, PLAN_2MONTH);
+  assert.equal(plans.findPlan(product, '111')?.id, PLAN_MONTH);
   assert.deepEqual(plans.planAdjustment(plans.allPlans(product)[0]), { type: 'percentage', value: 10 });
 });
 
@@ -182,13 +201,14 @@ test('subscription toggle changes price and adds sellingPlanId to the cart line'
   const added = sent('tether:added');
   find('#add').click();
   await waitFor(added, 'the line to be added');
-  const create = calls.find((c) => c.op === 'Tether_cartCreate');
+  const create = calls.find((call) => call.op === 'Tether_cartCreate');
   assert.ok(create, 'cartCreate called');
-  const line = create.variables.input.lines[0];
+  const [line] = linesAt(recordAt(create.variables, 'input'), 'lines');
+  assert.ok(line);
   assert.equal(line.merchandiseId, 'gid://shopify/ProductVariant/10');
   assert.equal(line.sellingPlanId, PLAN_MONTH);
   assert.deepEqual(line.attributes, [{ key: 'Gift message', value: 'Hi!' }]);
-  assert.equal(create.variables.input.buyerIdentity.countryCode, 'NL');
+  assert.equal(recordAt(recordAt(create.variables, 'input'), 'buyerIdentity')['countryCode'], 'NL');
   assert.match(create.query, /@inContext\(country: NL\)/);
 
   assert.equal(find('#count').textContent, '1');
@@ -200,10 +220,11 @@ test('subscription toggle changes price and adds sellingPlanId to the cart line'
 test('picking a plan the variant lacks falls back to a plan it has', async () => {
   await mountProduct('tether-default-purchase="subscription"');
   const scope = Tether.getScope(document.querySelector('h1'));
+  assert.ok(scope);
   assert.equal(scope.purchase.kind, 'subscription');
   scope.select('Size', '1kg');
   assert.deepEqual(scope.purchase, { kind: 'subscription', planId: PLAN_2MONTH });
-  assert.equal(scope.getLine().sellingPlanId, PLAN_2MONTH);
+  assert.equal(scope.getLine()?.sellingPlanId, PLAN_2MONTH);
 });
 
 test('one-time add has no sellingPlanId; lines can switch plan and be removed', async () => {
@@ -214,14 +235,18 @@ test('one-time add has no sellingPlanId; lines can switch plan and be removed', 
   const added = sent('tether:added');
   find('#add').click();
   await waitFor(added, 'the line to be added');
-  assert.equal(calls.find((c) => c.op === 'Tether_cartCreate').variables.input.lines[0].sellingPlanId, undefined);
+  assert.equal(
+    linesAt(recordAt(calls.find((call) => call.op === 'Tether_cartCreate')?.variables, 'input'), 'lines')[0]
+      ?.sellingPlanId,
+    undefined,
+  );
 
   await Tether.cart.updateLine('gid://shopify/CartLine/1', { sellingPlanId: '111' });
-  assert.equal(calls.at(-1).variables.lines[0].sellingPlanId, PLAN_MONTH);
-  assert.ok(Tether.cart.lines[0].sellingPlanAllocation);
+  assert.equal(recordsAt(calls.at(-1)?.variables, 'lines')[0]?.['sellingPlanId'], PLAN_MONTH);
+  assert.ok(Tether.cart.lines[0]?.sellingPlanAllocation);
 
   await Tether.cart.updateLine('gid://shopify/CartLine/1', { sellingPlanId: null });
-  assert.equal(calls.at(-1).variables.lines[0].sellingPlanId, null);
+  assert.equal(recordsAt(calls.at(-1)?.variables, 'lines')[0]?.['sellingPlanId'], null);
 
   find('.rm').click();
   await waitFor(() => Tether.cart.count === 0, 'the line to be removed');
@@ -242,10 +267,12 @@ test('group add sends all scopes in one request with _group attribute', async ()
   const added = sent('tether:added');
   find('#g').click();
   await waitFor(added, 'the group to be added');
-  const create = calls.filter((c) => c.op === 'Tether_cartCreate').at(-1);
-  assert.equal(create.variables.input.lines.length, 2);
-  assert.equal(create.variables.input.lines[1].sellingPlanId, PLAN_MONTH);
-  assert.deepEqual(create.variables.input.lines[0].attributes, [{ key: '_group', value: 'Starter set' }]);
+  const create = calls.filter((call) => call.op === 'Tether_cartCreate').at(-1);
+  assert.ok(create);
+  const lines = linesAt(recordAt(create.variables, 'input'), 'lines');
+  assert.equal(lines.length, 2);
+  assert.equal(lines[1]?.sellingPlanId, PLAN_MONTH);
+  assert.deepEqual(lines[0]?.attributes, [{ key: '_group', value: 'Starter set' }]);
 });
 
 test('binds on the product root itself (card link)', async () => {

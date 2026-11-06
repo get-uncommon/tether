@@ -23,27 +23,34 @@ Object.assign(globalThis, {
   localStorage: dom.window.localStorage,
   CustomEvent: dom.window.CustomEvent,
   MutationObserver: dom.window.MutationObserver,
-  Option: dom.window.Option,
+  Option: dom.window['Option'],
   getComputedStyle: dom.window.getComputedStyle,
 });
 
 let mode = 'ok'; // 'ok' | 'down' | 'unauthorized' | 'malformed'
+/** @type {{ op: string, variables: ReturnType<typeof graphqlRequest>['variables'] }[]} */
 const calls = [];
+/**
+ * @param {RequestInfo | URL} _url
+ * @param {RequestInit} [init]
+ */
 globalThis.fetch = async (_url, init) => {
   const { query, variables } = graphqlRequest(init);
   const op = operationName(query);
   calls.push({ op, variables });
   if (mode === 'down') throw new TypeError('fetch failed');
   if (mode === 'unauthorized') return jsonResponse({ errors: [{ message: 'Unauthorized' }] }, 401);
+  /** @param {unknown} data */
   const ok = (data) => jsonResponse({ data });
   if (mode === 'malformed' && op === 'TetherProducts') return ok({ h0: { ...product, variants: null } });
   if (mode === 'malformed' && op.startsWith('Tether_cart')) {
     return ok({ [op.slice('Tether_'.length)]: { cart: { id: 'gid://shopify/Cart/1', lines: null }, userErrors: [] } });
   }
   if (op === 'TetherProducts') {
+    /** @type {Record<string, import('../src/fragments.ts').Product | null>} */
     const data = {};
-    Object.keys(variables).forEach((k) => {
-      if (k.startsWith('h')) data[k] = variables[k] === product.handle ? product : null;
+    Object.keys(variables).forEach((key) => {
+      if (key.startsWith('h')) data[key] = variables[key] === product.handle ? product : null;
     });
     return ok(data);
   }
@@ -59,11 +66,18 @@ globalThis.fetch = async (_url, init) => {
   throw new Error(`unexpected op ${op}`);
 };
 
-/** Waits until the first element matching `selector` is in `state`. */
+/**
+ * Waits until the first element matching `selector` is in `state`.
+ *
+ * @param {string} state
+ */
 const waitForState = (state, selector = '[tether-product]') =>
   waitFor(() => find(selector)?.getAttribute('tether-state') === state, `${selector} to be ${state}`);
+/** @param {string} url */
 const go = (url) => dom.reconfigure({ url });
+/** @type {typeof import('../src/index.ts').default} */
 let Tether;
+/** @type {{ error: unknown, context: string }[]} */
 const errors = [];
 
 before(async () => {
@@ -74,9 +88,16 @@ before(async () => {
     autoMount: false,
     retries: 0,
     productPath: '/product?handle={handle}',
-    onError: (err, ctx) => errors.push({ err, ctx }),
+    onError: (error, context) => errors.push({ error, context }),
   });
 });
+
+/** The error the first `onError` call reported, which these tests expect to be a `TetherError`. */
+function firstError() {
+  const error = errors[0]?.error;
+  assert.ok(error instanceof Tether.TetherError, 'a TetherError was reported');
+  return error;
+}
 
 beforeEach(() => {
   mode = 'ok';
@@ -85,6 +106,7 @@ beforeEach(() => {
   Tether.clearProductCache();
 });
 
+/** @param {string} key */
 const page = (key, extra = '') => `
   <div tether-product="${key}" ${extra}>
     <div id="loading" tether-show="loading">Loading…</div>
@@ -94,13 +116,18 @@ const page = (key, extra = '') => `
     <button id="add" tether-add-to-cart>Add</button>
   </div>`;
 
+/** @param {string} id */
 const visible = (id) => find(`#${id}`).style.display !== 'none';
 
 test('resolveProductKey: url:handle, any param, url:path, plain values', () => {
-  const el = document.createElement('div');
-  const key = (v, url) => {
-    el.setAttribute('tether-product', v);
-    return Tether.resolveProductKey(el, new URL(url)).key;
+  const element = document.createElement('div');
+  /**
+   * @param {string} value
+   * @param {string} url
+   */
+  const key = (value, url) => {
+    element.setAttribute('tether-product', value);
+    return Tether.resolveProductKey(element, new URL(url)).key;
   };
   assert.equal(key('url:handle', 'https://x.test/product?handle=coffee-box'), 'coffee-box');
   assert.equal(key('url:p', 'https://x.test/shop?p=beans'), 'beans');
@@ -136,8 +163,11 @@ test('url:path takes the last path segment', async () => {
 test('unknown handle shows not-found, disables add to cart, no onError for URL typos', async () => {
   go('https://site.test/product?handle=nope');
   document.body.innerHTML = page('url:handle');
+  /** @type {{ key: unknown }[]} */
   const notFound = [];
-  document.addEventListener('tether:product-not-found', (e) => notFound.push(detailOf(e)), { once: true });
+  document.addEventListener('tether:product-not-found', (event) => notFound.push({ key: detailOf(event)['key'] }), {
+    once: true,
+  });
   Tether.mount(document);
   await waitForState('error');
   const root = find('[tether-product]');
@@ -145,7 +175,7 @@ test('unknown handle shows not-found, disables add to cart, no onError for URL t
   assert.equal(root.getAttribute('tether-error'), 'not-found');
   assert.ok(visible('nf') && !visible('err') && !visible('ready') && !visible('loading'));
   assert.equal(find('#add').hasAttribute('disabled'), true);
-  assert.equal(notFound[0].key, 'nope');
+  assert.equal(notFound[0]?.key, 'nope');
   assert.equal(errors.length, 0);
 });
 
@@ -155,7 +185,7 @@ test('missing ?handle= is not-found without a request', async () => {
   Tether.mount(document);
   await waitForState('error');
   assert.ok(visible('nf'));
-  assert.equal(calls.filter((c) => c.op === 'TetherProducts').length, 0);
+  assert.equal(calls.filter((call) => call.op === 'TetherProducts').length, 0);
 });
 
 test('a CMS-bound handle that no longer exists is reported to onError', async () => {
@@ -164,7 +194,7 @@ test('a CMS-bound handle that no longer exists is reported to onError', async ()
   await waitForState('error');
   assert.ok(visible('nf'));
   assert.equal(errors.length, 1);
-  assert.equal(errors[0].err.code, 'NOT_FOUND');
+  assert.equal(firstError().code, 'NOT_FOUND');
 });
 
 test('API down: error state, onError called, blocks hidden by a class still appear', async () => {
@@ -178,7 +208,7 @@ test('API down: error state, onError called, blocks hidden by a class still appe
   assert.equal(root.getAttribute('tether-error'), 'NETWORK');
   assert.ok(visible('err') && !visible('nf') && !visible('ready'));
   assert.equal(getComputedStyle(find('#err')).display, 'block');
-  assert.equal(errors[0].err.code, 'NETWORK');
+  assert.equal(firstError().code, 'NETWORK');
   assert.equal(find('#add').hasAttribute('disabled'), true);
 });
 
@@ -208,8 +238,8 @@ test('a Storefront answer missing fields Tether reads is a TetherError, not a cr
   document.body.innerHTML = page('coffee-box');
   Tether.mount(document);
   await waitFor(() => find('[tether-product]').getAttribute('tether-state') === 'error', 'the error state');
-  assert.equal(errors[0].err.name, 'TetherError');
-  assert.equal(errors[0].err.message, 'Invalid response (200)');
+  assert.equal(firstError().name, 'TetherError');
+  assert.equal(firstError().message, 'Invalid response (200)');
   await assert.rejects(Tether.cart.add({ variantId: '10' }), {
     name: 'TetherError',
     message: 'Invalid response (200)',
@@ -225,23 +255,23 @@ test('diagnose reports config, reachability, plans and markup problems', async (
     <span tether-bind="title"></span>
     <span tether-show="in-stok"></span>
     <div tether-product="coffee-box"><span tether-bind="metafield:custom.nope"></span></div>`;
-  const r = await Tether.diagnose({ silent: true, now: new Date('2026-11-04') });
+  const report = await Tether.diagnose({ silent: true, now: new Date('2026-11-04') });
   assert.equal(
-    r.version,
+    report.version,
     JSON.parse((await import('node:fs')).readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version,
   );
-  assert.equal(r.reachable, true);
-  assert.equal(r.shop.name, 'Test shop');
-  assert.match(r.config.token, /^publ…-123/);
-  assert.equal(r.apiVersion.ok, true);
-  assert.equal(r.sellingPlans.length, 2);
-  const msgs = r.problems.map((p) => p.message).join('\n');
-  assert.match(msgs, /has no value/);
-  assert.match(msgs, /this URL has no value/);
-  assert.match(msgs, /tether-bind outside any tether-product/);
-  assert.match(msgs, /Unknown tether-show="in-stok"/);
-  assert.match(msgs, /custom\.nope" is not in config\.metafields/);
-  assert.match(msgs, /in-stok"\. Did you mean "in-stock"/);
+  assert.equal(report.reachable, true);
+  assert.equal(report.shop?.name, 'Test shop');
+  assert.match(String(report.config['token']), /^publ…-123/);
+  assert.equal(report.apiVersion.ok, true);
+  assert.equal(report.sellingPlans.length, 2);
+  const messages = report.problems.map((problem) => problem.message).join('\n');
+  assert.match(messages, /has no value/);
+  assert.match(messages, /this URL has no value/);
+  assert.match(messages, /tether-bind outside any tether-product/);
+  assert.match(messages, /Unknown tether-show="in-stok"/);
+  assert.match(messages, /custom\.nope" is not in config\.metafields/);
+  assert.match(messages, /in-stok"\. Did you mean "in-stock"/);
 });
 
 test('diagnose: documented values pass, typos get a did-you-mean', async () => {
@@ -255,25 +285,25 @@ test('diagnose: documented values pass, typos get a did-you-mean', async () => {
       <div tether-option-list="Size"><button></button></div>
       <div tether-plan-list></div>
     </div>`;
-  const r = await Tether.diagnose({ silent: true, now: new Date('2026-11-04') });
-  const msgs = r.problems.map((p) => p.message).join('\n');
-  assert.doesNotMatch(msgs, /Unknown tether-show|bind="price"|image:2/);
-  assert.match(msgs, /tether-bind="pric".*Did you mean "price"/);
-  assert.match(msgs, /tether-bnd.*Did you mean "tether-bind"/);
-  assert.match(msgs, /tether-add-to-card.*Did you mean "tether-add-to-cart"/);
-  assert.match(msgs, /no option "Sise".*Did you mean "Size"/);
-  assert.match(msgs, /tether-plan-list without a template child/);
-  assert.doesNotMatch(msgs, /: \.|undefined/);
+  const report = await Tether.diagnose({ silent: true, now: new Date('2026-11-04') });
+  const messages = report.problems.map((problem) => problem.message).join('\n');
+  assert.doesNotMatch(messages, /Unknown tether-show|bind="price"|image:2/);
+  assert.match(messages, /tether-bind="pric".*Did you mean "price"/);
+  assert.match(messages, /tether-bnd.*Did you mean "tether-bind"/);
+  assert.match(messages, /tether-add-to-card.*Did you mean "tether-add-to-cart"/);
+  assert.match(messages, /no option "Sise".*Did you mean "Size"/);
+  assert.match(messages, /tether-plan-list without a template child/);
+  assert.doesNotMatch(messages, /: \.|undefined/);
 });
 
 test('diagnose explains a rejected token and an expired API version', async () => {
   mode = 'unauthorized';
   document.body.innerHTML = '';
-  const r = await Tether.diagnose({ silent: true, now: new Date('2028-01-01') });
-  assert.equal(r.reachable, false);
-  const msgs = r.problems.map((p) => p.message).join('\n');
-  assert.match(msgs, /rejected the Storefront token/);
-  assert.match(msgs, /no longer supported/);
+  const report = await Tether.diagnose({ silent: true, now: new Date('2028-01-01') });
+  assert.equal(report.reachable, false);
+  const messages = report.problems.map((problem) => problem.message).join('\n');
+  assert.match(messages, /rejected the Storefront token/);
+  assert.match(messages, /no longer supported/);
 });
 
 test('API versions: next quarterly version, support window, unstable refused', async () => {

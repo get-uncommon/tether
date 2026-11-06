@@ -26,7 +26,11 @@ class PartsHost extends ResourceLoader {
   }
 }
 
-/** Answers the Storefront queries Tether.diagnose() sends. */
+/**
+ * Answers the Storefront queries Tether.diagnose() sends.
+ *
+ * @param {import('jsdom').DOMWindow} window
+ */
 function storefront(window) {
   window.fetch = async (_url, init) => {
     const { query } = graphqlRequest(init);
@@ -58,12 +62,13 @@ async function loadDiagnoseFrom(partsUrl) {
   });
   const win = dom.window;
   await new Promise((resolve) => win.addEventListener('load', resolve));
-  const result = await win.Tether.diagnose({ silent: true });
+  const result = await win['Tether'].diagnose({ silent: true });
   const script = [...win.document.scripts].find((element) => /tether\.diagnose\.min\.js$/.test(element.src));
   assert.ok(script, 'the diagnose part has a script');
   return { win, script, result };
 }
 
+/** @param {string} file A file name in the test build. */
 async function builtHash(file) {
   return `sha384-${createHash('sha384')
     .update(await readFile(join(DIST, file)))
@@ -75,7 +80,7 @@ test('a cross-origin partsUrl loads parts with the hash built into the core, ove
   assert.equal(script.src, 'https://cdn.test/tether/tether.diagnose.min.js');
   assert.equal(script.integrity, await builtHash('tether.diagnose.min.js'));
   assert.equal(script.crossOrigin, 'anonymous');
-  assert.ok(win.Tether.__parts.diagnose, 'registered');
+  assert.ok(win['Tether'].__parts.diagnose, 'registered');
   assert.equal(result.config.domain, 'shop.test');
 });
 

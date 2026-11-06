@@ -14,7 +14,12 @@ const neverSync = {
   queueRetry: () => Promise.reject(new Error('a refused webhook never reaches the sync')),
 };
 
+/**
+ * @param {string} body
+ * @param {{ shop?: string | null }} [options]
+ */
 async function signed(body, { shop = SHOP } = {}) {
+  /** @type {Record<string, string>} */
   const headers = { 'x-shopify-topic': 'products/update', 'x-shopify-hmac-sha256': await signShopify(body, 'whsec') };
   if (shop) headers['x-shopify-shop-domain'] = shop;
   return new Request('https://w.test/webhooks/shopify', { method: 'POST', body, headers });
@@ -57,6 +62,7 @@ test('the bearer secret must match exactly', async () => {
 });
 
 test('a repeated X-Shopify-Webhook-Id is answered without syncing again; a new id syncs', async () => {
+  /** @type {string[]} */
   const synced = [];
   /** @type {WebhookSync} */
   const sync = {
@@ -66,6 +72,7 @@ test('a repeated X-Shopify-Webhook-Id is answered without syncing again; a new i
     },
     queueRetry: () => Promise.resolve(),
   };
+  /** @param {string} webhookId */
   const delivery = async (webhookId) => {
     const request = await signed('{"id":7}');
     const headers = new Headers(request.headers);
@@ -122,6 +129,7 @@ function fakeCache() {
 }
 
 test("a delivery another isolate accepted is dropped through the data centre's cache", async () => {
+  /** @type {string[]} */
   const synced = [];
   /** @type {WebhookSync} */
   const sync = {
@@ -141,7 +149,9 @@ test("a delivery another isolate accepted is dropped through the data centre's c
   const options = { sync, secrets: ['whsec'], shopDomain: SHOP, deliveries };
   const first = await handleShopifyWebhook(await delivery(), options);
   await first.task;
-  const [[key, kept]] = deliveries.entries;
+  const [entry] = deliveries.entries;
+  assert.ok(entry);
+  const [key, kept] = entry;
   assert.equal(new URL(key).host, 'w.test', "keyed on the Worker's own host");
   assert.match(kept.headers.get('cache-control') ?? '', /max-age=21600/, 'kept for six hours');
 
@@ -157,6 +167,7 @@ test("a delivery another isolate accepted is dropped through the data centre's c
 });
 
 test('a failing delivery cache is logged and the webhook still synced', async () => {
+  /** @type {string[]} */
   const warnings = [];
   /** @type {WebhookSync} */
   const sync = { syncById: async () => ({ action: 'unchanged' }), queueRetry: () => Promise.resolve() };
@@ -176,5 +187,5 @@ test('a failing delivery cache is logged and the webhook still synced', async ()
     log: { warn: (message) => warnings.push(message) },
   });
   assert.ok(task, 'synced');
-  assert.match(warnings[0], /delivery cache failed \(cache down\)/);
+  assert.match(warnings[0] ?? '', /delivery cache failed \(cache down\)/);
 });

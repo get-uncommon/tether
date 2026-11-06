@@ -22,20 +22,20 @@ const app = {
  */
 const raw = (port, text, { abortWhen } = {}) =>
   new Promise((resolve) => {
-    const s = connect(port, '127.0.0.1', () => {
-      s.write(text);
+    const socket = connect(port, '127.0.0.1', () => {
+      socket.write(text);
       if (abortWhen)
         void abortWhen().then(() => {
-          s.destroy();
+          socket.destroy();
           resolve('');
         });
     });
     let out = '';
-    s.on('data', (d) => {
-      out += d;
+    socket.on('data', (chunk) => {
+      out += chunk;
     });
-    s.on('end', () => resolve(out));
-    s.on('error', () => resolve(out));
+    socket.on('end', () => resolve(out));
+    socket.on('error', () => resolve(out));
   });
 
 /**
@@ -95,14 +95,17 @@ test('serve: an aborted upload, a huge body and unknown paths do not crash or bu
 });
 
 test('serve logs the address it really listens on', async () => {
+  /** @type {unknown[]} */
   const lines = [];
-  const log = { ...quiet, info: (line) => lines.push(line) };
+  const log = { ...quiet, info: (/** @type {unknown} */ line) => lines.push(line) };
   const local = await serve(app, { port: 0, host: '127.0.0.1', log });
   const everywhere = await serve(app, { port: 0, log });
   try {
     assert.equal(lines[0], `tether-sync listening on http://127.0.0.1:${listening(local).port}/webhooks/shopify`);
+    const [, everywhereLine] = lines;
+    assert.ok(typeof everywhereLine === 'string');
     assert.match(
-      lines[1],
+      everywhereLine,
       /^tether-sync listening on every interface \((::|0\.0\.0\.0)\), e\.g\. http:\/\/localhost:\d+\//,
     );
   } finally {

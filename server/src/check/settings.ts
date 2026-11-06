@@ -4,7 +4,7 @@
  */
 import { accountProblems, accountSettings } from '../account/settings.ts';
 import { envProblems, kvBinding, MIN_SECRET_LENGTH } from '../env.ts';
-import { deployHookMinSeconds } from '../settings.ts';
+import { deployHookMinSeconds, invalidNumberSettings } from '../settings.ts';
 import type { Steps } from './steps.ts';
 import type { CleanEnv } from '../env.ts';
 import type { SyncConfig } from '../mapping.ts';
@@ -51,6 +51,18 @@ export function reportIgnoredValues(steps: Steps, rawEnv: Record<string, unknown
         `is shorter than ${String(MIN_SECRET_LENGTH)} characters, so it counts as not set.`,
         `Use a random string of at least ${String(MIN_SECRET_LENGTH)} characters, e.g. from a password manager.`,
       );
+  }
+}
+
+/** Whole-number settings set to something unusable: the Worker runs with the default instead. */
+function checkNumberSettings(steps: Steps, env: CleanEnv): void {
+  for (const { key, raw, min, max, fallback } of invalidNumberSettings(env)) {
+    steps.add(
+      'error',
+      key,
+      `"${raw}" is not a whole number from ${String(min)} to ${String(max)}, so ${String(fallback)} is used.`,
+      `Set it to a whole number from ${String(min)} to ${String(max)}, or remove it to use ${String(fallback)}.`,
+    );
   }
 }
 
@@ -248,5 +260,6 @@ export function checkSettings(steps: Steps, context: SettingsContext): Connectio
   checkAccounts(steps, context);
   const target = checkTarget(steps, config, env);
   checkSecrets(steps, context);
+  checkNumberSettings(steps, env);
   return domain && target ? { domain, target } : null;
 }

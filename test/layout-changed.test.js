@@ -2,7 +2,8 @@
 import { test, beforeEach, afterEach, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
-import { captureTetherWarnings } from './fixtures.js';
+import { captureTetherWarnings, detailOf } from './fixtures.js';
+import { stringAt } from '../server/test/mocks.js';
 
 const warnings = captureTetherWarnings();
 
@@ -19,8 +20,10 @@ const { notifyLayoutChanged } = await import('../src/dom.ts');
 const LAYOUT_DEBOUNCE_MS = 120;
 
 /** What happened, in order: `refresh`, `hook:<reason>`, `event:<reason>`. */
+/** @type {string[]} */
 const happened = [];
-const recordEvent = (event) => happened.push(`event:${event.detail.reason}`);
+/** @param {Event} event */
+const recordEvent = (event) => happened.push(`event:${stringAt(detailOf(event), 'reason')}`);
 
 /** @returns What the next burst of two changes made happen, once the debounce has passed and not before. */
 function layoutChanges() {
@@ -82,8 +85,12 @@ test('a page ScrollTrigger without a refresh function is skipped and the event s
 });
 
 test('a site hook or refresh that throws is reported and the event still goes out', () => {
+  /** @type {[string, unknown][]} */
   const errors = [];
-  /** @param {unknown} error */
+  /**
+   * @param {unknown} error
+   * @param {unknown} context
+   */
   const onError = (error, context) => errors.push([String(error), context]);
   const onLayoutChange = () => {
     throw new Error('hook broke');

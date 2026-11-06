@@ -1,10 +1,20 @@
 import assert from 'node:assert/strict';
+import { asRecord, listAt, numberAt, recordsAt, stringAt } from '../server/test/mocks.js';
 
+/**
+ * @param {number | string} amount
+ * @returns {import('../src/shopify-values.ts').Money}
+ */
 const money = (amount, currencyCode = 'EUR') => ({ amount: String(amount), currencyCode });
 
 export const PLAN_MONTH = 'gid://shopify/SellingPlan/111';
 export const PLAN_2MONTH = 'gid://shopify/SellingPlan/222';
 
+/**
+ * @param {string} planId
+ * @param {number} price
+ * @returns {import('../src/fragments.ts').SellingPlanAllocation}
+ */
 const allocation = (planId, price) => ({
   sellingPlan: { id: planId },
   checkoutChargeAmount: money(price),
@@ -14,6 +24,12 @@ const allocation = (planId, price) => ({
   ],
 });
 
+/**
+ * @param {number} id
+ * @param {string} size
+ * @param {import('../src/fragments.ts').SellingPlanAllocation[]} allocations
+ * @returns {import('../src/fragments.ts').ProductVariant}
+ */
 const variant = (id, size, allocations, available = true) => ({
   id: `gid://shopify/ProductVariant/${id}`,
   title: size,
@@ -109,12 +125,54 @@ export const product = {
   },
 };
 
+/**
+ * A line a fake Storefront API keeps: what a cart mutation sent for it.
+ *
+ * @typedef {{ merchandiseId: string, quantity: number, sellingPlanId?: string | null,
+ *   attributes?: import('../src/cart/store.ts').Attribute[] }} FakeLine
+ */
+
+/**
+ * A line as a cart mutation sent it (a `CartLineInput`), checked field by field.
+ *
+ * @param {unknown} value
+ * @param {string} what Names the line in a failure.
+ * @returns {FakeLine}
+ */
+export function fakeLine(value, what = 'the line') {
+  const sent = asRecord(value, what);
+  /** @type {FakeLine} */
+  const line = { merchandiseId: stringAt(sent, 'merchandiseId'), quantity: numberAt(sent, 'quantity') };
+  if ('sellingPlanId' in sent)
+    line.sellingPlanId = sent['sellingPlanId'] === null ? null : stringAt(sent, 'sellingPlanId');
+  if ('attributes' in sent) line.attributes = attributesAt(sent, 'attributes');
+  return line;
+}
+
+/**
+ * @param {unknown} value An object.
+ * @param {string} key Its list of attributes, as a cart mutation sends them.
+ * @returns {import('../src/cart/store.ts').Attribute[]}
+ */
+export const attributesAt = (value, key) =>
+  recordsAt(value, key).map((attribute) => ({ key: stringAt(attribute, 'key'), value: stringAt(attribute, 'value') }));
+
+/**
+ * @param {unknown} value An object.
+ * @param {string} key Its list of lines.
+ */
+export const linesAt = (value, key) => listAt(value, key).map((line, i) => fakeLine(line, `${key}[${i}]`));
+
+/**
+ * @param {FakeLine[]} lines
+ * @returns {import('../src/cart/store.ts').ShopifyCart}
+ */
 export function cartFrom(lines) {
-  const total = lines.reduce((s, l) => s + l.quantity * (l.sellingPlanId ? 27 : 30), 0);
+  const total = lines.reduce((sum, line) => sum + line.quantity * (line.sellingPlanId ? 27 : 30), 0);
   return {
     id: 'gid://shopify/Cart/abc',
     checkoutUrl: 'https://shop.test/checkout/abc',
-    totalQuantity: lines.reduce((s, l) => s + l.quantity, 0),
+    totalQuantity: lines.reduce((sum, line) => sum + line.quantity, 0),
     note: null,
     createdAt: '',
     updatedAt: '',
@@ -123,21 +181,21 @@ export function cartFrom(lines) {
     discountCodes: [],
     cost: { subtotalAmount: money(total), totalAmount: money(total), checkoutChargeAmount: money(total) },
     lines: {
-      nodes: lines.map((l, i) => ({
+      nodes: lines.map((line, i) => ({
         id: `gid://shopify/CartLine/${i + 1}`,
-        quantity: l.quantity,
-        attributes: l.attributes || [],
+        quantity: line.quantity,
+        attributes: line.attributes || [],
         cost: {
-          totalAmount: money(l.quantity * (l.sellingPlanId ? 27 : 30)),
-          subtotalAmount: money(l.quantity * 30),
-          amountPerQuantity: money(l.sellingPlanId ? 27 : 30),
+          totalAmount: money(line.quantity * (line.sellingPlanId ? 27 : 30)),
+          subtotalAmount: money(line.quantity * 30),
+          amountPerQuantity: money(line.sellingPlanId ? 27 : 30),
           compareAtAmountPerQuantity: null,
         },
         discountAllocations: [],
-        sellingPlanAllocation: l.sellingPlanId
+        sellingPlanAllocation: line.sellingPlanId
           ? {
               sellingPlan: {
-                id: l.sellingPlanId,
+                id: line.sellingPlanId,
                 name: 'Every month',
                 description: null,
                 recurringDeliveries: true,
@@ -148,7 +206,7 @@ export function cartFrom(lines) {
             }
           : null,
         merchandise: {
-          id: l.merchandiseId,
+          id: line.merchandiseId,
           title: '250g',
           sku: 'SKU-10',
           availableForSale: true,
@@ -170,6 +228,13 @@ export function cartFrom(lines) {
   };
 }
 
+/**
+ * @param {number} id
+ * @param {string} size
+ * @param {string} color
+ * @param {Partial<import('../src/fragments.ts').ProductVariant>} [overrides]
+ * @returns {import('../src/fragments.ts').ProductVariant}
+ */
 const apparelVariant = (id, size, color, overrides = {}) => ({
   ...variant(id, `${size} / ${color}`, []),
   selectedOptions: [
@@ -221,6 +286,7 @@ export const apparel = {
  * @returns {unknown[][]} The captured warnings' arguments, for a test that checks one.
  */
 export function captureTetherWarnings() {
+  /** @type {unknown[][]} */
   const captured = [];
   const { warn } = console;
   console.warn = (...args) => {
@@ -241,7 +307,7 @@ export const jsonResponse = (body, status = 200) =>
  * The GraphQL request a fake Storefront API received.
  *
  * @param {RequestInit | undefined} init The fetch's options.
- * @returns {{ query: string; variables: Record<string, any> }}
+ * @returns {{ query: string; variables: Record<string, unknown> }}
  */
 export function graphqlRequest(init) {
   assert.ok(typeof init?.body === 'string', 'a GraphQL request has a JSON body');
@@ -253,17 +319,20 @@ export function graphqlRequest(init) {
  * @returns {string} The name of its operation.
  */
 export function operationName(query) {
-  const match = /(?:query|mutation)\s+(\w+)/.exec(query);
-  assert.ok(match, 'the operation has a name');
-  return match[1];
+  const name = /(?:query|mutation)\s+(\w+)/.exec(query)?.[1];
+  assert.ok(name, 'the operation has a name');
+  return name;
 }
 
 /**
  * @param {Event} event One of Tether's events, which are `CustomEvent`s of the page's window.
+ * @returns {Record<string, unknown>} Its detail, which is an object for every Tether event.
  */
 export function detailOf(event) {
   assert.ok(event instanceof CustomEvent, `${event.type} is a CustomEvent`);
-  return event.detail;
+  /** @type {unknown} */
+  const detail = event.detail;
+  return asRecord(detail, `the ${event.type} detail`);
 }
 
 /**

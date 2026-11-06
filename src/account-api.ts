@@ -8,6 +8,7 @@ import { attr } from './dom.ts';
 import { loadPart } from './lazy.ts';
 import { within } from './mounting.ts';
 import { hintKey, isLoginOutcome } from './account-marks.ts';
+import { getStored } from './storage.ts';
 import type { Parts } from './lazy.ts';
 
 type AccountPart = Parts['account'];
@@ -40,12 +41,8 @@ const accountSelector = (): string =>
  *
  * @returns False where the browser blocks storage, which then holds no hint.
  */
-function hasLoginHintIfAllowed(): boolean {
-  try {
-    return Boolean(localStorage.getItem(hintKey()));
-  } catch {
-    return false;
-  }
+function hasLoginHint(): boolean {
+  return Boolean(getStored(hintKey()));
 }
 
 /**
@@ -57,7 +54,7 @@ export function mountAccountIfUsed(root: ParentNode): void {
   const needed =
     within(root, accountSelector()).length > 0 ||
     isLoginOutcome(new URLSearchParams(window.location.search).get('account')) ||
-    hasLoginHintIfAllowed();
+    hasLoginHint();
   if (!needed) return;
   loadPart('account')
     .then((part) => part.mountAccount(root))

@@ -4,7 +4,12 @@ import assert from 'node:assert/strict';
 import { DEFAULTS, cfg, configure, resolveConfig } from '../src/config.ts';
 import { isQuarterlyVersion } from '../src/api-version.ts';
 
+/**
+ * @template T
+ * @param {() => T} fn
+ */
 const quietly = (fn) => {
+  /** @type {string[]} */
   const warned = [];
   const { warn } = console;
   console.warn = (...args) => warned.push(args.join(' '));
@@ -95,7 +100,7 @@ test('the domain must be a host name, and apiVersion a dated version', () => {
   assert.equal(resolveConfig({ apiVersion: '2025-10' }).apiVersion, '2025-10');
   const unstable = quietly(() => resolveConfig({ apiVersion: 'unstable' }));
   assert.equal(unstable.result.apiVersion, 'unstable');
-  assert.match(unstable.warned[0], /changes without notice/);
+  assert.match(unstable.warned[0] ?? '', /changes without notice/);
 });
 
 test('the default apiVersion is a dated version, as the config types it', () => {
@@ -170,6 +175,7 @@ test('an unknown or misspelt option warns and never reaches the config', () => {
 });
 
 test('partsUrl must be https or on the site, checked when the config is resolved', () => {
+  /** @param {string} partsUrl */
   const resolve = (partsUrl) => quietly(() => resolveConfig({ partsUrl }));
   assert.equal(resolve('https://cdn.test/tether/').result.partsUrl, 'https://cdn.test/tether/');
   assert.equal(resolve('/assets/tether/').result.partsUrl, '/assets/tether/');

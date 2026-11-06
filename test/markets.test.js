@@ -3,7 +3,8 @@ import { test, before, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
 import { cartFrom, detailOf, find, graphqlRequest, jsonResponse, operationName, product } from './fixtures.js';
-import { waitFor } from '../server/test/mocks.js';
+import { recordAt, stringAt, waitFor } from '../server/test/mocks.js';
+import { isRecord } from '../server/src/shared/json.ts';
 
 // A German Webflow locale page, with a saved cart from the Dutch market.
 const dom = new JSDOM('<!doctype html><html lang="de-DE"><body></body></html>', {
@@ -15,53 +16,82 @@ Object.assign(globalThis, {
   localStorage: dom.window.localStorage,
   CustomEvent: dom.window.CustomEvent,
   MutationObserver: dom.window.MutationObserver,
-  Option: dom.window.Option,
+  Option: dom.window['Option'],
   getComputedStyle: dom.window.getComputedStyle,
 });
 
+/** @type {Partial<Record<string, number>>} */
 const delays = {}; // country -> ms, to simulate a slow response from the old market
+/** @type {Partial<Record<string, string>>} */
 const CURRENCY = { NL: 'EUR', DE: 'EUR', US: 'USD', CH: 'CHF' };
+/**
+ * @typedef {{ host: string, op: string, variables: ReturnType<typeof graphqlRequest>['variables'], ctx: string,
+ *   country: string | null, answered: boolean }} StorefrontCall
+ */
+/** @type {StorefrontCall[]} */
 const calls = [];
+/** @type {Set<string>} */
 const hosts = new Set(); // every host ever contacted (never cleared)
+/** @type {import('../src/cart/store.ts').ShopifyCart | null} */
 let cart = null;
+const firstVariantId = product.variants.nodes[0]?.id ?? '';
+/** @param {string} countryCode */
 const cartWith = (countryCode) => ({
-  ...cartFrom([{ merchandiseId: product.variants.nodes[0].id, quantity: 1 }]),
+  ...cartFrom([{ merchandiseId: firstVariantId, quantity: 1 }]),
   buyerIdentity: { countryCode, email: null },
 });
 
-/** The product as Shopify returns it in a market: prices in that market's currency. */
+/**
+ * The product as Shopify returns it in a market: prices in that market's currency.
+ *
+ * @param {string | null} country
+ * @returns {import('../src/fragments.ts').Product}
+ */
 function productIn(country) {
-  const cur = CURRENCY[country] || 'EUR';
+  const currency = (country && CURRENCY[country]) || 'EUR';
   const amount = country === 'US' ? '35' : '30';
-  const swap = (o) =>
-    JSON.parse(
-      JSON.stringify(o)
-        .replace(/"amount":"30"/g, `"amount":"${amount}"`)
-        .replace(/"currencyCode":"EUR"/g, `"currencyCode":"${cur}"`),
-    );
-  return swap(product);
+  const priced = structuredClone(product);
+  /** @param {unknown} node Part of the copy, repriced in place. */
+  const reprice = (node) => {
+    if (typeof node !== 'object' || node === null) return;
+    if (isRecord(node)) {
+      if (node['amount'] === '30') node['amount'] = amount;
+      if (node['currencyCode'] === 'EUR') node['currencyCode'] = currency;
+    }
+    Object.values(node).forEach(reprice);
+  };
+  reprice(priced);
+  return priced;
 }
 
+/**
+ * @param {RequestInfo | URL} url
+ * @param {RequestInit} [init]
+ */
 globalThis.fetch = async (url, init) => {
-  const host = new URL(url).host;
+  const host = new URL(url instanceof Request ? url.url : url).host;
   const { query, variables } = graphqlRequest(init);
   const op = operationName(query);
   const ctx = query.match(/@inContext\(([^)]*)\)/)?.[1] || '';
   const country = ctx.match(/country: (\w+)/)?.[1] || null;
+  /** @type {StorefrontCall} */
   const call = { host, op, variables, ctx, country, answered: false };
   calls.push(call);
   hosts.add(host);
+  /** @param {unknown} data */
   const ok = (data) => {
     call.answered = true;
     return jsonResponse({ data });
   };
-  if (delays[country]) await new Promise((r) => setTimeout(r, delays[country]));
+  const delay = country ? delays[country] : undefined;
+  if (delay) await new Promise((resolve) => setTimeout(resolve, delay));
 
   switch (op) {
     case 'TetherProducts': {
+      /** @type {Record<string, import('../src/fragments.ts').Product | null>} */
       const data = {};
-      Object.keys(variables).forEach((k) => {
-        if (k.startsWith('h')) data[k] = variables[k] === product.handle ? productIn(country) : null;
+      Object.keys(variables).forEach((key) => {
+        if (key.startsWith('h')) data[key] = variables[key] === product.handle ? productIn(country) : null;
       });
       return ok(data);
     }
@@ -71,7 +101,7 @@ globalThis.fetch = async (url, init) => {
           country: {
             isoCode: country || 'NL',
             name: country || 'NL',
-            currency: { isoCode: CURRENCY[country] || 'EUR', symbol: '€' },
+            currency: { isoCode: (country && CURRENCY[country]) || 'EUR', symbol: '€' },
           },
           language: { isoCode: 'DE', name: 'Deutsch' },
           availableCountries: [
@@ -86,9 +116,13 @@ globalThis.fetch = async (url, init) => {
     case 'TetherSearch':
       return ok({ products: { nodes: [productIn(country)], pageInfo: { hasNextPage: false, endCursor: null } } });
     case 'Tether_cartBuyerIdentityUpdate':
-      if (variables.cartId.endsWith('/expired'))
+      if (stringAt(variables, 'cartId').endsWith('/expired'))
         return jsonResponse({ errors: [{ message: 'The specified cart does not exist.' }] });
-      cart = { ...cart, buyerIdentity: { countryCode: variables.buyerIdentity.countryCode, email: null } };
+      assert.ok(cart, 'a cart to update');
+      cart = {
+        ...cart,
+        buyerIdentity: { countryCode: stringAt(recordAt(variables, 'buyerIdentity'), 'countryCode'), email: null },
+      };
       return ok({ cartBuyerIdentityUpdate: { cart, userErrors: [] } });
     case 'Tether_cartCreate':
       throw new Error('switching country must not create a cart');
@@ -99,6 +133,7 @@ globalThis.fetch = async (url, init) => {
 
 const priceText = () => document.querySelector('#price')?.textContent ?? '';
 const listPrice = () => document.querySelector('.p')?.textContent ?? '';
+/** @type {typeof import('../src/index.ts').default} */
 let Tether;
 
 before(async () => {
@@ -125,27 +160,28 @@ beforeEach(() => {
  * @param {{ path?: string; lang?: string | null; meta?: string | null; cookie?: string; saved?: object | null; global?: object }} [page]
  */
 const env = ({ path = '/', lang = null, meta = null, cookie = '', saved = null, global = {} } = {}) => {
-  const d = new JSDOM(
+  const page = new JSDOM(
     `<!doctype html><html${lang ? ` lang="${lang}"` : ''}><head>${meta ? `<meta name="tether-country" content="${meta}">` : ''}</head></html>`,
     { url: `https://x.test${path}` },
   );
-  d.window.document.cookie = cookie;
+  page.window.document.cookie = cookie;
   const store = new Map(saved ? [['tether:market:shop.test', JSON.stringify(saved)]] : []);
   return {
-    document: d.window.document,
-    location: d.window.location,
-    storage: { getItem: (k) => store.get(k) ?? null },
+    document: page.window.document,
+    location: page.window.location,
+    storage: { getItem: (/** @type {string} */ key) => store.get(key) ?? null },
     global,
   };
 };
 const locales = { de: { country: 'DE', language: 'DE' }, 'fr-be': { country: 'BE', language: 'FR', locale: 'fr-BE' } };
 
 test('detect: Webflow locale subdirectory through the locales map', async () => {
-  const m = await Tether.detectMarket(); // async: the markets part loads on first use
-  assert.equal(m.country, 'DE'); // from the page this file runs on (/de/...)
-  const r = (o, mk = { detect: true, locales }) => detectOnly(mk, env(o));
-  assert.deepEqual(pick(r({ path: '/fr-be/shop' })), { country: 'BE', language: 'FR', locale: 'fr-BE' });
-  assert.deepEqual(pick(r({ path: '/de/shop' })), { country: 'DE', language: 'DE' });
+  const detected = await Tether.detectMarket(); // async: the markets part loads on first use
+  assert.equal(detected.country, 'DE'); // from the page this file runs on (/de/...)
+  /** @param {Parameters<typeof env>[0]} page */
+  const detectOn = (page) => detectOnly({ detect: true, locales }, env(page));
+  assert.deepEqual(pick(detectOn({ path: '/fr-be/shop' })), { country: 'BE', language: 'FR', locale: 'fr-BE' });
+  assert.deepEqual(pick(detectOn({ path: '/de/shop' })), { country: 'DE', language: 'DE' });
 });
 
 test('detect: <html lang>, mapped or not; never invents a country', () => {
@@ -168,16 +204,16 @@ test('detect: <html lang>, mapped or not; never invents a country', () => {
 });
 
 test('detect: server hints (global, meta, cookie) and the saved choice win, in that order', () => {
-  const mk = { detect: true, locales };
-  assert.equal(detectOnly(mk, env({ path: '/de/', meta: 'us' })).country, 'US');
-  assert.equal(detectOnly(mk, env({ path: '/de/', cookie: 'tether_country=CH' })).country, 'CH');
-  assert.equal(detectOnly({ ...mk, cookie: 'cf_country' }, env({ cookie: 'cf_country=BE' })).country, 'BE');
-  assert.equal(detectOnly(mk, env({ global: { TETHER_COUNTRY: 'FR' }, meta: 'US' })).country, 'FR');
-  const saved = detectOnly(mk, env({ path: '/de/', meta: 'US', saved: { country: 'NL' } }));
+  const config = { detect: true, locales };
+  assert.equal(detectOnly(config, env({ path: '/de/', meta: 'us' })).country, 'US');
+  assert.equal(detectOnly(config, env({ path: '/de/', cookie: 'tether_country=CH' })).country, 'CH');
+  assert.equal(detectOnly({ ...config, cookie: 'cf_country' }, env({ cookie: 'cf_country=BE' })).country, 'BE');
+  assert.equal(detectOnly(config, env({ global: { TETHER_COUNTRY: 'FR' }, meta: 'US' })).country, 'FR');
+  const saved = detectOnly(config, env({ path: '/de/', meta: 'US', saved: { country: 'NL' } }));
   assert.equal(saved.country, 'NL');
-  assert.equal(saved.sources.country, 'saved');
+  assert.equal(saved.sources?.country, 'saved');
   assert.equal(saved.language, 'DE', 'language still from the Webflow locale');
-  assert.equal(detectOnly({ ...mk, remember: false }, env({ meta: 'US', saved: { country: 'NL' } })).country, 'US');
+  assert.equal(detectOnly({ ...config, remember: false }, env({ meta: 'US', saved: { country: 'NL' } })).country, 'US');
 });
 
 test('detect: invalid or unknown countries are ignored; off by default; sources can be limited', () => {
@@ -193,10 +229,13 @@ test('detect: invalid or unknown countries are ignored; off by default; sources 
   assert.equal(detectOnly({ detect: ['webflow'], locales }, env({ path: '/de/', meta: 'US' })).country, 'DE');
 });
 
+/** @type {typeof import('../src/markets.ts')} */
 let markets;
-const detectOnly = (mk, e) => markets.detectMarket(mk, e);
+/** @param {Parameters<typeof markets.detectMarket>} args */
+const detectOnly = (...args) => markets.detectMarket(...args);
+/** @param {import('../src/markets.ts').DetectedMarket} market The fields it found, without `sources`. */
 const pick = ({ country, language, locale }) =>
-  Object.fromEntries(Object.entries({ country, language, locale }).filter(([, v]) => v));
+  Object.fromEntries(Object.entries({ country, language, locale }).filter(([, value]) => value));
 before(async () => {
   markets = await import('../src/markets.ts');
 });
@@ -206,12 +245,12 @@ before(async () => {
 test('init used the detected market: @inContext DE and the saved NL cart moved to DE', async () => {
   assert.equal(Tether.config.country, 'DE');
   assert.equal(Tether.config.language, 'DE');
-  assert.equal(Tether.cart.state.buyerIdentity.countryCode, 'DE');
+  assert.equal(Tether.cart.state?.buyerIdentity.countryCode, 'DE');
   document.body.innerHTML = '<div tether-product="coffee-box"><span id="price" tether-bind="price"></span></div>';
   Tether.mount(document);
-  await waitFor(() => calls.some((c) => c.op === 'TetherProducts'), 'the product request');
-  const p = calls.find((c) => c.op === 'TetherProducts');
-  assert.equal(p.ctx, 'country: DE, language: DE');
+  await waitFor(() => calls.some((call) => call.op === 'TetherProducts'), 'the product request');
+  const productCall = calls.find((call) => call.op === 'TetherProducts');
+  assert.equal(productCall?.ctx, 'country: DE, language: DE');
 });
 
 test('tether-country-select lists the markets; switching re-renders prices and updates the cart', async () => {
@@ -226,40 +265,47 @@ test('tether-country-select lists the markets; switching re-renders prices and u
     () => document.querySelector('select')?.options.length === 3 && /30/.test(priceText()),
     'the country select and the price',
   );
-  const s = document.querySelector('select');
-  assert.ok(s);
+  const select = document.querySelector('select');
+  assert.ok(select);
   assert.deepEqual(
-    [...s.options].map((o) => o.textContent),
+    [...select.options].map((option) => option.textContent),
     ['Germany – EUR', 'Netherlands – EUR', 'United States – USD'],
   );
-  assert.equal(s.value, 'DE');
+  assert.equal(select.value, 'DE');
   assert.equal(find('#cur').textContent, 'EUR');
   assert.match(find('#price').textContent, /30/);
   const scope = Tether.getScope(find('#price'));
+  assert.ok(scope);
   scope.select('Size', '1kg');
 
+  /** @type {{ country: string }[]} */
   const changes = [];
-  document.addEventListener('tether:country-changed', (e) => changes.push(detailOf(e)), { once: true });
+  document.addEventListener(
+    'tether:country-changed',
+    (event) => changes.push({ country: stringAt(detailOf(event), 'country') }),
+    { once: true },
+  );
   calls.length = 0;
-  s.value = 'US';
-  s.dispatchEvent(new window.Event('change', { bubbles: true }));
+  select.value = 'US';
+  select.dispatchEvent(new window.Event('change', { bubbles: true }));
   await waitFor(
     () => changes.length === 1 && /35/.test(priceText()) && find('#cur').textContent === 'USD',
     'the switch to US',
   );
 
-  const update = calls.find((c) => c.op === 'Tether_cartBuyerIdentityUpdate');
-  assert.equal(update.variables.buyerIdentity.countryCode, 'US');
+  const update = calls.find((call) => call.op === 'Tether_cartBuyerIdentityUpdate');
+  assert.ok(update);
+  assert.equal(recordAt(update.variables, 'buyerIdentity')['countryCode'], 'US');
   assert.equal(update.country, 'US', 'cart mutation sent in the new context');
-  assert.equal(Tether.cart.state.buyerIdentity.countryCode, 'US');
-  const refetch = calls.find((c) => c.op === 'TetherProducts');
-  assert.equal(refetch.country, 'US');
+  assert.equal(Tether.cart.state?.buyerIdentity.countryCode, 'US');
+  const refetch = calls.find((call) => call.op === 'TetherProducts');
+  assert.equal(refetch?.country, 'US');
   assert.match(find('#price').textContent, /\$|USD/);
   assert.match(find('#price').textContent, /35/);
   assert.equal(Tether.getScope(find('#price')), scope, 'same scope, updated in place');
-  assert.equal(scope.selected.Size, '1kg', 'selection kept');
+  assert.equal(scope.selected['Size'], '1kg', 'selection kept');
   assert.equal(find('#cur').textContent, 'USD');
-  assert.equal(changes[0].country, 'US');
+  assert.equal(changes[0]?.country, 'US');
   assert.deepEqual(JSON.parse(String(localStorage.getItem('tether:market:shop.test'))), {
     country: 'US',
     language: 'DE',
@@ -270,7 +316,7 @@ test('setCountry validates, and does nothing when the country is unchanged', asy
   await assert.rejects(Tether.setCountry('Germany'), /Not a country code/);
   calls.length = 0;
   await Tether.setCountry('us');
-  assert.ok(!calls.some((c) => c.op === 'TetherProducts' || c.op === 'Tether_cartBuyerIdentityUpdate'));
+  assert.ok(!calls.some((call) => call.op === 'TetherProducts' || call.op === 'Tether_cartBuyerIdentityUpdate'));
 });
 
 test('a list re-renders in the new market', async () => {
@@ -281,7 +327,7 @@ test('a list re-renders in the new market', async () => {
   calls.length = 0;
   await Tether.setCountry('NL', { remember: false });
   await waitFor(() => /30/.test(listPrice()), 'the list in NL prices');
-  assert.equal(calls.find((c) => c.op === 'TetherSearch').country, 'NL');
+  assert.equal(calls.find((call) => call.op === 'TetherSearch')?.country, 'NL');
   assert.match(find('.p').textContent, /30/);
   assert.equal(document.querySelectorAll('.p').length, 1);
 });
@@ -289,17 +335,20 @@ test('a list re-renders in the new market', async () => {
 test('a slow response from the old market never overwrites the new one or refills the cache', async () => {
   await Tether.setCountry('NL', { remember: false });
   Tether.clearProductCache();
-  delays.NL = 120;
+  delays['NL'] = 120;
   document.body.innerHTML = '<div tether-product="coffee-box"><span id="price" tether-bind="price"></span></div>';
   calls.length = 0;
   Tether.mount(document);
-  await waitFor(() => calls.some((c) => c.op === 'TetherProducts' && c.country === 'NL'), 'the slow NL request');
+  await waitFor(
+    () => calls.some((call) => call.op === 'TetherProducts' && call.country === 'NL'),
+    'the slow NL request',
+  );
   await Tether.setCountry('US', { remember: false });
-  const slow = calls.find((c) => c.country === 'NL');
+  const slow = calls.find((call) => call.country === 'NL');
   await waitFor(() => slow?.answered === true, 'the NL answer');
   // Nothing may happen once the stale answer is read: give it a moment to be (wrongly) applied.
-  await new Promise((r) => setTimeout(r, 20));
-  delete delays.NL;
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  delete delays['NL'];
   assert.match(find('#price').textContent, /35/);
   const cached = await Tether.getProduct('coffee-box');
   assert.equal(cached.priceRange.minVariantPrice.currencyCode, 'USD', 'cache holds the US product');
@@ -310,21 +359,21 @@ test('switching country keeps rendered products visible (state "updating", not "
   Tether.mount(document);
   const root = find('[tether-product]');
   await waitFor(() => root.getAttribute('tether-state') === 'ready', 'the product');
-  delays.DE = 60;
-  const p = Tether.setCountry('DE', { remember: false });
+  delays['DE'] = 60;
+  const switched = Tether.setCountry('DE', { remember: false });
   await waitFor(() => root.getAttribute('tether-state') === 'updating', 'the switch to start');
   assert.notEqual(find('#ready').style.display, 'none');
-  await p;
+  await switched;
   await waitFor(() => root.getAttribute('tether-state') === 'ready', 'the product in DE');
-  delete delays.DE;
+  delete delays['DE'];
 });
 
 test('an expired saved cart is dropped on a country switch, not replaced by a new empty cart', async () => {
   localStorage.setItem('tether:cart:shop.test', 'gid://shopify/Cart/expired');
   calls.length = 0;
   await Tether.setCountry('BE', { remember: false });
-  assert.ok(calls.some((c) => c.op === 'Tether_cartBuyerIdentityUpdate'));
-  assert.ok(!calls.some((c) => c.op === 'Tether_cartCreate'));
+  assert.ok(calls.some((call) => call.op === 'Tether_cartBuyerIdentityUpdate'));
+  assert.ok(!calls.some((call) => call.op === 'Tether_cartCreate'));
   assert.equal(Tether.cart.id(), null);
 });
 
@@ -350,7 +399,7 @@ test('tether-countries limits a country select to your list, in your order', asy
   const select = document.querySelector('select');
   assert.ok(select);
   assert.deepEqual(
-    [...select.options].map((o) => o.value),
+    [...select.options].map((option) => option.value),
     ['NL', 'DE'],
   );
 });
@@ -384,7 +433,10 @@ test('page market: leaving a market page, a saved market that is not valid falls
 });
 
 test('readSavedMarket: a valid saved market, normalized; junk and other scripts’ values are rejected', () => {
-  const storageWith = (text) => ({ getItem: (key) => (key === 'tether:market:shop.test' ? text : null) });
+  /** @param {string | null} text */
+  const storageWith = (text) => ({
+    getItem: (/** @type {string} */ key) => (key === 'tether:market:shop.test' ? text : null),
+  });
   assert.deepEqual(markets.readSavedMarket(storageWith('{"country":"de","language":"de-DE","locale":"de-DE"}')), {
     country: 'DE',
     language: 'DE',
@@ -407,11 +459,12 @@ test('readSavedMarket: a valid saved market, normalized; junk and other scripts�
     assert.equal(markets.readSavedMarket(storageWith(junk)), null, junk);
   }
   assert.equal(markets.readSavedMarket(storageWith(null)), null, 'nothing saved');
-  assert.equal(markets.readSavedMarket(null), null, 'storage blocked');
   assert.equal(detectOnly(null, env({ saved: { country: 'Germany', language: 'DE' } })).country, undefined);
 });
 
 test('detect: a single source name or an unknown one in detect is tolerated', () => {
+  // @ts-expect-error -- a single name, not a list, as a site's own untyped script may pass it
   assert.equal(detectOnly({ detect: 'server' }, env({ meta: 'US' })).country, 'US');
+  // @ts-expect-error -- a source Tether doesn't know, as a site's own untyped script may pass it
   assert.deepEqual(detectOnly({ detect: ['nope'] }, env({ meta: 'US' })), { sources: {} });
 });

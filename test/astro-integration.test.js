@@ -12,9 +12,11 @@ test('integration: inject false adds no script; the options are not changed by a
   const dir = await mkdtemp(join(tmpdir(), 'astro-options-'));
   await writeFile(join(dir, '.env'), 'PUBLIC_SHOPIFY_DOMAIN=a.myshopify.com\nPUBLIC_SHOPIFY_STOREFRONT_TOKEN=t\n');
   const prev = { ...process.env };
-  delete process.env.PUBLIC_SHOPIFY_DOMAIN;
-  delete process.env.PUBLIC_SHOPIFY_STOREFRONT_TOKEN;
+  delete process.env['PUBLIC_SHOPIFY_DOMAIN'];
+  delete process.env['PUBLIC_SHOPIFY_STOREFRONT_TOKEN'];
+  /** @type {string[]} */
   const scripts = [];
+  /** @type {unknown[]} */
   const updates = [];
   const onError = () => {};
   const options = { inject: false, country: 'NL', onError };
@@ -37,7 +39,9 @@ test('integration: inject false adds no script; the options are not changed by a
 
 test('integration: server-only options stay out of the page silently, unknown ones with a warning', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'astro-options-'));
+  /** @type {string[]} */
   const scripts = [];
+  /** @type {string[]} */
   const warnings = [];
   await tether({
     domain: 'a.myshopify.com',
@@ -53,6 +57,7 @@ test('integration: server-only options stay out of the page silently, unknown on
     logger: { warn: (message) => warnings.push(message) },
   });
   const page = scripts.find((code) => code.includes('TETHER_CONFIG'));
+  assert.ok(page, 'the page script');
   assert.match(page, /"domain":"a\.myshopify\.com"/);
   assert.doesNotMatch(page, /siteUrl|pageSize|opneCart/);
   assert.deepEqual(warnings, ['opneCart is not a Tether option: left out of the page.']);

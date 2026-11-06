@@ -15,6 +15,8 @@ import {
   sessionKeys,
 } from './account-fixtures.js';
 
+/** @typedef {typeof globalThis.fetch} Fetch */
+
 test('a logout from an address too long for the ticket cookie still logs out of Shopify, back to the home page', async () => {
   const { run, cookie } = await loginFlow();
   const returnTo = `${SITE}/search?q=${'\\'.repeat(2000)}`;
@@ -41,6 +43,7 @@ test("one session's sealed blob copied under another session's key does not open
   const [firstKey, secondKey] = sessionKeys(memory);
   assert.ok(firstKey && secondKey && firstKey !== secondKey);
   memory.set(secondKey, memory.get(firstKey));
+  /** @param {string} cookie */
   const me = (cookie) => first.run(req('/me', { origin: SITE, cookie }));
   assert.equal((await (await me(second.cookie)).json()).loggedIn, false, 'the copy is bound to the first key');
   assert.equal((await (await me(first.cookie)).json()).loggedIn, true, 'the original still opens');
@@ -58,7 +61,10 @@ test('cart link, refresh, absolute lifetime, a 401 from Shopify ends the session
     assert.equal((await (await run(req('/me', { origin: SITE, cookie }))).json()).loggedIn, true);
     assert.ok(
       sh.calls.some(
-        (c) => c.url.endsWith('/oauth/token') && new URLSearchParams(c.init.body).get('grant_type') === 'refresh_token',
+        (call) =>
+          call.url?.endsWith('/oauth/token') &&
+          call.init?.body instanceof URLSearchParams &&
+          call.init.body.get('grant_type') === 'refresh_token',
       ),
     );
     Date.now = () => realNow() + 15 * 86400e3; // past the 14-day lifetime, even though it was in use
@@ -71,6 +77,7 @@ test('cart link, refresh, absolute lifetime, a 401 from Shopify ends the session
 
 test('logout never fails open: session ended and cookie cleared even when Shopify is down; id token never in the answer', async () => {
   const { run, cookie, memory, sh } = await loginFlow();
+  /** @type {Fetch} */
   const down = async (url, init) =>
     /well-known|oauth\/token/.test(String(url)) ? new Response('down', { status: 503 }) : sh.fetch(url, init);
   const realNow = Date.now;
@@ -109,10 +116,16 @@ test('refresh race: two requests refresh at once (Shopify rotates the refresh to
   const { memory, cookie, sh } = await loginFlow();
   let rotated = false;
   let refreshes = 0;
+  /** @type {Fetch} */
   const rotating = async (url, init) => {
-    if (String(url).endsWith('/oauth/token') && new URLSearchParams(init.body).get('grant_type') === 'refresh_token') {
+    const body = init?.body;
+    if (
+      String(url).endsWith('/oauth/token') &&
+      body instanceof URLSearchParams &&
+      body.get('grant_type') === 'refresh_token'
+    ) {
       refreshes++;
-      await new Promise((r) => setTimeout(r, rotated ? 0 : 5));
+      await new Promise((resolve) => setTimeout(resolve, rotated ? 0 : 5));
       if (rotated) return new Response(JSON.stringify({ error: 'invalid_grant' }), { status: 400 }); // the old refresh token is spent
       rotated = true;
       return new Response(JSON.stringify({ access_token: 'access-2', refresh_token: 'refresh-2', expires_in: 3600 }), {
@@ -124,10 +137,11 @@ test('refresh race: two requests refresh at once (Shopify rotates the refresh to
   const realNow = Date.now;
   Date.now = () => realNow() + 2 * 3600e3;
   try {
+    /** @param {string} path */
     const run = (path) => answer(req(path, { origin: SITE, cookie }), env, { fetch: rotating, memory });
-    const [a, b] = await Promise.all([run('/me'), run('/orders')]);
-    assert.equal((await a.json()).loggedIn, true);
-    assert.equal((await b.json()).loggedIn, true, 'the loser uses the session the winner refreshed');
+    const [me, orders] = await Promise.all([run('/me'), run('/orders')]);
+    assert.equal((await me.json()).loggedIn, true);
+    assert.equal((await orders.json()).loggedIn, true, 'the loser uses the session the winner refreshed');
     assert.equal(refreshes, 1, 'requests in one isolate share one refresh');
   } finally {
     Date.now = realNow;
@@ -136,18 +150,23 @@ test('refresh race: two requests refresh at once (Shopify rotates the refresh to
 
 test('a 401 from Shopify (session ended there) ends it here too', async () => {
   const { memory, cookie, sh } = await loginFlow();
+  /** @type {Fetch} */
   const ended = async (url, init) =>
     String(url).includes('/account/customer/api/') ? new Response('{}', { status: 401 }) : sh.fetch(url, init);
-  const r = await answer(req('/me', { origin: SITE, cookie }), env, { fetch: ended, memory });
-  assert.equal((await r.json()).loggedIn, false);
+  const me = await answer(req('/me', { origin: SITE, cookie }), env, { fetch: ended, memory });
+  assert.equal((await me.json()).loggedIn, false);
   assert.equal(memory.size, 0);
-  assert.match(cookiesOf(r).join(), /__Host-tether-account=; .*Max-Age=0/, 'the dead session cookie is cleared');
+  assert.match(cookiesOf(me).join(), /__Host-tether-account=; .*Max-Age=0/, 'the dead session cookie is cleared');
   const orders = await answer(req('/orders', { origin: SITE, cookie }), env, { fetch: ended, memory });
   assert.equal(orders.status, 401, 'data routes answer 401 without a session; /me answers 200');
   assert.deepEqual(await orders.json(), { loggedIn: false, orders: [] });
 });
 
 test('a session without a refresh token lasts as long as its access token, without asking Shopify again', async () => {
+  /**
+   * @param {Fetch} inner
+   * @returns {Fetch}
+   */
   const withoutRefresh = (inner) => async (url, init) => {
     const res = await inner(url, init);
     if (!String(url).endsWith('/oauth/token')) return res;
@@ -167,7 +186,10 @@ test('a session without a refresh token lasts as long as its access token, witho
     Date.now = realNow;
   }
   const refreshes = sh.calls.filter(
-    (c) => c.url?.endsWith('/oauth/token') && new URLSearchParams(c.init.body).get('grant_type') === 'refresh_token',
+    (call) =>
+      call.url?.endsWith('/oauth/token') &&
+      call.init?.body instanceof URLSearchParams &&
+      call.init.body.get('grant_type') === 'refresh_token',
   );
   assert.equal(refreshes.length, 0);
   assert.equal(sessionKeys(memory).length, 0);
@@ -175,6 +197,7 @@ test('a session without a refresh token lasts as long as its access token, witho
 
 test('a refresh refused for a setup reason (invalid_client) keeps the session and answers an error', async () => {
   const { memory, cookie, sh } = await loginFlow();
+  /** @type {Fetch} */
   const misconfigured = async (url, init) => {
     if (String(url).endsWith('/oauth/token')) {
       return new Response(JSON.stringify({ error: 'invalid_client' }), { status: 401 });
@@ -197,6 +220,7 @@ test('logout with KV down still clears the cookie, and logs why Shopify is not l
   const down = () => Promise.reject(new Error('KV unavailable'));
   /** @type {import('../src/env.ts').KvBinding} */
   const TETHER_SYNC = { get: down, put: down, delete: down };
+  /** @type {string[]} */
   const logged = [];
   const realError = console.error;
   console.error = (...args) => logged.push(args.join(' '));
@@ -219,6 +243,7 @@ test('logout step 2 with Shopify unreachable goes back to the site and logs that
   const ticket = { idToken: 'header.payload.signature', returnTo: `${SITE}/bye`, at: Date.now() };
   const sealed = await seal(env.ACCOUNT_SECRET, 'logout', '__Host-tether-logout', ticket);
   const unreachable = async () => new Response('down', { status: 503 });
+  /** @type {string[]} */
   const logged = [];
   const realError = console.error;
   console.error = (...args) => logged.push(args.join(' '));

@@ -36,8 +36,8 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      # test/upgrade-from-v0.6.8.test.js installs this tree into a copy made from that tag.
-      - run: git fetch --depth=1 --no-tags origin tag v0.6.8
+      # test/upgrade-from-0.6.test.js installs this tree into copies made from these tags, one per 0.6 updater.
+      - run: git fetch --depth=1 --no-tags origin tag v0.6.7 tag v0.6.8
       - run: npm ci
       - name: Unit tests
         run: npm test

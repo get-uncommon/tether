@@ -102,6 +102,7 @@ test('id token claims: each check, with the first that fails named', () => {
   const expected = { issuer: 'https://shopify.com/authentication/1', clientId: 'client-1', nonce: 'n', nowSeconds };
   const good = { iss: expected.issuer, aud: 'client-1', nonce: 'n', exp: nowSeconds + 60, iat: nowSeconds, sub: 's' };
   assert.deepEqual(checkIdTokenClaims(good, expected), { kind: 'valid', subject: 's' });
+  /** @param {Record<string, unknown>} claims */
   const reason = (claims) => {
     const check = checkIdTokenClaims({ ...good, ...claims }, expected);
     return check.kind === 'invalid' ? check.reason : null;

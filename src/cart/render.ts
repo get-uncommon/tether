@@ -259,8 +259,8 @@ export function renderCart(view: CartView): void {
 }
 
 /** Shows the count a saved cart had on the last page in the cart counts the page left at 0, until it has loaded. */
-export function showSavedCount(count: string): void {
+export function showSavedCount(count: number): void {
   qsa(document, sel('cart-count')).forEach((el) => {
-    if (/^\s*0?\s*$/.test(el.textContent)) el.textContent = count;
+    if (/^\s*0?\s*$/.test(el.textContent)) el.textContent = String(count);
   });
 }

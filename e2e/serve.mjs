@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 const ROOT = fileURLToPath(new URL('../examples/astro/dist/', import.meta.url));
 const DIST = fileURLToPath(new URL('../dist/', import.meta.url));
 const PLAIN = fileURLToPath(new URL('./plain/', import.meta.url));
+/** @type {Partial<Record<string, string>>} */
 const TYPES = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript',
@@ -31,7 +32,9 @@ createServer(async (req, res) => {
   else if (path.startsWith('/plain/')) base = PLAIN;
   if (base !== ROOT) path = path.replace(base === DIST ? '/plain/dist/' : '/plain/', '/');
   // Only files inside the base folder (an encoded %2F can't climb out).
-  const inside = (f) => f === base.replace(/[\\/]$/, '') || f.startsWith(base.endsWith(sep) ? base : base + sep);
+  /** @param {string} candidate */
+  const inside = (candidate) =>
+    candidate === base.replace(/[\\/]$/, '') || candidate.startsWith(base.endsWith(sep) ? base : base + sep);
   let file = resolve(base, `.${path}`);
   try {
     if ((await stat(file)).isDirectory()) file = join(file, 'index.html');
@@ -51,4 +54,4 @@ createServer(async (req, res) => {
     res.writeHead(404, { 'content-type': 'text/plain' });
     res.end('not found');
   }
-}).listen(Number(process.env.PORT || 4399), '127.0.0.1');
+}).listen(Number(process.env['PORT'] || 4399), '127.0.0.1');

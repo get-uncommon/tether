@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { BASE } from '../src/account.ts';
 import { MAX_ACCOUNT_BODY_BYTES } from '../src/account/http.ts';
 import { SITE, WORKER, req, loginFlow } from './account-fixtures.js';
+import { recordsAt } from './mocks.js';
 
 test('me / orders: only for the allowed origin, with the cookie', async () => {
   const { run, cookie } = await loginFlow();
@@ -53,6 +54,10 @@ test('an account body past the limit is refused with 413 before it is read whole
   const { run, cookie } = await loginFlow();
   const cartId = 'gid://shopify/Cart/abc';
   const padding = 'x'.repeat(MAX_ACCOUNT_BODY_BYTES);
+  /**
+   * @param {string} path
+   * @param {unknown} body
+   */
   const post = (path, body) => run(req(path, { method: 'POST', origin: SITE, cookie, body }));
   for (const path of ['/cart', '/logout', '/address']) {
     const res = await post(path, { cartId, padding });
@@ -70,9 +75,16 @@ test('an account body past the limit is refused with 413 before it is read whole
 
 test('account operations: fixed routes, own data only, CSRF and origin rules, validated input', async () => {
   const { run, cookie, sh } = await loginFlow();
+  /** @param {string} path */
   const get = (path) => run(req(path, { origin: SITE, cookie }));
+  /**
+   * @param {string} path
+   * @param {unknown} body
+   * @param {{ header?: boolean }} [opts]
+   */
   const post = (path, body, opts = {}) => run(req(path, { method: 'POST', origin: SITE, cookie, body, ...opts }));
-  const body = async (r) => ({ status: r.status, ...(await r.json()) });
+  /** @param {Response} response */
+  const body = async (response) => ({ status: response.status, ...(await response.json()) });
 
   // Order detail: own order, numeric id accepted; someone else's order is null; a wrong id type is refused.
   assert.equal((await body(await get('/order?id=1'))).order.name, '#1001');
@@ -83,7 +95,7 @@ test('account operations: fixed routes, own data only, CSRF and origin rules, va
   // Addresses: list (default marked), create with validation errors passed on, update, delete.
   const list = await body(await get('/addresses'));
   assert.deepEqual(
-    list.addresses.map((a) => a.isDefault),
+    recordsAt(list, 'addresses').map((address) => address['isDefault']),
     [true, false],
   );
   const created = await body(
@@ -93,10 +105,9 @@ test('account operations: fixed routes, own data only, CSRF and origin rules, va
     }),
   );
   assert.equal(created.address.city, 'Leiden');
-  const sent = sh.calls.findLast((c) => c.op === 'TetherAddressCreate').variables;
-  assert.deepEqual(Object.keys(sent.address).sort(), ['address1', 'city', 'countryCode']);
-  assert.equal(sent.address.countryCode, 'NL');
-  assert.equal(sent.default, true);
+  const sent = sh.calls.findLast((call) => call.op === 'TetherAddressCreate')?.variables;
+  assert.deepEqual(sent?.['address'], { address1: 'Breestraat 1', city: 'Leiden', countryCode: 'NL' });
+  assert.equal(sent?.['default'], true);
   const invalid = await body(await post('/address', { address: { address1: 'No city' } }));
   assert.equal(invalid.status, 400);
   assert.match(invalid.error, /City is required/);
@@ -113,7 +124,7 @@ test('account operations: fixed routes, own data only, CSRF and origin rules, va
 
   // Profile: only first and last name reach Shopify.
   await post('/profile', { firstName: 'Ada', lastName: 'Lovelace', email: 'x@evil.test' });
-  assert.deepEqual(sh.calls.findLast((c) => c.op === 'TetherProfile').variables.input, {
+  assert.deepEqual(sh.calls.findLast((call) => call.op === 'TetherProfile')?.variables?.['input'], {
     firstName: 'Ada',
     lastName: 'Lovelace',
   });
@@ -131,7 +142,7 @@ test('account operations: fixed routes, own data only, CSRF and origin rules, va
   const before = sh.calls.length;
   const foreign = await post('/subscription', { id: 'gid://shopify/SubscriptionContract/2', action: 'cancel' });
   assert.equal(foreign.status, 404, "not the customer's contract");
-  assert.ok(!sh.calls.slice(before).some((c) => c.op === 'TetherCancel'), 'no mutation for a foreign contract');
+  assert.ok(!sh.calls.slice(before).some((call) => call.op === 'TetherCancel'), 'no mutation for a foreign contract');
   assert.equal((await post('/subscription', { id: 1, action: 'delete' })).status, 400);
 
   // Returns: validated lines.
@@ -144,10 +155,10 @@ test('account operations: fixed routes, own data only, CSRF and origin rules, va
   assert.equal((await post('/return', { orderId: 1, lines: [] })).status, 400);
 
   // Every call used the session's own token.
-  assert.ok(sh.calls.filter((c) => c.op).every((c) => /^access-/.test(c.auth)));
+  assert.ok(sh.calls.filter((call) => call.op).every((call) => /^access-/.test(call.auth ?? '')));
 
   // CSRF and origin: no header -> refused; other origin -> refused; no cookie -> 401; GET-only routes refuse POST.
-  const n = sh.calls.length;
+  const callsBefore = sh.calls.length;
   assert.equal((await post('/subscription', { id: 1, action: 'cancel' }, { header: false })).status, 400);
   assert.equal(
     (
@@ -165,7 +176,7 @@ test('account operations: fixed routes, own data only, CSRF and origin rules, va
   assert.equal((await run(req('/address/delete', { method: 'POST', origin: SITE, body: { id: 1 } }))).status, 401);
   assert.equal((await run(req('/subscriptions', { origin: SITE }))).status, 401);
   assert.equal((await run(req('/subscriptions', { method: 'POST', origin: SITE, cookie, body: {} }))).status, 404);
-  assert.equal(sh.calls.length, n, 'nothing reached Shopify');
+  assert.equal(sh.calls.length, callsBefore, 'nothing reached Shopify');
 });
 
 test('address update: fields sent empty are cleared; a new address leaves them out', async () => {
@@ -202,8 +213,12 @@ test('the browser and the Worker agree on every operation route', async () => {
   const { ops } = await import('../src/account/operations.ts');
   const { OPERATION_ROUTES, operationCall, operationRequest } = await import('../src/shared/account-routes.ts');
   assert.deepEqual(Object.keys(OPERATION_ROUTES).sort(), Object.keys(ops).sort());
-  // Object.keys names its keys as strings.
-  for (const name of /** @type {(keyof typeof ops)[]} */ (Object.keys(ops))) {
+  /**
+   * @param {string} name A key `Object.keys` names as a string.
+   * @returns {name is keyof typeof ops}
+   */
+  const isOperation = (name) => Object.hasOwn(ops, name);
+  for (const name of Object.keys(ops).filter(isOperation)) {
     const { method, path } = operationRequest(name, { id: 'gid://shopify/Order/1' });
     const url = new URL(`${WORKER}${BASE}${path}`);
     const call = operationCall(method, url.pathname.slice(BASE.length), url, { id: 'gid://shopify/Order/1' });

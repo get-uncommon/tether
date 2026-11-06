@@ -20,6 +20,14 @@ the secret is added. Workers without customer accounts need nothing. After 0.7.0
 update run also asks you to copy the new update workflow file in, once, by hand (see "Sync Worker
 updates" below).
 
+**Until you copy that workflow file in, a failed update looks green.** The workflow that copies got from
+0.6.x pipes the updater through `tee`, so a run whose update failed still shows a green check: it
+installs nothing, and the only sign is an error annotation titled `Tether update failed` on the run
+(Actions → the run → Annotations). Copy the new workflow file in once, right after 0.7.0 is installed,
+and a failed update fails the run from then on. Until then, look at the annotations of each update
+run, or update by hand: with the [GitHub CLI](https://cli.github.com) installed, run
+`node scripts/update-tether.mjs` in the copy and commit the result (see the Worker README).
+
 Sites that load the script from jsDelivr as `@0.6` stay on 0.6 until they change the URL; `@latest`
 gets 0.7.0 at once. The breaking changes below list each one's upgrade step.
 
@@ -36,7 +44,11 @@ gets 0.7.0 at once. The breaking changes below list each one's upgrade step.
   hand without the GitHub CLI, the updater refuses unless `--allow-unverified` is given; a check
   that fails is always refused. Releases before 0.7.0 have no signed file and can't be installed by
   the new updater. **Upgrade:** none for the updater itself: a copy's own 0.6 updater installs
-  0.7.0 by commit, and from then on every update is verified (`gh` comes with every GitHub runner).
+  0.7.0 (0.6.8's by commit, checked against `main`; 0.6.0–0.6.7's by tag), and from then on every
+  update is verified (`gh` comes with every GitHub runner). A copy made from 0.3.3–0.3.5 whose
+  `TETHER_VERSION` was changed to `latest` first copies in the release's
+  `.github/workflows/update-tether.yml` by hand: its updater also replaces that file, and GitHub
+  refuses the push.
   Which copies take 0.7.0 is decided by their `TETHER_VERSION` (next item).
 - **Breaking (sync Worker updates):** copies made from 0.6.1 to 0.6.8 have `latest` in
   `TETHER_VERSION` unless it was changed, so they install 0.7.0 by themselves; copies on `0.6` (made
@@ -77,10 +89,11 @@ gets 0.7.0 at once. The breaking changes below list each one's upgrade step.
   **Upgrade:** listen with `document.addEventListener` for your own events.
 - **Breaking (descriptions):** a description can't cover the page any more. It loses `class`
   attributes (a site's modal or overlay class would apply to it), the inline styles `transform`,
-  `translate`, `rotate`, `scale` and `offset-*`, negative margins and values in viewport units.
-  Content wider than the element still isn't clipped. **Upgrade:** style descriptions from the
-  site's CSS through the element Tether fills (`[tether-bind="description"] h2 { … }`), not with
-  classes inside the description.
+  `translate`, `rotate`, `scale` and `offset-*`, negative margins, and values in viewport or
+  container-query units (`vw`, `cqw`, …; the latter resolve against the window outside a size
+  container). Content wider than the element still isn't clipped. **Upgrade:** style
+  descriptions from the site's CSS through the element Tether fills
+  (`[tether-bind="description"] h2 { … }`), not with classes inside the description.
 - Fix: the analytics part no longer throws on a `checkout` event without a cart.
 - Security (descriptions): in an outline, shadow, filter, border-image or mask-border outset, text
   decoration or text stroke, every number but a colour must be a px length of at most 40px, so a
@@ -90,10 +103,16 @@ gets 0.7.0 at once. The breaking changes below list each one's upgrade step.
   `word-spacing` are kept down to `-4px` or `-0.25em` and a negative `text-indent` down to `-40px`,
   so tight tracking in headings stays; anything beyond is removed. Ordinary shadows and outlines
   look as before.
-- Size: the `<script>` core is about 1 KB smaller gzipped (29.0 KB, from 30.0 KB) and every part is
-  0.2–0.6 KB smaller: the core shares with its parts only the functions they use, and the store
-  countries code behind `Tether.getLocalization()` lives in the markets part, which that function
-  already loaded.
+- Size, gzipped, against 0.6.8: the `<script>` core is 28.9 KB, up from 24.8 KB. The growth pays
+  for the description sanitizer, the checks on Storefront answers and the integrity hashes of the
+  parts. Every part is smaller: account 4.1 KB (from 6.4, browser mode is gone), account pages 6.1
+  (7.3), diagnose 5.1 (5.5), analytics 3.0 (3.3), markets 2.5 (2.9), search 2.4 (2.5), extras 1.2
+  (1.4). The core shares with its parts only the functions they use, and the store-countries code
+  behind `Tether.getLocalization()` lives in the markets part, which that function already loaded.
+- Fix: until the saved cart loads, `[tether-cart-count]` shows the count from the last page only when
+  the stored value is a whole number; anything else another script wrote there is ignored.
+- Fix: where the browser blocks `sessionStorage` but not `localStorage`, the tokens 0.6's
+  browser-mode accounts left in `localStorage` are still removed.
 - Fix: a Storefront answer missing fields Tether reads (a product without prices or variants, a
   cart without lines, a page without `pageInfo`) is a `TetherError` `Invalid response (200)`
   (`HTTP_200`) instead of a crash inside the render, in the browser script and in
@@ -222,6 +241,14 @@ gets 0.7.0 at once. The breaking changes below list each one's upgrade step.
   without `pipefail`, so there the run stays green and installs nothing, and the annotation is the
   only sign of the failure. Copying in the 0.7.0 workflow (revision 3) makes a failed update fail
   the run.
+- Fix (sync Worker): `MAX_SUBREQUESTS` must be a whole number from 1 to 10000000 and
+  `DEPLOY_HOOK_MIN_SECONDS` one from 0 to 86400. Any other value (`-1`, `1e3`, `45.9`) uses the
+  default (45, 60), and `/check` reports it as an error naming the setting. A negative
+  `MAX_SUBREQUESTS` used to stop every sync at once, and `1e3` meant 1.
+- Customer accounts: the Worker reads the login's `locale` and `country` the way the browser does:
+  a value that isn't a language or country code is left out (with a warning in the Worker log)
+  instead of being repaired, so `U1S` no longer becomes `US`. `locale` goes to Shopify as a language
+  tag: `de-DE` is sent as `de`, `pt-BR` stays `pt-BR`.
 - Fix (customer accounts): `ACCOUNT_ORIGINS` entries are compared the way browsers send `Origin`:
   case, a default `:443` and a trailing slash no longer matter (`https://Shop.com:443/` matches
   `https://shop.com`). An entry that isn't an https origin alone (a path, a user name, `http:`) is a

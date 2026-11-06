@@ -21,6 +21,7 @@
  */
 import { MARKET_SOURCES, cfg, parseMarkets } from './config.ts';
 import { toCountry, toLanguage } from './market-codes.ts';
+import { getStored, setStored } from './storage.ts';
 import type { MarketsConfig } from './config.ts';
 import type { CountryCode, LanguageCode } from './market-codes.ts';
 
@@ -49,7 +50,8 @@ export interface DetectedMarket {
 interface MarketEnv {
   document: Pick<Document, 'cookie' | 'querySelector' | 'documentElement'> | null;
   location: Pick<Location, 'pathname'> | null;
-  storage: Pick<Storage, 'getItem'> | null;
+  /** `localStorage`, read through `getStored`, which finds nothing where the browser blocks it. */
+  storage: Pick<Storage, 'getItem'>;
   /** Where `TETHER_COUNTRY` and `TETHER_LANGUAGE` are read from (`window`). */
   global: object;
 }
@@ -86,18 +88,7 @@ const DEFAULT_COOKIE = 'tether_country';
 /** The localStorage key of the visitor's market: `<prefix>:market:<domain>`. */
 export const storageKey = (): string => `${cfg.prefix}:market:${cfg.domain}`;
 
-/**
- * Accessing `localStorage` throws where the browser blocks storage (sandboxed frames, cookies turned off); the visitor
- * then simply has no saved market.
- */
-function localStorageIfAllowed(): Storage | null {
-  if (typeof window === 'undefined') return null;
-  try {
-    return window.localStorage;
-  } catch {
-    return null;
-  }
-}
+const pageStorage: Pick<Storage, 'getItem'> = { getItem: (key) => getStored(key) };
 
 /** The page this script runs on. */
 function pageEnv(): MarketEnv {
@@ -105,7 +96,7 @@ function pageEnv(): MarketEnv {
   return {
     document: typeof document !== 'undefined' ? document : null,
     location: hasWindow ? window.location : null,
-    storage: localStorageIfAllowed(),
+    storage: pageStorage,
     global: hasWindow ? window : {},
   };
 }
@@ -137,11 +128,11 @@ function toMarket(value: unknown): Market | null {
  * The visitor's saved market (`setCountry()`, `tether-country-select`), validated: storage is written by other tabs,
  * older versions and other scripts too.
  *
- * @param storage Default `localStorage`, `null` where the browser blocks it.
+ * @param storage Default `localStorage`.
  * @returns `null` when nothing valid is saved.
  */
-export function readSavedMarket(storage: Pick<Storage, 'getItem'> | null = localStorageIfAllowed()): Market | null {
-  const text = storage?.getItem(storageKey());
+export function readSavedMarket(storage: Pick<Storage, 'getItem'> = pageStorage): Market | null {
+  const text = storage.getItem(storageKey());
   return text ? toMarket(parseJsonOrNull(text)) : null;
 }
 
@@ -243,15 +234,6 @@ export function detectMarket(
   return found;
 }
 
-/** `setItem` throws when storage is full or blocked (Safari's private mode); the choice then lasts for this page only. */
-function storeIfAllowed(key: string, value: string): void {
-  try {
-    localStorage.setItem(key, value);
-  } catch {
-    return;
-  }
-}
-
 /** Saves the visitor's choice for the next pages, unless `markets.remember` is false. */
 export function rememberMarket(market: {
   country: CountryCode;
@@ -260,5 +242,5 @@ export function rememberMarket(market: {
 }): void {
   if (cfg.markets?.remember === false) return;
   const saved = { country: market.country, language: market.language || undefined, locale: market.locale || undefined };
-  storeIfAllowed(storageKey(), JSON.stringify(saved));
+  setStored(storageKey(), JSON.stringify(saved));
 }

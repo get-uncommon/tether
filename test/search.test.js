@@ -3,7 +3,7 @@ import { test, before, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
 import { captureTetherWarnings, detailOf, find, graphqlRequest, jsonResponse, operationName } from './fixtures.js';
-import { waitFor } from '../server/test/mocks.js';
+import { stringAt, waitFor } from '../server/test/mocks.js';
 
 // The failures these tests cause on purpose are checked through onError and states, not the console.
 captureTetherWarnings();
@@ -18,8 +18,13 @@ Object.assign(globalThis, {
   getComputedStyle: dom.window.getComputedStyle,
 });
 
+/** @type {{ op: string, variables: Record<string, unknown> }[]} */
 const calls = [];
 let failNext = false;
+/**
+ * @param {RequestInfo | URL} _url
+ * @param {RequestInit} [init]
+ */
 globalThis.fetch = async (_url, init) => {
   const { query, variables } = graphqlRequest(init);
   calls.push({ op: operationName(query), variables });
@@ -42,7 +47,7 @@ globalThis.fetch = async (_url, init) => {
           },
         ],
         collections: [{ handle: 'coffee', title: 'Coffee', image: null }],
-        queries: [{ text: variables.q }, { text: `${variables.q} beans` }],
+        queries: [{ text: variables['q'] }, { text: `${variables['q']} beans` }],
       },
     },
   });
@@ -51,6 +56,9 @@ globalThis.fetch = async (_url, init) => {
 /**
  * Types `value` and runs the search timer at once (`searchDelay` is 0), for input that must not start a search: a
  * search that starts sets the `loading` state before its first await.
+ *
+ * @param {HTMLInputElement} input
+ * @param {string} value
  */
 function typeAndRunTimer(input, value) {
   mock.timers.enable({ apis: ['setTimeout'] });
@@ -61,7 +69,9 @@ function typeAndRunTimer(input, value) {
     mock.timers.reset();
   }
 }
+/** @type {string[]} */
 const errors = [];
+/** @type {typeof import('../src/search.ts').mountSearch} */
 let mountSearch;
 
 before(async () => {
@@ -87,6 +97,10 @@ const markup = `
     </div>
   </form>`;
 
+/**
+ * @param {HTMLInputElement} input
+ * @param {string} value
+ */
 const type = (input, value) => {
   input.value = value;
   input.dispatchEvent(new window.Event('input', { bubbles: true }));
@@ -104,8 +118,9 @@ test('typing sends one predictive query and renders products, queries and collec
   assert.equal(input.getAttribute('aria-controls'), results.id);
   assert.equal(results.hidden, true);
 
+  /** @type {{ term: string }[]} */
   const searches = [];
-  root.addEventListener('tether:search', (event) => searches.push(detailOf(event)));
+  root.addEventListener('tether:search', (event) => searches.push({ term: stringAt(detailOf(event), 'term') }));
   typeAndRunTimer(input, 'c');
   assert.equal(calls.length, 0, 'below the minimum length');
   assert.equal(root.getAttribute('tether-search-state'), 'idle');
@@ -113,7 +128,7 @@ test('typing sends one predictive query and renders products, queries and collec
   type(input, 'cof');
   await waitFor(() => root.getAttribute('tether-search-state') === 'ready', 'the results');
   assert.equal(calls.length, 1);
-  assert.deepEqual(calls[0].variables, { q: 'cof', limit: 4 });
+  assert.deepEqual(calls[0]?.variables, { q: 'cof', limit: 4 });
   assert.equal(root.getAttribute('tether-search-state'), 'ready');
   assert.ok(root.classList.contains('is-open'));
   assert.equal(results.hidden, false);
@@ -130,7 +145,7 @@ test('typing sends one predictive query and renders products, queries and collec
   );
   assert.equal(find('[tether-search-collections] a', root).getAttribute('href'), '/collection/coffee');
   assert.equal(find('[tether-show="search-empty"]', root).style.display, 'none');
-  assert.equal(searches.at(-1).term, 'cof');
+  assert.equal(searches.at(-1)?.term, 'cof');
 
   typeAndRunTimer(input, 'cof');
   assert.equal(root.getAttribute('tether-search-state'), 'ready');
@@ -141,13 +156,14 @@ test('arrow keys move through the options, Escape closes', () => {
   const root = find('[tether-search]');
   const input = root.querySelector('input');
   assert.ok(input);
+  /** @param {string} name */
   const key = (name) => input.dispatchEvent(new window.KeyboardEvent('keydown', { key: name, bubbles: true }));
   const options = [...root.querySelectorAll('[role="option"]')];
   assert.equal(options.length, 2);
   key('ArrowDown');
-  assert.equal(input.getAttribute('aria-activedescendant'), options[0].id);
+  assert.equal(input.getAttribute('aria-activedescendant'), options[0]?.id);
   key('ArrowUp');
-  assert.equal(input.getAttribute('aria-activedescendant'), options[1].id, 'wraps around');
+  assert.equal(input.getAttribute('aria-activedescendant'), options[1]?.id, 'wraps around');
   key('Escape');
   assert.ok(!root.classList.contains('is-open'));
   assert.equal(input.hasAttribute('aria-activedescendant'), false);
@@ -155,8 +171,10 @@ test('arrow keys move through the options, Escape closes', () => {
 
 test('a failed search sets the error state and reaches onError', async () => {
   const root = find('[tether-search]');
+  const input = root.querySelector('input');
+  assert.ok(input);
   failNext = true;
-  type(root.querySelector('input'), 'tea');
+  type(input, 'tea');
   await waitFor(() => root.getAttribute('tether-search-state') === 'error', 'the error state');
   assert.equal(root.getAttribute('tether-search-state'), 'error');
   assert.deepEqual(errors, ['search']);
