@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.6.8 (2026-11-06)
 
 - Security: the market's country and language are checked before they go into a query's
   `@inContext`. A `<meta name="tether-page-language">` or a saved market could otherwise change the
