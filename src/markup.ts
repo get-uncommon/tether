@@ -1,0 +1,108 @@
+/**
+ * How Tether finds its markup: attribute names carry the configured prefix (`tether-product`, or `wfs-product` with
+ * `prefix: 'wfs'`), and so do the selectors and the DOM events built from them.
+ */
+import { cfg } from './config.ts';
+import type { ShopifyCart } from './cart/store.ts';
+import type { CartLineInput } from './cart/mutations.ts';
+import type { CartWarning } from './config.ts';
+import type { Product, ProductVariant } from './fragments.ts';
+import type { Collection } from './loader.ts';
+import type { ProductScope } from './product.ts';
+import type { Purchase } from './product-state.ts';
+import type { SearchResults } from './search.ts';
+
+/** @returns The prefixed attribute name: `product` → `tether-product`. */
+export const attr = (name: string): string => `${cfg.prefix}-${name}`;
+
+/** @returns A selector for the attribute, with that exact value when given. */
+export const sel = (name: string, value?: string): string =>
+  value === undefined ? `[${attr(name)}]` : `[${attr(name)}="${value}"]`;
+
+export const get = (el: Element, name: string): string | null => el.getAttribute(attr(name));
+
+export const has = (el: Element, name: string): boolean => el.hasAttribute(attr(name));
+
+/**
+ * Tether's attributes go on HTML elements, so matches are typed as such. An SVG element that carries one still has
+ * the `style`, `dataset` and attribute methods Tether uses.
+ *
+ * @returns The matches in `root`, none without a root.
+ */
+export function qsa(root: ParentNode | null | undefined, selector: string): HTMLElement[] {
+  if (!root) return [];
+  return [...root.querySelectorAll<HTMLElement>(selector)];
+}
+
+/** @returns Matches in `root` whose nearest `scopeSelector` ancestor is `root` itself, not a nested scope. */
+export const scoped = (root: Element | null | undefined, selector: string, scopeSelector: string): HTMLElement[] =>
+  qsa(root, selector).filter((el) => el.closest(scopeSelector) === root);
+
+/**
+ * The events Tether dispatches, as `<prefix>:<name>` (`tether:cart-updated`), bubbling up to `document`, with the
+ * detail each carries. `emit` takes only these, so `Tether.on()` hands a listener the detail its event really has.
+ */
+export interface TetherEvents {
+  ready: { cart: ShopifyCart | null };
+  'product-ready': { product: Product; scope: ProductScope };
+  'product-updated': { product: Product; scope: ProductScope };
+  /** `key` is null when the scope names no product; `source` is what it named. */
+  'product-not-found': { key: string | null; source: string };
+  'variant-changed': {
+    product: Product;
+    variant: ProductVariant;
+    selected: Record<string, string>;
+    purchase: Purchase['kind'];
+    sellingPlanId: string | null;
+  };
+  'product-added': { product: Product; variant: ProductVariant; line: CartLineInput };
+  added: { cart: ShopifyCart; lines: CartLineInput[] };
+  'group-added': { group: string | null; lines: CartLineInput[] };
+  'cart-warning': { warnings: readonly CartWarning[] };
+  'cart-updated': { cart: ShopifyCart | null; reason: string };
+  'cart-toggled': { open: boolean };
+  'cart-error': { error: unknown };
+  checkout: { url: string; cart: ShopifyCart | null };
+  'list-ready': { products: Product[]; collection: Collection | null };
+  /** A list's cards were drawn (again): `container` holds them. */
+  'list-rendered': { container: Element };
+  /** The search part's suggestions for `term`. */
+  search: SearchResults & { term: string };
+  'country-changed': { country: string; language: string | undefined };
+  'discount-applied': { code: string };
+  'discount-invalid': { code: string };
+  'layout-changed': { reason: string };
+  error: { error: unknown; context: string; key?: string | null };
+  'account-login': Record<string, never>;
+  'account-logout': Record<string, never>;
+  /** A login that failed: `expired` (it took too long, or came back to another browser) or `error`. */
+  'account-error': { error: 'expired' | 'error' };
+  'account-updated': { what: 'profile' | 'addresses' | 'subscriptions' | 'orders' };
+}
+
+/**
+ * The events Tether created. Any script can dispatch a `<prefix>:<name>` event with any detail; a listener that reads
+ * the detail's fields (analytics) checks the event is in here, so the detail is the one Tether wrote.
+ */
+const ownEvents = new WeakSet<Event>();
+
+/** @returns The bubbling event `<prefix>:<name>`, known to `isOwnEvent`. */
+export function ownEvent(name: string, detail?: unknown): CustomEvent {
+  const event = new CustomEvent(`${cfg.prefix}:${name}`, { detail, bubbles: true });
+  ownEvents.add(event);
+  return event;
+}
+
+/** @returns True for an event `ownEvent` created, false for one another script dispatched. */
+export function isOwnEvent(event: Event): boolean {
+  return ownEvents.has(event);
+}
+
+/** Dispatches the bubbling event `<prefix>:<name>`. */
+export function emit<Name extends keyof TetherEvents>(
+  name: Name,
+  detail: TetherEvents[Name],
+  target: EventTarget = document,
+): void {
+  target.dispatchEvent(ownEvent(name, detail));
+}

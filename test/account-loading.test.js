@@ -16,11 +16,11 @@ Object.assign(globalThis, {
   getComputedStyle: dom.window.getComputedStyle,
 });
 
-const { configure } = await import('../src/config.js');
-const { mountAccountIfUsed } = await import('../src/account-api.js');
+const { configure } = await import('../src/config.ts');
+const { mountAccountIfUsed } = await import('../src/account-api.ts');
 // Loaded up front, so a part that loads when it shouldn't is seen within `QUIET_MS`.
-await import('../src/account.js');
-const { forgetServerLogin } = await import('../src/account/server-client.js');
+await import('../src/account.ts');
+const { forgetServerLogin } = await import('../src/account/server-client.ts');
 
 /** How long a page that doesn't load the part is watched for it. */
 const QUIET_MS = 200;

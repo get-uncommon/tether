@@ -7,15 +7,15 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { listTags, pickVersion, releaseCommit } from '../scripts/update-tether.mjs';
+import { listTags, pickVersion, releaseCommit } from '../scripts/update-tether.ts';
 import {
   FIRST_SIGNED_RELEASE,
   fetchSignedRelease,
   releaseAssetName,
   releaseAssetUrl,
   verifyAttestation,
-} from '../scripts/release-asset.mjs';
-import { reportWorkflow, workflowRevision, workflowState, WORKFLOW_PATH } from '../scripts/workflow-check.mjs';
+} from '../scripts/release-asset.ts';
+import { reportWorkflow, workflowRevision, workflowState, WORKFLOW_PATH } from '../scripts/workflow-check.ts';
 
 /**
  * The shipped workflow's hash. A copy keeps the workflow it was made with, because an Action's token can't change a
@@ -24,6 +24,9 @@ import { reportWorkflow, workflowRevision, workflowState, WORKFLOW_PATH } from '
  * change that copies need also raises its `# Tether workflow revision:` line, so the updater tells them to copy it in.
  */
 const WORKFLOW_HASH = 'a96a07d6b78e';
+
+/** The type-stripping flag this run was started with (Node before 22.18 needs it), passed on to the updater. */
+const NODE_FLAGS = process.execArgv.filter((flag) => flag === '--experimental-strip-types');
 
 const TAGS = ['v0.1.0', 'v0.2.0', 'v0.3.0', 'v0.3.1', 'v0.3.3', 'v0.3.2', 'v0.4.0', 'v1.0.0', 'not-a-version'];
 
@@ -65,9 +68,13 @@ test('updating a copy replaces the code and keeps config, wrangler ids and TETHE
   // The "new" release: this checkout.
   await cp(root, release, { recursive: true, filter: (p) => !p.includes('node_modules') });
 
-  const out = execFileSync('node', [join(copy, 'scripts', 'update-tether.mjs'), '--from', release], {
-    encoding: 'utf8',
-  });
+  const out = execFileSync(
+    process.execPath,
+    [...NODE_FLAGS, join(copy, 'scripts', 'update-tether.mjs'), '--from', release],
+    {
+      encoding: 'utf8',
+    },
+  );
   const version = JSON.parse(await readFile(join(release, 'package.json'), 'utf8')).version;
   assert.match(out, new RegExp(`updated=${version.replace(/\./g, '\\.')}`));
   assert.ok(existsSync(join(copy, 'src', 'entry.js')), 'new code in place');
@@ -90,9 +97,13 @@ test('updating a copy replaces the code and keeps config, wrangler ids and TETHE
     'the staging folder is removed',
   );
 
-  const again = execFileSync('node', [join(copy, 'scripts', 'update-tether.mjs'), '--from', release], {
-    encoding: 'utf8',
-  });
+  const again = execFileSync(
+    process.execPath,
+    [...NODE_FLAGS, join(copy, 'scripts', 'update-tether.mjs'), '--from', release],
+    {
+      encoding: 'utf8',
+    },
+  );
   assert.match(again, /up to date/);
   assert.equal(workflowVersion(out), version, 'the workflow reads the new version');
   assert.equal(workflowVersion(again), '', 'an empty version tells every workflow there is nothing to commit');
@@ -123,9 +134,9 @@ test('the workflow keeps to the contract: the script path, the updated= line, te
 });
 
 test('a failed update exits non-zero, and --from without a folder is refused', () => {
-  const script = fileURLToPath(new URL('../scripts/update-tether.mjs', import.meta.url));
+  const script = fileURLToPath(new URL('../scripts/update-tether.ts', import.meta.url));
   assert.throws(
-    () => execFileSync('node', [script, '--from'], { encoding: 'utf8', stdio: 'pipe' }),
+    () => execFileSync(process.execPath, [...NODE_FLAGS, script, '--from'], { encoding: 'utf8', stdio: 'pipe' }),
     (error) => error.status === 1 && /--from needs the folder/.test(String(error.stderr)),
   );
 });
@@ -356,10 +367,14 @@ test('an update run by its workflow warns when the copy needs the release workfl
   await writeFile(join(release, WORKFLOW_PATH), `# Tether workflow revision: 99\n${copyWorkflow}`);
   const summary = join(base, 'summary.md');
 
-  const out = execFileSync('node', [join(copy, 'scripts', 'update-tether.mjs'), '--from', release], {
-    encoding: 'utf8',
-    env: { ...process.env, GITHUB_STEP_SUMMARY: summary },
-  });
+  const out = execFileSync(
+    process.execPath,
+    [...NODE_FLAGS, join(copy, 'scripts', 'update-tether.mjs'), '--from', release],
+    {
+      encoding: 'utf8',
+      env: { ...process.env, GITHUB_STEP_SUMMARY: summary },
+    },
+  );
   assert.match(out, /^::warning title=Tether workflow file outdated::/m);
   assert.match(await readFile(summary, 'utf8'), /Update the workflow file once/);
   assert.equal(await readFile(join(copy, WORKFLOW_PATH), 'utf8'), copyWorkflow, 'the workflow file is never touched');

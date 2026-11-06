@@ -412,7 +412,7 @@ Events (on `document`, prefixed `tether:`): `ready`, `product-ready`, `variant-c
 
 ## Config
 
-See [`src/config.js`](../src/config.js) for every option with comments. The ones you'll use most:
+See [`src/config.ts`](../src/config.ts) for every option with comments. The ones you'll use most:
 `domain`, `token`, `country`, `language`, `locale`, `markets`, `productPath` (supports `{handle}`),
 `metafields`, `defaultPurchase`, `checkoutTarget`, `autoMount`, `observe` (auto-mount nodes added
 later, e.g. Finsweet load-more; off by default, or call `Tether.mount(el)` yourself: mounting twice
@@ -501,9 +501,9 @@ is still supported, and warns from 3 months before retirement with the version t
 `tether-sync check` refuses a non-dated version for the sync. To upgrade:
 
 1. Read the Storefront API release notes for the versions in between (shopify.dev → API versioning).
-2. `TETHER_API_VERSION=$(node scripts/api-version.mjs --next) npm run smoke` (and against your dev
+2. `TETHER_API_VERSION=$(node scripts/api-version.ts --next) npm run smoke` (and against your dev
    store with `TETHER_DOMAIN`/`TETHER_TOKEN`) to check every Tether query against the next version.
-3. Bump the versions in `server/src/shared/api-versions.js` (the browser script's default and the
+3. Bump the versions in `server/src/shared/api-versions.ts` (the browser script's default and the
    Worker's both come from there), run `npm test`, release. Sites can also set `apiVersion` in
    `TETHER_CONFIG` themselves.
 
@@ -529,7 +529,7 @@ npm test          # unit tests: client (jsdom, mocked Storefront API) + server/ 
 npm run smoke     # live test against a real store (default: Shopify's public demo store)
 TETHER_DOMAIN=x.myshopify.com TETHER_TOKEN=... npm run smoke   # your dev store, incl. selling plans
 TETHER_API_VERSION=2026-10 npm run smoke                        # try a newer Shopify API version
-node scripts/api-version.mjs --next                             # the next quarterly version
+node scripts/api-version.ts --next                             # the next quarterly version
 ```
 
 **Releases:** write the `## X.Y.Z` section in `CHANGELOG.md`, then

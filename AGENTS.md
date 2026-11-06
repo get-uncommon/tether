@@ -6,13 +6,15 @@ Tether puts a live Shopify store into Webflow, Astro or any HTML page through `t
 
 | Folder | Runs in | Notes |
 | --- | --- | --- |
-| `src/` | the visitor's browser; `server.js`, `initial.js` and `astro.js` also run in Node at build time | Built by `scripts/build.mjs` into `dist/` |
-| `server/src/` | the user's own Cloudflare Worker, or Node through `bin/tether-sync.js` | Plain JavaScript, run from source. Deployed copies update it with a pinned workflow that imports `src/entry.js` with plain Node, so it never gets a build step |
+| `src/` | the visitor's browser; `server.ts`, `initial.ts` and `astro.ts` also run in Node at build time | Built by `scripts/build.ts` into `dist/` |
+| `server/src/` | the user's own Cloudflare Worker, or Node through `bin/tether-sync.ts` | TypeScript run from source through Node's type stripping (Node 22.18 or newer), so it never gets a build step. Deployed copies keep a pinned workflow that runs `scripts/update-tether.mjs` and imports `src/entry.js`: those two and `bin/tether-sync.js` stay as one-line JavaScript shims |
 | `server/src/shared/` | the browser and the Worker | Imports nothing outside itself; dependency-cruiser enforces the layers |
-| `types/` | | The published `.d.ts` files |
+| `types/` | `tsc` (`npm run test:types`) | `check.ts` uses the package the way the docs show, against the declarations the test build generates into `.test-dist/types/` |
 | `test/`, `server/test/` | `node --test` with jsdom | `e2e/` is Playwright on the Astro starter |
 
-The source is JavaScript with JSDoc types, checked by `tsc` (`checkJs` on top of `@tsconfig/strictest`). Every file is fully typed; `// @ts-nocheck` and type casts that hide a wrong type are not accepted.
+The source is TypeScript, checked by `tsc` on top of `@tsconfig/strictest`. Node runs it unbuilt, so only erasable syntax is allowed (`erasableSyntaxOnly`: no `enum`, `namespace` or parameter properties), type-only imports say so (`verbatimModuleSyntax`), and relative imports name the real `.ts` file. Tests stay JavaScript and import the `.ts` sources; on Node before 22.18 the npm scripts pass `--experimental-strip-types`. Every file is fully typed; `// @ts-nocheck` and type casts that hide a wrong type are not accepted.
+
+The published `.d.ts` files are generated from the source, never hand-written: `scripts/build.ts` runs `tsc` with `tsconfig.declarations.json` on the entry points (`index.ts`, `server.ts`, `astro.ts`, `presets/barba.ts`) into `dist/types/`. A type a site imports by name is a type export of its entry point. The `window` globals the published types declare are in `src/globals.d.ts`, which the source's own program leaves out, so the source still reads those globals as unknown.
 
 ## The gate
 
@@ -45,7 +47,7 @@ A refactor keeps all of them. A change to one is a behaviour change, with a CHAN
 ## Principles
 
 - **Simplicity first.** No single-use abstraction, no configurability nobody asked for, no error handling for impossible cases.
-- **One method per concern.** One Storefront client (`client.js`), one place that formats money, one sealing scheme for anything stored. No fallback chains.
+- **One method per concern.** One Storefront client (`client.ts`), one place that formats money, one sealing scheme for anything stored. No fallback chains.
 - **Surgical changes.** A refactor and a behaviour change are separate commits. Formatting-only commits go in `.git-blame-ignore-revs`.
 - **Never disable a lint rule to get green.** Fix the code. If a rule is wrong for a line, the disable comment says why.
 - **State is a union, not a set of booleans or strings.** If two fields must agree, make them one field.

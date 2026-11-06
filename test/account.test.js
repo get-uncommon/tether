@@ -14,10 +14,10 @@ Object.assign(globalThis, {
   getComputedStyle: dom.window.getComputedStyle,
 });
 
-const { configure } = await import('../src/config.js');
-const { Cart } = await import('../src/cart.js');
-const account = await import('../src/account.js');
-const { forgetServerLogin, serverCheckoutUrl } = await import('../src/account/server-client.js');
+const { configure } = await import('../src/config.ts');
+const { Cart } = await import('../src/cart.ts');
+const account = await import('../src/account.ts');
+const { forgetServerLogin, serverCheckoutUrl } = await import('../src/account/server-client.ts');
 
 const CART_KEY = 'tether:cart:shop.test';
 const SERVER = { server: '/_tether/account' };
@@ -115,7 +115,7 @@ for (const [outcome, events] of [
     configure({ ...testConfig(), account: SERVER });
     globalThis.fetch = async () => json({ loggedIn: outcome === 'in', customer: { firstName: 'Ada' } });
     window.history.replaceState(null, '', `/account?account=${outcome}&page=2`);
-    const fresh = await import(`../src/account.js?account-${outcome}`);
+    const fresh = await import(`../src/account.ts?account-${outcome}`);
     assert.deepEqual(await eventsDuring(() => fresh.mountAccount(document)), events);
     assert.equal(window.location.search, '?page=2', 'the mark is dropped, the rest of the URL kept');
   });
@@ -125,7 +125,7 @@ test('another ?account= value is not the login redirect, and is left alone', asy
   configure({ ...testConfig(), account: SERVER });
   globalThis.fetch = async () => json({ loggedIn: false });
   window.history.replaceState(null, '', '/account?account=settings');
-  const fresh = await import('../src/account.js?account-other');
+  const fresh = await import('../src/account.ts?account-other');
   assert.deepEqual(await eventsDuring(() => fresh.mountAccount(document)), []);
   assert.equal(window.location.search, '?account=settings');
 });

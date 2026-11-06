@@ -2,7 +2,7 @@
 // with a real RSA key, and the attacks the Worker has to refuse.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { handleAccount, BASE } from '../src/account.js';
+import { handleAccount, BASE } from '../src/account.ts';
 
 const SHOP = 'shop.myshopify.com';
 const SITE = 'https://shop.example';
@@ -674,7 +674,7 @@ test('account operations: fixed routes, own data only, CSRF and origin rules, va
 });
 
 test('address update: fields sent empty are cleared; a new address leaves them out', async () => {
-  const { addressInput } = await import('../src/account/operations.js');
+  const { addressInput } = await import('../src/account/operations.ts');
   const form = { address1: 'Main 1', address2: '', phoneNumber: '', city: 'Utrecht' };
   assert.deepEqual(addressInput(form, { clear: true }), {
     address1: 'Main 1',
@@ -691,7 +691,7 @@ test('address update: fields sent empty are cleared; a new address leaves them o
 });
 
 test('settings: ACCOUNT_SECRET is required, with no fallback to SYNC_SECRET; /check says what to set', async () => {
-  const { accountSettings, accountProblems } = await import('../src/account.js');
+  const { accountSettings, accountProblems } = await import('../src/account.ts');
   const { ACCOUNT_SECRET, ...withoutSecret } = env;
   const syncOnly = { ...withoutSecret, SYNC_SECRET: 'a-long-sync-secret-of-24-plus-chars' };
   assert.equal(accountSettings(syncOnly).secret, null, 'SYNC_SECRET is never a session key');
@@ -722,7 +722,7 @@ test('settings: ACCOUNT_SECRET is required, with no fallback to SYNC_SECRET; /ch
 });
 
 test('settings: unusable ACCOUNT_SESSION_DAYS and SHOPIFY_DOMAIN are reported, not silently replaced', async () => {
-  const { accountSettings, accountProblems } = await import('../src/account.js');
+  const { accountSettings, accountProblems } = await import('../src/account.ts');
   const problems = (overrides) => accountProblems(accountSettings({ ...env, ...overrides }));
   for (const [raw, days] of [
     ['0', 1],
@@ -888,7 +888,7 @@ test('discovery falls back to the shop id only for bot protection, not for a sto
 });
 
 test('userErrors from Shopify are parsed: an entry without a message still refuses the change', async () => {
-  const { ops, InputError } = await import('../src/account/operations.js');
+  const { ops, InputError } = await import('../src/account/operations.ts');
   const ask = async () => ({ customerUpdate: { customer: null, userErrors: [{ field: ['firstName', 3] }, 'odd'] } });
   await assert.rejects(ops.profile(ask, { firstName: 'Ada' }), (error) => {
     assert.ok(error instanceof InputError);
@@ -901,8 +901,8 @@ test('userErrors from Shopify are parsed: an entry without a message still refus
 });
 
 test('the browser and the Worker agree on every operation route', async () => {
-  const { ops } = await import('../src/account/operations.js');
-  const { OPERATION_ROUTES, operationCall, operationRequest } = await import('../src/shared/account-routes.js');
+  const { ops } = await import('../src/account/operations.ts');
+  const { OPERATION_ROUTES, operationCall, operationRequest } = await import('../src/shared/account-routes.ts');
   assert.deepEqual(Object.keys(OPERATION_ROUTES).sort(), Object.keys(ops).sort());
   for (const name of Object.keys(ops)) {
     const { method, path } = operationRequest(name, { id: 'gid://shopify/Order/1' });
@@ -938,7 +938,7 @@ test('logout with KV down still clears the cookie, and logs why Shopify is not l
 });
 
 test('logout step 2 with Shopify unreachable goes back to the site and logs that Shopify is not logged out', async () => {
-  const { seal } = await import('../src/crypto.js');
+  const { seal } = await import('../src/crypto.ts');
   const ticket = { idToken: 'header.payload.signature', returnTo: `${SITE}/bye`, at: Date.now() };
   const sealed = await seal(env.ACCOUNT_SECRET, 'logout', '__Host-tether-logout', ticket);
   const unreachable = async () => new Response('down', { status: 503 });

@@ -103,9 +103,9 @@ let server;
 let cfg;
 
 before(async () => {
-  ({ default: Tether } = await import('../src/index.js'));
-  ({ cfg } = await import('../src/config.js'));
-  server = await import('../src/server.js');
+  ({ default: Tether } = await import('../src/index.ts'));
+  ({ cfg } = await import('../src/config.ts'));
+  server = await import('../src/server.ts');
   await Tether.init({ domain: 'shop.test', token: 't', autoMount: false, country: 'NL', locale: 'nl-NL' });
 });
 beforeEach(() => {
@@ -136,7 +136,7 @@ test('server: the config is resolved as the browser’s: an invalid count falls 
 });
 
 test('server: same product query as the browser, so hydrated data has the same shape', async () => {
-  const { productFragment } = await import('../src/fragments.js');
+  const { productFragment } = await import('../src/fragments.ts');
   const shop = server.createStorefront({ domain: 'shop.test', token: 't', fetch: globalThis.fetch });
   await shop.getProduct('coffee-box');
   assert.ok(calls[0].query.includes(productFragment(shop.config)));
@@ -286,7 +286,7 @@ test('cart.subscribe gives the cart now and after every change; unsubscribe stop
 // ---- the Astro integration ---------------------------------------------------
 
 test('integration: injects the page script with .env values, drops functions with a warning', async () => {
-  const { default: tether } = await import('../src/astro.js');
+  const { default: tether } = await import('../src/astro.ts');
   const prev = { ...process.env };
   process.env.PUBLIC_SHOPIFY_DOMAIN = 'env-shop.myshopify.com';
   process.env.PUBLIC_SHOPIFY_STOREFRONT_TOKEN = 'env-token';
@@ -313,7 +313,7 @@ test('integration: injects the page script with .env values, drops functions wit
 });
 
 test('integration: warns clearly when the store is missing', async () => {
-  const { default: tether } = await import('../src/astro.js');
+  const { default: tether } = await import('../src/astro.ts');
   const prev = { ...process.env };
   delete process.env.PUBLIC_SHOPIFY_DOMAIN;
   delete process.env.PUBLIC_SHOPIFY_STOREFRONT_TOKEN;
@@ -329,7 +329,7 @@ test('integration: warns clearly when the store is missing', async () => {
 });
 
 test('integration: reads .env, .env.local and .env.production like Vite (process.env wins)', async () => {
-  const { default: tether } = await import('../src/astro.js');
+  const { default: tether } = await import('../src/astro.ts');
   const { mkdtemp, writeFile } = await import('node:fs/promises');
   const { tmpdir } = await import('node:os');
   const { join } = await import('node:path');
@@ -355,7 +355,7 @@ test('integration: reads .env, .env.local and .env.production like Vite (process
 });
 
 test('integration: --mode picks the .env file; shop.config.js changes restart the dev server', async () => {
-  const { default: tether } = await import('../src/astro.js');
+  const { default: tether } = await import('../src/astro.ts');
   const { mkdtemp, writeFile, mkdir } = await import('node:fs/promises');
   const { tmpdir } = await import('node:os');
   const { join } = await import('node:path');
@@ -833,7 +833,7 @@ test('a page built for another market: html.tether-market-pending until the live
 
 test("analytics: Tether's own events become GA4 dataLayer events (view_item, add_to_cart from cart changes, begin_checkout); look-alikes send nothing", async () => {
   window.dataLayer = [];
-  const a = await import('../src/analytics.js');
+  const a = await import('../src/analytics.ts');
   const prev = cfg.analytics;
   cfg.analytics = { dataLayer: true };
   const q = [];
@@ -844,7 +844,7 @@ test("analytics: Tether's own events become GA4 dataLayer events (view_item, add
   Tether.mount(document);
   await tick(20);
   const root = document.querySelector('[tether-product]');
-  const { ownEvent } = await import('../src/dom.js');
+  const { ownEvent } = await import('../src/dom.ts');
   // Look-alike events from another script, whatever their detail, send nothing and don't throw.
   q.push(new window.CustomEvent('tether:cart-updated', { detail: null }));
   q.push(new window.CustomEvent('tether:checkout', { detail: { cart: cartFrom([]) } }));
@@ -866,7 +866,7 @@ test("analytics: Tether's own events become GA4 dataLayer events (view_item, add
 });
 
 test('customer accounts: no token in the browser, the Worker does the work', async () => {
-  const acc = await import('../src/account.js');
+  const acc = await import('../src/account.ts');
   const nav = [];
   cfg.account = { server: '/_tether/account', navigate: (u) => nav.push(u) }; // a path on this site works too
   const realFetch = globalThis.fetch;
@@ -978,7 +978,7 @@ test('a rejected token says why: Shopify sends 401 with an empty message', async
 });
 
 test('image size attributes: max-width, or valid HTML tether-max-width / data-max-width', async () => {
-  const { cdnUrl } = await import('../src/dom.js');
+  const { cdnUrl } = await import('../src/dom.ts');
   const img = (a) => {
     const el = document.createElement('img');
     Object.entries(a).forEach(([k, v]) => el.setAttribute(k, v));
@@ -1005,7 +1005,7 @@ test('tether-products="url:q": a search results page on a static site', async ()
 });
 
 test('account pages: order page with returns, subscriptions with actions, addresses, profile', async () => {
-  const acc = await import('../src/account.js?pages'); // a fresh instance: an earlier test logged out
+  const acc = await import('../src/account.ts?pages'); // a fresh instance: an earlier test logged out
   cfg.account = {
     server: '/_tether/account',
     orderUrl: '/account/order?id={id}',
@@ -1205,7 +1205,7 @@ test('account pages: order page with returns, subscriptions with actions, addres
 });
 
 test('integration: a secret Shopify token is never written into pages, and a non-PUBLIC name is flagged', async () => {
-  const { default: tether } = await import('../src/astro.js');
+  const { default: tether } = await import('../src/astro.ts');
   const prev = { ...process.env };
   const setup = (warnings, scripts = []) =>
     tether().hooks['astro:config:setup']({

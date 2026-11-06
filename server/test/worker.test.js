@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import defaultConfig from './default-config.js';
-import { createWorker } from '../src/index.js';
+import { createWorker } from '../src/index.ts';
 import { createMockApis, shopifyProduct, instantSleep } from './mocks.js';
 
 const SECRET = 'a-long-random-sync-secret-123';
@@ -114,7 +114,7 @@ test('the Worker and the browser script are released with one version', async (t
   if (root.name !== '@occluze/tether') return t.skip('not in the Tether repository');
   assert.equal(server.version, root.version, 'server/package.json and the root package.json');
   const browserVersion = /export const VERSION = '([^']+)'/.exec(
-    await readFile(new URL('../../src/index.js', import.meta.url), 'utf8'),
+    await readFile(new URL('../../src/index.ts', import.meta.url), 'utf8'),
   )?.[1];
-  assert.equal(browserVersion, root.version, 'src/index.js and the root package.json');
+  assert.equal(browserVersion, root.version, 'src/index.ts and the root package.json');
 });

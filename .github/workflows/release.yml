@@ -2,7 +2,7 @@
 # tests, npm publish with provenance (trusted publishing: no token in the repo), GitHub Release.
 # The Release carries tether-server-X.Y.Z.tar.gz, the sync Worker's server/ folder with a GitHub artifact
 # attestation from this workflow: deployed copies install an update only from that file, after
-# `gh attestation verify --signer-workflow <repo>/.github/workflows/release.yml` (server/scripts/release-asset.mjs).
+# `gh attestation verify --signer-workflow <repo>/.github/workflows/release.yml` (server/scripts/release-asset.ts).
 # Renaming this file or the asset stops every copy's updates.
 name: release
 
@@ -33,7 +33,7 @@ jobs:
       - name: Tag matches package.json
         run: |
           test "v$(node -p "require('./package.json').version")" = "$GITHUB_REF_NAME" || { echo "::error::tag $GITHUB_REF_NAME doesn't match package.json"; exit 1; }
-      # npm and the Release ship the committed dist/, so it must be what this tag's source builds.
+      # npm and the Release ship the committed dist/ (dist/types/ included), so it must be what this tag's source builds.
       - name: Committed dist/ matches a fresh build
         shell: bash
         run: |

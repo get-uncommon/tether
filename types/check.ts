@@ -1,5 +1,6 @@
-// Compile-only check of the public types (npm run test:types). Not shipped.
-import Tether, { init, type TetherConfig, type ShopifyCart, type CartStatus, TetherError } from '@occluze/tether';
+// Compile-only check of the published types (npm run test:types), the declarations generated into .test-dist/types:
+// the package used the way the docs show, under a site's strict settings. Not shipped.
+import Tether, { init, type TetherConfig, type ShopifyCart, type CartStatus, type TetherError } from '@occluze/tether';
 import { barbaPreset } from '@occluze/tether/presets/barba';
 import { createStorefront } from '@occluze/tether/server';
 import tetherAstro from '@occluze/tether/astro';
@@ -158,3 +159,40 @@ async function accountShapes() {
 void accountShapes;
 const loggedOutCode: TetherError['code'] = 'NOT_LOGGED_IN';
 void loggedOutCode;
+
+// The names a site imports, and the window globals of the <script> build.
+import type {
+  Tether as TetherApi,
+  ResolvedTetherConfig,
+  ShopifyProduct,
+  ShopifyVariant,
+  ProductScope,
+  AccountCustomer,
+  AccountOrder,
+  OrderDetail,
+  SubscriptionContract,
+  TetherEvents,
+} from '@occluze/tether';
+import type { Storefront, InitialState } from '@occluze/tether/server';
+const api: TetherApi = window.Tether;
+const resolved: ResolvedTetherConfig = api.config;
+window.TETHER_CONFIG = { domain: 'x.myshopify.com', token: 't', autoMount: false };
+const country: string | undefined = window.TETHER_COUNTRY;
+const storefront: Storefront = shop;
+const first: InitialState | null = storefront.initialState(null);
+type Answers = [AccountCustomer | null, AccountOrder[], OrderDetail | null, SubscriptionContract[]];
+const answers: Promise<Answers> = Promise.all([
+  api.account.customer(),
+  api.account.orders(),
+  api.account.order('1'),
+  api.account.subscriptions(),
+]);
+const added: TetherEvents['product-added'] | null = null;
+function variantOf(scope: ProductScope, product: ShopifyProduct): ShopifyVariant | null {
+  return scope.product === product ? scope.variant : null;
+}
+// Another script's event under the prefix: its detail is unknown.
+api.on('my-event', (detail) => console.log(detail));
+// @ts-expect-error: TetherError is a type here; the class is Tether.TetherError
+void ({} instanceof TetherError);
+void [resolved.prefix, country, first, answers, added, variantOf];

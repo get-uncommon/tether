@@ -1,8 +1,8 @@
 // The webhook endpoint's checks before any work: body size, signature, shop.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { handleShopifyWebhook, MAX_WEBHOOK_BYTES } from '../src/webhook.js';
-import { bearerMatches, signShopify, verifyShopifyHmac } from '../src/hmac.js';
+import { handleShopifyWebhook, MAX_WEBHOOK_BYTES } from '../src/webhook.ts';
+import { bearerMatches, signShopify, verifyShopifyHmac } from '../src/hmac.ts';
 
 const SHOP = 'shop.myshopify.com';
 const neverSync = {
@@ -135,7 +135,7 @@ test("a delivery another isolate accepted is dropped through the data centre's c
   assert.match(kept.headers.get('cache-control'), /max-age=21600/, 'kept for six hours');
 
   // Another isolate has its own module state and the same cache.
-  const { handleShopifyWebhook: otherIsolate } = await import('../src/webhook.js?isolate-2');
+  const { handleShopifyWebhook: otherIsolate } = await import('../src/webhook.ts?isolate-2');
   const again = await otherIsolate(await delivery(), options);
   assert.equal(again.response.status, 200);
   assert.equal(again.task, undefined, 'not synced twice');

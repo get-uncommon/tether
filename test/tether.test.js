@@ -61,7 +61,7 @@ let Tether;
 let plans;
 
 before(async () => {
-  ({ default: Tether } = await import('../src/index.js'));
+  ({ default: Tether } = await import('../src/index.ts'));
   plans = Tether.plans;
   await Tether.init({
     domain: 'shop.test',

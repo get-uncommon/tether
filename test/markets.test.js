@@ -102,7 +102,7 @@ let Tether;
 before(async () => {
   localStorage.setItem('tether:cart:shop.test', 'gid://shopify/Cart/1');
   cart = cartWith('NL');
-  ({ default: Tether } = await import('../src/index.js'));
+  ({ default: Tether } = await import('../src/index.ts'));
   await Tether.init({
     domain: 'shop.test',
     token: 't',
@@ -193,7 +193,7 @@ const detectOnly = (mk, e) => markets.detectMarket(mk, e);
 const pick = ({ country, language, locale }) =>
   Object.fromEntries(Object.entries({ country, language, locale }).filter(([, v]) => v));
 before(async () => {
-  markets = await import('../src/markets.js');
+  markets = await import('../src/markets.ts');
 });
 
 // ---- init + switching --------------------------------------------------------
@@ -324,7 +324,7 @@ test('no request ever leaves for anything but the Storefront API (no IP lookups)
 });
 
 test('setCountry: the money format follows the country (option or markets.locales), and is remembered', async () => {
-  (await import('../src/config.js')).cfg.markets.locales = { de: { country: 'DE', language: 'DE', locale: 'de-DE' } };
+  (await import('../src/config.ts')).cfg.markets.locales = { de: { country: 'DE', language: 'DE', locale: 'de-DE' } };
   await Tether.setCountry('DE', { language: null });
   assert.equal(Tether.config.locale, 'de-DE');
   assert.equal(JSON.parse(localStorage.getItem('tether:market:shop.test')).locale, 'de-DE');

@@ -1,23 +1,29 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
   "entry": [
-    "src/index.js",
-    "src/server.js",
-    "src/astro.js",
-    "src/presets/barba.js",
-    "src/parts/*.js",
-    "src/lazy-iife.js",
-    "server/src/entry.js",
-    "server/src/index.js",
-    "server/bin/tether-sync.js",
-    "server/scripts/*.mjs",
-    "scripts/*.mjs",
+    "src/index.ts",
+    "src/server.ts",
+    "src/astro.ts",
+    "src/presets/barba.ts",
+    "src/parts/*.ts",
+    "src/lazy-iife.ts",
+    "server/src/entry.{js,ts}",
+    "server/src/index.ts",
+    "server/bin/tether-sync.{js,ts}",
+    "server/scripts/*.{mjs,ts}",
+    "scripts/*.ts",
     "test/**/*.js",
     "server/test/**/*.js",
     "e2e/*.{js,mjs}",
     "types/check.ts"
   ],
-  "project": ["src/**/*.js", "server/src/**/*.js", "server/bin/*.js", "server/scripts/*.mjs", "scripts/*.mjs"],
+  "project": [
+    "src/**/*.ts",
+    "server/src/**/*.{js,ts}",
+    "server/bin/*.{js,ts}",
+    "server/scripts/*.{mjs,ts}",
+    "scripts/*.ts"
+  ],
   "ignoreBinaries": ["tsc"],
   "rules": {
     "duplicates": "off"

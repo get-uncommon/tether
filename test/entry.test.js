@@ -22,7 +22,7 @@ const errors = [];
 let Tether;
 
 before(async () => {
-  ({ default: Tether } = await import('../src/index.js'));
+  ({ default: Tether } = await import('../src/index.ts'));
   await Tether.init({
     domain: 'shop.test',
     token: 't',
@@ -51,7 +51,7 @@ test('Tether.account is a plain object of the account part’s functions, not a 
     'subscriptions',
     'updateProfile',
   ]);
-  const part = await import('../src/account.js');
+  const part = await import('../src/account.ts');
   for (const name of Object.keys(Tether.account)) assert.equal(typeof part[name], 'function', name);
   assert.equal(await Tether.account.isLoggedIn(), part.isLoggedIn());
 });

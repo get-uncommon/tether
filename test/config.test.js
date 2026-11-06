@@ -1,7 +1,7 @@
 // configure() parses every option where it arrives: an invalid value warns and falls back to its default.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { DEFAULTS, cfg, configure, resolveConfig } from '../src/config.js';
+import { DEFAULTS, cfg, configure, resolveConfig } from '../src/config.ts';
 
 const quietly = (fn) => {
   const warned = [];
@@ -175,7 +175,7 @@ test('partsUrl must be https or on the site, checked when the config is resolved
 });
 
 test('Tether.config shows the live config and refuses writes, which would skip validation', async () => {
-  const { configView } = await import('../src/config.js');
+  const { configView } = await import('../src/config.ts');
   quietly(() => configure({ domain: 'shop.test', markets: { detect: ['saved'] } }));
   assert.equal(configView.domain, 'shop.test');
   const { warned } = quietly(() => {

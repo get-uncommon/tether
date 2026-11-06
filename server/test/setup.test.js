@@ -2,10 +2,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import defaultConfig from './default-config.js';
-import { createApp, memoryStore, createWorker } from '../src/index.js';
-import { runCheck, formatCheck } from '../src/check.js';
-import { cleanEnv } from '../src/env.js';
-import { applyEnv, normalizeConfig } from '../src/mapping.js';
+import { createApp, memoryStore, createWorker } from '../src/index.ts';
+import { runCheck, formatCheck } from '../src/check.ts';
+import { cleanEnv } from '../src/env.ts';
+import { applyEnv, normalizeConfig } from '../src/mapping.ts';
 import { createMockApis, shopifyProduct, instantSleep } from './mocks.js';
 
 const COL = '0123456789abcdef01234567';
@@ -136,7 +136,7 @@ test('worker GET /check: config presence for anyone, API tests only with SYNC_SE
 });
 
 test('example values and a short SYNC_SECRET count as not set, and check names them', async () => {
-  const { cleanEnv: clean } = await import('../src/env.js');
+  const { cleanEnv: clean } = await import('../src/env.ts');
   const filled = {
     SHOPIFY_DOMAIN: 'your-store.myshopify.com',
     WEBFLOW_TOKEN: 'your-webflow-site-token',
@@ -240,7 +240,7 @@ test('webhooks: the first reconcile registers them through the app, once; check 
 test('webhooks signed with either the client secret or SHOPIFY_WEBHOOK_SECRET are accepted', async () => {
   const apis = createMockApis({ products: [shopifyProduct(1)] });
   const worker = createWorker(defaultConfig, { fetch: apis.fetch, sleep: instantSleep });
-  const { signShopify } = await import('../src/hmac.js');
+  const { signShopify } = await import('../src/hmac.ts');
   const send = async (key) => {
     const body = JSON.stringify({ id: 1 });
     return worker.fetch(

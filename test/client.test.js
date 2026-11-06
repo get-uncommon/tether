@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { withContext, request, TetherError } from '../src/client.js';
+import { withContext, request, TetherError } from '../src/client.ts';
 
 const QUERY = 'query TetherProduct($handle: String!) { product(handle: $handle) { id } }';
 

@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-const { default: tether } = await import('../src/astro.js');
+const { default: tether } = await import('../src/astro.ts');
 
 test('integration: inject false adds no script; the options are not changed by a run', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'astro-options-'));

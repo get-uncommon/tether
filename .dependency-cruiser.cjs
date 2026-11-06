@@ -1,4 +1,4 @@
-// Tether's layers: src/ runs in the browser (and, for server.js and astro.js, in Node at build time); server/src/ is
+// Tether's layers: src/ runs in the browser (and, for server.ts and astro.ts, in Node at build time); server/src/ is
 // the user's own Worker, run from source. A deployed Worker copy holds only server/, so what both need lives in
 // server/src/shared/, which imports nothing outside itself.
 /** @type {import('dependency-cruiser').IConfiguration} */
@@ -18,9 +18,11 @@ module.exports = {
       from: {
         orphan: true,
         pathNot: [
-          '^src/(index|server|astro|lazy-iife)[.]js$',
+          // Declaration files type imports; nothing imports them by path.
+          '[.]d[.]ts$',
+          '^src/(index|server|astro|lazy-iife)[.]ts$',
           '^src/(parts|presets)/',
-          '^server/src/(entry|index)[.]js$',
+          '^server/src/(entry[.](js|ts)|index[.]ts)$',
           '^server/(bin|scripts)/',
           '^scripts/',
         ],

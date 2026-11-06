@@ -14,7 +14,7 @@ import {
   normalizeProduct,
   toSlug,
   createWorker,
-} from '../src/index.js';
+} from '../src/index.ts';
 import { createMockApis, shopifyProduct, baseConfig, env, instantSleep } from './mocks.js';
 
 const setup = (opts = {}, config = baseConfig) => {
@@ -408,11 +408,11 @@ test('worker: webhook route with waitUntil, cron reconcile writes KV only on cha
   const ctx = { waitUntil: (p) => pending.push(p) };
 
   const health = await worker.fetch(new Request('https://sync.test/health'), wenv, ctx);
-  const { VERSION } = await import('../src/version.js');
+  const { VERSION } = await import('../src/version.ts');
   const pkg = JSON.parse(
     await (await import('node:fs/promises')).readFile(new URL('../package.json', import.meta.url), 'utf8'),
   );
-  assert.equal(VERSION, pkg.version, 'src/version.js matches package.json');
+  assert.equal(VERSION, pkg.version, 'src/version.ts matches package.json');
   assert.deepEqual(await health.json(), { ok: true, version: pkg.version });
 
   const res = await worker.fetch(await webhook('products/update', { id: 1 }), wenv, ctx);

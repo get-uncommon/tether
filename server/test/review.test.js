@@ -5,8 +5,8 @@ import assert from 'node:assert/strict';
 import { mkdtemp, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createApp, memoryStore, createWorker, signShopify, createShopify, pageSizeFor } from '../src/index.js';
-import { fileStore } from '../src/node.js';
+import { createApp, memoryStore, createWorker, signShopify, createShopify, pageSizeFor } from '../src/index.ts';
+import { fileStore } from '../src/node.ts';
 import { createMockApis, shopifyProduct, baseConfig, env, instantSleep } from './mocks.js';
 
 const setup = (opts = {}, config = baseConfig, extra = {}) => {

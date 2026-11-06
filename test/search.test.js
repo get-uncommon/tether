@@ -56,7 +56,7 @@ const errors = [];
 let mountSearch;
 
 before(async () => {
-  const { configure } = await import('../src/config.js');
+  const { configure } = await import('../src/config.ts');
   configure({
     domain: 'shop.test',
     token: 't',
@@ -64,7 +64,7 @@ before(async () => {
     retries: 0,
     onError: (error, context) => errors.push(context),
   });
-  ({ mountSearch } = await import('../src/search.js'));
+  ({ mountSearch } = await import('../src/search.ts'));
 });
 
 const markup = `

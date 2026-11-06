@@ -45,9 +45,9 @@ let server;
 let state;
 
 before(async () => {
-  ({ default: Tether } = await import('../src/index.js'));
-  server = await import('../src/server.js');
-  state = await import('../src/product-state.js');
+  ({ default: Tether } = await import('../src/index.ts'));
+  server = await import('../src/server.ts');
+  state = await import('../src/product-state.ts');
   await Tether.init({ domain: 'shop.test', token: 't', autoMount: false, country: 'NL', locale: LOCALE });
 });
 after(() => {

@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { connect } from 'node:net';
-import { serve } from '../src/node.js';
+import { serve } from '../src/node.ts';
 
 const quiet = { info() {}, warn() {}, error() {} };
 const app = {

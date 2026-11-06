@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
-import { storeHtmlFragment } from '../src/store-html.js';
+import { storeHtmlFragment } from '../src/store-html.ts';
 
 const { document } = new JSDOM('<!doctype html><body></body>').window;
 const render = (html) => {
@@ -112,7 +112,7 @@ test('script, handlers and script URLs are removed, however they are written', (
 test('a background image URL cannot end the CSS string or use another scheme', async () => {
   const dom = new JSDOM('<!doctype html><body><div id="bg"></div></body>', { url: 'https://site.test/' });
   Object.assign(globalThis, { window: dom.window, document: dom.window.document });
-  const { setImage } = await import('../src/dom.js');
+  const { setImage } = await import('../src/dom.ts');
   const el = dom.window.document.getElementById('bg');
   setImage(el, 'https://cdn.shopify.com/a.jpg?x=1"); background-color: red; ("');
   assert.doesNotMatch(el.getAttribute('style') ?? '', /background-color/);

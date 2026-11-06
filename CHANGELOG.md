@@ -65,6 +65,25 @@
   `InitialState` declares `unavailable`. The Astro integration's `hooks` is typed as the
   `astro:config:setup` hook it registers. **Upgrade:** code that read fields Tether doesn't query
   through the index signature reads them from its own `Tether.query()` result instead.
+- **Breaking (types):** the published declarations are generated from the source (now TypeScript)
+  by `tsc` at build time, in `dist/types/`, so they can't drift from the code. Where the
+  hand-written ones differed, they now say what the code does: `TetherError` is a type export of
+  `@occluze/tether` (the class is `Tether.TetherError`, and a value export of
+  `@occluze/tether/server`), `Tether.on(name, fn)` types the detail of each event Tether dispatches
+  (`TetherEvents`) and hands another name's detail as `unknown`, `scope.setPurchase()` takes
+  `'one-time' | 'subscription'`, `Tether.mount()` takes a `Document` or an `Element`, and
+  `createStorefront()` names the `.env` keys it reads instead of taking any key. The types a site
+  imports keep their names (`TetherConfig`, `Tether`, `ShopifyProduct`, `ShopifyCart`, `Storefront`,
+  `InitialState`, the account answers, …), and `window.Tether` and `window.TETHER_CONFIG` stay
+  declared. **Upgrade:** a site that imported `TetherError` from `@occluze/tether` as a value (it was
+  never exported there at run time) uses `Tether.TetherError`.
+- The source is TypeScript. The sync Worker and its CLI run it unbuilt through Node's type
+  stripping, so they need Node 22.18 or newer; the browser builds in `dist/` are unchanged. Deployed
+  Worker copies keep working: `src/entry.js`, `bin/tether-sync.js` and `scripts/update-tether.mjs`,
+  which their wrangler config and pinned workflow name, stay as one-line JavaScript shims.
+  **Upgrade:** none for Worker copies whose update workflow runs on Node 22.18 or newer (GitHub's
+  `setup-node` with `node-version: 22` installs the latest 22). A host that runs the Node CLI
+  (`tether-sync`) itself needs Node 22.18 or newer: update Node there before updating Tether.
 - **Breaking (server):** `initialState(product)` throws a `TetherError` for a product without
   variants (Shopify always sends at least one), so its non-null overload holds; `initialState(null)`
   is still `null`. **Upgrade:** none for Shopify data.

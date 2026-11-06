@@ -53,7 +53,7 @@ let Tether;
 const errors = [];
 
 before(async () => {
-  ({ default: Tether } = await import('../src/index.js'));
+  ({ default: Tether } = await import('../src/index.ts'));
   await Tether.init({
     domain: 'shop.test',
     token: 'public-token-123',
@@ -256,7 +256,7 @@ test('diagnose explains a rejected token and an expired API version', async () =
 });
 
 test('API versions: next quarterly version, support window, unstable refused', async () => {
-  const { nextApiVersion, apiVersionStatus } = await import('../src/api-version.js');
+  const { nextApiVersion, apiVersionStatus } = await import('../src/api-version.ts');
   assert.equal(nextApiVersion('2026-07'), '2026-10');
   assert.equal(nextApiVersion('2026-10'), '2027-01');
   assert.equal(nextApiVersion('2026-10', 2), '2027-04');

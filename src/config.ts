@@ -1,0 +1,468 @@
+/**
+ * The runtime configuration. `cfg` is one shared object that every browser module imports; `configure()` replaces its
+ * contents in place, so those imports see the new values, and `setCountry()` changes its market keys the same way.
+ * Every option is validated here, once, where it arrives: values that end up in query text, URLs, attribute names or
+ * storage keys never reach the code that uses them unchecked.
+ */
+import { STOREFRONT_API_VERSION } from '../server/src/shared/api-versions.ts';
+import { isQuarterlyVersion } from './api-version.ts';
+import {
+  accountOption,
+  analyticsOption,
+  domainOption,
+  marketsOption,
+  metafieldsOption,
+  partsUrlOption,
+} from './config-sections.ts';
+
+export { MARKET_SOURCES } from './config-sections.ts';
+import { toCountry, toLanguage } from './market-codes.ts';
+import type { Money } from './shopify-values.ts';
+import type { CountryCode, LanguageCode } from './market-codes.ts';
+
+/** Where the visitor's market comes from (`markets.ts`). */
+export interface MarketsConfig {
+  /** True: every source; a list: only those. */
+  detect?: boolean | ('saved' | 'server' | 'webflow')[];
+  /** Webflow locale (subdirectory or html lang) to market. */
+  locales?: Record<string, { country?: string; language?: string; locale?: string }>;
+  /** The cookie a server sets with the visitor's country. */
+  cookie?: string;
+  /** Remember the visitor's choice (default true). */
+  remember?: boolean;
+  /** With `locales`: ignore an html lang that isn't in the map. */
+  strict?: boolean;
+}
+
+/** The optional analytics part. */
+export interface AnalyticsConfig {
+  /** GA4/GTM events, into `window.dataLayer` or the named array. */
+  dataLayer?: boolean | string;
+  /** Shopify's own analytics. `proxy`: the site serves the Storefront API on its own domain. */
+  shopify?: boolean | { consent?: 'no-banner' | 'default-banner' | 'custom-banner'; proxy?: boolean };
+  onEvent?: (name: string, data: Record<string, unknown>) => void;
+}
+
+/** The optional customer accounts part, which runs through the site's Worker. */
+export interface AccountConfig {
+  /** The Worker's account routes, a URL or a path on this site. */
+  server: string;
+  /** The site's own order page, with `{id}` for the numeric order id. */
+  orderUrl?: string;
+  /** Shopify's subscription management page. */
+  subscriptionsUrl?: string;
+  /** A separate page for payment methods (default `subscriptionsUrl`). */
+  paymentUrl?: string;
+  /** Where Shopify sends the visitor after logout (default the home page). */
+  logoutUrl?: string;
+  /** The language of Shopify's login pages. */
+  locale?: string;
+  /** Replaces `location.assign` for the login redirect (popups, tests). */
+  navigate?: (url: string) => void;
+}
+
+export interface MetafieldIdentifier {
+  namespace: string;
+  key: string;
+}
+/** `'namespace.key'` or the identifier itself. */
+export type MetafieldRef = string | MetafieldIdentifier;
+/** Shopify's note on a cart change. */
+export interface CartWarning {
+  code: string;
+  message: string;
+  target?: string;
+}
+export type CheckoutTarget = '_self' | '_blank';
+type PurchaseKind = 'one-time' | 'subscription';
+
+/** Every option, with its default filled in. */
+export interface TetherConfig {
+  /** The store's domain, without protocol or path. */
+  domain: string;
+  /** The public Storefront API access token. */
+  token: string;
+  /** A dated Shopify API version (or `unstable`, with a warning). */
+  apiVersion: string;
+  /** The market's country, for `@inContext(country:)`. */
+  country: CountryCode | undefined;
+  /** The market's language, for `@inContext(language:)`. */
+  language: LanguageCode | undefined;
+  /** An `Intl` locale for money and dates. */
+  locale: string | undefined;
+  markets: MarketsConfig | null;
+  /** The attribute prefix: `tether` reads `tether-product`, `tether-bind`. */
+  prefix: string;
+  /** A folder (`/product`) or a template with `{handle}` / `{id}`. */
+  productPath: string;
+  collectionPath: string;
+  /** The product metafields to fetch. */
+  metafields: MetafieldRef[];
+  imagesFirst: number;
+  variantsFirst: number;
+  sellingPlanGroupsFirst: number;
+  sellingPlansFirst: number;
+  collectionFirst: number;
+  /** Retries of a request that failed on the network, a 429/5xx or Shopify's throttling. */
+  retries: number;
+  /** Refresh server-rendered products once in the background. */
+  revalidate: boolean;
+  /** The localStorage key of the cart id (default `<prefix>:cart:<domain>`). */
+  storageKey: string;
+  cartDrawerOpenClass: string;
+  openCartOnAdd: boolean;
+  /** Move focus into the open cart, keep Tab inside it, restore it on close. */
+  cartFocus: boolean;
+  checkoutTarget: CheckoutTarget;
+  defaultPurchase: PurchaseKind;
+  /** `?variant=` follows the visitor's choice on the page's main product. */
+  variantUrl: boolean;
+  /** Seconds a Shopify answer may be cached; 0 leaves it to Shopify, which can be hours. */
+  maxAge: number;
+  /** `tether-show="low-stock"` at this many or fewer (needs inventory access). */
+  lowStock: number;
+  /** Milliseconds the search part waits after the last keystroke. */
+  searchDelay: number;
+  /** Mount the document on DOMContentLoaded. */
+  autoMount: boolean;
+  /** Mount elements added later (CMS load more, filters). */
+  observe: boolean;
+  /** Mount on Astro's `astro:page-load` and close the cart on navigation. */
+  astro: boolean;
+  /** The folder of the optional parts, for the `<script>` build. */
+  partsUrl: string | null;
+  analytics: AnalyticsConfig | null;
+  account: AccountConfig | null;
+  /** The site's text for a cart warning; nothing keeps Shopify's. */
+  warningText: ((warning: CartWarning) => string | null | undefined) | null;
+  formatMoney: ((money: Money, locale: string | undefined) => string) | null;
+  /** Default: `ScrollTrigger.refresh()` when present. */
+  onLayoutChange: ((reason: string) => void) | null;
+  onCartOpen: ((drawers: HTMLElement[]) => void) | null;
+  onCartClose: ((drawers: HTMLElement[]) => void) | null;
+  onLineEnter: ((node: HTMLElement) => void) | null;
+  /** Animates a line out, then calls `done()`. */
+  onLineLeave: ((node: HTMLElement, done: () => void) => void) | null;
+  onValueChange: ((element: HTMLElement, previousText: string) => void) | null;
+  /** Every failure that reaches the visitor. */
+  onError: ((error: unknown, context: string) => void) | null;
+  debug: boolean;
+}
+
+/**
+ * What a site passes: any option, the market as the codes people write (`'de'`, `'pt-BR'`), and `null` for the
+ * default storage key.
+ */
+export type TetherOptions = {
+  [Key in Exclude<keyof TetherConfig, 'country' | 'language' | 'storageKey'>]?: TetherConfig[Key];
+} & { country?: string | undefined; language?: string | undefined; storageKey?: string | null | undefined };
+
+export const DEFAULTS: Readonly<TetherConfig> = {
+  domain: '',
+  token: '',
+  apiVersion: STOREFRONT_API_VERSION,
+  country: undefined,
+  language: undefined,
+  locale: undefined,
+  markets: null,
+  prefix: 'tether',
+  productPath: '/product',
+  collectionPath: '/collection',
+  metafields: [],
+  imagesFirst: 25,
+  variantsFirst: 100,
+  sellingPlanGroupsFirst: 10,
+  sellingPlansFirst: 25,
+  collectionFirst: 24,
+  retries: 2,
+  revalidate: true,
+  storageKey: '',
+  cartDrawerOpenClass: 'is-open',
+  openCartOnAdd: true,
+  cartFocus: true,
+  checkoutTarget: '_self',
+  defaultPurchase: 'one-time',
+  variantUrl: false,
+  maxAge: 60,
+  lowStock: 5,
+  searchDelay: 150,
+  autoMount: true,
+  observe: false,
+  astro: true,
+  partsUrl: null,
+  analytics: null,
+  account: null,
+  warningText: null,
+  formatMoney: null,
+  onLayoutChange: null,
+  onCartOpen: null,
+  onCartClose: null,
+  onLineEnter: null,
+  onLineLeave: null,
+  onValueChange: null,
+  onError: null,
+  debug: false,
+};
+
+export const cfg: TetherConfig = { ...DEFAULTS };
+
+/**
+ * @returns A view of `target` and the objects in it that reads the live values and refuses every change: a write
+ *   throws in strict-mode code (as on a frozen object) and warns in any code.
+ */
+function readOnlyView<T extends object>(target: T): T {
+  const refuse = (key: string | symbol) => {
+    warn(`Tether.config is read-only (${String(key)}): pass options to Tether.init() instead`);
+    return false;
+  };
+  return new Proxy(target, {
+    get(object, key) {
+      const value: unknown = Reflect.get(object, key);
+      // The config's objects are its own copies (`resolveConfig`), never frozen, so a view of each is allowed.
+      return typeof value === 'object' && value !== null ? readOnlyView(value) : value;
+    },
+    set: (_object, key) => refuse(key),
+    deleteProperty: (_object, key) => refuse(key),
+    defineProperty: (_object, key) => refuse(key),
+  });
+}
+
+/**
+ * `cfg` as `Tether.config` shows it. A value written there would skip the validation `configure()` does, so the view
+ * is read-only; `Tether.init(options)` is how a site changes the config.
+ */
+export const configView = readOnlyView(cfg);
+
+/** The prefix becomes part of attribute names, CSS selectors and event names, so it is kept to those characters. */
+const PREFIX = /^[a-z][a-z0-9-]*$/;
+
+type CountOption =
+  | 'imagesFirst'
+  | 'variantsFirst'
+  | 'sellingPlanGroupsFirst'
+  | 'sellingPlansFirst'
+  | 'collectionFirst'
+  | 'retries'
+  | 'maxAge'
+  | 'lowStock'
+  | 'searchDelay';
+type HookOption =
+  | 'warningText'
+  | 'formatMoney'
+  | 'onLayoutChange'
+  | 'onCartOpen'
+  | 'onCartClose'
+  | 'onLineEnter'
+  | 'onLineLeave'
+  | 'onValueChange'
+  | 'onError';
+type SwitchOption =
+  'revalidate' | 'openCartOnAdd' | 'cartFocus' | 'variantUrl' | 'autoMount' | 'observe' | 'astro' | 'debug';
+type TextOption = 'token' | 'productPath' | 'collectionPath' | 'cartDrawerOpenClass';
+
+const SWITCH_OPTIONS: readonly SwitchOption[] = [
+  'revalidate',
+  'openCartOnAdd',
+  'cartFocus',
+  'variantUrl',
+  'autoMount',
+  'observe',
+  'astro',
+  'debug',
+];
+const TEXT_OPTIONS: readonly TextOption[] = ['token', 'productPath', 'collectionPath', 'cartDrawerOpenClass'];
+
+/** Options that are written into queries as list sizes or used as counts. */
+const COUNT_OPTIONS: readonly CountOption[] = [
+  'imagesFirst',
+  'variantsFirst',
+  'sellingPlanGroupsFirst',
+  'sellingPlansFirst',
+  'collectionFirst',
+  'retries',
+  'maxAge',
+  'lowStock',
+  'searchDelay',
+];
+const HOOK_OPTIONS: readonly HookOption[] = [
+  'warningText',
+  'formatMoney',
+  'onLayoutChange',
+  'onCartOpen',
+  'onCartClose',
+  'onLineEnter',
+  'onLineLeave',
+  'onValueChange',
+  'onError',
+];
+
+/** @returns `fallback`, with a warning unless `value` was left out. */
+function invalidOption<T>(name: string, value: unknown, fallback: T): T {
+  if (value !== undefined) warn(`invalid ${name} ${JSON.stringify(value)}: using ${JSON.stringify(fallback)}`);
+  return fallback;
+}
+
+/** Warns about an option without a default to fall back to, which is left out (`config-sections.ts` too). */
+function dropped(name: string, value: unknown): void {
+  warn(`invalid ${name} ${JSON.stringify(value)}: ignored`);
+}
+
+/**
+ * Warns about each key that is no option, so a misspelt one (`openCartOnAd`) is seen; none of them reaches `cfg`.
+ */
+function warnUnknownKeys(options: Readonly<Record<string, unknown>>): void {
+  for (const key of Object.keys(options)) {
+    if (!(key in DEFAULTS)) warn(`unknown option ${JSON.stringify(key)}: ignored`);
+  }
+}
+
+/** @returns A site's hook, `null` for anything that isn't a function. */
+function hookOption(value: unknown): ((...args: never[]) => unknown) | null {
+  return typeof value === 'function' ? (value as (...args: never[]) => unknown) : null;
+}
+
+function hookOptions(options: Readonly<Record<string, unknown>>): Pick<TetherConfig, HookOption> {
+  const hooks = Object.fromEntries(HOOK_OPTIONS.map((name) => [name, hookOption(options[name])]));
+  // A function from the site can only be checked for being callable; how it is called is the documented signature
+  // of its option.
+  return hooks as Pick<TetherConfig, HookOption>;
+}
+
+/** @returns `value` when it is a non-negative integer, else the default. */
+function countOption(name: CountOption, value: unknown): number {
+  if (typeof value === 'number' && Number.isInteger(value) && value >= 0) return value;
+  return invalidOption(name, value, DEFAULTS[name]);
+}
+
+function switchOption(name: SwitchOption, value: unknown): boolean {
+  return typeof value === 'boolean' ? value : invalidOption(name, value, DEFAULTS[name]);
+}
+
+function textOption(name: TextOption, value: unknown): string {
+  return typeof value === 'string' ? value : invalidOption(name, value, DEFAULTS[name]);
+}
+
+/** @returns An `Intl` locale as written, `undefined` for one `Intl` doesn't accept. */
+function localeOption(value: unknown): string | undefined {
+  if (value === undefined || value === null || value === '') return undefined;
+  try {
+    if (typeof value === 'string' && Intl.getCanonicalLocales(value).length) return value;
+  } catch {
+    // RangeError: not a locale (falls through to the warning).
+  }
+  dropped('locale', value);
+  return undefined;
+}
+
+/** @param choices The first one is the default. */
+function choiceOption<Choice extends string>(
+  name: string,
+  value: unknown,
+  choices: readonly [Choice, ...Choice[]],
+): Choice {
+  return choices.find((choice) => choice === value) ?? invalidOption(name, value, choices[0]);
+}
+
+/**
+ * @returns A quarterly version, or `unstable` with a warning; the default for anything else, which would be written
+ *   into the endpoint's path.
+ */
+function apiVersionOption(value: unknown): string {
+  if (value === 'unstable') {
+    warn('apiVersion "unstable" changes without notice. Pin a dated version (e.g. 2026-07).');
+    return value;
+  }
+  return isQuarterlyVersion(value) ? value : invalidOption('apiVersion', value, DEFAULTS.apiVersion);
+}
+
+function codeOption<Code>(name: string, value: unknown, parse: (value: unknown) => Code | null): Code | undefined {
+  if (value === undefined || value === null || value === '') return undefined;
+  const code = parse(value);
+  if (code !== null) return code;
+  dropped(name, value);
+  return undefined;
+}
+
+/**
+ * The configuration `options` describe: defaults filled in, every value validated (an invalid one warns and falls
+ * back to its default), hooks that aren't functions dropped so callers only check for null.
+ *
+ * @param options What the site set, or any object (the server helpers take their options from code and `.env`).
+ */
+export function resolveConfig(options: TetherOptions | Readonly<Record<string, unknown>>): TetherConfig {
+  warnUnknownKeys(options);
+  const domain = domainOption(options.domain, dropped);
+  const prefix =
+    typeof options.prefix === 'string' && PREFIX.test(options.prefix)
+      ? options.prefix
+      : invalidOption('prefix', options.prefix, DEFAULTS.prefix);
+  const resolved: TetherConfig = {
+    ...DEFAULTS,
+    ...hookOptions(options),
+    domain,
+    apiVersion: apiVersionOption(options.apiVersion),
+    country: codeOption('country', options.country, toCountry),
+    locale: localeOption(options.locale),
+    partsUrl: partsUrlOption(options.partsUrl, dropped),
+    language: codeOption('language', options.language, toLanguage),
+    markets: marketsOption(options.markets, dropped),
+    analytics: analyticsOption(options.analytics, dropped),
+    account: accountOption(options.account, dropped, warn),
+    prefix,
+    storageKey:
+      typeof options.storageKey === 'string' && options.storageKey ? options.storageKey : `${prefix}:cart:${domain}`,
+    metafields: metafieldsOption(options.metafields ?? [], dropped),
+    checkoutTarget: choiceOption('checkoutTarget', options.checkoutTarget, ['_self', '_blank']),
+    defaultPurchase: choiceOption('defaultPurchase', options.defaultPurchase, ['one-time', 'subscription']),
+  };
+  for (const name of COUNT_OPTIONS) resolved[name] = countOption(name, options[name]);
+  for (const name of SWITCH_OPTIONS) resolved[name] = switchOption(name, options[name]);
+  for (const name of TEXT_OPTIONS) resolved[name] = textOption(name, options[name]);
+  return resolved;
+}
+
+/**
+ * @param value A `markets` option from code other than the config (`Tether.detectMarket(markets)`).
+ * @returns It validated as the config's own is, with the same warnings.
+ */
+export const parseMarkets = (value: unknown): MarketsConfig | null => marketsOption(value, dropped);
+
+/**
+ * Replaces the shared configuration with `options` over the defaults (see `resolveConfig`).
+ *
+ * @returns The shared `cfg`.
+ */
+export function configure(options: TetherOptions | Readonly<Record<string, unknown>> = {}): TetherConfig {
+  const resolved = resolveConfig(options);
+  for (const key of Object.keys(cfg)) {
+    if (!(key in resolved)) Reflect.deleteProperty(cfg, key);
+  }
+  return Object.assign(cfg, resolved);
+}
+
+/** @returns True once a domain and a token are set. */
+export const isConfigured = (): boolean => Boolean(cfg.domain && cfg.token);
+
+export function log(...args: unknown[]): void {
+  if (cfg.debug) console.log(`[${cfg.prefix}]`, ...args);
+}
+
+export function warn(...args: unknown[]): void {
+  console.warn(`[${cfg.prefix}]`, ...args);
+}
+
+/**
+ * Logs a failure that reaches the visitor and hands it to `onError`. A throwing `onError` is logged, never rethrown:
+ * the site's hook must not break the render that reported the failure.
+ *
+ * @param context What failed, e.g. `product coffee-box`.
+ */
+export function reportError(error: unknown, context: string): void {
+  warn(context, error instanceof Error && error.message ? error.message : error);
+  if (!cfg.onError) return;
+  try {
+    cfg.onError(error, context);
+  } catch (hookError) {
+    warn('onError threw', hookError);
+  }
+}

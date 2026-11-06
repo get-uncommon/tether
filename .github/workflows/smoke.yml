@@ -42,8 +42,8 @@ jobs:
       - name: API versions
         id: versions
         run: |
-          echo "pinned=$(node scripts/api-version.mjs)" >> "$GITHUB_OUTPUT"
-          echo "next=$(node scripts/api-version.mjs --next)" >> "$GITHUB_OUTPUT"
+          echo "pinned=$(node --experimental-strip-types scripts/api-version.ts)" >> "$GITHUB_OUTPUT"
+          echo "next=$(node --experimental-strip-types scripts/api-version.ts --next)" >> "$GITHUB_OUTPUT"
       - name: Smoke (pinned ${{ steps.versions.outputs.pinned }})
         id: pinned
         run: npm run smoke

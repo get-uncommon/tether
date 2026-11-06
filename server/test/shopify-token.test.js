@@ -1,8 +1,8 @@
 // The client-credentials token the Worker caches between runs.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createShopify } from '../src/shopify.js';
-import { memoryStore } from '../src/store.js';
+import { createShopify } from '../src/shopify.ts';
+import { memoryStore } from '../src/store.ts';
 
 const TOKEN = 'shpca_live-admin-token';
 

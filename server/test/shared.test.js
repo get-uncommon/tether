@@ -1,11 +1,11 @@
 // The JSON helpers and the order reader in server/src/shared/, and the parsers of Shopify's login answers.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { asList, textOrNull } from '../src/shared/json.js';
-import { readOrders } from '../src/shared/account-orders.js';
-import { expiresInSeconds, tokenAnswer, tokenRefusal } from '../src/account/token-answer.js';
-import { accountEndpoints, DiscoveryError, graphqlEndpoint, wellKnownUrl } from '../src/account/discovery.js';
-import { checkIdTokenClaims } from '../src/account/id-token-claims.js';
+import { asList, textOrNull } from '../src/shared/json.ts';
+import { readOrders } from '../src/shared/account-orders.ts';
+import { expiresInSeconds, tokenAnswer, tokenRefusal } from '../src/account/token-answer.ts';
+import { accountEndpoints, DiscoveryError, graphqlEndpoint, wellKnownUrl } from '../src/account/discovery.ts';
+import { checkIdTokenClaims } from '../src/account/id-token-claims.ts';
 
 test('textOrNull: a non-empty string, else null; asList: an array, else empty', () => {
   assert.deepEqual(['a', '', null, 3, undefined].map(textOrNull), ['a', null, null, null, null]);

@@ -17,12 +17,12 @@ Object.assign(globalThis, {
   getComputedStyle: dom.window.getComputedStyle,
 });
 
-const { configure } = await import('../src/config.js');
-const { Cart, trapFocus } = await import('../src/cart.js');
-const { serial } = await import('../src/cart/store.js');
-const { isCartGone } = await import('../src/cart/mutations.js');
-const { TetherError } = await import('../src/client.js');
-const { isGreaterAmount } = await import('../src/amounts.js');
+const { configure } = await import('../src/config.ts');
+const { Cart, trapFocus } = await import('../src/cart.ts');
+const { serial } = await import('../src/cart/store.ts');
+const { isCartGone } = await import('../src/cart/mutations.ts');
+const { TetherError } = await import('../src/client.ts');
+const { isGreaterAmount } = await import('../src/amounts.ts');
 
 const KEY = 'tether:cart:shop.test';
 const VARIANT = product.variants.nodes[0].id;
