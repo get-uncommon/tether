@@ -26,7 +26,27 @@ const PACKAGE_VERSION = /"version": "\d+\.\d+\.\d+"/;
  * @param {string[]} args
  */
 function run(command, args) {
-  execFileSync(command, args, { cwd: ROOT, stdio: 'inherit' });
+  execFileSync(...spawnable(command, args), { cwd: ROOT, stdio: 'inherit', shell: needsShell(command) });
+}
+
+/**
+ * On Windows npm is `npm.cmd`, a batch file Node only starts through a shell. Its arguments here
+ * are fixed words, so the shell has nothing to quote.
+ *
+ * @param {string} command
+ * @returns {boolean}
+ */
+function needsShell(command) {
+  return process.platform === 'win32' && command === 'npm';
+}
+
+/**
+ * @param {string} command
+ * @param {string[]} args
+ * @returns {[string, string[]]}
+ */
+function spawnable(command, args) {
+  return [needsShell(command) ? 'npm.cmd' : command, args];
 }
 
 /**
@@ -35,7 +55,7 @@ function run(command, args) {
  * @returns {string} The command's output, trimmed.
  */
 function output(command, args) {
-  return execFileSync(command, args, { cwd: ROOT, encoding: 'utf8' }).trim();
+  return execFileSync(...spawnable(command, args), { cwd: ROOT, encoding: 'utf8', shell: needsShell(command) }).trim();
 }
 
 /**
