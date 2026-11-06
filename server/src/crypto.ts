@@ -20,9 +20,12 @@ export function toHex(bytes: Uint8Array): string {
   return [...bytes].map((byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
-const keys = new Map<string, Promise<CryptoKey>>();
+/** Web Crypto's key, named through the `crypto` global: Node's types declare no global `CryptoKey` type. */
+type Key = Awaited<ReturnType<typeof crypto.subtle.deriveKey>>;
 
-function aesKey(secret: string, purpose: string): Promise<CryptoKey> {
+const keys = new Map<string, Promise<Key>>();
+
+function aesKey(secret: string, purpose: string): Promise<Key> {
   const id = `${purpose}:${secret}`;
   let key = keys.get(id);
   if (!key) {

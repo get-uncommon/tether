@@ -36,7 +36,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "eslint .",
-    "typecheck": "tsc -p tsconfig.json",
+    "typecheck": "tsc -b",
     "knip": "knip",
     "deps": "depcruise src server/src server/bin server/scripts scripts",
     "check": "npm run format:check && npm run lint && npm run typecheck && npm run knip && npm run deps && npm test",

@@ -2,7 +2,16 @@
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
-import { product, cartFrom, captureTetherWarnings } from './fixtures.js';
+import {
+  captureTetherWarnings,
+  cartFrom,
+  detailOf,
+  find,
+  graphqlRequest,
+  jsonResponse,
+  operationName,
+  product,
+} from './fixtures.js';
 
 // The failures these tests cause on purpose are checked through onError, states and events, not the console.
 captureTetherWarnings();
@@ -32,13 +41,13 @@ const calls = [];
 let answers = {};
 
 globalThis.fetch = async (_url, init) => {
-  const { query, variables } = JSON.parse(init.body);
-  const op = query.match(/(?:query|mutation)\s+(\w+)/)[1];
+  const { query, variables } = graphqlRequest(init);
+  const op = operationName(query);
   calls.push({ op, variables });
   const answer = answers[op];
   if (!answer) throw new Error(`unexpected op ${op}`);
   const body = await answer(variables);
-  return { ok: true, status: 200, json: async () => body };
+  return jsonResponse(body);
 };
 
 const payload = (name, cart, userErrors = []) => ({ data: { [name]: { cart, userErrors, warnings: [] } } });
@@ -50,7 +59,8 @@ const loadSaved = async (cart) => {
   await Cart.init();
 };
 const deferred = () => {
-  let resolve;
+  /** @type {(value?: unknown) => void} */
+  let resolve = () => {};
   const promise = new Promise((r) => {
     resolve = r;
   });
@@ -96,7 +106,7 @@ test('status: ready with the saved cart; error (cart kept) when Shopify cannot b
   answers.TetherCart = () => ({ errors: [{ message: 'Internal error' }] });
   await Cart.init();
   assert.equal(Cart.status.kind, 'error');
-  assert.match(Cart.lastError.message, /Internal error/);
+  assert.match(String(Cart.lastError), /Internal error/);
   assert.equal(Cart.state, null);
   assert.equal(Cart.id(), 'gid://shopify/Cart/abc', 'the saved cart is probably fine');
   assert.equal(reported.at(-1).context, 'cart load failed');
@@ -108,19 +118,19 @@ test('status: a failed change shows cart-error and keeps the cart; the next succ
   answers.TetherCart = () => ({ data: { cart: oneLine(1) } });
   await Cart.init();
   const errors = [];
-  document.addEventListener('tether:cart-error', (e) => errors.push(e.detail.error));
+  document.addEventListener('tether:cart-error', (e) => errors.push(detailOf(e).error));
   answers.Tether_cartLinesAdd = () => payload('cartLinesAdd', null, [{ field: ['lines'], message: 'Sold out' }]);
   await assert.rejects(Cart.add(VARIANT), /Sold out/);
   assert.equal(Cart.status.kind, 'error');
   assert.equal(Cart.count, 1, 'the cart as Shopify last sent it');
   assert.equal(errors.length, 1);
-  assert.notEqual(document.getElementById('err').style.display, 'none');
+  assert.notEqual(find('#err').style.display, 'none');
 
   answers.Tether_cartLinesAdd = () => payload('cartLinesAdd', oneLine(2));
   await Cart.add(VARIANT);
   assert.equal(Cart.status.kind, 'ready');
   assert.equal(Cart.lastError, null);
-  assert.equal(document.getElementById('err').style.display, 'none');
+  assert.equal(find('#err').style.display, 'none');
 });
 
 test('serial: each task starts once the one before has settled, failed or not', async () => {
@@ -212,6 +222,7 @@ test('expired cart: a GraphQL error naming the cart id is recognised by its mess
   answers.Tether_cartNoteUpdate = () => ({ errors: [{ message: 'The specified cart does not exist.' }] });
   answers.Tether_cartCreate = (variables) => payload('cartCreate', { ...oneLine(), note: variables.input.note });
   const cart = await Cart.setNote('hello');
+  assert.ok(cart);
   assert.equal(cart.note, 'hello');
 });
 
@@ -240,7 +251,7 @@ test('checkout: a failing account step is reported and Shopify checkout is used 
     throw new Error('account server down');
   });
   const urls = [];
-  document.addEventListener('tether:checkout', (e) => urls.push(e.detail.url), { once: true });
+  document.addEventListener('tether:checkout', (e) => urls.push(detailOf(e).url), { once: true });
   const url = await Cart.checkout('_self');
   assert.equal(url, 'https://shop.test/checkouts/1');
   assert.deepEqual(urls, [url]);
@@ -290,7 +301,10 @@ test('applyDiscount: a refused code is removed again; a failed removal is report
     const discountCodes = variables.discountCodes.map((code) => ({ code, applicable: false }));
     return payload('cartDiscountCodesUpdate', { ...oneLine(), discountCodes });
   };
-  await assert.rejects(Cart.applyDiscount('NOPE'), (error) => error.code === 'INVALID_DISCOUNT');
+  await assert.rejects(
+    Cart.applyDiscount('NOPE'),
+    (error) => error instanceof TetherError && error.code === 'INVALID_DISCOUNT',
+  );
   assert.equal(removals, 1);
   assert.deepEqual(
     reported.map((r) => r.context),
@@ -301,6 +315,7 @@ test('applyDiscount: a refused code is removed again; a failed removal is report
 test('lastError is read-only: the store decides it', () => {
   // Test files are modules, so strict: assigning a getter-only property throws.
   assert.throws(() => {
+    // @ts-expect-error -- the assignment this test expects to throw
     Cart.lastError = new Error('x');
   }, TypeError);
 });
@@ -308,6 +323,7 @@ test('lastError is read-only: the store decides it', () => {
 test('trapFocus: Tab wraps inside the open drawer and goes in from outside', () => {
   // jsdom has no layout, so no element counts as visible without this.
   const layout = Object.getOwnPropertyDescriptor(window.HTMLElement.prototype, 'offsetParent');
+  assert.ok(layout);
   Object.defineProperty(window.HTMLElement.prototype, 'offsetParent', {
     configurable: true,
     get() {
@@ -322,17 +338,17 @@ test('trapFocus: Tab wraps inside the open drawer and goes in from outside', () 
     trapFocus(event);
     return event.defaultPrevented;
   };
-  document.getElementById('last').focus();
+  find('#last').focus();
   assert.equal(tab(), true);
-  assert.equal(document.activeElement.id, 'first');
+  assert.equal(document.activeElement?.id, 'first');
   assert.equal(tab(), false, 'Tab between the two stays with the browser');
   assert.equal(tab(true), true);
-  assert.equal(document.activeElement.id, 'last');
-  document.getElementById('out').focus();
+  assert.equal(document.activeElement?.id, 'last');
+  find('#out').focus();
   assert.equal(tab(), true);
-  assert.equal(document.activeElement.id, 'first');
+  assert.equal(document.activeElement?.id, 'first');
   Cart.close();
-  document.getElementById('out').focus();
+  find('#out').focus();
   assert.equal(tab(), false, 'a closed cart traps nothing');
   Object.defineProperty(window.HTMLElement.prototype, 'offsetParent', layout);
 });

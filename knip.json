@@ -24,9 +24,5 @@
     "server/scripts/*.{mjs,ts}",
     "scripts/*.ts"
   ],
-  "ignoreBinaries": ["tsc"],
-  "ignoreIssues": {
-    "src/index.ts": ["duplicates"],
-    "src/presets/barba.ts": ["duplicates"]
-  }
+  "ignoreBinaries": ["tsc"]
 }

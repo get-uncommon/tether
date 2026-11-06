@@ -392,6 +392,7 @@ export const api = {
 /** `window.Tether`, and what `import Tether from '@occluze/tether'` gives. */
 export type Tether = typeof api;
 
+/** @alias `api`, for `import Tether from '@occluze/tether'`. */
 export default api;
 
 /**

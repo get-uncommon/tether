@@ -5,7 +5,7 @@ import { JSDOM, VirtualConsole } from 'jsdom';
 import { readFile } from 'node:fs/promises';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { product } from './fixtures.js';
+import { find, graphqlRequest, jsonResponse, operationName, product } from './fixtures.js';
 
 const DIST = join(dirname(fileURLToPath(import.meta.url)), '..', '.test-dist');
 let win;
@@ -26,9 +26,9 @@ before(async () => {
     resources: 'usable',
     virtualConsole,
     beforeParse(w) {
-      w.fetch = async (url, init) => {
-        const { query, variables } = JSON.parse(init.body);
-        const op = query.match(/(?:query|mutation)\s+(\w+)/)[1];
+      w.fetch = async (_url, init) => {
+        const { query, variables } = graphqlRequest(init);
+        const op = operationName(query);
         ops.push({ op, query });
         const data = {
           TetherProducts: () =>
@@ -55,7 +55,7 @@ before(async () => {
           }),
         }[op];
         if (!data) throw new Error(`unexpected ${op}`);
-        return { ok: true, status: 200, json: async () => ({ data: data() }) };
+        return jsonResponse({ data: data() });
       };
     },
   });
@@ -64,7 +64,7 @@ before(async () => {
   // Wait for the markets part (its own file) instead of a fixed time: CI runners can be slow.
   for (
     let i = 0;
-    i < 100 && !(win.Tether?.__parts?.markets && win.document.getElementById('cs')?.options.length > 1);
+    i < 100 && !(win.Tether?.__parts?.markets && (win.document.querySelector('select')?.options.length ?? 0) > 1);
     i++
   ) {
     await new Promise((r) => setTimeout(r, 50));
@@ -72,7 +72,7 @@ before(async () => {
 });
 
 test('the built script renders a product (and its GraphQL is minified but valid-looking)', () => {
-  assert.equal(win.document.querySelector('h1').textContent, 'Coffee Box');
+  assert.equal(find('h1', win.document).textContent, 'Coffee Box');
   const q = ops.find((o) => o.op === 'TetherProducts').query;
   assert.ok(!/\n| {2}/.test(q), 'no newlines or double spaces');
   assert.match(q, /fragment TetherProduct on Product\{id handle title/);

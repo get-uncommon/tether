@@ -2,7 +2,7 @@
 import { test, before, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
-import { product, cartFrom } from './fixtures.js';
+import { cartFrom, detailOf, find, graphqlRequest, jsonResponse, operationName, product } from './fixtures.js';
 
 // A German Webflow locale page, with a saved cart from the Dutch market.
 const dom = new JSDOM('<!doctype html><html lang="de-DE"><body></body></html>', {
@@ -43,13 +43,13 @@ function productIn(country) {
 
 globalThis.fetch = async (url, init) => {
   const host = new URL(url).host;
-  const { query, variables } = JSON.parse(init.body);
-  const op = query.match(/(?:query|mutation)\s+(\w+)/)[1];
+  const { query, variables } = graphqlRequest(init);
+  const op = operationName(query);
   const ctx = query.match(/@inContext\(([^)]*)\)/)?.[1] || '';
   const country = ctx.match(/country: (\w+)/)?.[1] || null;
   calls.push({ host, op, variables, ctx, country });
   hosts.add(host);
-  const ok = (data) => ({ ok: true, status: 200, json: async () => ({ data }) });
+  const ok = (data) => jsonResponse({ data });
   if (delays[country]) await new Promise((r) => setTimeout(r, delays[country]));
 
   switch (op) {
@@ -82,11 +82,7 @@ globalThis.fetch = async (url, init) => {
       return ok({ products: { nodes: [productIn(country)], pageInfo: { hasNextPage: false, endCursor: null } } });
     case 'Tether_cartBuyerIdentityUpdate':
       if (variables.cartId.endsWith('/expired'))
-        return {
-          ok: true,
-          status: 200,
-          json: async () => ({ errors: [{ message: 'The specified cart does not exist.' }] }),
-        };
+        return jsonResponse({ errors: [{ message: 'The specified cart does not exist.' }] });
       cart = { ...cart, buyerIdentity: { countryCode: variables.buyerIdentity.countryCode, email: null } };
       return ok({ cartBuyerIdentityUpdate: { cart, userErrors: [] } });
     case 'Tether_cartCreate':
@@ -119,6 +115,9 @@ beforeEach(() => {
 
 // ---- detection (pure) -------------------------------------------------------
 
+/**
+ * @param {{ path?: string; lang?: string | null; meta?: string | null; cookie?: string; saved?: object | null; global?: object }} [page]
+ */
 const env = ({ path = '/', lang = null, meta = null, cookie = '', saved = null, global = {} } = {}) => {
   const d = new JSDOM(
     `<!doctype html><html${lang ? ` lang="${lang}"` : ''}><head>${meta ? `<meta name="tether-country" content="${meta}">` : ''}</head></html>`,
@@ -218,25 +217,20 @@ test('tether-country-select lists the markets; switching re-renders prices and u
       <div tether-option-list="Size"><button>v</button></div></div>`;
   Tether.mount(document);
   await tick();
-  const s = document.getElementById('cs');
+  const s = document.querySelector('select');
+  assert.ok(s);
   assert.deepEqual(
     [...s.options].map((o) => o.textContent),
     ['Germany – EUR', 'Netherlands – EUR', 'United States – USD'],
   );
   assert.equal(s.value, 'DE');
-  assert.equal(document.getElementById('cur').textContent, 'EUR');
-  assert.match(document.getElementById('price').textContent, /30/);
-  const scope = Tether.getScope(document.getElementById('price'));
+  assert.equal(find('#cur').textContent, 'EUR');
+  assert.match(find('#price').textContent, /30/);
+  const scope = Tether.getScope(find('#price'));
   scope.select('Size', '1kg');
 
-  let changed = null;
-  document.addEventListener(
-    'tether:country-changed',
-    (e) => {
-      changed = e.detail;
-    },
-    { once: true },
-  );
+  const changes = [];
+  document.addEventListener('tether:country-changed', (e) => changes.push(detailOf(e)), { once: true });
   calls.length = 0;
   s.value = 'US';
   s.dispatchEvent(new window.Event('change', { bubbles: true }));
@@ -248,13 +242,16 @@ test('tether-country-select lists the markets; switching re-renders prices and u
   assert.equal(Tether.cart.state.buyerIdentity.countryCode, 'US');
   const refetch = calls.find((c) => c.op === 'TetherProducts');
   assert.equal(refetch.country, 'US');
-  assert.match(document.getElementById('price').textContent, /\$|USD/);
-  assert.match(document.getElementById('price').textContent, /35/);
-  assert.equal(Tether.getScope(document.getElementById('price')), scope, 'same scope, updated in place');
+  assert.match(find('#price').textContent, /\$|USD/);
+  assert.match(find('#price').textContent, /35/);
+  assert.equal(Tether.getScope(find('#price')), scope, 'same scope, updated in place');
   assert.equal(scope.selected.Size, '1kg', 'selection kept');
-  assert.equal(document.getElementById('cur').textContent, 'USD');
-  assert.equal(changed.country, 'US');
-  assert.deepEqual(JSON.parse(localStorage.getItem('tether:market:shop.test')), { country: 'US', language: 'DE' });
+  assert.equal(find('#cur').textContent, 'USD');
+  assert.equal(changes[0].country, 'US');
+  assert.deepEqual(JSON.parse(String(localStorage.getItem('tether:market:shop.test'))), {
+    country: 'US',
+    language: 'DE',
+  });
 });
 
 test('setCountry validates, and does nothing when the country is unchanged', async () => {
@@ -269,12 +266,12 @@ test('a list re-renders in the new market', async () => {
     '<div tether-products=""><div tether-list><div><span class="p" tether-bind="price"></span></div></div></div>';
   Tether.mount(document);
   await tick(80);
-  assert.match(document.querySelector('.p').textContent, /35/);
+  assert.match(find('.p').textContent, /35/);
   calls.length = 0;
   await Tether.setCountry('NL', { remember: false });
   await tick(80);
   assert.equal(calls.find((c) => c.op === 'TetherSearch').country, 'NL');
-  assert.match(document.querySelector('.p').textContent, /30/);
+  assert.match(find('.p').textContent, /30/);
   assert.equal(document.querySelectorAll('.p').length, 1);
 });
 
@@ -289,7 +286,7 @@ test('a slow response from the old market never overwrites the new one or refill
   await switching;
   await tick(200); // the NL response has arrived by now
   delete delays.NL;
-  assert.match(document.getElementById('price').textContent, /35/);
+  assert.match(find('#price').textContent, /35/);
   const cached = await Tether.getProduct('coffee-box');
   assert.equal(cached.priceRange.minVariantPrice.currencyCode, 'USD', 'cache holds the US product');
 });
@@ -301,9 +298,9 @@ test('switching country keeps rendered products visible (state "updating", not "
   delays.DE = 60;
   const p = Tether.setCountry('DE', { remember: false });
   await tick(15); // the markets part loads first
-  const root = document.querySelector('[tether-product]');
+  const root = find('[tether-product]');
   assert.equal(root.getAttribute('tether-state'), 'updating');
-  assert.notEqual(document.getElementById('ready').style.display, 'none');
+  assert.notEqual(find('#ready').style.display, 'none');
   await p;
   await tick(100);
   delete delays.DE;
@@ -324,10 +321,12 @@ test('no request ever leaves for anything but the Storefront API (no IP lookups)
 });
 
 test('setCountry: the money format follows the country (option or markets.locales), and is remembered', async () => {
-  (await import('../src/config.ts')).cfg.markets.locales = { de: { country: 'DE', language: 'DE', locale: 'de-DE' } };
+  const { cfg } = await import('../src/config.ts');
+  assert.ok(cfg.markets);
+  cfg.markets.locales = { de: { country: 'DE', language: 'DE', locale: 'de-DE' } };
   await Tether.setCountry('DE', { language: null });
   assert.equal(Tether.config.locale, 'de-DE');
-  assert.equal(JSON.parse(localStorage.getItem('tether:market:shop.test')).locale, 'de-DE');
+  assert.equal(JSON.parse(String(localStorage.getItem('tether:market:shop.test'))).locale, 'de-DE');
   await Tether.setCountry('NL', { locale: 'nl-NL', language: null });
   assert.equal(Tether.config.locale, 'nl-NL');
 });
@@ -336,8 +335,10 @@ test('tether-countries limits a country select to your list, in your order', asy
   document.body.innerHTML = '<select id="cs2" tether-country-select tether-countries="NL, DE"></select>';
   Tether.mount(document);
   await tick(80);
+  const select = document.querySelector('select');
+  assert.ok(select);
   assert.deepEqual(
-    [...document.getElementById('cs2').options].map((o) => o.value),
+    [...select.options].map((o) => o.value),
     ['NL', 'DE'],
   );
 });

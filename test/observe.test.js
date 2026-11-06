@@ -2,7 +2,7 @@
 import { test, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
-import { product, apparel } from './fixtures.js';
+import { apparel, find, graphqlRequest, jsonResponse, product } from './fixtures.js';
 
 const dom = new JSDOM('<!doctype html><body><span tether-cart-count></span><main></main></body>', {
   url: 'https://site.test/',
@@ -19,15 +19,15 @@ Object.assign(globalThis, {
 
 /** @type {string[]} The handles each products request asked for. */
 const requested = [];
-globalThis.fetch = async (url, init) => {
-  const { variables } = JSON.parse(init.body);
+globalThis.fetch = async (_url, init) => {
+  const { variables } = graphqlRequest(init);
   const data = {};
   for (const [key, handle] of Object.entries(variables)) {
     if (!key.startsWith('h')) continue;
     requested.push(handle);
     data[key] = [product, apparel].find((candidate) => candidate.handle === handle) ?? null;
   }
-  return { ok: true, status: 200, json: async () => ({ data }) };
+  return jsonResponse({ data });
 };
 
 const tick = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -69,7 +69,7 @@ async function documentQueries(run) {
 
 test('a burst of added cards mounts each card, reads only their hydrate tags and renders the cart once', async () => {
   const shop = server.createStorefront({ domain: 'shop.test', token: 't', country: 'NL' });
-  const main = document.querySelector('main');
+  const main = find('main');
   const selectors = await documentQueries(async () => {
     for (const handle of ['coffee-box', 'coffee-box', 'tee']) {
       const card = document.createElement('div');
@@ -101,8 +101,8 @@ test('a hydrate entry without the lists a render walks is skipped, and the produ
   const truncated = { id: apparel.id, handle: apparel.handle, title: apparel.title };
   const box = document.createElement('div');
   box.innerHTML = `${shop.hydrate(truncated)}<div tether-product="tee"><span tether-bind="title"></span></div>`;
-  document.querySelector('main').append(box);
+  find('main').append(box);
   await tick(120);
   assert.deepEqual(requested, ['tee']);
-  assert.equal(box.querySelector('[tether-bind="title"]').textContent, apparel.title);
+  assert.equal(find('[tether-bind="title"]', box).textContent, apparel.title);
 });

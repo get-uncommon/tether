@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
 import { storeHtmlFragment } from '../src/store-html.ts';
+import { find } from './fixtures.js';
 
 const { document } = new JSDOM('<!doctype html><body></body>').window;
 const render = (html) => {
@@ -57,6 +58,7 @@ test('embeds over http, relative or without a src are removed; the https one is 
   );
   assert.equal(box.querySelectorAll('iframe').length, 1);
   const frame = box.querySelector('iframe');
+  assert.ok(frame);
   assert.equal(frame.getAttribute('sandbox'), 'allow-scripts allow-same-origin allow-popups allow-presentation');
   assert.equal(frame.getAttribute('referrerpolicy'), 'strict-origin-when-cross-origin');
   assert.equal(frame.getAttribute('allow'), 'autoplay');
@@ -113,7 +115,7 @@ test('a background image URL cannot end the CSS string or use another scheme', a
   const dom = new JSDOM('<!doctype html><body><div id="bg"></div></body>', { url: 'https://site.test/' });
   Object.assign(globalThis, { window: dom.window, document: dom.window.document });
   const { setImage } = await import('../src/dom.ts');
-  const el = dom.window.document.getElementById('bg');
+  const el = find('#bg', dom.window.document);
   setImage(el, 'https://cdn.shopify.com/a.jpg?x=1"); background-color: red; ("');
   assert.doesNotMatch(el.getAttribute('style') ?? '', /background-color/);
   setImage(el, 'javascript:alert(1)');

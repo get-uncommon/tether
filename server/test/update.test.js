@@ -117,13 +117,14 @@ test('updating a copy replaces the code and keeps config, wrangler ids and TETHE
 function workflowVersion(output) {
   const lines = output.split(/\r?\n/).filter((line) => line.startsWith('updated='));
   assert.ok(lines.length, 'the output has an updated= line');
-  return lines.at(-1).split('=')[1];
+  return lines[lines.length - 1].split('=')[1];
 }
 
 test('a failed update exits non-zero, and --from without a folder is refused', () => {
   const script = fileURLToPath(new URL('../scripts/update-tether.ts', import.meta.url));
   assert.throws(
     () => execFileSync(process.execPath, [...NODE_FLAGS, script, '--from'], { encoding: 'utf8', stdio: 'pipe' }),
+    /** @param {Error & import('node:child_process').SpawnSyncReturns<string>} error What execFileSync throws. */
     (error) => error.status === 1 && /--from needs the folder/.test(String(error.stderr)),
   );
 });
@@ -200,6 +201,7 @@ test('release asset: a release without one (before 0.7.0) is refused with a mess
   const noAsset = github({ '/repos/o/r/releases/tags/v0.6.8': { assets: [] } });
   const old = { ...RELEASE, version: '0.6.8' };
   await assert.rejects(releaseAssetUrl(noAsset, old), (error) => {
+    assert.ok(error instanceof Error);
     assert.match(error.message, /v0\.6\.8 has no signed tether-server-0\.6\.8\.tar\.gz/);
     assert.ok(error.message.includes(`before ${FIRST_SIGNED_RELEASE} have none`));
     return true;
@@ -230,7 +232,7 @@ test('attestation: gh verifies the file against the upstream release workflow an
 
 test('attestation: a failed check is refused, even with --allow-unverified', () => {
   const gh = fakeGh({ kind: 'exited', status: 1, output: 'no matching attestations' });
-  for (const policy of ['require', 'allow-unverified']) {
+  for (const policy of /** @type {const} */ (['require', 'allow-unverified'])) {
     assert.throws(
       () => verifyAttestation(gh.run, 'a.tgz', RELEASE, policy),
       /failed its attestation check: not installed\nno matching attestations/,

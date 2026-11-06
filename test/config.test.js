@@ -188,11 +188,12 @@ test('Tether.config shows the live config and refuses writes, which would skip v
       configView.prefix = 'x"] *';
     }, TypeError);
     assert.throws(() => {
+      // @ts-expect-error -- the write this test expects to throw
       configView.markets.detect.push('server');
     }, TypeError);
   });
   assert.equal(cfg.prefix, 'tether');
-  assert.deepEqual(cfg.markets.detect, ['saved']);
+  assert.deepEqual(cfg.markets?.detect, ['saved']);
   assert.equal(warned.length, 2);
   quietly(() => configure({ domain: 'other.test' }));
   assert.equal(configView.domain, 'other.test', 'a view, not a copy');

@@ -18,7 +18,8 @@ const TYPES = {
 createServer(async (req, res) => {
   let path;
   try {
-    path = decodeURIComponent(new URL(req.url, 'http://x').pathname);
+    // Node's types share `url` with client requests, where it is unset; a server's request always has one.
+    path = decodeURIComponent(new URL(req.url ?? '/', 'http://x').pathname);
   } catch {
     res.writeHead(400);
     res.end('bad path');

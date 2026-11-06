@@ -4,9 +4,14 @@ import assert from 'node:assert/strict';
 import { handleShopifyWebhook, MAX_WEBHOOK_BYTES } from '../src/webhook.ts';
 import { bearerMatches, signShopify, verifyShopifyHmac } from '../src/hmac.ts';
 
+/** @typedef {Parameters<typeof handleShopifyWebhook>[1]['sync']} WebhookSync */
+/** @typedef {import('../src/webhook.ts').DeliveryCache} DeliveryCache */
+
 const SHOP = 'shop.myshopify.com';
+/** @type {WebhookSync} */
 const neverSync = {
   syncById: () => Promise.reject(new Error('a refused webhook never reaches the sync')),
+  queueRetry: () => Promise.reject(new Error('a refused webhook never reaches the sync')),
 };
 
 async function signed(body, { shop = SHOP } = {}) {
@@ -53,6 +58,7 @@ test('the bearer secret must match exactly', async () => {
 
 test('a repeated X-Shopify-Webhook-Id is answered without syncing again; a new id syncs', async () => {
   const synced = [];
+  /** @type {WebhookSync} */
   const sync = {
     syncById: async (id) => {
       synced.push(id);
@@ -78,6 +84,7 @@ test('a repeated X-Shopify-Webhook-Id is answered without syncing again; a new i
 });
 
 test('a forged repeat of a webhook id is refused by its signature before it can block the real delivery', async () => {
+  /** @type {WebhookSync} */
   const sync = { syncById: async () => ({ action: 'unchanged' }), queueRetry: () => Promise.resolve() };
   const forged = new Request('https://w.test/webhooks/shopify', {
     method: 'POST',
@@ -101,18 +108,22 @@ test('a forged repeat of a webhook id is refused by its signature before it can 
 
 /** A Cache API stand-in: what `caches.open()` gives a Worker, shared by every isolate of a data centre. */
 function fakeCache() {
+  /** @type {Map<string, Response>} */
   const entries = new Map();
-  return {
+  /** @type {DeliveryCache & { entries: typeof entries }} */
+  const cache = {
     entries,
     match: async (request) => entries.get(request.url)?.clone(),
     put: async (request, response) => {
       entries.set(request.url, response);
     },
   };
+  return cache;
 }
 
 test("a delivery another isolate accepted is dropped through the data centre's cache", async () => {
   const synced = [];
+  /** @type {WebhookSync} */
   const sync = {
     syncById: async (id) => {
       synced.push(id);
@@ -132,10 +143,13 @@ test("a delivery another isolate accepted is dropped through the data centre's c
   await first.task;
   const [[key, kept]] = deliveries.entries;
   assert.equal(new URL(key).host, 'w.test', "keyed on the Worker's own host");
-  assert.match(kept.headers.get('cache-control'), /max-age=21600/, 'kept for six hours');
+  assert.match(kept.headers.get('cache-control') ?? '', /max-age=21600/, 'kept for six hours');
 
   // Another isolate has its own module state and the same cache.
-  const { handleShopifyWebhook: otherIsolate } = await import('../src/webhook.ts?isolate-2');
+  // The query string makes a second copy of the module, which TypeScript can't resolve by name.
+  const isolate = '../src/webhook.ts?isolate-2';
+  /** @type {typeof import('../src/webhook.ts')} */
+  const { handleShopifyWebhook: otherIsolate } = await import(isolate);
   const again = await otherIsolate(await delivery(), options);
   assert.equal(again.response.status, 200);
   assert.equal(again.task, undefined, 'not synced twice');
@@ -144,7 +158,9 @@ test("a delivery another isolate accepted is dropped through the data centre's c
 
 test('a failing delivery cache is logged and the webhook still synced', async () => {
   const warnings = [];
+  /** @type {WebhookSync} */
   const sync = { syncById: async () => ({ action: 'unchanged' }), queueRetry: () => Promise.resolve() };
+  /** @type {DeliveryCache} */
   const broken = {
     match: () => Promise.reject(new Error('cache down')),
     put: () => Promise.reject(new Error('cache down')),

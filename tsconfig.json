@@ -1,20 +1,14 @@
 {
   "$schema": "https://json.schemastore.org/tsconfig",
-  "extends": "@tsconfig/strictest/tsconfig.json",
-  "compilerOptions": {
-    "noEmit": true,
-    "target": "ES2022",
-    "module": "nodenext",
-    "moduleResolution": "nodenext",
-    "moduleDetection": "force",
-    "allowImportingTsExtensions": true,
-    "erasableSyntaxOnly": true,
-    "verbatimModuleSyntax": true,
-    "lib": ["ES2023", "DOM", "DOM.Iterable"],
-    "types": ["node"]
-  },
-  "include": ["src/**/*.ts", "server/src/**/*.ts", "server/bin/*.ts", "server/scripts/*.ts", "scripts/*.ts"],
-  // The `window` globals the published declarations add for sites (tsconfig.declarations.json); the source reads
-  // them as unknown.
-  "exclude": ["src/globals.d.ts"]
+  // One program per runtime, so each file sees only the globals of where it runs (`npm run typecheck` builds them all;
+  // editors and ESLint find a file's program through these references).
+  "files": [],
+  "references": [
+    { "path": "./tsconfig.browser.json" },
+    { "path": "./tsconfig.node.json" },
+    { "path": "./tsconfig.worker.json" },
+    { "path": "./tsconfig.worker-node.json" },
+    { "path": "./tsconfig.test.json" },
+    { "path": "./tsconfig.e2e.json" }
+  ]
 }

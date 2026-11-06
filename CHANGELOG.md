@@ -139,6 +139,11 @@
   dependencies are installed only in a read-only job, the server asset is built and attested in a
   job that installs nothing, and npm publishes with `--ignore-scripts`.
 - Repository: CI runs `npm run check` on pull requests and pushes to `main`, on Node 22.18 and 24.
+- Repository: browser, Node-side, Worker and test code are type-checked as separate programs
+  (`tsc -b`), so browser code can't use Node globals and the Worker can't use the DOM; the tests are
+  type-checked too, with their fakes checked against the interfaces they stand in for.
+- Types: `ApiVersion` is the template literal `` `${number}-${'01' | '04' | '07' | '10'}` `` (it was a
+  branded string), and the API version constants are typed `ApiVersion`.
 - Security: descriptions lose `id` attributes (they could clobber `window.<id>` and the site's own
   ids), inline style declarations that position content over the page or load from elsewhere
   (`position`, `top`/`right`/`bottom`/`left`/`inset`, `z-index`, any value with `url(`,

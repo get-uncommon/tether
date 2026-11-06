@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  // The unit tests and their fakes, checked against the sources they import. They stay JavaScript: deployed Worker
+  // copies run `node --test test/*.test.js` in server/. They run in Node, with jsdom for the browser modules.
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "tsBuildInfoFile": "node_modules/.cache/tsc/test.tsbuildinfo",
+    "allowJs": true,
+    "checkJs": true,
+    // A test's helpers and callbacks go unannotated, and its array and record reads fail the test when they miss; a
+    // fake passed where the source expects a type is still checked against it.
+    "noImplicitAny": false,
+    "noUncheckedIndexedAccess": false,
+    "noPropertyAccessFromIndexSignature": false,
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "types": ["node"]
+  },
+  "include": ["test/*.js", "server/test/*.js"]
+}

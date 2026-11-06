@@ -2,7 +2,15 @@
 import { test, before, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
-import { product, captureTetherWarnings } from './fixtures.js';
+import {
+  captureTetherWarnings,
+  detailOf,
+  find,
+  graphqlRequest,
+  jsonResponse,
+  operationName,
+  product,
+} from './fixtures.js';
 
 // The failures these tests cause on purpose are checked through onError, states and events, not the console.
 captureTetherWarnings();
@@ -20,14 +28,13 @@ Object.assign(globalThis, {
 
 let mode = 'ok'; // 'ok' | 'down' | 'unauthorized'
 const calls = [];
-globalThis.fetch = async (url, init) => {
-  const { query, variables } = JSON.parse(init.body);
-  const op = query.match(/(?:query|mutation)\s+(\w+)/)[1];
+globalThis.fetch = async (_url, init) => {
+  const { query, variables } = graphqlRequest(init);
+  const op = operationName(query);
   calls.push({ op, variables });
   if (mode === 'down') throw new TypeError('fetch failed');
-  if (mode === 'unauthorized')
-    return { ok: false, status: 401, json: async () => ({ errors: [{ message: 'Unauthorized' }] }) };
-  const ok = (data) => ({ ok: true, status: 200, json: async () => ({ data }) });
+  if (mode === 'unauthorized') return jsonResponse({ errors: [{ message: 'Unauthorized' }] }, 401);
+  const ok = (data) => jsonResponse({ data });
   if (op === 'TetherProducts') {
     const data = {};
     Object.keys(variables).forEach((k) => {
@@ -80,7 +87,7 @@ const page = (key, extra = '') => `
     <button id="add" tether-add-to-cart>Add</button>
   </div>`;
 
-const visible = (id) => document.getElementById(id).style.display !== 'none';
+const visible = (id) => find(`#${id}`).style.display !== 'none';
 
 test('resolveProductKey: url:handle, any param, url:path, plain values', () => {
   const el = document.createElement('div');
@@ -99,15 +106,15 @@ test('dynamic product page renders the product from ?handle=', async () => {
   go('https://site.test/product?handle=coffee-box');
   document.body.innerHTML = page('url:handle', 'tether-page-title="{title} | Shop"');
   Tether.mount(document);
-  const root = document.querySelector('[tether-product]');
+  const root = find('[tether-product]');
   assert.equal(root.getAttribute('tether-state'), 'loading');
   assert.ok(visible('loading'));
   assert.ok(!visible('nf') && !visible('err'));
   await tick();
   assert.equal(root.getAttribute('tether-state'), 'ready');
-  assert.equal(document.querySelector('h1').textContent, 'Coffee Box');
+  assert.equal(find('h1').textContent, 'Coffee Box');
   assert.ok(visible('ready') && !visible('loading') && !visible('nf') && !visible('err'));
-  assert.equal(document.getElementById('link').getAttribute('href'), '/product?handle=coffee-box');
+  assert.equal(find('#link').getAttribute('href'), '/product?handle=coffee-box');
   assert.equal(document.title, 'Coffee Box | Shop');
 });
 
@@ -116,28 +123,22 @@ test('url:path takes the last path segment', async () => {
   document.body.innerHTML = page('url:path');
   Tether.mount(document);
   await tick();
-  assert.equal(document.querySelector('h1').textContent, 'Coffee Box');
+  assert.equal(find('h1').textContent, 'Coffee Box');
 });
 
 test('unknown handle shows not-found, disables add to cart, no onError for URL typos', async () => {
   go('https://site.test/product?handle=nope');
   document.body.innerHTML = page('url:handle');
-  let notFound = null;
-  document.addEventListener(
-    'tether:product-not-found',
-    (e) => {
-      notFound = e.detail;
-    },
-    { once: true },
-  );
+  const notFound = [];
+  document.addEventListener('tether:product-not-found', (e) => notFound.push(detailOf(e)), { once: true });
   Tether.mount(document);
   await tick();
-  const root = document.querySelector('[tether-product]');
+  const root = find('[tether-product]');
   assert.equal(root.getAttribute('tether-state'), 'error');
   assert.equal(root.getAttribute('tether-error'), 'not-found');
   assert.ok(visible('nf') && !visible('err') && !visible('ready') && !visible('loading'));
-  assert.equal(document.getElementById('add').disabled, true);
-  assert.equal(notFound.key, 'nope');
+  assert.equal(find('#add').hasAttribute('disabled'), true);
+  assert.equal(notFound[0].key, 'nope');
   assert.equal(errors.length, 0);
 });
 
@@ -165,13 +166,13 @@ test('API down: error state, onError called, blocks hidden by a class still appe
   document.body.innerHTML = page('coffee-box').replace('id="err"', 'id="err" class="hidden"');
   Tether.mount(document);
   await tick();
-  const root = document.querySelector('[tether-product]');
+  const root = find('[tether-product]');
   assert.equal(root.getAttribute('tether-state'), 'error');
   assert.equal(root.getAttribute('tether-error'), 'NETWORK');
   assert.ok(visible('err') && !visible('nf') && !visible('ready'));
-  assert.equal(getComputedStyle(document.getElementById('err')).display, 'block');
+  assert.equal(getComputedStyle(find('#err')).display, 'block');
   assert.equal(errors[0].err.code, 'NETWORK');
-  assert.equal(document.getElementById('add').disabled, true);
+  assert.equal(find('#add').hasAttribute('disabled'), true);
 });
 
 test('list error state', async () => {
@@ -182,7 +183,7 @@ test('list error state', async () => {
   </div>`;
   Tether.mount(document);
   await tick();
-  assert.equal(document.querySelector('[tether-collection]').getAttribute('tether-state'), 'error');
+  assert.equal(find('[tether-collection]').getAttribute('tether-state'), 'error');
   assert.ok(visible('lerr'));
 });
 
@@ -274,13 +275,13 @@ test('back online: failed products load again by themselves', async () => {
   document.body.innerHTML = page('coffee-box');
   Tether.mount(document);
   await tick();
-  const root = document.querySelector('[tether-product]');
+  const root = find('[tether-product]');
   assert.equal(root.getAttribute('tether-state'), 'error');
-  assert.equal(document.getElementById('add').getAttribute('aria-disabled'), 'true');
+  assert.equal(find('#add').getAttribute('aria-disabled'), 'true');
   mode = 'ok';
   window.dispatchEvent(new window.Event('online'));
   await tick();
   assert.equal(root.getAttribute('tether-state'), 'ready');
-  assert.equal(document.querySelector('h1').textContent, 'Coffee Box');
-  assert.equal(document.getElementById('add').getAttribute('aria-disabled'), 'false');
+  assert.equal(find('h1').textContent, 'Coffee Box');
+  assert.equal(find('#add').getAttribute('aria-disabled'), 'false');
 });

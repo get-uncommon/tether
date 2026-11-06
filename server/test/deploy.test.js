@@ -4,11 +4,15 @@ import assert from 'node:assert/strict';
 import defaultConfig from '../tether-sync.config.js';
 import { createApp, memoryStore } from '../src/index.ts';
 import { runCheck } from '../src/check.ts';
-import { createMockApis, shopifyProduct, baseConfig, instantSleep } from './mocks.js';
+import { createMockApis, shopifyProduct, baseConfig, instantSleep, checkStep } from './mocks.js';
 
 const HOOK = 'https://api.pages.test/deploy_hooks/abc';
 const shopEnv = { SHOPIFY_DOMAIN: 'shop.myshopify.com', SHOPIFY_ADMIN_TOKEN: 'shpat_x', DEPLOY_HOOK_URL: HOOK };
 
+/**
+ * @param {{ products?: import('./mocks.js').MockProduct[], env?: Record<string, string>,
+ *   config?: import('../src/mapping.ts').RawConfig, hookStatus?: number }} [options]
+ */
 function setup({
   products = [shopifyProduct(1), shopifyProduct(2)],
   env = shopEnv,
@@ -46,7 +50,7 @@ test('deploy-only: the first import starts one build; running it again starts no
   const r = await app.sync.importAll();
   assert.equal(r.stats.created, 2);
   assert.equal(t.hooks.length, 1);
-  assert.equal(r.deploy.triggered, true);
+  assert.deepEqual(r.deploy, { triggered: true });
   const again = await t.make().sync.importAll();
   assert.equal(again.stats.unchanged, 2);
   assert.equal(t.hooks.length, 1, 'nothing changed, no build');
@@ -78,7 +82,7 @@ test('deploy-only: a content change starts a build, a stock-only change does not
   );
   const r2 = await app.sync.syncById(1);
   assert.equal(r2.action, 'updated');
-  assert.equal(r2.deploy.triggered, true);
+  assert.deepEqual(r2.deploy, { triggered: true });
   assert.equal(t.hooks.length, before + 1);
 });
 
@@ -92,13 +96,13 @@ test('deploy-only: changes within the interval wait for the next run, then give 
     t.tick(10);
     t.apis.shop.products.set('gid://shopify/Product/1', shopifyProduct(1, { title: 'A' }));
     const r1 = await t.make().sync.syncById(1);
-    assert.equal(r1.deploy.pending, true, 'noted, not built yet (60s interval)');
+    assert.ok(r1.deploy && 'pending' in r1.deploy, 'noted, not built yet (60s interval)');
     t.apis.shop.products.set('gid://shopify/Product/2', shopifyProduct(2, { title: 'B' }));
     await t.make().sync.syncById(2);
     assert.equal(t.hooks.length, 1);
     t.tick(60);
     const r3 = await t.make().sync.reconcile(); // the cron run
-    assert.equal(r3.deploy.triggered, true);
+    assert.deepEqual(r3.deploy, { triggered: true });
     assert.equal(t.hooks.length, 2, 'two changes, one build');
   } finally {
     Date.now = realNow;
@@ -108,6 +112,7 @@ test('deploy-only: changes within the interval wait for the next run, then give 
 test('deploy-only: a failing hook is retried on the next run', async () => {
   const t = setup({ hookStatus: 500 });
   const r = await t.make().sync.importAll();
+  assert.ok(r.deploy && 'error' in r.deploy);
   assert.match(r.deploy.error, /answered 500/);
   assert.deepEqual(await t.store.get('deploy:state'), { dirty: true, lastAt: 0 });
 });
@@ -136,10 +141,10 @@ test('Webflow + deploy hook: Webflow is written and a build starts', async () =>
 test('check in deploy-only mode: no Webflow errors, the hook is validated', async () => {
   const ok = await runCheck(defaultConfig, shopEnv, { deep: false });
   assert.ok(!ok.steps.some((s) => /Webflow/.test(s.title)), ok.steps.map((s) => s.title).join(','));
-  assert.match(ok.steps.find((s) => s.title === 'Deploy hook').message, /no Webflow/);
+  assert.match(checkStep(ok, 'Deploy hook').message, /no Webflow/);
   assert.equal(ok.ok, true);
   const bad = await runCheck(defaultConfig, { ...shopEnv, DEPLOY_HOOK_URL: 'http://insecure.test' }, { deep: false });
-  assert.match(bad.steps.find((s) => s.title === 'Deploy hook').message, /must be an https URL/);
+  assert.match(checkStep(bad, 'Deploy hook').message, /must be an https URL/);
 });
 
 test('deploy hook: a network error keeps the build pending for the next run', async () => {

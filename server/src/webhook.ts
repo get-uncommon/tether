@@ -34,8 +34,11 @@ const recentWebhookIds = new Set<string>();
  */
 const DELIVERY_TTL_SECONDS = 6 * 60 * 60;
 
-/** The Cache API, as the Worker's `caches.open()` gives it. */
-export type DeliveryCache = Pick<Cache, 'match' | 'put'>;
+/** The part of the Cache API the webhook uses, as the Worker's `caches.open()` gives it. Node has no Cache API. */
+export interface DeliveryCache {
+  match: (request: Request) => Promise<Response | undefined>;
+  put: (request: Request, response: Response) => Promise<void>;
+}
 
 /** What a webhook's sync did: the sync's action, or `failed` with the error, which the next reconcile retries. */
 type WebhookOutcome = { action: SyncAction } | { action: 'failed'; error: unknown };

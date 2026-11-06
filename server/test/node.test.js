@@ -48,5 +48,5 @@ test('config file: a value of the wrong type is named when the config loads', as
   await writeFile(path, JSON.stringify({ shopify: { apiVersion: 202607 }, webflow: [], fields: { name: 'title' } }));
   await assert.rejects(loadConfig(path), /shopify\.apiVersion must be a string; webflow must be an object/);
   await writeFile(path, JSON.stringify({ shopify: { domain: 'shop.myshopify.com' }, fields: { name: 'title' } }));
-  assert.equal((await loadConfig(path)).config.shopify.domain, 'shop.myshopify.com');
+  assert.equal((await loadConfig(path)).config.shopify?.domain, 'shop.myshopify.com');
 });

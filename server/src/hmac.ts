@@ -15,7 +15,7 @@ function bodyBytes(body: Body): Uint8Array<ArrayBuffer> {
   return body instanceof Uint8Array ? body : new Uint8Array(body);
 }
 
-function hmacKey(secret: string, usage: KeyUsage): Promise<CryptoKey> {
+function hmacKey(secret: string, usage: 'sign' | 'verify') {
   return crypto.subtle.importKey('raw', encoder.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, [usage]);
 }
 

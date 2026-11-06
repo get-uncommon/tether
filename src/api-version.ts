@@ -4,8 +4,7 @@
  * scripts.
  */
 
-/** A dated version such as `2026-07`, as `isQuarterlyVersion` checks it. */
-export type ApiVersion = string & { readonly __brand: 'ApiVersion' };
+import type { ApiVersion } from '../server/src/shared/api-versions.ts';
 
 const QUARTERLY_VERSION = /^(\d{4})-(01|04|07|10)$/;
 const MONTHS_PER_QUARTER = 3;

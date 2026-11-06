@@ -1,7 +1,16 @@
 import { test, before, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
-import { product, cartFrom, PLAN_MONTH, PLAN_2MONTH } from './fixtures.js';
+import {
+  cartFrom,
+  find,
+  graphqlRequest,
+  jsonResponse,
+  operationName,
+  PLAN_2MONTH,
+  PLAN_MONTH,
+  product,
+} from './fixtures.js';
 
 const dom = new JSDOM('<!doctype html><body></body>', { url: 'https://site.test/product/coffee-box' });
 Object.assign(globalThis, {
@@ -17,11 +26,11 @@ Object.assign(globalThis, {
 // ---- fake Storefront API ---------------------------------------------------
 const calls = [];
 let cartLines = [];
-globalThis.fetch = async (url, init) => {
-  const { query, variables } = JSON.parse(init.body);
-  const op = query.match(/(?:query|mutation)\s+(\w+)/)[1];
+globalThis.fetch = async (_url, init) => {
+  const { query, variables } = graphqlRequest(init);
+  const op = operationName(query);
   calls.push({ op, query, variables });
-  const ok = (data) => ({ ok: true, status: 200, json: async () => ({ data }) });
+  const ok = (data) => jsonResponse({ data });
   const payload = () => ({ cart: cartFrom(cartLines), userErrors: [] });
 
   switch (op) {
@@ -130,27 +139,27 @@ function mountProduct(extra = '') {
 
 test('renders product, metafield and one-time price by default', async () => {
   await mountProduct();
-  assert.equal(document.querySelector('h1').textContent, 'Coffee Box');
-  assert.equal(document.querySelector('[tether-bind="metafield:custom.origin"]').textContent, 'Ethiopia');
-  assert.match(document.querySelector('#price').textContent, /30/);
-  assert.match(document.querySelector('#sub-price').textContent, /27/);
-  assert.equal(document.querySelector('#savings').textContent, '10%');
-  assert.equal(document.querySelector('#sub-only').style.display, 'none');
+  assert.equal(find('h1').textContent, 'Coffee Box');
+  assert.equal(find('[tether-bind="metafield:custom.origin"]').textContent, 'Ethiopia');
+  assert.match(find('#price').textContent, /30/);
+  assert.match(find('#sub-price').textContent, /27/);
+  assert.equal(find('#savings').textContent, '10%');
+  assert.equal(find('#sub-only').style.display, 'none');
   assert.equal(document.querySelectorAll('[tether-plan-value]').length, 2);
-  assert.equal(document.querySelector('[tether-plan-value] [tether-plan-bind="name"]').textContent, 'Every month');
+  assert.equal(find('[tether-plan-value] [tether-plan-bind="name"]').textContent, 'Every month');
 });
 
 test('subscription toggle changes price and adds sellingPlanId to the cart line', async () => {
   localStorage.clear();
   cartLines = [];
   await mountProduct();
-  document.querySelector('#sub').click();
-  assert.match(document.querySelector('#price').textContent, /27/);
-  assert.equal(document.querySelector('#sub').getAttribute('aria-pressed'), 'true');
-  assert.equal(document.querySelector('#sub-only').style.display, '');
-  assert.equal(document.querySelector('#plan-name').textContent, 'Every month');
+  find('#sub').click();
+  assert.match(find('#price').textContent, /27/);
+  assert.equal(find('#sub').getAttribute('aria-pressed'), 'true');
+  assert.equal(find('#sub-only').style.display, '');
+  assert.equal(find('#plan-name').textContent, 'Every month');
 
-  document.querySelector('#add').click();
+  find('#add').click();
   await tick(60);
   const create = calls.find((c) => c.op === 'Tether_cartCreate');
   assert.ok(create, 'cartCreate called');
@@ -161,10 +170,10 @@ test('subscription toggle changes price and adds sellingPlanId to the cart line'
   assert.equal(create.variables.input.buyerIdentity.countryCode, 'NL');
   assert.match(create.query, /@inContext\(country: NL\)/);
 
-  assert.equal(document.querySelector('#count').textContent, '1');
-  assert.equal(document.querySelector('.plan').textContent, 'Every month');
-  assert.notEqual(document.querySelector('.sub').style.display, 'none');
-  assert.ok(document.querySelector('[tether-cart-drawer]').classList.contains('is-open'));
+  assert.equal(find('#count').textContent, '1');
+  assert.equal(find('.plan').textContent, 'Every month');
+  assert.notEqual(find('.sub').style.display, 'none');
+  assert.ok(find('[tether-cart-drawer]').classList.contains('is-open'));
 });
 
 test('picking a plan the variant lacks falls back to a plan it has', async () => {
@@ -180,8 +189,8 @@ test('one-time add has no sellingPlanId; lines can switch plan and be removed', 
   localStorage.clear();
   cartLines = [];
   await mountProduct();
-  document.querySelector('#one').click();
-  document.querySelector('#add').click();
+  find('#one').click();
+  find('#add').click();
   await tick(60);
   assert.equal(calls.find((c) => c.op === 'Tether_cartCreate').variables.input.lines[0].sellingPlanId, undefined);
 
@@ -192,7 +201,7 @@ test('one-time add has no sellingPlanId; lines can switch plan and be removed', 
   await Tether.cart.updateLine('gid://shopify/CartLine/1', { sellingPlanId: null });
   assert.equal(calls.at(-1).variables.lines[0].sellingPlanId, null);
 
-  document.querySelector('.rm').click();
+  find('.rm').click();
   await tick(60);
   assert.equal(Tether.cart.count, 0);
 });
@@ -208,7 +217,7 @@ test('group add sends all scopes in one request with _group attribute', async ()
   </div>`;
   Tether.mount(document);
   await tick();
-  document.querySelector('#g').click();
+  find('#g').click();
   await tick(60);
   const create = calls.filter((c) => c.op === 'Tether_cartCreate').at(-1);
   assert.equal(create.variables.input.lines.length, 2);
@@ -221,7 +230,7 @@ test('binds on the product root itself (card link)', async () => {
     '<a href="#" tether-product="coffee-box" tether-bind="link"><span tether-bind="title"></span></a>';
   Tether.mount(document);
   await tick();
-  assert.equal(document.querySelector('a').getAttribute('href'), '/product/coffee-box');
+  assert.equal(find('a').getAttribute('href'), '/product/coffee-box');
 });
 
 test('image:N binds the nth product image, background for non-img', async () => {
@@ -229,8 +238,8 @@ test('image:N binds the nth product image, background for non-img', async () => 
     '<div tether-product="coffee-box"><div id="bg" tether-bind="image:1"></div><img id="i9" tether-bind="image:9"></div>';
   Tether.mount(document);
   await tick();
-  assert.match(document.querySelector('#bg').style.backgroundImage, /a\.jpg/);
-  assert.match(document.querySelector('#i9').getAttribute('src'), /a\.jpg/);
+  assert.match(find('#bg').style.backgroundImage, /a\.jpg/);
+  assert.match(find('#i9').getAttribute('src') ?? '', /a\.jpg/);
 });
 
 test('a custom prefix reads its own attributes', async () => {
@@ -238,7 +247,7 @@ test('a custom prefix reads its own attributes', async () => {
   document.body.innerHTML = '<div wfs-product="coffee-box"><h2 wfs-bind="title"></h2></div>';
   Tether.mount(document);
   await tick();
-  assert.equal(document.querySelector('h2').textContent, 'Coffee Box');
+  assert.equal(find('h2').textContent, 'Coffee Box');
   await Tether.init({ domain: 'shop.test', token: 't', autoMount: false });
 });
 

@@ -178,4 +178,5 @@ export function barbaPreset(options: BarbaPresetOptions = {}): BarbaPresetConfig
   };
 }
 
+/** @alias `barbaPreset`, for `import barbaPreset from '@occluze/tether/presets/barba'`. */
 export default barbaPreset;

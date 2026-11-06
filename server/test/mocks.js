@@ -1,5 +1,10 @@
 // In-memory fake Shopify Admin API + Webflow Data API v2 behind one fetch().
+import assert from 'node:assert/strict';
 
+/**
+ * @param {number} n
+ * @param {Record<string, unknown>} [over] Fields that replace the defaults.
+ */
 export function shopifyProduct(n, over = {}) {
   return {
     id: `gid://shopify/Product/${n}`,
@@ -48,6 +53,13 @@ export function shopifyProduct(n, over = {}) {
   };
 }
 
+/** @typedef {ReturnType<typeof shopifyProduct>} MockProduct */
+/** @typedef {{ id: string, isArchived?: boolean, isDraft?: boolean, fieldData: Record<string, any> }} MockItem */
+
+/**
+ * @param {{ products?: MockProduct[], items?: MockItem[], failCreateFor?: string | null, rateLimitOnce?: boolean,
+ *   maxFirst?: number }} [options]
+ */
 export function createMockApis({
   products = [],
   items = [],
@@ -55,8 +67,11 @@ export function createMockApis({
   rateLimitOnce = false,
   maxFirst = Infinity,
 } = {}) {
-  const shop = { products: new Map(products.map((p) => [p.id, p])), webhooks: [] };
+  /** @type {{ id: string, topic: string, uri: string }[]} */
+  const webhooks = [];
+  const shop = { products: new Map(products.map((p) => [p.id, p])), webhooks };
   const wf = { items: new Map(items.map((it) => [it.id, it])), live: new Set(), nextId: 1 };
+  /** @type {{ host: string, method: string, path: string, body: any, headers: HeadersInit | undefined }[]} */
   const calls = [];
   let limited = !rateLimitOnce;
   const flags = { failPublish: false };
@@ -214,3 +229,20 @@ export const baseConfig = {
 
 export const env = { SHOPIFY_ADMIN_TOKEN: 'shpat_test', WEBFLOW_TOKEN: 'wf_test', SHOPIFY_WEBHOOK_SECRET: 'whsec' };
 export const instantSleep = async () => {};
+
+/** A Worker context for requests that hand nothing to `waitUntil`. */
+export const noWaitUntil = {
+  waitUntil() {
+    throw new Error('unexpected waitUntil');
+  },
+};
+
+/**
+ * @param {{ steps: import('../src/check/steps.ts').CheckStep[] }} report A `/check` report.
+ * @param {string} title
+ */
+export function checkStep(report, title) {
+  const step = report.steps.find((s) => s.title === title);
+  assert.ok(step, `no "${title}" step`);
+  return step;
+}

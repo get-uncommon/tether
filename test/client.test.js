@@ -1,6 +1,20 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { withContext, request, TetherError } from '../src/client.ts';
+import { resolveConfig } from '../src/config.ts';
+import { graphqlRequest, jsonResponse } from './fixtures.js';
+
+/**
+ * A store's settings for `request`, with no cache and no retries.
+ *
+ * @param {string} domain
+ * @param {typeof fetch} [fetch]
+ * @returns {import('../src/client.ts').StorefrontConfig}
+ */
+const storefront = (domain, fetch) => ({
+  ...resolveConfig({ domain, token: 't', maxAge: 0, retries: 0 }),
+  ...(fetch ? { fetch } : {}),
+});
 
 const QUERY = 'query TetherProduct($handle: String!) { product(handle: $handle) { id } }';
 
@@ -23,25 +37,14 @@ test('withContext leaves out a country or language that is not a code, so page i
 
 test('a token without inventory access costs one extra request per store, then Tether writes queries without the field', async () => {
   const queries = [];
-  const conf = {
-    domain: 'no-inventory.test',
-    token: 't',
-    apiVersion: '2026-07',
-    maxAge: 0,
-    retries: 0,
-    fetch: async (url, init) => {
-      const { query } = JSON.parse(init.body);
-      queries.push(query);
-      if (query.includes('quantityAvailable')) {
-        return {
-          ok: true,
-          status: 200,
-          json: async () => ({ errors: [{ message: 'Access denied for quantityAvailable field.' }] }),
-        };
-      }
-      return { ok: true, status: 200, json: async () => ({ data: { product: { id: '1' } } }) };
-    },
-  };
+  const conf = storefront('no-inventory.test', async (_url, init) => {
+    const { query } = graphqlRequest(init);
+    queries.push(query);
+    if (query.includes('quantityAvailable')) {
+      return jsonResponse({ errors: [{ message: 'Access denied for quantityAvailable field.' }] });
+    }
+    return jsonResponse({ data: { product: { id: '1' } } });
+  });
   const accessSeen = [];
   const query = (access) => {
     accessSeen.push(access.inventory);
@@ -67,8 +70,7 @@ test('a token without inventory access costs one extra request per store, then T
 });
 
 test('an answer that is not in the GraphQL shape is a TetherError, not a crash', async () => {
-  const conf = { domain: 'odd.test', token: 't', apiVersion: '2026-07', maxAge: 0, retries: 0 };
-  const answering = (body) => ({ ...conf, fetch: async () => ({ ok: true, status: 200, json: async () => body }) });
+  const answering = (body) => storefront('odd.test', async () => jsonResponse(body));
   await assert.rejects(request(answering({ errors: 'boom' }), '{ shop { name } }'), {
     name: 'TetherError',
     message: 'Invalid response (200)',
@@ -85,17 +87,16 @@ test('an answer that is not in the GraphQL shape is a TetherError, not a crash',
 });
 
 test('request errors are TetherErrors with a code', async () => {
-  const conf = { domain: 'down.test', token: 't', apiVersion: '2026-07', maxAge: 0, retries: 0 };
-  await assert.rejects(request({ ...conf, domain: '' }, '{ shop { name } }'), {
+  await assert.rejects(request(storefront(''), '{ shop { name } }'), {
     name: 'TetherError',
     code: 'NOT_CONFIGURED',
   });
   const offline = async () => {
     throw new TypeError('fetch failed');
   };
-  await assert.rejects(request({ ...conf, fetch: offline }, '{ shop { name } }'), { code: 'NETWORK' });
-  const unauthorized = async () => ({ ok: false, status: 401, json: async () => ({}) });
-  const error = await request({ ...conf, fetch: unauthorized }, '{ shop { name } }').catch((e) => e);
+  await assert.rejects(request(storefront('down.test', offline), '{ shop { name } }'), { code: 'NETWORK' });
+  const unauthorized = async () => jsonResponse({}, 401);
+  const error = await request(storefront('down.test', unauthorized), '{ shop { name } }').catch((e) => e);
   assert.ok(error instanceof TetherError);
   assert.equal(error.code, 'HTTP_401');
   assert.equal(error.status, 401);

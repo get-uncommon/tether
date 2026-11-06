@@ -17,7 +17,7 @@ import {
 
 export { MARKET_SOURCES } from './config-sections.ts';
 import { toCountry, toLanguage } from './market-codes.ts';
-import type { ApiVersion } from './api-version.ts';
+import type { ApiVersion } from '../server/src/shared/api-versions.ts';
 import type { ShopDomain } from './config-sections.ts';
 import type { Money } from './shopify-values.ts';
 import type { CountryCode, LanguageCode } from './market-codes.ts';
@@ -167,8 +167,7 @@ export type TetherOptions = {
 export const DEFAULTS: Readonly<TetherConfig> = {
   domain: '',
   token: '',
-  // A dated version: test/config.test.js checks it with `isQuarterlyVersion`.
-  apiVersion: STOREFRONT_API_VERSION as ApiVersion,
+  apiVersion: STOREFRONT_API_VERSION,
   country: undefined,
   language: undefined,
   locale: undefined,

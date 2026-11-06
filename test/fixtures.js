@@ -1,3 +1,5 @@
+import assert from 'node:assert/strict';
+
 const money = (amount, currencyCode = 'EUR') => ({ amount: String(amount), currencyCode });
 
 export const PLAN_MONTH = 'gid://shopify/SellingPlan/111';
@@ -28,6 +30,7 @@ const variant = (id, size, allocations, available = true) => ({
   sellingPlanAllocations: { nodes: allocations },
 });
 
+/** @type {import('../src/fragments.ts').Product} */
 export const product = {
   id: 'gid://shopify/Product/1',
   handle: 'coffee-box',
@@ -178,6 +181,7 @@ const apparelVariant = (id, size, color, overrides = {}) => ({
 
 // Two options, no plans: S/Red is sold out, M/Blue doesn't exist, S/Blue is on sale and low in stock, M/Red is on
 // backorder.
+/** @type {import('../src/fragments.ts').Product} */
 export const apparel = {
   ...product,
   id: 'gid://shopify/Product/2',
@@ -224,4 +228,75 @@ export function captureTetherWarnings() {
     else warn(...args);
   };
   return captured;
+}
+
+/**
+ * @param {unknown} body Sent as JSON.
+ * @param {number} [status]
+ */
+export const jsonResponse = (body, status = 200) =>
+  new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
+
+/**
+ * The GraphQL request a fake Storefront API received.
+ *
+ * @param {RequestInit | undefined} init The fetch's options.
+ * @returns {{ query: string; variables: Record<string, any> }}
+ */
+export function graphqlRequest(init) {
+  assert.ok(typeof init?.body === 'string', 'a GraphQL request has a JSON body');
+  return JSON.parse(init.body);
+}
+
+/**
+ * @param {string} query A GraphQL document.
+ * @returns {string} The name of its operation.
+ */
+export function operationName(query) {
+  const match = /(?:query|mutation)\s+(\w+)/.exec(query);
+  assert.ok(match, 'the operation has a name');
+  return match[1];
+}
+
+/**
+ * @param {Event} event One of Tether's events, which are `CustomEvent`s of the page's window.
+ */
+export function detailOf(event) {
+  assert.ok(event instanceof CustomEvent, `${event.type} is a CustomEvent`);
+  return event.detail;
+}
+
+/**
+ * @param {Element} element
+ * @returns {element is HTMLElement} True for an HTML element of the element's own window.
+ */
+const isHtmlElement = (element) => {
+  const view = element.ownerDocument.defaultView;
+  return view !== null && element instanceof view.HTMLElement;
+};
+
+/**
+ * The HTML element `selector` finds in `root`; the test fails when there is none.
+ *
+ * @param {string} selector
+ * @param {ParentNode} [root]
+ */
+export function find(selector, root = document) {
+  const element = root.querySelector(selector);
+  assert.ok(element, `nothing matches ${selector}`);
+  assert.ok(isHtmlElement(element), `${selector} is not an HTML element`);
+  return element;
+}
+
+/**
+ * The HTML elements `selector` finds in `root`; the test fails when one is not an HTML element.
+ *
+ * @param {string} selector
+ * @param {ParentNode} [root]
+ */
+export function findAll(selector, root = document) {
+  return [...root.querySelectorAll(selector)].map((element) => {
+    assert.ok(isHtmlElement(element), `${selector} is not an HTML element`);
+    return element;
+  });
 }
