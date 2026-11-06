@@ -1,5 +1,45 @@
 # Changelog
 
+## 0.7.3 (unreleased)
+
+- **Breaking (types):** `Tether.query()` and the server's `query()` answer `Promise<object>` and
+  take no type argument: Tether checks only that the answer is an object, so a type argument
+  promised more than was checked. **Upgrade:** code that passed one (`query<MyShape>(…)`) checks the
+  fields it reads. Documented usage (`Tether.query(text)`, `query(graphql, variables)`) is
+  unchanged.
+- Fix (sync Worker): a reconcile whose Webflow publish fails, or leaves items out, retries every
+  product of the run on the next one, those from the retry list included. Before, every page but the
+  last stayed unpublished.
+- Fix (sync Worker): a reconcile stopped mid-page continues right after the last product it did,
+  using Shopify's cursor, so a product edited between runs is no longer skipped. A position saved by
+  an earlier release is resumed from the start of its page.
+- Fix (sync Worker): products Webflow refuses to publish, after a webhook or in an import, are
+  retried or reported as failures instead of being dropped silently.
+- Fix (sync Worker): every `POST /reconcile` checks the Shopify webhooks and registers again any
+  that Shopify deleted, and `/check` points there.
+- Fix (customer accounts): a token refresh that finishes after a logout no longer restores the
+  session (a new KV key, `tether-account:ended:<hash>`, marks ended sessions).
+- Fix (Node sync): `serve` and a cron `reconcile` sharing `.tether-sync-state.json` no longer lose
+  each other's writes (a lock file, `.tether-sync-state.json.lock`).
+- Sync Worker updates: a managed file or folder a release no longer ships is removed from the copy
+  instead of staying behind, and a release missing the files the update workflow runs is refused
+  before anything changes. A copy without a `TETHER_VERSION` file records the minor it updated to,
+  and a copy whose own version is outside its `TETHER_VERSION` range is warned on every run instead
+  of reporting up to date. These come with the updater in this release, so they apply from a copy's
+  next update after installing 0.7.3.
+- Sync Worker copies git-ignore the updater's `.tether-update-*` work folder (a failed rollback
+  keeps it for a restore by hand); copies get this with this release.
+- Releases: the GitHub Release no longer carries `tether.esm.js`, which needs the `esm/` folder the
+  Release doesn't ship; take the ES module build from npm. The release workflow refuses a tag whose
+  commit isn't on `main` (or on its `release/X.Y` branch when that exists) before publishing
+  anything, since copies refuse such a tag and it would block every copy in its range.
+- Types: `tether:cart-updated`'s `reason` is the exported `CartUpdateReason` (`load`, `add`,
+  `update`, `remove`, `note`, `attributes`, `discount`, `buyer-identity`, `pending`, `settled`), and
+  the reference lists when each one fires.
+- Fix: a hook option (`onError`, `formatMoney`, `warningText`, `onCartOpen`, …) that isn't a
+  function logs the warning the reference promises and is ignored, instead of being dropped
+  silently.
+
 ## 0.7.2 (2026-11-06)
 
 - Fix: a 2xx answer carrying Shopify's `INTERNAL_SERVER_ERROR`, or GraphQL errors without `data` for

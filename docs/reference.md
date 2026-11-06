@@ -411,7 +411,7 @@ const scope = Tether.getScope(el);
 scope.selectPlan('Every month'); scope.setPurchase('one-time');
 scope.purchase;  // { kind: 'subscription', planId } or { kind: 'one-time', offeredPlanId } (read-only)
 
-Tether.query(`query { shop { name } }`);          // anything else in the Storefront API
+Tether.query(`query { shop { name } }`);          // anything else in the Storefront API: `data`, as an object to check
 Tether.plans.planSavings(variant, planId);        // selling plan helpers
 
 Tether.on('cart-updated', ({ cart }) => {});
@@ -429,6 +429,19 @@ Events (on `document`, prefixed `tether:`): `ready`, `product-ready`, `variant-c
 `Tether.on(name, fn)` takes only these names, and calls `fn` only for the events Tether dispatched:
 another script's `tether:cart-updated`, whatever its detail, doesn't reach it. A plain
 `document.addEventListener('tether:…')` hears every event of that name, so check its detail yourself.
+
+`cart-updated` carries `{ cart, reason }`, and `reason` (the `CartUpdateReason` type) is one of:
+
+| `reason`                                           | When                                                                                                                             |
+| -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `load`                                             | the saved cart loaded, failed to load, was loaded again after an unclear failure, or was forgotten (`Tether.cart.forgetSaved()`) |
+| `add`, `update`, `remove`                          | Shopify answered an add, a line change or a removal                                                                              |
+| `note`, `attributes`, `discount`, `buyer-identity` | Shopify answered `setNote`, `setAttributes`, a discount change or `setBuyerIdentity`                                             |
+| `pending`                                          | a quick `+`/`-` click shows its quantity before Shopify has it                                                                   |
+| `settled`                                          | the last request of those clicks is done                                                                                         |
+
+A cart UI that redraws on every `cart-updated` can skip `pending` and `settled` when it only cares
+about what Shopify has.
 
 ## Config
 
@@ -573,10 +586,28 @@ npm run release -- X.Y.Z --push
 ```
 
 It bumps the version everywhere (packages, `VERSION`, the sync, README pins, `server/TETHER_VERSION`
-for a new minor), builds, runs the tests and the live smoke test, commits, tags and pushes. The
-`release` workflow then publishes to npm with provenance (npm trusted publishing, no token in the
-repo) and creates the GitHub Release with the files. jsDelivr serves the tag immediately, and
-deployed sync Workers pick it up through their Update Tether action within their range.
+for a new minor), builds, runs `npm run check` and the live smoke test, commits, tags and pushes.
+The `release` workflow then runs on the tag, in this order:
+
+1. It refuses a tag whose commit isn't in main's history (deployed sync Workers install only
+   those), or, when the tag's `release/X.Y` branch exists, isn't on that branch.
+2. It checks that the committed `dist/` is a fresh build, and runs the gate and the smoke test again.
+3. It creates the GitHub Release, with the browser scripts and `tether-server-X.Y.Z.tar.gz`, the
+   sync Worker's `server/` folder, attested by the workflow. Deployed sync Workers install only that
+   file, and pick the release up through their Update Tether action within their range. The ES
+   module build (`tether.esm.js` and `esm/`) is left out of the Release: bundlers take it from npm.
+4. It publishes to npm with provenance (npm trusted publishing, no token in the repo). It comes
+   last, so a failed publish doesn't hold back the Workers, and can be run again on its own.
+
+jsDelivr serves the tag immediately.
+
+**Maintenance releases:** a fix for an older minor line X.Y is released from its branch
+`release/X.Y`, made once from that line's last tag (`git push origin vX.Y.Z:refs/heads/release/X.Y`)
+and given `scripts/release.ts` and `.github/workflows/release.yml` from main, since a tag runs the
+workflow at its own commit. Check out `origin/release/X.Y` and run the same command. The script also
+records the release commit in main's history, by a merge commit that changes only main's
+`CHANGELOG.md`, and pushes the branch, main and the tag together. The release isn't GitHub's latest
+release, and goes to npm under the `latest-X.Y` dist-tag instead of `latest`.
 
 ## Subscriptions: what Shopify handles, not Tether
 
