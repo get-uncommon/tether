@@ -295,7 +295,23 @@ test('me / orders: only for the allowed origin, with the cookie', async () => {
   assert.equal(data.loggedIn, true);
   assert.equal(data.customer.email, 'ada@x.test');
   assert.ok(!JSON.stringify(data).includes('access-'), 'no token in answers');
-  assert.equal((await (await run(req('/orders?first=5', { origin: SITE, cookie }))).json()).orders[0].name, '#1001');
+  const { orders } = await (await run(req('/orders?first=5', { origin: SITE, cookie }))).json();
+  assert.deepEqual(
+    orders,
+    [
+      {
+        id: 'o1',
+        name: '#1001',
+        processedAt: null,
+        financialStatus: null,
+        fulfillmentStatus: null,
+        statusPageUrl: null,
+        totalPrice: { amount: '10.0', currencyCode: 'EUR' },
+        lineItems: { nodes: [] },
+      },
+    ],
+    'the parsed order the browser reads, every field present',
+  );
   const same = new Request(`${WORKER}${BASE}/me`, { headers: { Cookie: cookie, 'Sec-Fetch-Site': 'same-origin' } });
   assert.equal((await (await run(same)).json()).loggedIn, true, 'same-origin GET without Origin');
   const cross = new Request(`${WORKER}${BASE}/me`, { headers: { Cookie: cookie, 'Sec-Fetch-Site': 'cross-site' } });

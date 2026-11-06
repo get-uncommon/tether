@@ -32,6 +32,50 @@
   `account: { server: '/_tether/account' }`. Code that called `Tether.account.query()` uses the
   fixed functions (`customer()`, `orders()`, `order()`, …) instead. Sites already on
   `account.server` only drop the removed options, which are ignored.
+- **Breaking (product scope):** `scope.purchase` is the purchase itself,
+  `{ kind: 'subscription', planId }` or `{ kind: 'one-time', offeredPlanId }` (the plan offered next
+  to the one-time price, `null` without plans), and is read-only. `scope.planId` and assigning
+  `scope.purchase` / `scope.planId` are removed. **Upgrade:** read `scope.purchase.kind` where the
+  code compared `scope.purchase` to a string, `scope.plan?.id` (or the union's `planId`) for the
+  plan, and change it with `scope.setPurchase(mode)` and `scope.selectPlan(ref)`.
+- **Breaking (cart):** `Tether.cart.setCheckoutResolver(fn | null)` replaces
+  `setCustomer({ accessToken, beforeCheckout })` and the `customerAccessToken` and `beforeCheckout`
+  properties: the function answers a logged-in customer's checkout URL for the cart (`null` uses the
+  cart's own), and that URL opens with `logged_in=true`. New carts no longer carry a
+  `customerAccessToken` (the Worker links the cart at checkout). `Tether.cart.lastError` is
+  read-only, and the undocumented `Tether.cart._commit()` is removed. Types: `CustomerLink` is gone.
+  **Upgrade:** the account part sets the resolver itself; only code that called `setCustomer` or
+  wrote those properties changes, to `setCheckoutResolver`.
+- **Breaking (errors):** the codes `NOT_ALLOWED`, `SESSION_ENDED` and `TOKEN_FAILED`, which nothing
+  raises since accounts run through the Worker, are removed, and `TetherError.code` is exactly
+  `TetherErrorCode` (Shopify's own codes for refused input are on `userErrors`). **Upgrade:** drop
+  checks for those codes.
+- **Breaking (sync Worker):** `GET /_tether/account/orders` answers the orders as the browser reads
+  them (every selected field present, `null` when Shopify leaves it out, only the selected fields),
+  read by the same module (`server/src/shared/account-orders.js`) in the Worker and the browser. An
+  order without an id makes the route answer 502 instead of sending it on. **Upgrade:** none for
+  sites using `Tether.account.orders()`; code reading `/orders` itself gets the same fields.
+- **Breaking (types):** the Shopify objects are typed exactly as Tether's queries select them:
+  `ShopifyProduct`, `ShopifyVariant`, `ShopifyCart` and `ShopifyCartLine` have no index signature
+  and no optional fields Shopify always sends, a cart line's `merchandise` is `ShopifyCartVariant`,
+  `ShopifySellingPlan` always has its `group`, and the new `ShopifySellingPlanNode`,
+  `ShopifySellingPlanGroup`, `ShopifySellingPlanAllocation`, `ShopifyMetafield`,
+  `SellingPlanAdjustmentValue`, `PlanAdjustment`, `ProductWithPlans` and `VariantWithPlans` name the
+  rest. `Tether.plans` takes what each helper reads and answers typed allocations and adjustments.
+  `InitialState` declares `unavailable`. The Astro integration's `hooks` is typed as the
+  `astro:config:setup` hook it registers. **Upgrade:** code that read fields Tether doesn't query
+  through the index signature reads them from its own `Tether.query()` result instead.
+- **Breaking (server):** `initialState(product)` throws a `TetherError` for a product without
+  variants (Shopify always sends at least one), so its non-null overload holds; `initialState(null)`
+  is still `null`. **Upgrade:** none for Shopify data.
+- Customer accounts: on start the core removes the tokens Tether 0.6's browser-mode accounts left in
+  `sessionStorage` / `localStorage` (`<prefix>:account:<domain>`, `<prefix>:account-login:<domain>`),
+  so a full-scope refresh token doesn't stay behind. This cleanup is removed again in 0.8.0.
+- Sync Worker: a repeated webhook delivery is also dropped across the Worker's isolates in a data
+  centre, through Cloudflare's Cache API (`caches.open('tether-webhook-deliveries')`, kept six
+  hours, free and without KV writes). Node keeps the in-process check only.
+- Sync CLI: the `Webflow requests` count is right with Webflow and `DEPLOY_HOOK_URL` together (it
+  stayed at 0).
 - **Breaking (sync Worker):** customer accounts need `ACCOUNT_SECRET` (24+ random characters); the
   session key no longer falls back to `SYNC_SECRET`, the `/reconcile` and `/check` password.
   Without it the account routes answer 503 and log `account setup ACCOUNT_SECRET is not set`, and
@@ -85,8 +129,7 @@
 - Astro integration: `createStorefront()`'s own options in a shared `shop.config.js` (`siteUrl`,
   `pageSize`, `fetch`) are left out of the page; any other unknown option warns at build time.
 - Types: the `.d.ts` files are checked against the source's JSDoc types (`npm run test:types`).
-  Fixed drift: `TetherError.code` keeps its union (`TetherErrorCode | (string & {})`) and the
-  constructor takes typed `errors`/`userErrors`/`code`; `Tether.config` is `ResolvedTetherConfig`;
+  Fixed drift: the `TetherError` constructor takes typed `errors`/`userErrors`/`code`; `Tether.config` is `ResolvedTetherConfig`;
   `query()` defaults to `unknown` and `on(name: string)` passes `unknown`
   instead of `any`; `onError` receives `unknown` (a handler may still type it narrower); cart
   changes that can answer without a cart return `ShopifyCart | null` and `checkout()` the checkout
@@ -105,7 +148,8 @@
   change:** a core on another origin loads its parts with CORS (jsDelivr sends the headers; a
   self-hosted copy on another domain must too). Parts from a `partsUrl` load without a hash.
 - Security (sync Worker): a repeated webhook delivery (same `X-Shopify-Webhook-Id`) is dropped
-  within the Worker instance, after the signature and shop checks.
+  within the Worker instance and across the data centre (see above), after the signature and shop
+  checks.
 - Security (sync Worker): a new login ends the session the browser already had. A failed login,
   callback or logout step sends the visitor back to the site with `?account=error` (and clears the
   login cookies) instead of a raw 502 answer.

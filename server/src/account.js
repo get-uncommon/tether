@@ -14,7 +14,7 @@
 /** @import { ExpiringStore, MemoryEntries } from './account/kv.js' */
 
 import { authorizeUrl } from './account/authorize.js';
-import { randomToken } from './shared/base64url.js';
+import { randomToken } from './base64url.js';
 import { isRecord } from './shared/json.js';
 import { open, seal } from './crypto.js';
 import { messageOf } from './util.js';

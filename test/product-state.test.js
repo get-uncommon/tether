@@ -142,9 +142,9 @@ for (const { name, product: p, server: options, browser, expected } of CASES) {
 
     assert.equal(scope.variant.id, st.variant.id, 'variant');
     assert.deepEqual({ ...scope.selected }, st.selected, 'selected');
-    assert.equal(scope.purchase, st.purchase, 'purchase');
+    assert.equal(scope.purchase.kind, st.purchase, 'purchase');
     assert.equal(scope.isSubscription, st.plan !== null, 'bought on a plan');
-    if (st.plan) assert.equal(scope.planId, st.plan.id, 'plan');
+    if (st.plan) assert.equal(scope.plan?.id, st.plan.id, 'plan');
 
     assert.equal(document.getElementById('price').textContent, server.formatMoney(st.price, LOCALE), 'price');
     const compare = st.compareAtPrice ? server.formatMoney(st.compareAtPrice, LOCALE) : '';
@@ -194,7 +194,7 @@ test('initialState() keeps its shape: plain data plus isUnavailable()', () => {
   assert.deepEqual(Object.keys(st.show).sort(), [...SHOW_KEYS].sort());
   assert.deepEqual(Object.keys(st.plans[0]).sort(), ['available', 'id', 'name', 'price', 'savings', 'selected']);
   assert.equal(server.initialState(null), null);
-  assert.equal(server.initialState({ ...product, variants: { nodes: [] } }), null);
+  assert.throws(() => server.initialState({ ...product, variants: { nodes: [] } }), /has no variants/);
 });
 
 test('purchase: a product without plans is bought once, whatever is wanted', () => {
@@ -251,28 +251,27 @@ test('purchase: subscribing on a variant that is not on the plan buys the line o
   });
 });
 
-test('purchase: the scope switches only to what the product allows, and keeps legacy fields in step', async () => {
+test('purchase: the scope switches only to what the product allows', async () => {
   const tee = await mountScope(apparel);
   let changes = 0;
   tee.root.addEventListener('tether:variant-changed', () => {
     changes += 1;
   });
   tee.setPurchase('subscription');
-  assert.equal(tee.purchase, 'one-time');
-  assert.equal(tee.planId, null);
+  assert.deepEqual(tee.purchase, { kind: 'one-time', offeredPlanId: null });
   assert.equal(changes, 0, 'nothing changed, nothing rendered');
 
   const coffee = await mountScope(product);
   coffee.select('Size', '1kg');
   coffee.selectPlan(PLAN_MONTH);
-  assert.equal(coffee.purchase, 'subscription');
-  assert.equal(coffee.planId, PLAN_2MONTH, '1kg is only on the 2-month plan');
+  assert.deepEqual(coffee.purchase, { kind: 'subscription', planId: PLAN_2MONTH }, '1kg is only on the 2-month plan');
   assert.equal(coffee.getLine().sellingPlanId, PLAN_2MONTH);
-  coffee.purchase = 'one-time';
+  coffee.setPurchase('one-time');
+  assert.deepEqual(coffee.purchase, { kind: 'one-time', offeredPlanId: PLAN_2MONTH }, 'the plan stays offered');
   assert.equal(coffee.isSubscription, false);
   assert.equal(coffee.getLine().sellingPlanId, undefined);
-  coffee.planId = 'gid://shopify/SellingPlan/9';
-  assert.equal(coffee.planId, PLAN_2MONTH, 'an unknown plan becomes one the variant is on');
+  coffee.selectPlan('gid://shopify/SellingPlan/9');
+  assert.equal(coffee.purchase.kind, 'one-time', 'an unknown plan changes nothing');
 });
 
 test("money: amounts are computed in the currency's smallest unit, without float remainders", () => {

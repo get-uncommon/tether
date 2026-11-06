@@ -17,7 +17,7 @@ Object.assign(globalThis, {
 const { configure } = await import('../src/config.js');
 const { Cart } = await import('../src/cart.js');
 const account = await import('../src/account.js');
-const { forgetServerLogin } = await import('../src/account/server-client.js');
+const { forgetServerLogin, serverCheckoutUrl } = await import('../src/account/server-client.js');
 
 const CART_KEY = 'tether:cart:shop.test';
 const SERVER = { server: '/_tether/account' };
@@ -65,7 +65,7 @@ beforeEach(() => {
   localStorage.clear();
   sessionStorage.clear();
   reported.length = 0;
-  Cart.setCustomer({ accessToken: null, beforeCheckout: null });
+  Cart.setCheckoutResolver(null);
   document.body.innerHTML = '';
   forgetServerLogin();
   window.history.replaceState(null, '', '/account');
@@ -102,8 +102,8 @@ test('a 401 is a logout, not a failure; a failing checkout link is left to the c
   assert.deepEqual(await account.orders(), []);
   assert.equal(reported.length, 0);
   localStorage.setItem(CART_KEY, 'gid://shopify/Cart/1');
-  await account.mountAccount(document);
-  await assert.rejects(Cart.beforeCheckout(), /Shopify is down/);
+  await assert.rejects(serverCheckoutUrl(), /Shopify is down/);
+  assert.equal(reported.length, 0, 'the cart reports it, when checkout asks');
 });
 
 for (const [outcome, events] of [

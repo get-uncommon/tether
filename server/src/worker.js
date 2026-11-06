@@ -31,6 +31,7 @@ import { handleAccount } from './account.js';
 /** @typedef {Parameters<typeof createApp>[0]} SyncConfig */
 /** @typedef {typeof fetch} Fetch */
 /** @typedef {import('./store.js').Store} Store */
+/** @typedef {import('./webhook.js').DeliveryCache} DeliveryCache */
 
 const consoleLog = {
   info: console.log,
@@ -130,6 +131,23 @@ async function check(setup, request, env, url) {
   return Response.json(body, { status: report.ok ? 200 : 503 });
 }
 
+/** The Cache API cache that remembers accepted webhook deliveries for every isolate of the data centre. */
+const DELIVERY_CACHE = 'tether-webhook-deliveries';
+
+/**
+ * @returns {Promise<DeliveryCache | null>} `null` where the runtime has no Cache API (Node runs this Worker in the
+ *   tests), or when it can't be opened, which is logged: the isolate's own ids still drop repeats.
+ */
+async function openDeliveryCache() {
+  if (typeof caches === 'undefined') return null;
+  try {
+    return await caches.open(DELIVERY_CACHE);
+  } catch (error) {
+    console.warn(`webhook: the delivery cache is not available (${messageOf(error)})`);
+    return null;
+  }
+}
+
 /** @param {WorkerSetup} setup @param {Request} request @param {WorkerEnv} env @param {ExecutionContext} context */
 async function webhook(setup, request, env, context) {
   const { sleep } = setup;
@@ -143,6 +161,7 @@ async function webhook(setup, request, env, context) {
     secrets: app.webhookSecrets,
     shopDomain: app.config.shopify.domain,
     log: consoleLog,
+    deliveries: await openDeliveryCache(),
     ...(sleep ? { sleep } : {}),
   });
   if (task) context.waitUntil(task);

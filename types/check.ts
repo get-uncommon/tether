@@ -37,6 +37,30 @@ createStorefront({ domian: 'x.myshopify.com' });
 const env: Record<string, string> = {};
 createStorefront({ ...env, country: 'NL' }); // import.meta.env-style spreads still work
 tetherAstro({ country: 'NL', inject: true });
+
+// Astro 5's `AstroIntegration`, as far as the integration has to fit it (astro isn't installed here).
+type DeepPartial<T> = { [P in keyof T]?: T[P] extends object ? DeepPartial<T[P]> : T[P] };
+interface AstroLikeConfig {
+  root: URL;
+  env: { schema: Record<string, { type: 'string'; context: 'client' | 'server'; access: 'public' | 'secret' }> };
+}
+interface AstroLikeIntegration {
+  name: string;
+  hooks: {
+    'astro:config:setup'?: (options: {
+      config: AstroLikeConfig;
+      command: 'dev' | 'build' | 'preview' | 'sync';
+      isRestart: boolean;
+      updateConfig: (newConfig: DeepPartial<AstroLikeConfig>) => AstroLikeConfig;
+      addWatchFile: (path: URL | string) => void;
+      injectScript: (stage: 'before-hydration' | 'head-inline' | 'page' | 'page-ssr', content: string) => void;
+      logger: { info(message: string): void; warn(message: string): void; error(message: string): void };
+    }) => void | Promise<void>;
+    'astro:build:done'?: (options: { dir: URL }) => void | Promise<void>;
+  };
+}
+const integration: AstroLikeIntegration = tetherAstro();
+void integration;
 // @ts-expect-error: functions can't go through the integration
 tetherAstro({ onError: () => {} });
 const unsub: () => void = Tether.cart.subscribe((cart, { count }) => console.log(cart?.id, count));
@@ -100,8 +124,8 @@ function cartSummary(status: CartStatus): string {
   }
 }
 void cartSummary(Tether.cart.status);
-Tether.cart.setCustomer({ accessToken: null });
-Tether.cart.setCustomer({ beforeCheckout: async () => null });
+Tether.cart.setCheckoutResolver(null);
+Tether.cart.setCheckoutResolver(async () => null);
 async function accountAndMarkets() {
   const loggedIn: boolean = await Tether.account.isLoggedIn();
   await Tether.account.render(document);

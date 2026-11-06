@@ -1,4 +1,4 @@
-// Regression tests for the 0.3.0 review: query cost, cursor progress, publish commits,
+// The sync under load and failure: query cost, cursor progress, publish commits,
 // concurrent creates, subrequest budget, caches, file store, auth.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';

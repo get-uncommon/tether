@@ -19,7 +19,6 @@
   ],
   "project": ["src/**/*.js", "server/src/**/*.js", "server/bin/*.js", "server/scripts/*.mjs", "scripts/*.mjs"],
   "ignoreBinaries": ["tsc"],
-  "ignoreDependencies": ["astro"],
   "rules": {
     "duplicates": "off"
   }

@@ -7,7 +7,7 @@ import { isHttpsUrl } from '../shopify-values.js';
 import { formatDate, formatMoney, get, qsa, repeat, sel, setImage, setText } from '../dom.js';
 import { ownValue, showIn } from './markup.js';
 import { fillLines } from './order-lines.js';
-/** @import { AccountOrder } from './answers.js' */
+/** @import { AccountOrder } from '../../server/src/shared/account-orders.js' */
 
 /** How many orders `orders()` answers, and a `tether-orders` list shows, without being told. */
 export const DEFAULT_ORDER_COUNT = 10;

@@ -10,8 +10,8 @@ import { field, isRecord } from '../server/src/shared/json.js';
 /** @import { CountryCode, LanguageCode } from './market-codes.js' */
 
 /**
- * @typedef {'NOT_FOUND' | 'NETWORK' | 'NOT_CONFIGURED' | 'NOT_LOGGED_IN' | 'NOT_ALLOWED' | 'INVALID'
- *   | 'INVALID_COUNTRY' | 'INVALID_DISCOUNT' | 'SESSION_ENDED' | 'TOKEN_FAILED' | 'ERROR' | `HTTP_${number}`}
+ * @typedef {'NOT_FOUND' | 'NETWORK' | 'NOT_CONFIGURED' | 'NOT_LOGGED_IN' | 'INVALID' | 'INVALID_COUNTRY'
+ *   | 'INVALID_DISCOUNT' | 'ERROR' | `HTTP_${number}`}
  *   TetherErrorCode
  */
 /** @typedef {{ message: string, extensions?: { code?: string } }} GraphQLError */

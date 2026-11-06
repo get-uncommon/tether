@@ -1,7 +1,8 @@
-// The JSON helpers in server/src/shared/, and the parsers of Shopify's login answers.
+// The JSON helpers and the order reader in server/src/shared/, and the parsers of Shopify's login answers.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { asList, textOrNull } from '../src/shared/json.js';
+import { readOrders } from '../src/shared/account-orders.js';
 import { expiresInSeconds, tokenAnswer, tokenRefusal } from '../src/account/token-answer.js';
 import { accountEndpoints, DiscoveryError, graphqlEndpoint, wellKnownUrl } from '../src/account/discovery.js';
 import { checkIdTokenClaims } from '../src/account/id-token-claims.js';
@@ -10,6 +11,44 @@ test('textOrNull: a non-empty string, else null; asList: an array, else empty', 
   assert.deepEqual(['a', '', null, 3, undefined].map(textOrNull), ['a', null, null, null, null]);
   assert.deepEqual(asList([1]), [1]);
   assert.deepEqual(asList({ 0: 1 }), []);
+});
+
+test('readOrders: the fields the orders document selects, null when missing; an order without an id is refused', () => {
+  const reading = readOrders([
+    {
+      id: 'gid://shopify/Order/1',
+      name: '#1',
+      extra: 'dropped',
+      totalPrice: { amount: '5.0' },
+      lineItems: { nodes: [{ title: 'Tee', quantity: 2, image: { url: 'https://cdn.shopify.com/t.jpg' } }] },
+    },
+  ]);
+  assert.deepEqual(reading, {
+    kind: 'read',
+    orders: [
+      {
+        id: 'gid://shopify/Order/1',
+        name: '#1',
+        processedAt: null,
+        financialStatus: null,
+        fulfillmentStatus: null,
+        statusPageUrl: null,
+        totalPrice: null,
+        lineItems: {
+          nodes: [
+            {
+              title: 'Tee',
+              variantTitle: null,
+              quantity: 2,
+              image: { url: 'https://cdn.shopify.com/t.jpg', altText: null },
+            },
+          ],
+        },
+      },
+    ],
+  });
+  assert.deepEqual(readOrders('not a list'), { kind: 'read', orders: [] });
+  assert.deepEqual(readOrders([{ name: '#2' }]), { kind: 'missing-id' });
 });
 
 test('token answers: expires_in as a number or numeric string, refusals by their error code', () => {

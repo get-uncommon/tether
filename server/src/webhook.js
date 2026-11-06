@@ -6,8 +6,9 @@
  * A signed webhook replayed later is harmless: no webhook changes anything by itself. Each one only makes the sync ask
  * Shopify for the product's current state, and the sync writes to Webflow and KV only when that state differs from
  * what it last wrote. A replay therefore costs Shopify reads and subrequests, never a wrong write. Repeats of one
- * delivery within an isolate are dropped by their `X-Shopify-Webhook-Id` without any KV write, because KV's free plan
- * allows only 1,000 writes a day.
+ * delivery are dropped by their `X-Shopify-Webhook-Id` without any KV write, because KV's free plan allows only 1,000
+ * writes a day: first by the ids this isolate accepted, then, in a Worker, by Cloudflare's Cache API, which every
+ * isolate of the data centre shares and which costs nothing.
  */
 import { readCapped, streamChunks } from './capped-body.js';
 import { verifyShopifyHmac } from './hmac.js';
@@ -31,6 +32,14 @@ const RECENT_WEBHOOK_IDS = 500;
 const recentWebhookIds = new Set();
 
 /**
+ * How long the data centre's cache remembers a delivery. Shopify sends a repeat within minutes of the first; a later
+ * replay only costs reads (see the file's comment).
+ */
+const DELIVERY_TTL_SECONDS = 6 * 60 * 60;
+
+/** @typedef {Pick<Cache, 'match' | 'put'>} DeliveryCache The Cache API, as the Worker's `caches.open()` gives it. */
+
+/**
  * @typedef {object} WebhookSync The part of the sync engine a webhook drives.
  * @property {(id: string) => Promise<{ action: string }>} syncById
  * @property {(id: string, error: unknown) => Promise<void>} queueRetry
@@ -49,6 +58,8 @@ const recentWebhookIds = new Set();
  * @property {string[]} secrets Keys a webhook may be signed with (the app's client secret, an admin webhook key).
  * @property {string} shopDomain The store's `.myshopify.com` domain; webhooks from any other shop are refused.
  * @property {WebhookLog} [log]
+ * @property {DeliveryCache | null} [deliveries] The deliveries other isolates accepted; without it (in Node), only this
+ *   process's are known.
  * @property {number} [createDelayMs]
  * @property {(ms: number) => Promise<void>} [sleep]
  */
@@ -71,13 +82,11 @@ async function readCappedBody(request) {
 }
 
 /**
- * Whether this isolate already accepted the delivery with this id, remembering it otherwise. A webhook without an id
- * is never a repeat.
+ * Whether this isolate already accepted the delivery with this id, remembering it otherwise.
  *
- * @param {string | null} webhookId
+ * @param {string} webhookId
  */
-function isRepeat(webhookId) {
-  if (!webhookId) return false;
+function isRepeatInIsolate(webhookId) {
   if (recentWebhookIds.has(webhookId)) return true;
   recentWebhookIds.add(webhookId);
   if (recentWebhookIds.size > RECENT_WEBHOOK_IDS) {
@@ -88,6 +97,40 @@ function isRepeat(webhookId) {
     }
   }
   return false;
+}
+
+/**
+ * Whether another isolate already accepted the delivery, remembering it otherwise. A cache that fails is logged and
+ * the delivery synced: a repeat costs only reads.
+ *
+ * @param {string} webhookId
+ * @param {DeliveryCache} deliveries
+ * @param {string} requestUrl The cache keys are URLs, on the Worker's own host.
+ * @param {WebhookLog | undefined} log
+ */
+async function isRepeatInDataCentre(webhookId, deliveries, requestUrl, log) {
+  const key = new Request(new URL(`/_tether/webhook-delivery/${encodeURIComponent(webhookId)}`, requestUrl));
+  try {
+    if (await deliveries.match(key)) return true;
+    await deliveries.put(key, new Response('1', { headers: { 'Cache-Control': `max-age=${DELIVERY_TTL_SECONDS}` } }));
+  } catch (error) {
+    log?.warn?.(`webhook ${webhookId}: the delivery cache failed (${messageOf(error)}); synced anyway`);
+  }
+  return false;
+}
+
+/**
+ * Whether the delivery with this id was accepted already. A webhook without an id is never a repeat.
+ *
+ * @param {Request} request
+ * @param {DeliveryCache | null} deliveries
+ * @param {WebhookLog | undefined} log
+ */
+async function isRepeat(request, deliveries, log) {
+  const webhookId = request.headers.get('x-shopify-webhook-id');
+  if (!webhookId) return false;
+  if (isRepeatInIsolate(webhookId)) return true;
+  return deliveries ? isRepeatInDataCentre(webhookId, deliveries, request.url, log) : false;
 }
 
 /**
@@ -111,7 +154,7 @@ function productIdOf(payload) {
  */
 export async function handleShopifyWebhook(
   request,
-  { sync, secrets, shopDomain, log, createDelayMs = CREATE_DELAY_MS, sleep = realSleep },
+  { sync, secrets, shopDomain, log, deliveries = null, createDelayMs = CREATE_DELAY_MS, sleep = realSleep },
 ) {
   if (request.method !== 'POST') return { response: reply(405, 'POST only') };
   const raw = await readCappedBody(request);
@@ -140,7 +183,7 @@ export async function handleShopifyWebhook(
   }
   const id = productIdOf(payload);
   if (!id) return { response: reply(400, 'no product id') };
-  if (isRepeat(request.headers.get('x-shopify-webhook-id'))) return { response: reply(200, 'already received') };
+  if (await isRepeat(request, deliveries, log)) return { response: reply(200, 'already received') };
 
   const work = async () => {
     try {

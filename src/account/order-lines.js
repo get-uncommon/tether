@@ -5,7 +5,7 @@
  */
 import { formatMoney, get, qsa, repeat, sel, setImage, setText } from '../dom.js';
 import { bindsIn, ownValue, showIn } from './markup.js';
-/** @import { AccountOrderLine } from './answers.js' */
+/** @import { AccountOrderLine } from '../../server/src/shared/account-orders.js' */
 /** @import { OrderDetailLine } from './page-answers.js' */
 
 /**

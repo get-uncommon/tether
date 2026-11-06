@@ -1,4 +1,4 @@
-/** Base64url (RFC 4648 §5, no padding) and random tokens, for the browser's and the Worker's OAuth code. */
+/** Base64url (RFC 4648 §5, no padding) and random tokens, for the Worker's OAuth code, cookies and sealed values. */
 
 /** @param {ArrayBuffer | Uint8Array} bytes */
 export function toBase64Url(bytes) {

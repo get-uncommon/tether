@@ -2,7 +2,7 @@
  * The login request to Shopify's Customer Account API authorize endpoint (OAuth 2.0 with PKCE and OpenID Connect). The
  * caller keeps its own pending login and cleans the visitor's locale and country before passing them in.
  */
-import { toBase64Url } from '../shared/base64url.js';
+import { toBase64Url } from '../base64url.js';
 
 /** What a login asks for: the id token (`openid`), the email claim, and the whole Customer Account API. */
 const LOGIN_SCOPE = 'openid email customer-account-api:full';

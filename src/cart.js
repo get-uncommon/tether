@@ -16,7 +16,7 @@ import {
   toLineUpdate,
   updateLines,
 } from './cart/mutations.js';
-import { checkout } from './cart/checkout.js';
+import { checkout, setCheckoutResolver } from './cart/checkout.js';
 import { drawers, isOpen, openCart, closeCart, toggleCart, trapFocus } from './cart/drawer.js';
 import {
   announce,
@@ -24,7 +24,6 @@ import {
   commit,
   currentCart,
   currentWarnings,
-  customer,
   enqueue,
   forgetSavedCart,
   keepQuietly,
@@ -32,14 +31,13 @@ import {
   pendingQuantityOf,
   render,
   savedCartId,
-  setFailure,
   settleLoad,
   showLastKnownCount,
   subscribe,
 } from './cart/store.js';
 /** @import { CartWarning } from './config.js' */
 /** @import { Attributes, LineSpec, CartLineInput, LinePatch } from './cart/mutations.js' */
-/** @import { ShopifyCart, ShopifyCartLine, CustomerLink, CartStatus } from './cart/store.js' */
+/** @import { ShopifyCart, ShopifyCartLine, CartStatus } from './cart/store.js' */
 
 export { trapFocus };
 
@@ -165,9 +163,6 @@ export const Cart = {
     if (current.kind !== 'error') return null;
     return current.error instanceof Error ? current.error : new Error(String(current.error));
   },
-  set lastError(error) {
-    setFailure(error);
-  },
   /** @returns {CartWarning[]} Shopify's notes on the last change, a copy. */
   get warnings() {
     return [...currentWarnings()];
@@ -177,30 +172,11 @@ export const Cart = {
     return pendingQuantities;
   },
 
-  /** @returns {string | null} The logged-in customer's Customer Account API token (set by the account part). */
-  get customerAccessToken() {
-    return customer.accessToken;
-  },
-  set customerAccessToken(token) {
-    customer.accessToken = token || null;
-  },
-  /** @returns {(() => Promise<string | null>) | null} The account's own checkout URL (set by the account part). */
-  get beforeCheckout() {
-    return customer.beforeCheckout;
-  },
-  set beforeCheckout(fetchUrl) {
-    customer.beforeCheckout = typeof fetchUrl === 'function' ? fetchUrl : null;
-  },
   /**
-   * Links the cart to a logged-in customer, or unlinks it with `null`s. Carts created from now on belong to the
-   * customer; `beforeCheckout` gives the checkout URL (`null` from it uses the cart's).
-   *
-   * @param {Partial<CustomerLink>} link Fields left out keep their value.
+   * Sets where a logged-in customer checks out, or clears it with `null`: the account part's resolver answers the
+   * customer's checkout URL for the cart (`null` uses the cart's own).
    */
-  setCustomer(link) {
-    if (link.accessToken !== undefined) customer.accessToken = link.accessToken;
-    if (link.beforeCheckout !== undefined) customer.beforeCheckout = link.beforeCheckout;
-  },
+  setCheckoutResolver,
 
   /**
    * Forgets the saved cart on this device, as if there were none: the page shows an empty cart and
@@ -211,8 +187,6 @@ export const Cart = {
     settleLoad({ kind: 'loaded', cart: null });
   },
 
-  /** Keeps a cart and shows it, as a change does; tests seed the cart with it. */
-  _commit: commit,
   render,
   subscribe,
 
@@ -376,7 +350,7 @@ export const Cart = {
   /**
    * Sets who is buying; a country changes the cart's currency and prices to that market's.
    *
-   * @param {{ countryCode?: string, email?: string, phone?: string, customerAccessToken?: string | null }} buyerIdentity
+   * @param {{ countryCode?: string, email?: string, phone?: string }} buyerIdentity
    * @param {{ create?: boolean }} [options] `create: false` forgets an expired cart instead of creating an empty one.
    * @returns {Promise<ShopifyCart | null>}
    */

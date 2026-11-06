@@ -116,6 +116,7 @@ export interface Storefront {
    * What Tether shows first for this product (variant, price, purchase mode, tether-show conditions),
    * so the server renders the same and nothing flashes. Pass Astro.url.searchParams.get('variant') in SSR.
    */
+  /** Throws a TetherError for a product without variants, which Shopify never sends. */
   initialState(product: ShopifyProduct, opts?: InitialOptions): InitialState;
   initialState(product: ShopifyProduct | null | undefined, opts?: InitialOptions): InitialState | null;
   /** schema.org Product / ProductGroup data for search engines, as a <script type="application/ld+json"> tag. */
@@ -161,6 +162,8 @@ export interface InitialState {
     | 'has-savings',
     boolean
   >;
+  /** Per option, the values without a variant for sale (given the other selected values), as plain data for props. */
+  unavailable: Record<string, string[]>;
   /** true for option values without an available variant: class is-unavailable. */
   isUnavailable(optionName: string, value: string): boolean;
 }

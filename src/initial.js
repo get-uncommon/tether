@@ -4,6 +4,7 @@
  * the ones the browser scope uses.
  */
 import { DEFAULTS } from './config.js';
+import { TetherError } from './client.js';
 import { initialChoice, isValueAvailable, productView } from './product-state.js';
 import { allPlans, allocationFor, planPrice, planSavings } from './selling-plans.js';
 /** @import { Money } from './shopify-values.js' */
@@ -45,16 +46,29 @@ import { allPlans, allocationFor, planPrice, planSavings } from './selling-plans
  */
 
 /**
+ * @overload
+ * @param {Product} product
+ * @param {InitialOptions} [options]
+ * @returns {InitialState}
+ * @throws {TetherError} For a product without variants, which Shopify never sends: every product has one.
+ */
+/**
+ * @overload
  * @param {Product | null | undefined} product
  * @param {InitialOptions} [options]
- * @returns {InitialState | null} `null` without a product or variants.
+ * @returns {InitialState | null} `null` without a product.
+ */
+/**
+ * @param {Product | null | undefined} product
+ * @param {InitialOptions} [options]
+ * @returns {InitialState | null}
  */
 export function initialState(product, options = {}) {
   if (!product) return null;
   const { variant, sellingPlan, defaultPurchase = DEFAULTS.defaultPurchase, lowStock = DEFAULTS.lowStock } = options;
   const choice = initialChoice(product, { variant, sellingPlan, defaultPurchase });
   const view = productView(product, { ...choice, quantity: 1 }, lowStock);
-  if (!view) return null;
+  if (!view) throw new TetherError(`Product ${product.handle} has no variants`);
   const { selected, line } = view;
   const isUnavailable = (/** @type {string} */ name, /** @type {string} */ value) =>
     !isValueAvailable(product, selected, name, value);

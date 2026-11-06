@@ -195,7 +195,16 @@ export function withDeployHook(webflow, hook) {
       return result;
     };
   return {
-    ...webflow,
+    collectionId: webflow.collectionId,
+    // A getter, not a copy: the count goes on rising after this wrapper is made.
+    get requests() {
+      return webflow.requests;
+    },
+    call: webflow.call,
+    getItem: webflow.getItem,
+    getCollection: webflow.getCollection,
+    listAllItems: webflow.listAllItems,
+    publish: webflow.publish,
     createItem: marking(webflow.createItem),
     updateItem: marking(webflow.updateItem),
     deleteItem: marking(webflow.deleteItem),

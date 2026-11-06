@@ -130,6 +130,7 @@ test('Webflow + deploy hook: Webflow is written and a build starts', async () =>
   await app.sync.importAll();
   assert.equal(t.apis.wf.items.size, 2);
   assert.equal(t.hooks.length, 1);
+  assert.ok(app.webflow.requests > 0, 'the request count follows the Webflow client');
 });
 
 test('check in deploy-only mode: no Webflow errors, the hook is validated', async () => {

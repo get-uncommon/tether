@@ -11,6 +11,7 @@
 import { operationCall } from '../shared/account-routes.js';
 import { InputError, ops } from './operations.js';
 import { field, textOrNull } from '../shared/json.js';
+import { readOrders } from '../shared/account-orders.js';
 import { customerQuery, discover, linkCart, UnauthorizedError } from './shopify.js';
 import { CART_ID, jsonResponse, NO_STORE, readJsonObject, SESSION_COOKIE, setCookie } from './http.js';
 
@@ -125,13 +126,13 @@ const CUSTOMER_ROUTES = new Map([
     'GET /orders',
     {
       loggedOut: { status: 401, extra: { orders: [] } },
-      // The nodes are the fields ORDERS_QUERY selects, which the browser reads as they are.
       async answer({ url }, cors, { ask }) {
         const asked = parseInt(url.searchParams.get('first') ?? '', 10) || DEFAULT_ORDERS;
         const first = Math.max(1, Math.min(MAX_ORDERS, asked));
         const data = await ask(ORDERS_QUERY, { first });
-        const list = field(field(field(data, 'customer'), 'orders'), 'nodes') ?? [];
-        return jsonResponse({ loggedIn: true, orders: list }, 200, cors);
+        const reading = readOrders(field(field(field(data, 'customer'), 'orders'), 'nodes'));
+        if (reading.kind === 'missing-id') throw new Error('Shopify answered an order without an id');
+        return jsonResponse({ loggedIn: true, orders: reading.orders }, 200, cors);
       },
     },
   ],

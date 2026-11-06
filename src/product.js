@@ -112,8 +112,8 @@ export class ProductScope {
     });
     /** @type {Selection} */
     this.selected = choice.selected;
-    /** @type {Purchase} */
-    this.purchaseChoice = choice.purchase;
+    /** @type {Purchase} How the visitor buys; `setPurchase` and `selectPlan` change it. */
+    this.purchase = choice.purchase;
     /** @type {ProductVariant | null} */
     this.variant = null;
     this.quantity = has(root, 'quantity') ? Math.max(0, parseInt(get(root, 'quantity') ?? '', 10) || 0) : 1;
@@ -170,30 +170,10 @@ export class ProductScope {
     return options[index]?.name ?? authored;
   }
 
-  /** @returns {'one-time' | 'subscription'} */
-  get purchase() {
-    return this.purchaseChoice.kind;
-  }
-
-  /** @param {string} kind */
-  set purchase(kind) {
-    const wanted = kind === 'subscription' ? 'subscription' : 'one-time';
-    this.purchaseChoice = normalisePurchase(this.product, this.variant, wanted, this.planId);
-  }
-
-  /** @returns {string | null} The plan bought on, or offered while buying once. */
-  get planId() {
-    return purchasePlanId(this.purchaseChoice);
-  }
-
-  /** @param {string | null} planId */
-  set planId(planId) {
-    this.purchaseChoice = normalisePurchase(this.product, this.variant, this.purchase, planId);
-  }
-
   /** @returns {PlanInGroup | null} */
   get plan() {
-    return this.plans.find((plan) => plan.id === this.planId) ?? null;
+    const planId = purchasePlanId(this.purchase);
+    return this.plans.find((plan) => plan.id === planId) ?? null;
   }
 
   /** True when the current variant can be bought on a plan. */
@@ -203,7 +183,7 @@ export class ProductScope {
 
   /** True when the line is bought on a plan: subscribing, and the variant is on the plan. */
   get isSubscription() {
-    return linePurchase(this.purchaseChoice, this.variant).kind === 'subscription';
+    return linePurchase(this.purchase, this.variant).kind === 'subscription';
   }
 
   /** @returns {CartLineInput | null} What would be added to the cart right now. */
@@ -211,7 +191,7 @@ export class ProductScope {
     if (!this.variant) return null;
     /** @type {CartLineInput} */
     const line = { merchandiseId: this.variant.id, quantity: this.quantity };
-    const bought = linePurchase(this.purchaseChoice, this.variant);
+    const bought = linePurchase(this.purchase, this.variant);
     if (bought.kind === 'subscription') line.sellingPlanId = bought.planId;
     const attributes = this.collectAttributes();
     if (attributes.length) line.attributes = attributes;
@@ -273,10 +253,10 @@ export class ProductScope {
   /** @param {string | null} mode `subscription`, else buying once. */
   setPurchase(mode) {
     const kind = mode === 'subscription' ? 'subscription' : 'one-time';
-    const next = normalisePurchase(this.product, this.variant, kind, this.planId);
+    const next = normalisePurchase(this.product, this.variant, kind, purchasePlanId(this.purchase));
     // The product decides when the wanted kind isn't possible (no plans, or a plan required).
-    if (next.kind === this.purchase) return;
-    this.purchaseChoice = next;
+    if (next.kind === this.purchase.kind) return;
+    this.purchase = next;
     this.renderVariant();
   }
 
@@ -284,7 +264,7 @@ export class ProductScope {
   selectPlan(ref) {
     const plan = findPlan(this.product, ref);
     if (!plan) return;
-    this.purchaseChoice = { kind: 'subscription', planId: plan.id };
+    this.purchase = { kind: 'subscription', planId: plan.id };
     this.renderVariant();
   }
 
@@ -326,7 +306,7 @@ export class ProductScope {
   renderVariant() {
     const view = productView(
       this.product,
-      { selected: this.selected, purchase: this.purchaseChoice, quantity: this.quantity },
+      { selected: this.selected, purchase: this.purchase, quantity: this.quantity },
       cfg.lowStock,
     );
     if (!view) {
@@ -335,7 +315,7 @@ export class ProductScope {
     }
     this.variant = view.variant;
     this.selected = view.selected;
-    this.purchaseChoice = view.purchase;
+    this.purchase = view.purchase;
     writeVariant(this, view);
     emit(
       'variant-changed',

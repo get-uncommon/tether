@@ -386,10 +386,13 @@ Tether.cart.setBuyerIdentity({ countryCode: 'DE' });
 Tether.cart.warnings;                             // [{ code, message, target }] from the last change (a copy)
 Tether.cart.open(); Tether.cart.checkout();      // open/close also work without a drawer; checkout() answers the URL
 Tether.cart.subscribe((cart, { count, open, loaded, warnings }) => {});  // your own cart UI
+Tether.cart.setCheckoutResolver(async () => url);  // a logged-in checkout URL (the account part sets it); null clears
 
 const p = await Tether.getProduct('coffee-box');  // batched + cached
 const { products, pageInfo } = await Tether.getProducts({ collection: 'coffee', first: 12 });
-Tether.getScope(el).selectPlan('Every month');
+const scope = Tether.getScope(el);
+scope.selectPlan('Every month'); scope.setPurchase('one-time');
+scope.purchase;  // { kind: 'subscription', planId } or { kind: 'one-time', offeredPlanId } (read-only)
 
 Tether.query(`query { shop { name } }`);          // anything else in the Storefront API
 Tether.plans.planSavings(variant, planId);        // selling plan helpers

@@ -19,7 +19,7 @@ import { jsonLdData, scriptJson } from './storefront/json-ld.js';
 /** @import { TetherConfig, TetherOptions } from './config.js' */
 /** @import { Product } from './fragments.js' */
 /** @import { Money } from './shopify-values.js' */
-/** @import { InitialOptions } from './initial.js' */
+/** @import { InitialOptions, InitialState } from './initial.js' */
 /** @import { JsonLdOptions } from './storefront/json-ld.js' */
 
 export { imageUrl, initialState, formatPercent, formatMoney, productKey };
@@ -171,6 +171,29 @@ export function createStorefront(options = {}) {
     return `<script type="application/ld+json">${scriptJson(jsonLdData(product, jsonLdOptions, site))}</script>`;
   }
 
+  /**
+   * `initialState()` with the storefront's `defaultPurchase` and `lowStock`.
+   *
+   * @overload
+   * @param {Product} product
+   * @param {InitialOptions} [initialOptions]
+   * @returns {InitialState}
+   */
+  /**
+   * @overload
+   * @param {Product | null | undefined} product
+   * @param {InitialOptions} [initialOptions]
+   * @returns {InitialState | null}
+   */
+  /**
+   * @param {Product | null | undefined} product
+   * @param {InitialOptions} [initialOptions]
+   * @returns {InitialState | null}
+   */
+  function storefrontInitialState(product, initialOptions = {}) {
+    return initialState(product, { defaultPurchase: conf.defaultPurchase, lowStock: conf.lowStock, ...initialOptions });
+  }
+
   return {
     config: conf,
     /**
@@ -200,12 +223,7 @@ export function createStorefront(options = {}) {
      * @param {JsonLdOptions} [jsonLdOptions]
      */
     jsonLdData: (product, jsonLdOptions = {}) => jsonLdData(product, jsonLdOptions, site),
-    /**
-     * @param {Product | null | undefined} product
-     * @param {InitialOptions} [initialOptions]
-     */
-    initialState: (product, initialOptions = {}) =>
-      initialState(product, { defaultPurchase: conf.defaultPurchase, lowStock: conf.lowStock, ...initialOptions }),
+    initialState: storefrontInitialState,
     /**
      * @param {string} handle
      * @param {{ productPath?: string, id?: string }} [urlOptions]

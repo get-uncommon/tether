@@ -3,21 +3,20 @@
  * rules are answers.js's: every selected field is kept, a missing one reads as `null`, and the ids the pages act on
  * are required.
  */
-import { field, isRecord, textOrNull } from '../../server/src/shared/json.js';
 import {
   countOrZero,
-  imageOrNull,
+  field,
+  isRecord,
   listOf,
-  moneyOrNull,
   nodesOf,
   numberOrNull,
-  requiredId,
   textList,
-  toOrderLine,
-  unexpected,
-} from './answers.js';
+  textOrNull,
+} from '../../server/src/shared/json.js';
+import { imageOrNull, moneyOrNull, toOrderLine } from '../../server/src/shared/account-orders.js';
+import { requiredId, unexpected } from './answers.js';
 /** @import { Money } from '../shopify-values.js' */
-/** @import { AccountImage, AccountOrderLine } from './answers.js' */
+/** @import { AccountImage, AccountOrderLine } from '../../server/src/shared/account-orders.js' */
 
 /**
  * @typedef {object} MailingAddress An address as the documents select it.

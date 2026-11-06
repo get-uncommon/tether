@@ -44,3 +44,37 @@ export function asList(value) {
 export function textOrNull(value) {
   return typeof value === 'string' && value !== '' ? value : null;
 }
+
+/**
+ * @param {unknown} value
+ * @returns {number | null}
+ */
+export const numberOrNull = (value) => (typeof value === 'number' && Number.isFinite(value) ? value : null);
+
+/**
+ * @param {unknown} value
+ * @returns {number} A count Shopify always sends; 0 for an answer without it.
+ */
+export const countOrZero = (value) => numberOrNull(value) ?? 0;
+
+/**
+ * @template T
+ * @param {unknown} value
+ * @param {(item: unknown) => T} read
+ * @returns {T[]}
+ */
+export const listOf = (value, read) => asList(value).map((item) => read(item));
+
+/**
+ * @template T
+ * @param {unknown} connection A GraphQL connection: `{ nodes: [...] }`.
+ * @param {(item: unknown) => T} read
+ * @returns {{ nodes: T[] }}
+ */
+export const nodesOf = (connection, read) => ({ nodes: listOf(field(connection, 'nodes'), read) });
+
+/**
+ * @param {unknown} value
+ * @returns {string[]} The non-empty strings of a list.
+ */
+export const textList = (value) => listOf(value, textOrNull).filter((line) => line !== null);

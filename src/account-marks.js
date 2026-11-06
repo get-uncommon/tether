@@ -20,6 +20,31 @@ import { cfg } from './config.js';
 export const hintKey = () => `${cfg.prefix}:account-hint:${cfg.domain}`;
 
 /**
+ * Removes a key from both storage areas. Accessing storage throws where the browser blocks it (private mode, site data
+ * turned off), and then there is nothing stored to remove.
+ *
+ * @param {string} key
+ */
+function removeStoredIfAllowed(key) {
+  try {
+    window.sessionStorage.removeItem(key);
+    window.localStorage.removeItem(key);
+  } catch {
+    // Storage is blocked: see the function's comment.
+  }
+}
+
+/**
+ * Removes the customer tokens and pending login that Tether 0.6's browser-mode accounts kept in this browser. The
+ * session held a refresh token with the customer's full scope, so it must not stay behind once accounts run through
+ * the Worker. TODO: remove in 0.8.0, when no visitor's browser still holds a 0.6 session.
+ */
+export function forgetBrowserModeTokens() {
+  removeStoredIfAllowed(`${cfg.prefix}:account:${cfg.domain}`);
+  removeStoredIfAllowed(`${cfg.prefix}:account-login:${cfg.domain}`);
+}
+
+/**
  * @param {string | null} value
  * @returns {value is LoginOutcome}
  */

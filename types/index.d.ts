@@ -1,6 +1,6 @@
 // Type definitions for @occluze/tether
-// Shopify Storefront API objects are typed loosely (`ShopifyProduct` etc.): Tether passes them
-// through as Shopify returns them. See https://shopify.dev/docs/api/storefront for the full shape.
+// The Shopify Storefront API objects are the fields Tether's own queries select, as Shopify sends them.
+// See https://shopify.dev/docs/api/storefront for each field.
 
 export interface Money {
   amount: string;
@@ -8,37 +8,71 @@ export interface Money {
 }
 export interface ShopifyImage {
   url: string;
-  altText?: string | null;
-  width?: number | null;
-  height?: number | null;
+  altText: string | null;
+  width: number | null;
+  height: number | null;
 }
 
-export interface ShopifySellingPlan {
+export type SellingPlanAdjustmentValue =
+  | { __typename: 'SellingPlanPercentagePriceAdjustment'; adjustmentPercentage: number }
+  | { __typename: 'SellingPlanFixedAmountPriceAdjustment'; adjustmentAmount: Money }
+  | { __typename: 'SellingPlanFixedPriceAdjustment'; price: Money };
+
+/** A selling plan as its group lists it. */
+export interface ShopifySellingPlanNode {
   id: string;
   name: string;
-  description?: string | null;
-  recurringDeliveries?: boolean;
+  description: string | null;
+  recurringDeliveries: boolean;
   options: { name: string; value: string }[];
-  priceAdjustments: unknown[];
-  /** Added by Tether: the plan's group. */
-  group?: { name: string; [k: string]: unknown };
+  priceAdjustments: { orderCount: number | null; adjustmentValue: SellingPlanAdjustmentValue }[];
+}
+
+export interface ShopifySellingPlanGroup {
+  name: string;
+  appName: string | null;
+  options: { name: string; values: string[] }[];
+  sellingPlans: { nodes: ShopifySellingPlanNode[] };
+}
+
+/** A plan with the group it belongs to: what the plan helpers and a product scope hand out. */
+export interface ShopifySellingPlan extends ShopifySellingPlanNode {
+  group: ShopifySellingPlanGroup;
+}
+
+/** A variant's price on one plan. */
+export interface ShopifySellingPlanAllocation {
+  sellingPlan: { id: string };
+  /** What the customer pays at checkout (more for a prepaid plan). */
+  checkoutChargeAmount: Money;
+  remainingBalanceChargeAmount: Money;
+  priceAdjustments: { price: Money; compareAtPrice: Money; perDeliveryPrice: Money; unitPrice: Money | null }[];
 }
 
 export interface ShopifyVariant {
   id: string;
   title: string;
   availableForSale: boolean;
-  currentlyNotInStock?: boolean;
+  currentlyNotInStock: boolean;
+  /** Absent when the store's token can't read inventory. */
   quantityAvailable?: number | null;
-  sku?: string | null;
-  barcode?: string | null;
+  sku: string | null;
+  barcode: string | null;
   selectedOptions: { name: string; value: string }[];
-  image?: ShopifyImage | null;
+  image: ShopifyImage | null;
   price: Money;
-  compareAtPrice?: Money | null;
-  unitPrice?: Money | null;
-  sellingPlanAllocations?: { nodes: unknown[] };
-  [k: string]: unknown;
+  compareAtPrice: Money | null;
+  unitPrice: Money | null;
+  sellingPlanAllocations: { nodes: ShopifySellingPlanAllocation[] };
+}
+
+export interface ShopifyMetafield {
+  namespace: string;
+  key: string;
+  type: string;
+  value: string;
+  /** A file reference's image. */
+  reference: { image?: ShopifyImage } | null;
 }
 
 export interface ShopifyProduct {
@@ -47,49 +81,78 @@ export interface ShopifyProduct {
   title: string;
   description: string;
   descriptionHtml: string;
-  productType?: string;
-  vendor?: string;
+  productType: string;
+  vendor: string;
   tags: string[];
   availableForSale: boolean;
-  requiresSellingPlan?: boolean;
-  featuredImage?: ShopifyImage | null;
+  publishedAt: string | null;
+  onlineStoreUrl: string | null;
+  requiresSellingPlan: boolean;
+  seo: { title: string | null; description: string | null };
+  featuredImage: ShopifyImage | null;
   images: { nodes: ShopifyImage[] };
+  options: { name: string; optionValues: { name: string; swatch: unknown }[] }[];
   priceRange: { minVariantPrice: Money; maxVariantPrice: Money };
-  options: { name: string; optionValues: { name: string; swatch?: unknown }[] }[];
+  compareAtPriceRange: { minVariantPrice: Money; maxVariantPrice: Money };
+  /** Present when `metafields` are configured; null for one that isn't set. */
+  metafields?: (ShopifyMetafield | null)[];
+  sellingPlanGroups: { nodes: ShopifySellingPlanGroup[] };
   variants: { nodes: ShopifyVariant[] };
-  sellingPlanGroups?: { nodes: unknown[] };
-  metafields?: ({ namespace: string; key: string; type: string; value: string; reference?: unknown } | null)[];
-  seo?: { title?: string | null; description?: string | null };
-  onlineStoreUrl?: string | null;
-  [k: string]: unknown;
+}
+
+/** A cart line's `merchandise`. */
+export interface ShopifyCartVariant {
+  id: string;
+  title: string;
+  sku: string | null;
+  availableForSale: boolean;
+  requiresShipping: boolean;
+  /** Absent when the store's token can't read inventory. */
+  quantityAvailable?: number | null;
+  image: ShopifyImage | null;
+  price: Money;
+  compareAtPrice: Money | null;
+  selectedOptions: { name: string; value: string }[];
+  product: { id: string; title: string; handle: string; vendor: string; featuredImage: ShopifyImage | null };
 }
 
 export interface ShopifyCartLine {
   id: string;
   quantity: number;
-  merchandise: ShopifyVariant & { product: Pick<ShopifyProduct, 'id' | 'handle' | 'title'> & Record<string, unknown> };
-  sellingPlanAllocation?: { sellingPlan: { id: string; name: string } } | null;
-  attributes?: { key: string; value: string }[];
+  attributes: { key: string; value: string }[];
   cost: {
     totalAmount: Money;
     subtotalAmount: Money;
     amountPerQuantity: Money;
-    compareAtAmountPerQuantity?: Money | null;
+    compareAtAmountPerQuantity: Money | null;
   };
-  [k: string]: unknown;
+  discountAllocations: { discountedAmount: Money }[];
+  sellingPlanAllocation: {
+    sellingPlan: Omit<ShopifySellingPlanNode, 'priceAdjustments'>;
+    checkoutChargeAmount: Money;
+    priceAdjustments: { price: Money; compareAtPrice: Money; perDeliveryPrice: Money }[];
+  } | null;
+  merchandise: ShopifyCartVariant;
+  /** Only on a bundle. */
+  lineComponents?: {
+    id: string;
+    quantity: number;
+    merchandise: { id: string; title: string; product: { title: string; handle: string } };
+  }[];
 }
 
 export interface ShopifyCart {
   id: string;
   checkoutUrl: string;
   totalQuantity: number;
-  note?: string | null;
-  lines: { nodes: ShopifyCartLine[] };
-  cost: Record<string, Money | null | undefined>;
-  discountCodes: { code: string; applicable: boolean }[];
+  note: string | null;
+  createdAt: string;
+  updatedAt: string;
   attributes: { key: string; value: string }[];
-  buyerIdentity?: { countryCode?: string | null; email?: string | null };
-  [k: string]: unknown;
+  buyerIdentity: { countryCode: string | null; email: string | null };
+  discountCodes: { code: string; applicable: boolean }[];
+  cost: { subtotalAmount: Money; totalAmount: Money; checkoutChargeAmount: Money };
+  lines: { nodes: ShopifyCartLine[] };
 }
 
 export interface MarketsConfig {
@@ -215,19 +278,16 @@ export type TetherErrorCode =
   | 'NETWORK'
   | 'NOT_CONFIGURED'
   | 'NOT_LOGGED_IN'
-  | 'NOT_ALLOWED'
   | 'INVALID'
   | 'INVALID_COUNTRY'
   | 'INVALID_DISCOUNT'
-  | 'SESSION_ENDED'
-  | 'TOKEN_FAILED'
   | 'ERROR'
   | `HTTP_${number}`;
 
 export declare class TetherError extends Error {
   name: 'TetherError';
-  /** One of `TetherErrorCode`, or a code Shopify sent (an account mutation's user error). */
-  code: TetherErrorCode | (string & {});
+  /** Shopify's own codes for refused input are on `userErrors`. */
+  code: TetherErrorCode;
   status?: number;
   errors?: GraphQLError[];
   /** A mutation's user errors (code INVALID for refused account input). */
@@ -278,27 +338,23 @@ export type CartStatus =
   | { kind: 'ready'; cart: ShopifyCart }
   | { kind: 'error'; error: unknown; cart: ShopifyCart | null };
 
-/** The logged-in customer the cart belongs to (set by the account part). */
-export interface CustomerLink {
-  /** The Customer Account API token: carts created from now on belong to the customer. */
-  accessToken: string | null;
-  /** The account's own checkout URL; null from it, or no function, uses the cart's. */
-  beforeCheckout: (() => Promise<string | null>) | null;
-}
-
 export interface Cart {
   readonly status: CartStatus;
   readonly state: ShopifyCart | null;
   /** A copy of the lines: changing it changes nothing in the cart. */
   readonly lines: ShopifyCartLine[];
   readonly count: number;
-  lastError: Error | null;
+  /** The failure of the last load or change, until a change succeeds. */
+  readonly lastError: Error | null;
   /** Shopify's notes on the last change, e.g. less stock than asked (code MERCHANDISE_NOT_ENOUGH_STOCK). */
   readonly warnings: CartWarning[];
   /** true once the saved cart (or the absence of one) is known. */
   readonly loaded: boolean;
-  /** Links the cart to a logged-in customer, or unlinks it with nulls. Fields left out keep their value. */
-  setCustomer(link: Partial<CustomerLink>): void;
+  /**
+   * Where a logged-in customer checks out (set by the account part), or null to clear it: the resolver answers the
+   * customer's checkout URL for the cart, which opens with `logged_in=true`; null from it uses the cart's own URL.
+   */
+  setCheckoutResolver(resolver: (() => Promise<string | null>) | null): void;
   id(): string | null;
   init(): Promise<ShopifyCart | null>;
   /** Forgets the saved cart on this device: the page shows an empty cart (`tether:cart-updated`, reason `load`). */
@@ -346,6 +402,12 @@ export interface Cart {
   ): () => void;
 }
 
+/**
+ * How a product scope's visitor wants to buy. Buying once keeps the plan offered next to the one-time price
+ * (`null` for a product without plans); subscribing names the plan.
+ */
+export type Purchase = { kind: 'one-time'; offeredPlanId: string | null } | { kind: 'subscription'; planId: string };
+
 export interface ProductScope {
   readonly root: HTMLElement;
   product: ShopifyProduct;
@@ -353,8 +415,8 @@ export interface ProductScope {
   selected: Record<string, string>;
   quantity: number;
   plans: ShopifySellingPlan[];
-  purchase: 'one-time' | 'subscription';
-  planId: string | null;
+  /** How the visitor buys; change it with setPurchase() and selectPlan(). */
+  readonly purchase: Purchase;
   readonly plan: ShopifySellingPlan | null;
   readonly isSubscription: boolean;
   readonly subscriptionAvailable: boolean;
@@ -368,23 +430,46 @@ export interface ProductScope {
   update(product: ShopifyProduct): void;
 }
 
+/** What the plan helpers read of a product. */
+export interface ProductWithPlans {
+  sellingPlanGroups?: { nodes: ShopifySellingPlanGroup[] } | null;
+}
+/** What the plan helpers read of a variant. */
+export interface VariantWithPlans {
+  price: Money;
+  sellingPlanAllocations?: { nodes: ShopifySellingPlanAllocation[] } | null;
+}
+export type PlanAdjustment =
+  { type: 'percentage'; value: number } | { type: 'amount'; value: Money } | { type: 'price'; value: Money };
+
 export interface SellingPlanHelpers {
-  allPlans(product: ShopifyProduct): ShopifySellingPlan[];
-  hasPlans(product: ShopifyProduct): boolean;
-  allocationFor(variant: ShopifyVariant, planId: string | null): unknown | null;
-  plansForVariant(product: ShopifyProduct, variant: ShopifyVariant): ShopifySellingPlan[];
-  planPrice(variant: ShopifyVariant, planId: string): Money | null;
-  planCheckoutCharge(variant: ShopifyVariant, planId: string): Money | null;
-  planSavings(variant: ShopifyVariant, planId: string): { amount: Money | null; percentage: number };
-  planAdjustment(
-    plan: ShopifySellingPlan | null | undefined,
-  ): { type: 'percentage' | 'amount' | 'price'; value: number | Money } | null;
-  findPlan(product: ShopifyProduct, ref: string | null | undefined): ShopifySellingPlan | null;
-  toGid(value: string | number, type: string): string | null;
+  allPlans(product: ProductWithPlans | null | undefined): ShopifySellingPlan[];
+  hasPlans(product: ProductWithPlans | null | undefined): boolean;
+  /** null when the variant isn't on the plan. */
+  allocationFor(
+    variant: VariantWithPlans | null | undefined,
+    planId: string | null | undefined,
+  ): ShopifySellingPlanAllocation | null;
+  plansForVariant(
+    product: ProductWithPlans | null | undefined,
+    variant: VariantWithPlans | null | undefined,
+  ): ShopifySellingPlan[];
+  /** The price per delivery on the plan; the one-time price when the variant isn't on it. */
+  planPrice(variant: VariantWithPlans | null | undefined, planId: string | null | undefined): Money | null;
+  planCheckoutCharge(variant: VariantWithPlans | null | undefined, planId: string | null | undefined): Money | null;
+  planSavings(
+    variant: VariantWithPlans | null | undefined,
+    planId: string | null | undefined,
+  ): { amount: Money | null; percentage: number };
+  planAdjustment(plan: Pick<ShopifySellingPlanNode, 'priceAdjustments'> | null | undefined): PlanAdjustment | null;
+  /** By id, numeric id, name or option value (case-insensitive). */
+  findPlan(product: ProductWithPlans | null | undefined, ref: string | null | undefined): ShopifySellingPlan | null;
+  /** The gid of a numeric id; a gid or other value as written; null when empty. */
+  toGid(value: unknown, type: string): string | null;
   GID: {
-    product(v: string | number): string | null;
-    variant(v: string | number): string | null;
-    sellingPlan(v: string | number): string | null;
+    product(value: unknown): string | null;
+    variant(value: unknown): string | null;
+    sellingPlan(value: unknown): string | null;
   };
 }
 

@@ -43,6 +43,12 @@ globalThis.fetch = async (_url, init) => {
 
 const payload = (name, cart, userErrors = []) => ({ data: { [name]: { cart, userErrors, warnings: [] } } });
 const oneLine = (quantity = 1) => cartFrom([{ merchandiseId: VARIANT, quantity }]);
+/** Loads `cart` as the saved cart, the way a page with a cart starts. */
+const loadSaved = async (cart) => {
+  localStorage.setItem(KEY, 'gid://shopify/Cart/abc');
+  answers.TetherCart = () => ({ data: { cart } });
+  await Cart.init();
+};
 const deferred = () => {
   let resolve;
   const promise = new Promise((r) => {
@@ -62,7 +68,7 @@ beforeEach(() => {
   reported.length = 0;
   calls.length = 0;
   answers = {};
-  Cart.setCustomer({ accessToken: null, beforeCheckout: null });
+  Cart.setCheckoutResolver(null);
   document.body.innerHTML = '';
 });
 
@@ -228,12 +234,11 @@ test('isCartGone: the network, the token and other errors keep the saved cart', 
 });
 
 test('checkout: a failing account step is reported and Shopify checkout is used instead', async () => {
-  localStorage.setItem(KEY, 'gid://shopify/Cart/abc');
-  Cart._commit(oneLine(), 'test');
+  await loadSaved(oneLine());
   answers.TetherCheckout = () => ({ data: { cart: { checkoutUrl: 'https://shop.test/checkouts/1' } } });
-  Cart.beforeCheckout = async () => {
+  Cart.setCheckoutResolver(async () => {
     throw new Error('account server down');
-  };
+  });
   const urls = [];
   document.addEventListener('tether:checkout', (e) => urls.push(e.detail.url), { once: true });
   const url = await Cart.checkout('_self');
@@ -246,18 +251,26 @@ test('checkout: a failing account step is reported and Shopify checkout is used 
 });
 
 test("checkout: the account's URL wins, and the cart's unneeded request failing is not a failure", async () => {
-  localStorage.setItem(KEY, 'gid://shopify/Cart/abc');
-  Cart._commit(oneLine(), 'test');
+  await loadSaved(oneLine());
   answers.TetherCheckout = () => ({ errors: [{ message: 'Internal error' }] });
-  Cart.setCustomer({ accessToken: 'tok', beforeCheckout: async () => 'https://shop.test/checkouts/c/2' });
+  Cart.setCheckoutResolver(async () => 'https://shop.test/checkouts/c/2?key=k');
   const url = await Cart.checkout('_self');
-  assert.equal(url, 'https://shop.test/checkouts/c/2?logged_in=true');
+  assert.equal(url, 'https://shop.test/checkouts/c/2?key=k&logged_in=true');
+  assert.equal(reported.length, 0);
+});
+
+test("checkout: null from the account uses the cart's URL, without the login parameter", async () => {
+  await loadSaved(oneLine());
+  answers.TetherCheckout = () => ({ data: { cart: { checkoutUrl: 'https://shop.test/checkouts/1' } } });
+  Cart.setCheckoutResolver(async () => null);
+  assert.equal(await Cart.checkout('_self'), 'https://shop.test/checkouts/1');
+  Cart.setCheckoutResolver(null);
+  assert.equal(await Cart.checkout('_self'), 'https://shop.test/checkouts/1', 'cleared: the cart decides');
   assert.equal(reported.length, 0);
 });
 
 test('checkout: without any checkout URL the failure is reported and nothing opens', async () => {
-  localStorage.setItem(KEY, 'gid://shopify/Cart/abc');
-  Cart._commit(oneLine(), 'test');
+  await loadSaved(oneLine());
   answers.TetherCheckout = () => ({ errors: [{ message: 'Internal error' }] });
   assert.equal(await Cart.checkout('_self'), null);
   assert.deepEqual(
@@ -285,20 +298,11 @@ test('applyDiscount: a refused code is removed again; a failed removal is report
   );
 });
 
-test('customer link: setCustomer and the assignable properties are the same state', async () => {
-  const beforeCheckout = async () => null;
-  Cart.setCustomer({ accessToken: 'tok-1', beforeCheckout });
-  assert.equal(Cart.customerAccessToken, 'tok-1');
-  assert.equal(Cart.beforeCheckout, beforeCheckout);
-  Cart.customerAccessToken = null;
-  Cart.beforeCheckout = undefined;
-  assert.equal(Cart.customerAccessToken, null);
-  assert.equal(Cart.beforeCheckout, null);
-
-  Cart.customerAccessToken = 'tok-2';
-  answers.Tether_cartCreate = (variables) => payload('cartCreate', cartFrom(variables.input.lines));
-  await Cart.add(VARIANT);
-  assert.equal(calls[0].variables.input.buyerIdentity.customerAccessToken, 'tok-2', 'new carts belong to the customer');
+test('lastError is read-only: the store decides it', () => {
+  // Test files are modules, so strict: assigning a getter-only property throws.
+  assert.throws(() => {
+    Cart.lastError = new Error('x');
+  }, TypeError);
 });
 
 test('trapFocus: Tab wraps inside the open drawer and goes in from outside', () => {

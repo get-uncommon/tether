@@ -8,7 +8,7 @@ import { gql, unwrap, TetherError } from '../client.js';
 import { cartFragment } from '../fragments.js';
 import { GID } from '../selling-plans.js';
 import { toAttributes } from '../dom.js';
-import { customer, savedCartId, forgetSavedCart, setWarnings } from './store.js';
+import { savedCartId, forgetSavedCart, setWarnings } from './store.js';
 /** @import { CartWarning } from '../config.js' */
 /** @import { QueryText, UserError } from '../client.js' */
 /** @import { AttributeValue } from '../dom.js' */
@@ -107,17 +107,13 @@ async function send(name, args, inner, variables) {
 }
 
 /**
- * A new cart in the visitor's market, for the logged-in customer if there is one.
+ * A new cart in the visitor's market.
  *
  * @param {Record<string, unknown>} input More of Shopify's `CartInput`, e.g. the first lines.
  * @returns {Promise<ShopifyCart | null>}
  */
 function createCart(input) {
-  const buyerIdentity = {
-    ...(cfg.country ? { countryCode: cfg.country } : {}),
-    ...(customer.accessToken ? { customerAccessToken: customer.accessToken } : {}),
-  };
-  const withIdentity = Object.keys(buyerIdentity).length ? { buyerIdentity, ...input } : input;
+  const withIdentity = cfg.country ? { buyerIdentity: { countryCode: cfg.country }, ...input } : input;
   return send('cartCreate', '$input: CartInput!', 'input: $input', { input: withIdentity });
 }
 

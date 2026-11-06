@@ -170,9 +170,9 @@ test('subscription toggle changes price and adds sellingPlanId to the cart line'
 test('picking a plan the variant lacks falls back to a plan it has', async () => {
   await mountProduct('tether-default-purchase="subscription"');
   const scope = Tether.getScope(document.querySelector('h1'));
-  assert.equal(scope.purchase, 'subscription');
+  assert.equal(scope.purchase.kind, 'subscription');
   scope.select('Size', '1kg');
-  assert.equal(scope.planId, PLAN_2MONTH);
+  assert.deepEqual(scope.purchase, { kind: 'subscription', planId: PLAN_2MONTH });
   assert.equal(scope.getLine().sellingPlanId, PLAN_2MONTH);
 });
 
@@ -233,11 +233,25 @@ test('image:N binds the nth product image, background for non-img', async () => 
   assert.match(document.querySelector('#i9').getAttribute('src'), /a\.jpg/);
 });
 
-test('custom prefix keeps old wfs- markup working', async () => {
+test('a custom prefix reads its own attributes', async () => {
   await Tether.init({ domain: 'shop.test', token: 't', autoMount: false, prefix: 'wfs' });
   document.body.innerHTML = '<div wfs-product="coffee-box"><h2 wfs-bind="title"></h2></div>';
   Tether.mount(document);
   await tick();
   assert.equal(document.querySelector('h2').textContent, 'Coffee Box');
   await Tether.init({ domain: 'shop.test', token: 't', autoMount: false });
+});
+
+test("init removes the customer tokens 0.6's browser-mode accounts left in storage, and nothing else", async () => {
+  const { sessionStorage: session, localStorage: local } = window;
+  session.setItem('tether:account:shop.test', '{"refresh":"r"}');
+  session.setItem('tether:account-login:shop.test', '{"verifier":"v"}');
+  local.setItem('tether:account:shop.test', '{"refresh":"r"}');
+  local.setItem('tether:account-hint:shop.test', '1');
+  await Tether.init({ domain: 'shop.test', token: 't', autoMount: false });
+  assert.equal(session.getItem('tether:account:shop.test'), null);
+  assert.equal(session.getItem('tether:account-login:shop.test'), null);
+  assert.equal(local.getItem('tether:account:shop.test'), null);
+  assert.equal(local.getItem('tether:account-hint:shop.test'), '1', "the Worker login's hint stays");
+  local.removeItem('tether:account-hint:shop.test');
 });

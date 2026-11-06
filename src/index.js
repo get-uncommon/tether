@@ -36,6 +36,7 @@ import {
 } from './mounting.js';
 import { applyStartMarket, setCountry } from './page-market.js';
 import { accountApi, mountAccountIfUsed } from './account-api.js';
+import { forgetBrowserModeTokens } from './account-marks.js';
 import { bindCartControls } from './controls/cart-controls.js';
 import { bindDiscountControls } from './controls/discount.js';
 import { addGroup, bindExtrasControls } from './controls/extras.js';
@@ -256,6 +257,7 @@ export function init(overrides = {}) {
     initPromise = Promise.resolve(null);
     return initPromise;
   }
+  forgetBrowserModeTokens();
   bindControls();
   if (cfg.observe) startObserver();
   if (cfg.analytics && !analyticsQueue) startAnalyticsQueue();

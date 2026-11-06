@@ -6,7 +6,7 @@
 /** @import { ShopifyAccountSettings } from './settings.js' */
 /** @import { Discovery, Fetch } from './shopify.js' */
 
-import { fromBase64Url } from '../shared/base64url.js';
+import { fromBase64Url } from '../base64url.js';
 import { checkIdTokenClaims } from './id-token-claims.js';
 import { asList, field } from '../shared/json.js';
 import { asRecord, responseJsonOrNull } from '../json.js';

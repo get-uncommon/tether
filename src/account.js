@@ -34,7 +34,8 @@ import { DEFAULT_ORDER_COUNT, MAX_ORDER_COUNT, isOrderCount, renderOrderList } f
 import { ownValue } from './account/markup.js';
 import { toAccountOrders } from './account/answers.js';
 import { isLoginOutcome } from './account-marks.js';
-/** @import { AccountCustomer, AccountOrder } from './account/answers.js' */
+/** @import { AccountCustomer } from './account/answers.js' */
+/** @import { AccountOrder } from '../server/src/shared/account-orders.js' */
 /** @import { Parts } from './lazy.js' */
 /** @import { AddressFields, ReturnLine } from './account/operations.js' */
 /** @import { SubscriptionAction } from '../server/src/shared/account-routes.js' */
@@ -295,7 +296,7 @@ export async function mountAccount(root = document) {
   started = true;
   document.addEventListener('click', onClick);
   finishServerLogin();
-  Cart.setCustomer({ beforeCheckout: serverCheckoutUrl });
+  Cart.setCheckoutResolver(serverCheckoutUrl);
   await render(root);
   log('account', isLoggedIn() ? 'logged in' : 'logged out');
 }

@@ -1,16 +1,32 @@
 /**
  * Sending the visitor to Shopify's checkout. The URL comes from Shopify at click time, because the cart's checkout URL
- * changes with its market and customer; a logged-in customer's account part may supply its own (`beforeCheckout`).
+ * changes with its market and customer; the account part resolves a logged-in customer's own (`setCheckoutResolver`).
  */
 import { cfg, reportError } from '../config.js';
 import { TetherError } from '../client.js';
 import { isHttpsUrl } from '../shopify-values.js';
 import { emit } from '../dom.js';
 import { fetchCheckoutUrl } from './mutations.js';
-import { customer, currentCart, savedCartId } from './store.js';
+import { currentCart, savedCartId } from './store.js';
 /** @import { CheckoutTarget } from '../config.js' */
 
 /** @typedef {{ kind: 'url', url: string | null } | { kind: 'failed', error: unknown }} CheckoutUrlAnswer */
+/**
+ * @typedef {() => Promise<string | null>} CheckoutResolver The logged-in customer's checkout URL for the cart;
+ *   `null` when nobody is logged in, so the cart's own checkout URL is used.
+ */
+
+/** @type {CheckoutResolver | null} */
+let resolveAccountCheckout = null;
+
+/**
+ * Sets the account part's checkout URL, or clears it with `null`. A URL it answers opens checkout logged in.
+ *
+ * @param {CheckoutResolver | null} resolver
+ */
+export function setCheckoutResolver(resolver) {
+  resolveAccountCheckout = resolver;
+}
 
 /**
  * @param {string} cartId
@@ -28,9 +44,11 @@ const askCheckoutUrl = (cartId) =>
  *   failure is reported and the cart's own checkout URL is used, which still checks out (without the login).
  */
 async function accountCheckoutUrl() {
-  if (!customer.beforeCheckout) return null;
+  if (!resolveAccountCheckout) return null;
   try {
-    return await customer.beforeCheckout();
+    const url = await resolveAccountCheckout();
+    // Shopify's checkout shows the customer as logged in only with this parameter.
+    return url && `${url}${url.includes('?') ? '&' : '?'}logged_in=true`;
   } catch (error) {
     reportError(error, 'account checkout');
     return null;
@@ -44,15 +62,12 @@ async function accountCheckoutUrl() {
  */
 async function checkoutUrl(cartId) {
   const cartAnswer = askCheckoutUrl(cartId);
-  let url = await accountCheckoutUrl();
-  if (!url) {
-    const answer = await cartAnswer;
-    if (answer.kind === 'failed') throw answer.error;
-    url = answer.url;
-  }
-  if (!url) throw new TetherError('No checkoutUrl (cart empty or expired)');
-  if (!customer.accessToken) return url;
-  return `${url}${url.includes('?') ? '&' : '?'}logged_in=true`;
+  const accountUrl = await accountCheckoutUrl();
+  if (accountUrl) return accountUrl;
+  const answer = await cartAnswer;
+  if (answer.kind === 'failed') throw answer.error;
+  if (!answer.url) throw new TetherError('No checkoutUrl (cart empty or expired)');
+  return answer.url;
 }
 
 /**

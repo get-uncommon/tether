@@ -22,6 +22,8 @@ Object.assign(globalThis, {
 });
 
 const calls = [];
+/** The cart "Shopify" has for the saved id: `seedCart` sets it. */
+let savedCart = null;
 let livePrice = '30'; // what "Shopify" returns now (the server-rendered copy may be older)
 const withPrice = (p, amount) => JSON.parse(JSON.stringify(p).replace(/"amount":"30"/g, `"amount":"${amount}"`));
 globalThis.fetch = async (url, init) => {
@@ -74,7 +76,7 @@ globalThis.fetch = async (url, init) => {
       },
     });
   if (op === 'TetherSearch') return ok({ products: { nodes: [], pageInfo: { hasNextPage: false, endCursor: null } } });
-  if (op === 'TetherCart') return ok({ cart: null });
+  if (op === 'TetherCart') return ok({ cart: variables.id === savedCart?.id ? savedCart : null });
   if (op === 'Tether_cartCreate') return ok({ cartCreate: { cart: cartFrom(variables.input.lines), userErrors: [] } });
   if (op === 'Tether_cartLinesAdd')
     return ok({ cartLinesAdd: { cart: cartFrom([...variables.lines, ...variables.lines]), userErrors: [] } });
@@ -86,6 +88,13 @@ globalThis.fetch = async (url, init) => {
   }
   throw new Error(`unexpected ${op}`);
 };
+
+/** Starts the page with `cart` saved, as a visitor coming back to it. */
+async function seedCart(cart) {
+  savedCart = cart;
+  window.localStorage.setItem(cfg.storageKey, cart.id);
+  await Tether.cart.init();
+}
 
 const tick = (ms = 40) => new Promise((r) => setTimeout(r, ms));
 let Tether;
@@ -413,7 +422,7 @@ test('cart.subscribe hears the saved cart once it has loaded', async () => {
 test('cart: line links keep the chosen variant; checkout is marked disabled while the cart is empty', async () => {
   document.body.innerHTML = `<button id="co" tether-checkout>Checkout</button>
     <div tether-cart-lines><div><a tether-line="url">x</a></div></div>`;
-  Tether.cart._commit(null, 'test');
+  Tether.cart.forgetSaved();
   assert.equal(document.getElementById('co').getAttribute('aria-disabled'), 'true');
   const cart = await Tether.cart.add(product.variants.nodes[0].id, 1);
   assert.ok(cart);
@@ -545,7 +554,7 @@ test('another language: translated option names (Size -> Größe) still match th
 
 test('cart: quick +/+ clicks add up (each builds on the last one asked for), the line is busy meanwhile', async () => {
   const cart = cartFrom([{ merchandiseId: product.variants.nodes[0].id, quantity: 1 }]);
-  Tether.cart._commit(cart, 'test');
+  await seedCart(cart);
   const lineId = cart.lines.nodes[0].id;
   document.body.innerHTML = `<div tether-cart-lines><div><span tether-line="quantity"></span><button tether-line-plus>+</button></div></div>`;
   Tether.cart.render();
@@ -581,7 +590,7 @@ test('cart: + + + - while Shopify answers slowly: the count never steps past the
     return realFetch(url, init);
   };
   try {
-    Tether.cart._commit(cartFrom([{ merchandiseId: product.variants.nodes[0].id, quantity: 1 }]), 'test');
+    await seedCart(cartFrom([{ merchandiseId: product.variants.nodes[0].id, quantity: 1 }]));
     document.body.innerHTML =
       '<span tether-cart-count></span><div tether-cart-lines><div><span tether-line="quantity"></span><button tether-line-plus>+</button><button tether-line-minus>-</button></div></div>';
     Tether.cart.render();
@@ -903,7 +912,7 @@ test('customer accounts: no token in the browser, the Worker does the work', asy
     return realFetch(url, init);
   };
   try {
-    Tether.cart._commit(cartFrom([{ merchandiseId: product.variants.nodes[0].id, quantity: 1 }]), 'test');
+    await seedCart(cartFrom([{ merchandiseId: product.variants.nodes[0].id, quantity: 1 }]));
     await acc.login();
     const to = new URL(nav.pop());
     assert.equal(to.pathname, '/_tether/account/login');
@@ -925,8 +934,8 @@ test('customer accounts: no token in the browser, the Worker does the work', asy
     noOrders = false;
     assert.equal(window.location.search, '', '?account=in removed');
     assert.equal(document.getElementById('n').textContent, 'Ada');
-    const url = await Tether.cart.beforeCheckout();
-    assert.match(url, /checkouts\/c\/1\?logged_in=true/);
+    const url = await Tether.cart.checkout('_self');
+    assert.equal(url, 'https://shop.test/checkouts/c/1?logged_in=true', "the Worker's checkout, logged in");
     const stored = JSON.stringify({ ...window.localStorage }) + JSON.stringify({ ...window.sessionStorage });
     assert.ok(
       !/access|refresh|token/i.test(stored.replace(/account-hint/g, '')),
@@ -937,7 +946,7 @@ test('customer accounts: no token in the browser, the Worker does the work', asy
   } finally {
     globalThis.fetch = realFetch;
     cfg.account = null;
-    Tether.cart.beforeCheckout = undefined;
+    Tether.cart.setCheckoutResolver(null);
     window.history.replaceState(null, '', '/');
   }
 });

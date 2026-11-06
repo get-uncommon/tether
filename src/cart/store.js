@@ -1,6 +1,6 @@
 /**
- * The cart on this page: what Shopify last said about it (`CartStatus`), the quantities quick clicks asked for, the
- * customer it belongs to, and the one queue every change goes through. A change of what the page shows goes through
+ * The cart on this page: what Shopify last said about it (`CartStatus`), the quantities quick clicks asked for and
+ * the one queue every change goes through. A change of what the page shows goes through
  * here, so the document (`renderCart`) and the listeners (`tether:cart-updated`) always see the store's cart.
  */
 import { cfg } from '../config.js';
@@ -73,13 +73,6 @@ import { renderCart, quantityOf, showSavedCount } from './render.js';
 /** @typedef {{ quantity: number }} PendingQuantity What one quick +/- click asked for; a newer click replaces it. */
 
 /**
- * @typedef {object} CustomerLink What the account part sets while a customer is logged in.
- * @property {string | null} accessToken The Customer Account API token: carts created now belong to the customer.
- * @property {(() => Promise<string | null>) | null} beforeCheckout The account's own checkout URL; `null` from it, or
- *   no function, uses the cart's.
- */
-
-/**
  * @typedef {object} CartMeta The second argument of a `subscribe` listener.
  * @property {boolean} open
  * @property {number} count
@@ -95,9 +88,6 @@ let warnings = [];
 
 /** @type {Map<string, PendingQuantity>} Line id → what quick +/- clicks asked for, until Shopify has answered. */
 export const pendingQuantities = new Map();
-
-/** @type {CustomerLink} */
-export const customer = { accessToken: null, beforeCheckout: null };
 
 /** @returns {CartStatus} */
 export const cartStatus = () => status;
@@ -213,16 +203,6 @@ export function commit(cart, reason) {
 export function settleLoad(outcome) {
   status = outcome.kind === 'loaded' ? statusOf(outcome.cart) : { kind: 'error', error: outcome.error, cart: null };
   announce('load');
-}
-
-/**
- * Sets or clears the failure without rendering, for `Tether.cart.lastError`, which the public types declare writable.
- *
- * @param {unknown} error `null` or `undefined` clears it.
- */
-export function setFailure(error) {
-  const cart = currentCart();
-  status = error == null ? statusOf(cart) : { kind: 'error', error, cart };
 }
 
 /** Until the saved cart has loaded, the counts show the count it had on the last page instead of the page's 0. */

@@ -176,7 +176,7 @@ export function serverLoginRedirect({ returnTo, locale }) {
 }
 
 /**
- * The logged-in customer's checkout, for `Cart.beforeCheckout`: the Worker links the cart to the customer and answers
+ * The logged-in customer's checkout, for `Cart.setCheckoutResolver`: the Worker links the cart to the customer and answers
  * with its checkout URL.
  *
  * @returns {Promise<string | null>} `null` when nobody is logged in or the Worker linked no cart, so the cart's own
@@ -188,9 +188,7 @@ export async function serverCheckoutUrl() {
   if (!(await serverLogin()).loggedIn || !cartId) return null;
   const answer = await serverFetch('/cart', { method: 'POST', body: { cartId } });
   if (answer.kind === 'logged-out') return null;
-  const url = textOrNull(answer.data['checkoutUrl']);
-  if (!url) return null;
-  return `${url}${url.includes('?') ? '&' : '?'}logged_in=true`;
+  return textOrNull(answer.data['checkoutUrl']);
 }
 
 /**

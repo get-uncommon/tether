@@ -4,7 +4,7 @@
  * so it runs in Workers and Node 20+.
  */
 
-import { fromBase64Url, toBase64Url } from './shared/base64url.js';
+import { fromBase64Url, toBase64Url } from './base64url.js';
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
