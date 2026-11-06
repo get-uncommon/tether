@@ -23,6 +23,7 @@
  */
 
 import { ops, ROUTES, InputError } from './account-ops.js';
+import { fromBase64Url, open, randomToken, seal, sha256, toBase64Url, toHex } from './crypto.js';
 
 export const BASE = '/_tether/account';
 const COOKIE = '__Host-tether-account';
@@ -35,24 +36,6 @@ const ME_QUERY =
 
 const enc = new TextEncoder();
 const dec = new TextDecoder();
-const b64url = (bytes) =>
-  btoa(String.fromCharCode(...new Uint8Array(bytes)))
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=+$/, '');
-const fromB64url = (s) =>
-  Uint8Array.from(
-    atob(
-      s
-        .replace(/-/g, '+')
-        .replace(/_/g, '/')
-        .padEnd(Math.ceil(s.length / 4) * 4, '='),
-    ),
-    (c) => c.charCodeAt(0),
-  );
-const random = (n = 32) => b64url(crypto.getRandomValues(new Uint8Array(n)));
-const sha256 = async (s) => new Uint8Array(await crypto.subtle.digest('SHA-256', enc.encode(s)));
-const hex = (bytes) => [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('');
 
 const val = (v) => {
   const t = String(v ?? '').trim();
@@ -94,52 +77,6 @@ export function accountProblems(s) {
       "STOREFRONT_TOKEN (the public Storefront token) is missing: carts can't be linked, so checkout won't know the customer",
     );
   return p;
-}
-
-// ---------------------------------------------------------------- crypto
-
-const keys = new Map();
-/** One AES-GCM key per purpose ('session', 'login', 'logout'), derived with HKDF. */
-async function aesKey(secret, purpose) {
-  const id = `${purpose}:${secret}`;
-  if (!keys.has(id)) {
-    const base = await crypto.subtle.importKey('raw', enc.encode(secret), 'HKDF', false, ['deriveKey']);
-    keys.set(
-      id,
-      await crypto.subtle.deriveKey(
-        { name: 'HKDF', hash: 'SHA-256', salt: enc.encode('tether-account-v1'), info: enc.encode(purpose) },
-        base,
-        { name: 'AES-GCM', length: 256 },
-        false,
-        ['encrypt', 'decrypt'],
-      ),
-    );
-  }
-  return keys.get(id);
-}
-/** Encrypt for one purpose, bound to `bind` (the KV key or cookie name): it can't be moved elsewhere. */
-async function seal(secret, purpose, bind, data) {
-  const iv = crypto.getRandomValues(new Uint8Array(12));
-  const ct = await crypto.subtle.encrypt(
-    { name: 'AES-GCM', iv, additionalData: enc.encode(bind) },
-    await aesKey(secret, purpose),
-    enc.encode(JSON.stringify(data)),
-  );
-  return `${b64url(iv)}.${b64url(ct)}`;
-}
-async function open(secret, purpose, bind, sealed) {
-  if (!sealed) return null;
-  try {
-    const [iv, ct] = String(sealed).split('.');
-    const pt = await crypto.subtle.decrypt(
-      { name: 'AES-GCM', iv: fromB64url(iv), additionalData: enc.encode(bind) },
-      await aesKey(secret, purpose),
-      fromB64url(ct),
-    );
-    return JSON.parse(dec.decode(pt));
-  } catch {
-    return null;
-  }
 }
 
 // ---------------------------------------------------------------- KV (with expiry)
@@ -236,8 +173,8 @@ const jwksCache = new Map();
 async function verifyIdToken(token, d, s, nonce, fetchImpl) {
   const [h, p, sig] = String(token || '').split('.');
   if (!sig) throw new Error('id token missing');
-  const header = JSON.parse(dec.decode(fromB64url(h)));
-  const claims = JSON.parse(dec.decode(fromB64url(p)));
+  const header = JSON.parse(dec.decode(fromBase64Url(h)));
+  const claims = JSON.parse(dec.decode(fromBase64Url(p)));
   if (header.alg !== 'RS256') throw new Error(`id token alg ${header.alg}`);
   let set = jwksCache.get(d.jwks_uri);
   if (!set || !set.keys.some((k) => k.kid === header.kid)) {
@@ -252,7 +189,7 @@ async function verifyIdToken(token, d, s, nonce, fetchImpl) {
   const key = await crypto.subtle.importKey('jwk', jwk, { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, false, [
     'verify',
   ]);
-  const ok = await crypto.subtle.verify('RSASSA-PKCS1-v1_5', key, fromB64url(sig), enc.encode(`${h}.${p}`));
+  const ok = await crypto.subtle.verify('RSASSA-PKCS1-v1_5', key, fromBase64Url(sig), enc.encode(`${h}.${p}`));
   const aud = [].concat(claims.aud || []);
   if (!ok) throw new Error('id token signature');
   if (claims.iss !== d.issuer) throw new Error('id token issuer');
@@ -386,7 +323,7 @@ export async function handleAccount(request, env, { fetch: fetchImpl = globalThi
 
   // ---- sessions: KV under a hash of the session id, encrypted and bound to that key
   const sid = readCookie(request);
-  const sessionKey = async (id) => `s:${hex(await sha256(id))}`;
+  const sessionKey = async (id) => `s:${toHex(await sha256(id))}`;
   const loadSession = async () => {
     if (!sid) return null;
     const key = await sessionKey(sid);
@@ -446,9 +383,9 @@ export async function handleAccount(request, env, { fetch: fetchImpl = globalThi
     if (route === '/login' && request.method === 'GET') {
       const d = await discover(s, fetchImpl);
       const pending = {
-        state: random(),
-        nonce: random(),
-        verifier: random(),
+        state: randomToken(),
+        nonce: randomToken(),
+        verifier: randomToken(),
         at: Date.now(),
         returnTo: safeReturn(url.searchParams.get('returnTo') || request.headers.get('referer') || '', s),
       };
@@ -465,7 +402,7 @@ export async function handleAccount(request, env, { fetch: fetchImpl = globalThi
         redirect_uri: callbackUrl,
         state: pending.state,
         nonce: pending.nonce,
-        code_challenge: b64url(await sha256(pending.verifier)),
+        code_challenge: toBase64Url(await sha256(pending.verifier)),
         code_challenge_method: 'S256',
         ...(lang ? { locale: lang } : {}),
         ...(country ? { region_country: country } : {}),
@@ -499,7 +436,7 @@ export async function handleAccount(request, env, { fetch: fetchImpl = globalThi
         fetchImpl,
       );
       await verifyIdToken(t.id_token, d, s, pending.nonce, fetchImpl);
-      const id = random(32);
+      const id = randomToken(32);
       await saveSession(id, {
         access: t.access_token,
         refresh: t.refresh_token || null,

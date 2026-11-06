@@ -76,6 +76,9 @@
     "@typescript-eslint/no-confusing-void-expression": {
       "count": 2
     },
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    },
     "@typescript-eslint/prefer-includes": {
       "count": 1
     },
