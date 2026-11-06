@@ -1,5 +1,6 @@
 /**
- * Builds dist/:
+ * Builds dist/ (or the folder after --out, which the tests use so the committed dist/ only changes in a
+ * release):
  *   tether.min.js (+ .map), tether.js          the <script> build (IIFE)
  *   tether.diagnose(.min).js, tether.markets(.min).js
  *                                              optional parts, loaded on first use
@@ -19,6 +20,8 @@ import { dirname, join, basename } from 'node:path';
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const SRC = join(ROOT, 'src');
 const watch = process.argv.includes('--watch');
+const outIndex = process.argv.indexOf('--out');
+const OUT = outIndex === -1 ? join(ROOT, 'dist') : join(ROOT, process.argv[outIndex + 1]);
 const TARGET = 'es2020';
 
 // ---------------------------------------------------------------------------
@@ -116,34 +119,34 @@ async function builds() {
     entryPoints: [join(SRC, 'parts', `${name}.js`)],
     format: 'iife',
     minify,
-    outfile: join(ROOT, 'dist', `tether.${name}${minify ? '.min' : ''}.js`),
+    outfile: join(OUT, `tether.${name}${minify ? '.min' : ''}.js`),
     plugins: [partPlugin(exportsByFile), graphqlPlugin],
   });
   return [
-    { ...iife, outfile: join(ROOT, 'dist/tether.js') },
-    { ...iife, outfile: join(ROOT, 'dist/tether.min.js'), minify: true, sourcemap: true },
+    { ...iife, outfile: join(OUT, 'tether.js') },
+    { ...iife, outfile: join(OUT, 'tether.min.js'), minify: true, sourcemap: true },
     ...['diagnose', 'markets', 'search', 'extras', 'account', 'account-pages', 'analytics'].flatMap((n) => [part(n, false), part(n, true)]),
     {
       ...common, entryPoints: [join(SRC, 'index.js'), join(SRC, 'server.js'), join(SRC, 'astro.js')], format: 'esm', splitting: true, minify: true,
       external: ['@occluze/tether', 'node:*'],
-      outdir: join(ROOT, 'dist/esm'), chunkNames: 'chunks/[name]-[hash]', entryNames: '[name]',
+      outdir: join(OUT, 'esm'), chunkNames: 'chunks/[name]-[hash]', entryNames: '[name]',
     },
-    { ...common, entryPoints: [join(SRC, 'presets/barba.js')], format: 'esm', outfile: join(ROOT, 'dist/presets/barba.esm.js') },
+    { ...common, entryPoints: [join(SRC, 'presets/barba.js')], format: 'esm', outfile: join(OUT, 'presets/barba.esm.js') },
   ];
 }
 
 async function report() {
   const rows = [];
   for (const f of ['tether.min.js', 'tether.diagnose.min.js', 'tether.markets.min.js', 'tether.search.min.js', 'tether.extras.min.js', 'tether.account.min.js', 'tether.account-pages.min.js', 'tether.analytics.min.js']) {
-    const buf = await readFile(join(ROOT, 'dist', f));
+    const buf = await readFile(join(OUT, f));
     rows.push(`${f.padEnd(24)} ${(buf.length / 1024).toFixed(1).padStart(5)} KB  gzip ${(gzipSync(buf, { level: 9 }).length / 1024).toFixed(1).padStart(4)} KB  brotli ${(brotliCompressSync(buf).length / 1024).toFixed(1).padStart(4)} KB`);
   }
   console.log(rows.join('\n'));
 }
 
-await rm(join(ROOT, 'dist/esm'), { recursive: true, force: true });
-await mkdir(join(ROOT, 'dist'), { recursive: true });
-await writeFile(join(ROOT, 'dist/tether.esm.js'), "export * from './esm/index.js';\nexport { default } from './esm/index.js';\n");
+await rm(join(OUT, 'esm'), { recursive: true, force: true });
+await mkdir(OUT, { recursive: true });
+await writeFile(join(OUT, 'tether.esm.js'), "export * from './esm/index.js';\nexport { default } from './esm/index.js';\n");
 const all = await builds();
 if (watch) {
   for (const b of all) (await esbuild.context(b)).watch();

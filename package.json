@@ -39,7 +39,7 @@
     "dev": "node scripts/build.mjs --watch",
     "test": "node --test test/*.test.js server/test/*.test.js && npm run test:types",
     "smoke": "node scripts/smoke.mjs",
-    "pretest": "node scripts/build.mjs",
+    "pretest": "node scripts/build.mjs --out .test-dist",
     "presmoke": "node scripts/build.mjs",
     "test:types": "tsc -p types/tsconfig.json",
     "release": "node scripts/release.mjs",

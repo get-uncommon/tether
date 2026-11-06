@@ -1,4 +1,4 @@
-// The real <script> build (dist/), loaded like a browser would: core + optional parts as files.
+// The real <script> build (npm test builds it into .test-dist/), loaded like a browser would: core + optional parts as files.
 import { test, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM, VirtualConsole } from 'jsdom';
@@ -7,7 +7,7 @@ import { pathToFileURL, fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { product } from './fixtures.js';
 
-const DIST = join(dirname(fileURLToPath(import.meta.url)), '..', 'dist');
+const DIST = join(dirname(fileURLToPath(import.meta.url)), '..', '.test-dist');
 let win;
 const ops = [];
 
