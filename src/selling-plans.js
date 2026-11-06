@@ -72,10 +72,14 @@ export function planAdjustment(plan) {
   const v = plan?.priceAdjustments?.[0]?.adjustmentValue;
   if (!v) return null;
   switch (v.__typename) {
-    case 'SellingPlanPercentagePriceAdjustment': return { type: 'percentage', value: v.adjustmentPercentage };
-    case 'SellingPlanFixedAmountPriceAdjustment': return { type: 'amount', value: v.adjustmentAmount };
-    case 'SellingPlanFixedPriceAdjustment': return { type: 'price', value: v.price };
-    default: return null;
+    case 'SellingPlanPercentagePriceAdjustment':
+      return { type: 'percentage', value: v.adjustmentPercentage };
+    case 'SellingPlanFixedAmountPriceAdjustment':
+      return { type: 'amount', value: v.adjustmentAmount };
+    case 'SellingPlanFixedPriceAdjustment':
+      return { type: 'price', value: v.price };
+    default:
+      return null;
   }
 }
 
@@ -88,8 +92,10 @@ export function findPlan(product, ref) {
   const plans = allPlans(product);
   const gid = GID.sellingPlan(ref);
   const needle = String(ref).trim().toLowerCase();
-  return plans.find((p) => p.id === gid)
-    || plans.find((p) => p.name.toLowerCase() === needle)
-    || plans.find((p) => (p.options || []).some((o) => String(o.value).toLowerCase() === needle))
-    || null;
+  return (
+    plans.find((p) => p.id === gid) ||
+    plans.find((p) => p.name.toLowerCase() === needle) ||
+    plans.find((p) => (p.options || []).some((o) => String(o.value).toLowerCase() === needle)) ||
+    null
+  );
 }

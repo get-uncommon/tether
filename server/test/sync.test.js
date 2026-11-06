@@ -2,8 +2,18 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHmac } from 'node:crypto';
 import {
-  createApp, memoryStore, signShopify, verifyShopifyHmac, handleShopifyWebhook, createThrottle,
-  normalizeConfig, mapProduct, checkMapping, normalizeProduct, toSlug, createWorker,
+  createApp,
+  memoryStore,
+  signShopify,
+  verifyShopifyHmac,
+  handleShopifyWebhook,
+  createThrottle,
+  normalizeConfig,
+  mapProduct,
+  checkMapping,
+  normalizeProduct,
+  toSlug,
+  createWorker,
 } from '../src/index.js';
 import { createMockApis, shopifyProduct, baseConfig, env, instantSleep } from './mocks.js';
 
@@ -34,19 +44,33 @@ test('mapping: sources, metafields, slug, owned fields and config checks', () =>
   assert.equal(p.compareAtPrice, 15);
   const fd = mapProduct(p, cfg);
   assert.deepEqual(fd, {
-    name: 'Product 7', slug: 'product-7', 'shopify-id': '7', price: 12.5,
-    'main-image': { url: 'https://cdn.test/7.jpg', alt: 'alt' }, description: '<p>Desc</p>', material: 'Oak',
+    name: 'Product 7',
+    slug: 'product-7',
+    'shopify-id': '7',
+    price: 12.5,
+    'main-image': { url: 'https://cdn.test/7.jpg', alt: 'alt' },
+    description: '<p>Desc</p>',
+    material: 'Oak',
   });
   assert.equal(toSlug('Café Crème 250g!'), 'cafe-creme-250g');
   assert.throws(() => normalizeConfig({ webflowOwned: ['slug'] }), /can't be Webflow-owned/);
   assert.throws(() => normalizeConfig({ onDelete: 'nuke' }), /onDelete/);
 
-  const problems = checkMapping(normalizeConfig({ ...baseConfig, fields: { ...baseConfig.fields, price: 'title', gone: 'vendor' } }), {
-    displayName: 'Products',
-    fields: [{ slug: 'name', type: 'PlainText' }, { slug: 'slug', type: 'PlainText' }, { slug: 'price', type: 'Number' },
-      { slug: 'main-image', type: 'Image' }, { slug: 'description', type: 'RichText' }, { slug: 'material', type: 'PlainText' },
-      { slug: 'required-thing', type: 'PlainText', isRequired: true }],
-  });
+  const problems = checkMapping(
+    normalizeConfig({ ...baseConfig, fields: { ...baseConfig.fields, price: 'title', gone: 'vendor' } }),
+    {
+      displayName: 'Products',
+      fields: [
+        { slug: 'name', type: 'PlainText' },
+        { slug: 'slug', type: 'PlainText' },
+        { slug: 'price', type: 'Number' },
+        { slug: 'main-image', type: 'Image' },
+        { slug: 'description', type: 'RichText' },
+        { slug: 'material', type: 'PlainText' },
+        { slug: 'required-thing', type: 'PlainText', isRequired: true },
+      ],
+    },
+  );
   const text = problems.map((p) => p.message).join('\n');
   assert.match(text, /"gone" doesn't exist/);
   assert.match(text, /"price" is a Number field but maps "title"/);
@@ -57,8 +81,17 @@ test('mapping: sources, metafields, slug, owned fields and config checks', () =>
 test('throttle spaces requests and pauses after a 429', async () => {
   let t = 0;
   const waits = [];
-  const th = createThrottle({ perMinute: 60, now: () => t, sleep: async (ms) => { waits.push(ms); t += ms; } });
-  await th.wait(); await th.wait(); await th.wait();
+  const th = createThrottle({
+    perMinute: 60,
+    now: () => t,
+    sleep: async (ms) => {
+      waits.push(ms);
+      t += ms;
+    },
+  });
+  await th.wait();
+  await th.wait();
+  await th.wait();
   assert.deepEqual(waits, [1000, 1000]);
   th.pause(5000);
   await th.wait();
@@ -100,7 +133,10 @@ test('update sends changed fields but never Webflow-owned ones', async () => {
   const item = [...wf.items.values()][0];
   item.fieldData.description = '<p>Edited in Webflow</p>';
 
-  shop.products.set('gid://shopify/Product/1', shopifyProduct(1, { title: 'Renamed', descriptionHtml: '<p>New</p>', updatedAt: '2026-11-02T00:00:00Z' }));
+  shop.products.set(
+    'gid://shopify/Product/1',
+    shopifyProduct(1, { title: 'Renamed', descriptionHtml: '<p>New</p>', updatedAt: '2026-11-02T00:00:00Z' }),
+  );
   const r = await sync.syncById('1');
   assert.equal(r.action, 'updated');
   const patch = webflowWrites().find((c) => c.method === 'PATCH');
@@ -209,19 +245,28 @@ test('reconcile: only products updated since the cursor, budgeted, resumable, id
   assert.equal(r3.changes, 0);
   assert.equal(await store.get('reconcile:since'), '2026-11-01T00:00:05Z');
 
-  shop.products.set('gid://shopify/Product/1', shopifyProduct(1, { title: 'Late edit', updatedAt: '2026-11-03T00:00:00Z' }));
+  shop.products.set(
+    'gid://shopify/Product/1',
+    shopifyProduct(1, { title: 'Late edit', updatedAt: '2026-11-03T00:00:00Z' }),
+  );
   const r4 = await sync.reconcile();
   assert.equal(r4.changes, 1);
   assert.equal(r4.until, '2026-11-03T00:00:00Z');
 });
 
 test('reconcile retries failed products on the next run', async () => {
-  const { sync, store, shop } = setup({ products: [shopifyProduct(1, { handle: 'bad' }), shopifyProduct(2)], failCreateFor: 'bad' });
+  const { sync, store, shop } = setup({
+    products: [shopifyProduct(1, { handle: 'bad' }), shopifyProduct(2)],
+    failCreateFor: 'bad',
+  });
   await store.put('reconcile:since', '2026-01-01T00:00:00Z');
   const r1 = await sync.reconcile();
   assert.equal(r1.failures.length, 1);
   assert.equal(r1.changes, 1);
-  assert.deepEqual((await store.get('reconcile:retry')).map((f) => f.id), ['1']);
+  assert.deepEqual(
+    (await store.get('reconcile:retry')).map((f) => f.id),
+    ['1'],
+  );
 
   shop.products.set('gid://shopify/Product/1', shopifyProduct(1, { handle: 'fixed' }));
   const r2 = await sync.reconcile();
@@ -238,7 +283,11 @@ test('Webflow 429 is retried after Retry-After', async () => {
 
 test('client credentials grant: token fetched once and sent to the Admin API', async () => {
   const apis = createMockApis({ products: [shopifyProduct(1)] });
-  const app = createApp(baseConfig, { WEBFLOW_TOKEN: 'wf', SHOPIFY_CLIENT_ID: 'cid', SHOPIFY_CLIENT_SECRET: 'csecret' }, { store: memoryStore(), fetch: apis.fetch, sleep: instantSleep });
+  const app = createApp(
+    baseConfig,
+    { WEBFLOW_TOKEN: 'wf', SHOPIFY_CLIENT_ID: 'cid', SHOPIFY_CLIENT_SECRET: 'csecret' },
+    { store: memoryStore(), fetch: apis.fetch, sleep: instantSleep },
+  );
   await app.sync.importAll();
   await app.sync.syncById(1);
   const tokenCalls = apis.calls.filter((c) => c.path === '/admin/oauth/access_token');
@@ -254,8 +303,13 @@ test('client credentials grant: token fetched once and sent to the Admin API', a
 async function webhook(topic, payload, { secret = 'whsec', shop = 'shop.myshopify.com' } = {}) {
   const body = JSON.stringify(payload);
   return new Request('https://sync.test/webhooks/shopify', {
-    method: 'POST', body,
-    headers: { 'x-shopify-topic': topic, 'x-shopify-hmac-sha256': await signShopify(body, secret), 'x-shopify-shop-domain': shop },
+    method: 'POST',
+    body,
+    headers: {
+      'x-shopify-topic': topic,
+      'x-shopify-hmac-sha256': await signShopify(body, secret),
+      'x-shopify-shop-domain': shop,
+    },
   });
 }
 
@@ -271,12 +325,18 @@ test('webhook: verifies HMAC and shop, syncs update, archives on delete', async 
   assert.equal(r.response.status, 200);
   assert.equal(r.task, undefined);
 
-  r = await handleShopifyWebhook(await webhook('products/update', { id: 1, admin_graphql_api_id: 'gid://shopify/Product/1' }), opts);
+  r = await handleShopifyWebhook(
+    await webhook('products/update', { id: 1, admin_graphql_api_id: 'gid://shopify/Product/1' }),
+    opts,
+  );
   assert.equal(r.response.status, 200);
   assert.equal((await r.task).action, 'created');
 
   // create arrives right after update for a new product: no duplicate item
-  r = await handleShopifyWebhook(await webhook('products/create', { id: 1, admin_graphql_api_id: 'gid://shopify/Product/1' }), opts);
+  r = await handleShopifyWebhook(
+    await webhook('products/create', { id: 1, admin_graphql_api_id: 'gid://shopify/Product/1' }),
+    opts,
+  );
   assert.equal((await r.task).action, 'unchanged');
   assert.equal(wf.items.size, 1);
 
@@ -288,10 +348,16 @@ test('webhook: verifies HMAC and shop, syncs update, archives on delete', async 
 test('webhook: an unsigned topic header cannot delete a live product (Shopify is asked)', async () => {
   const { app, wf } = setup({ products: [shopifyProduct(1)] });
   const opts = { sync: app.sync, secret: app.webhookSecret, shopDomain: 'shop.myshopify.com', sleep: instantSleep };
-  let r = await handleShopifyWebhook(await webhook('products/update', { id: 1, admin_graphql_api_id: 'gid://shopify/Product/1' }), opts);
+  let r = await handleShopifyWebhook(
+    await webhook('products/update', { id: 1, admin_graphql_api_id: 'gid://shopify/Product/1' }),
+    opts,
+  );
   assert.equal((await r.task).action, 'created');
   // The same signed body, replayed with the topic header changed to products/delete.
-  r = await handleShopifyWebhook(await webhook('products/delete', { id: 1, admin_graphql_api_id: 'gid://shopify/Product/1' }), opts);
+  r = await handleShopifyWebhook(
+    await webhook('products/delete', { id: 1, admin_graphql_api_id: 'gid://shopify/Product/1' }),
+    opts,
+  );
   assert.equal(r.response.status, 200);
   assert.notEqual((await r.task).action, 'archived');
   const [item] = [...wf.items.values()];
@@ -313,10 +379,20 @@ function kv() {
   const m = new Map();
   let writes = 0;
   return {
-    get writes() { return writes; },
-    async get(k, type) { const v = m.get(k); return v == null ? null : type === 'json' ? JSON.parse(v) : v; },
-    async put(k, v) { writes++; m.set(k, v); },
-    async delete(k) { m.delete(k); },
+    get writes() {
+      return writes;
+    },
+    async get(k, type) {
+      const v = m.get(k);
+      return v == null ? null : type === 'json' ? JSON.parse(v) : v;
+    },
+    async put(k, v) {
+      writes++;
+      m.set(k, v);
+    },
+    async delete(k) {
+      m.delete(k);
+    },
   };
 }
 
@@ -330,7 +406,9 @@ test('worker: webhook route with waitUntil, cron reconcile writes KV only on cha
 
   const health = await worker.fetch(new Request('https://sync.test/health'), wenv, ctx);
   const { VERSION } = await import('../src/version.js');
-  const pkg = JSON.parse(await (await import('node:fs/promises')).readFile(new URL('../package.json', import.meta.url), 'utf8'));
+  const pkg = JSON.parse(
+    await (await import('node:fs/promises')).readFile(new URL('../package.json', import.meta.url), 'utf8'),
+  );
   assert.equal(VERSION, pkg.version, 'src/version.js matches package.json');
   assert.deepEqual(await health.json(), { ok: true, version: pkg.version, kv: true });
 
@@ -349,6 +427,13 @@ test('worker: webhook route with waitUntil, cron reconcile writes KV only on cha
 
   const denied = await worker.fetch(new Request('https://sync.test/reconcile', { method: 'POST' }), wenv, ctx);
   assert.equal(denied.status, 401);
-  const ok = await worker.fetch(new Request('https://sync.test/reconcile', { method: 'POST', headers: { authorization: 'Bearer s3cret-s3cret-s3cret-s3cret' } }), wenv, ctx);
+  const ok = await worker.fetch(
+    new Request('https://sync.test/reconcile', {
+      method: 'POST',
+      headers: { authorization: 'Bearer s3cret-s3cret-s3cret-s3cret' },
+    }),
+    wenv,
+    ctx,
+  );
   assert.equal(ok.status, 200);
 });

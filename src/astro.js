@@ -38,7 +38,11 @@ async function readEnv(command, root) {
     const { join } = await import('node:path');
     for (const name of ['.env', '.env.local', `.env.${mode}`, `.env.${mode}.local`]) {
       let text;
-      try { text = await readFile(join(root, name), 'utf8'); } catch { continue; }
+      try {
+        text = await readFile(join(root, name), 'utf8');
+      } catch {
+        continue;
+      }
       for (const line of text.split(/\r?\n/)) {
         const m = /^\s*(?:export\s+)?([\w.-]+)\s*=\s*(.*?)\s*$/.exec(line);
         if (!m || line.trim().startsWith('#')) continue;
@@ -48,23 +52,40 @@ async function readEnv(command, root) {
         out[m[1]] = v;
       }
     }
-  } catch { /* not in Node: nothing to read */ }
+  } catch {
+    /* not in Node: nothing to read */
+  }
   return { ...out, ...process.env };
 }
 
 export default function tether(options = {}) {
-  const { inject = true, watch = ['src/shop.config.js', 'src/shop.config.mjs', 'src/shop.config.ts'], ...config } = options;
+  const {
+    inject = true,
+    watch = ['src/shop.config.js', 'src/shop.config.mjs', 'src/shop.config.ts'],
+    ...config
+  } = options;
   return {
     name: '@occluze/tether',
     hooks: {
-      'astro:config:setup': async ({ injectScript, command, config: astroConfig, logger, addWatchFile, updateConfig }) => {
+      'astro:config:setup': async ({
+        injectScript,
+        command,
+        config: astroConfig,
+        logger,
+        addWatchFile,
+        updateConfig,
+      }) => {
         const root = astroConfig?.root ? decodeURIComponent(new URL(astroConfig.root).pathname) : process.cwd();
         // The options usually come from a file the Astro config imports (src/shop.config.js):
         // the dev server restarts when it changes, so the browser gets the new config too.
         if (command === 'dev' && addWatchFile) {
           const { existsSync } = await import('node:fs');
           const { resolve } = await import('node:path');
-          [].concat(watch || []).map((f) => resolve(root, f)).filter((f) => existsSync(f)).forEach((f) => addWatchFile(f));
+          []
+            .concat(watch || [])
+            .map((f) => resolve(root, f))
+            .filter((f) => existsSync(f))
+            .forEach((f) => addWatchFile(f));
         }
         // Astro 5+: declare the store variables, so Astro checks them (astro:env).
         if (updateConfig) {
@@ -72,30 +93,44 @@ export default function tether(options = {}) {
             const { envField } = await import('astro/config');
             if (envField) {
               const field = () => envField.string({ context: 'client', access: 'public', optional: true });
-              updateConfig({ env: { schema: { PUBLIC_SHOPIFY_DOMAIN: field(), PUBLIC_SHOPIFY_STOREFRONT_TOKEN: field() } } });
+              updateConfig({
+                env: { schema: { PUBLIC_SHOPIFY_DOMAIN: field(), PUBLIC_SHOPIFY_STOREFRONT_TOKEN: field() } },
+              });
             }
-          } catch { /* Astro 4: no astro:env */ }
+          } catch {
+            /* Astro 4: no astro:env */
+          }
         }
         const env = await readEnv(command, root);
         for (const [key, names] of Object.entries(ENV_KEYS)) {
           if (!config[key]) config[key] = names.map((n) => env[n]).find(Boolean);
         }
-        const bad = Object.entries(config).filter(([, v]) => typeof v === 'function').map(([k]) => k);
+        const bad = Object.entries(config)
+          .filter(([, v]) => typeof v === 'function')
+          .map(([k]) => k);
         bad.forEach((k) => delete config[k]);
-        if (bad.length) logger.warn(`${bad.join(', ')}: functions can't be passed here. Set them in window.TETHER_CONFIG in your layout.`);
+        if (bad.length)
+          logger.warn(
+            `${bad.join(', ')}: functions can't be passed here. Set them in window.TETHER_CONFIG in your layout.`,
+          );
         if (!config.domain || !config.token) {
-          logger.warn('No Shopify store configured: set PUBLIC_SHOPIFY_DOMAIN and PUBLIC_SHOPIFY_STOREFRONT_TOKEN in .env (the public Storefront API token).');
+          logger.warn(
+            'No Shopify store configured: set PUBLIC_SHOPIFY_DOMAIN and PUBLIC_SHOPIFY_STOREFRONT_TOKEN in .env (the public Storefront API token).',
+          );
         }
         if (!inject) return;
         // Before any module runs: window.TETHER_CONFIG in the layout doesn't auto-start a second init.
         injectScript('head-inline', 'window.TETHER_INTEGRATION="astro";');
-        injectScript('page', [
-          "import Tether from '@occluze/tether';",
-          // As the base config (like window.TETHER_CONFIG), not as overrides: a visitor's saved market
-          // (country, money format) then wins over the defaults, as on a plain script-tag site.
-          `window.TETHER_CONFIG = { ...${JSON.stringify({ autoMount: false, ...config })}, ...(window.TETHER_CONFIG || {}) };`,
-          'Tether.init().then(() => Tether.mount(document));',
-        ].join('\n'));
+        injectScript(
+          'page',
+          [
+            "import Tether from '@occluze/tether';",
+            // As the base config (like window.TETHER_CONFIG), not as overrides: a visitor's saved market
+            // (country, money format) then wins over the defaults, as on a plain script-tag site.
+            `window.TETHER_CONFIG = { ...${JSON.stringify({ autoMount: false, ...config })}, ...(window.TETHER_CONFIG || {}) };`,
+            'Tether.init().then(() => Tether.mount(document));',
+          ].join('\n'),
+        );
       },
     },
   };

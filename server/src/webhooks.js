@@ -8,7 +8,8 @@ export const PRODUCT_TOPICS = ['PRODUCTS_CREATE', 'PRODUCTS_UPDATE', 'PRODUCTS_D
 const KEY = 'webhooks:uri';
 
 export async function ensureWebhooks({ shopify, store, uri, force = false }) {
-  if (!force && store && (await store.get(KEY)) === uri) return { uri, created: [], existing: PRODUCT_TOPICS, cached: true };
+  if (!force && store && (await store.get(KEY)) === uri)
+    return { uri, created: [], existing: PRODUCT_TOPICS, cached: true };
   const current = await shopify.listWebhooks();
   const have = new Set(current.filter((w) => w.uri === uri).map((w) => w.topic));
   const created = [];
@@ -26,5 +27,9 @@ export async function ensureWebhooks({ shopify, store, uri, force = false }) {
 export async function webhookStatus({ shopify, uri }) {
   const current = await shopify.listWebhooks();
   const mine = new Set(current.filter((w) => w.uri === uri).map((w) => w.topic));
-  return { uri, registered: PRODUCT_TOPICS.filter((t) => mine.has(t)), missing: PRODUCT_TOPICS.filter((t) => !mine.has(t)) };
+  return {
+    uri,
+    registered: PRODUCT_TOPICS.filter((t) => mine.has(t)),
+    missing: PRODUCT_TOPICS.filter((t) => !mine.has(t)),
+  };
 }

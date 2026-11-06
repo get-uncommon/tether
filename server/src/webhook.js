@@ -12,15 +12,21 @@ const TOPICS = new Set(['products/create', 'products/update', 'products/delete']
 
 const reply = (status, text) => new Response(text, { status, headers: { 'content-type': 'text/plain' } });
 
-export async function handleShopifyWebhook(request, {
-  sync, secret, secrets, shopDomain, log, createDelayMs = 3000, sleep = realSleep,
-}) {
+export async function handleShopifyWebhook(
+  request,
+  { sync, secret, secrets, shopDomain, log, createDelayMs = 3000, sleep = realSleep },
+) {
   if (request.method !== 'POST') return { response: reply(405, 'POST only') };
   const raw = await request.arrayBuffer();
   const hmac = request.headers.get('x-shopify-hmac-sha256');
   const keys = (secrets && secrets.length ? secrets : [secret]).filter(Boolean);
   let valid = false;
-  for (const k of keys) { if (await verifyShopifyHmac(raw, hmac, k)) { valid = true; break; } }
+  for (const k of keys) {
+    if (await verifyShopifyHmac(raw, hmac, k)) {
+      valid = true;
+      break;
+    }
+  }
   if (!valid) {
     log?.warn?.('webhook rejected: bad HMAC');
     return { response: reply(401, 'invalid signature') };
@@ -33,7 +39,11 @@ export async function handleShopifyWebhook(request, {
   if (!TOPICS.has(topic)) return { response: reply(200, 'ignored') };
 
   let payload;
-  try { payload = JSON.parse(new TextDecoder().decode(raw)); } catch { return { response: reply(400, 'invalid JSON') }; }
+  try {
+    payload = JSON.parse(new TextDecoder().decode(raw));
+  } catch {
+    return { response: reply(400, 'invalid JSON') };
+  }
   const id = payload.admin_graphql_api_id || payload.id;
   if (!id) return { response: reply(400, 'no product id') };
 
@@ -50,7 +60,11 @@ export async function handleShopifyWebhook(request, {
     } catch (err) {
       // Shopify won't retry (we already answered 200): the next reconcile does.
       log?.error?.(`webhook ${topic} ${id} failed: ${err.message}`);
-      try { await sync.queueRetry?.(id, err); } catch { /* the cursor overlap still catches most */ }
+      try {
+        await sync.queueRetry?.(id, err);
+      } catch {
+        /* the cursor overlap still catches most */
+      }
       return { action: 'failed', error: err };
     }
   };

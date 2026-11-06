@@ -32,7 +32,14 @@ export default tseslint.config(
     languageOptions: { globals: { ...globals.browser } },
   },
   {
-    files: ['src/server.js', 'src/astro.js', 'server/**/*.{js,mjs}', 'scripts/**/*.mjs', 'test/**/*.js', 'e2e/**/*.{js,mjs}'],
+    files: [
+      'src/server.js',
+      'src/astro.js',
+      'server/**/*.{js,mjs}',
+      'scripts/**/*.mjs',
+      'test/**/*.js',
+      'e2e/**/*.{js,mjs}',
+    ],
     languageOptions: { globals: { ...globals.node, ...globals.serviceworker } },
   },
   {

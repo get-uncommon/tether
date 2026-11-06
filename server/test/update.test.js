@@ -33,24 +33,38 @@ test('updating a copy replaces the code and keeps config, wrangler ids and TETHE
   await mkdir(join(copy, 'src'));
   await writeFile(join(copy, 'src', 'old.js'), 'old');
   await writeFile(join(copy, 'package.json'), JSON.stringify({ name: '@occluze/tether-sync', version: '0.3.1' }));
-  await writeFile(join(copy, 'tether-sync.config.js'), 'export default { fields: { material: "metafield:custom.material" } };');
+  await writeFile(
+    join(copy, 'tether-sync.config.js'),
+    'export default { fields: { material: "metafield:custom.material" } };',
+  );
   await writeFile(join(copy, 'wrangler.jsonc'), '{ "kv_namespaces": [{ "binding": "TETHER_SYNC", "id": "kv-123" }] }');
   await writeFile(join(copy, 'TETHER_VERSION'), '0.3\n');
   // The "new" release: this checkout.
   await cp(root, release, { recursive: true, filter: (p) => !p.includes('node_modules') });
 
-  const out = execFileSync('node', [join(copy, 'scripts', 'update-tether.mjs'), '--from', release], { encoding: 'utf8' });
+  const out = execFileSync('node', [join(copy, 'scripts', 'update-tether.mjs'), '--from', release], {
+    encoding: 'utf8',
+  });
   const version = JSON.parse(await readFile(join(release, 'package.json'), 'utf8')).version;
   assert.match(out, new RegExp(`updated=${version.replace(/\./g, '\\.')}`));
   assert.ok(existsSync(join(copy, 'src', 'entry.js')), 'new code in place');
   assert.ok(!existsSync(join(copy, 'src', 'old.js')), 'old code removed');
-  assert.match(await readFile(join(copy, 'tether-sync.config.js'), 'utf8'), /metafield:custom\.material/, 'mapping kept');
+  assert.match(
+    await readFile(join(copy, 'tether-sync.config.js'), 'utf8'),
+    /metafield:custom\.material/,
+    'mapping kept',
+  );
   assert.match(await readFile(join(copy, 'wrangler.jsonc'), 'utf8'), /kv-123/, 'Cloudflare ids kept');
   assert.equal((await readFile(join(copy, 'TETHER_VERSION'), 'utf8')).trim(), '0.3');
-  assert.ok(!existsSync(join(copy, '.github')), 'workflow files are never touched (GitHub refuses that from an Action)');
+  assert.ok(
+    !existsSync(join(copy, '.github')),
+    'workflow files are never touched (GitHub refuses that from an Action)',
+  );
   assert.ok(existsSync(join(copy, 'scripts', 'update-tether.mjs')), 'the updater script updates itself');
 
-  const again = execFileSync('node', [join(copy, 'scripts', 'update-tether.mjs'), '--from', release], { encoding: 'utf8' });
+  const again = execFileSync('node', [join(copy, 'scripts', 'update-tether.mjs'), '--from', release], {
+    encoding: 'utf8',
+  });
   assert.match(again, /up to date/);
 });
 

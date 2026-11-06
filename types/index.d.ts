@@ -2,8 +2,16 @@
 // Shopify Storefront API objects are typed loosely (`ShopifyProduct` etc.): Tether passes them
 // through as Shopify returns them. See https://shopify.dev/docs/api/storefront for the full shape.
 
-export interface Money { amount: string; currencyCode: string }
-export interface ShopifyImage { url: string; altText?: string | null; width?: number; height?: number }
+export interface Money {
+  amount: string;
+  currencyCode: string;
+}
+export interface ShopifyImage {
+  url: string;
+  altText?: string | null;
+  width?: number;
+  height?: number;
+}
 
 export interface ShopifySellingPlan {
   id: string;
@@ -62,7 +70,12 @@ export interface ShopifyCartLine {
   merchandise: ShopifyVariant & { product: Pick<ShopifyProduct, 'id' | 'handle' | 'title'> & Record<string, unknown> };
   sellingPlanAllocation?: { sellingPlan: { id: string; name: string } } | null;
   attributes?: { key: string; value: string }[];
-  cost: { totalAmount: Money; subtotalAmount: Money; amountPerQuantity: Money; compareAtAmountPerQuantity?: Money | null };
+  cost: {
+    totalAmount: Money;
+    subtotalAmount: Money;
+    amountPerQuantity: Money;
+    compareAtAmountPerQuantity?: Money | null;
+  };
   [k: string]: unknown;
 }
 
@@ -186,7 +199,8 @@ export interface TetherConfig {
   debug?: boolean;
 }
 
-export type TetherErrorCode = 'NOT_FOUND' | 'NETWORK' | 'NOT_CONFIGURED' | 'INVALID_COUNTRY' | 'ERROR' | `HTTP_${number}`;
+export type TetherErrorCode =
+  'NOT_FOUND' | 'NETWORK' | 'NOT_CONFIGURED' | 'INVALID_COUNTRY' | 'ERROR' | `HTTP_${number}`;
 
 export declare class TetherError extends Error {
   name: 'TetherError';
@@ -208,7 +222,11 @@ export interface LineInput {
 }
 
 /** Shopify's note on the last cart change; target is the cart line id it's about. */
-export interface CartWarning { code: string; message: string; target?: string }
+export interface CartWarning {
+  code: string;
+  message: string;
+  target?: string;
+}
 
 export interface Cart {
   readonly state: ShopifyCart | null;
@@ -222,7 +240,11 @@ export interface Cart {
   id(): string | null;
   init(): Promise<ShopifyCart | null>;
   /** add(variantId, qty) · add({ variantId, quantity, sellingPlanId, attributes }) · add([line, line]) */
-  add(input: string | LineInput | LineInput[], quantity?: number, opts?: Omit<LineInput, 'variantId' | 'quantity'>): Promise<ShopifyCart>;
+  add(
+    input: string | LineInput | LineInput[],
+    quantity?: number,
+    opts?: Omit<LineInput, 'variantId' | 'quantity'>,
+  ): Promise<ShopifyCart>;
   /** updateLine(id, 3) · updateLine(id, { sellingPlanId: null }) switches to one-time. */
   updateLine(lineId: string, patch: number | (LineInput & { quantity?: number })): Promise<ShopifyCart>;
   removeLine(lineIds: string | string[]): Promise<ShopifyCart>;
@@ -237,7 +259,10 @@ export interface Cart {
   /** Rejects with code INVALID_DISCOUNT (and doesn't keep the code) when Shopify doesn't accept it. */
   applyDiscount(code: string): Promise<ShopifyCart>;
   removeDiscount(code: string): Promise<ShopifyCart>;
-  setBuyerIdentity(identity: { countryCode?: string; email?: string; phone?: string }, opts?: { create?: boolean }): Promise<ShopifyCart | null>;
+  setBuyerIdentity(
+    identity: { countryCode?: string; email?: string; phone?: string },
+    opts?: { create?: boolean },
+  ): Promise<ShopifyCart | null>;
   checkout(target?: '_self' | '_blank'): Promise<void>;
   open(): void;
   close(): void;
@@ -246,7 +271,12 @@ export interface Cart {
   drawers(): HTMLElement[];
   render(): void;
   /** For framework islands: fn(cart, meta) now, when the saved cart has loaded and after every change. Returns unsubscribe. */
-  subscribe(fn: (cart: ShopifyCart | null, meta: { open: boolean; count: number; loaded: boolean; warnings: CartWarning[] }) => void): () => void;
+  subscribe(
+    fn: (
+      cart: ShopifyCart | null,
+      meta: { open: boolean; count: number; loaded: boolean; warnings: CartWarning[] },
+    ) => void,
+  ): () => void;
 }
 
 export interface ProductScope {
@@ -279,10 +309,16 @@ export interface SellingPlanHelpers {
   planPrice(variant: ShopifyVariant, planId: string): Money | null;
   planCheckoutCharge(variant: ShopifyVariant, planId: string): Money | null;
   planSavings(variant: ShopifyVariant, planId: string): { amount: Money | null; percentage: number };
-  planAdjustment(plan: ShopifySellingPlan | null | undefined): { type: 'percentage' | 'amount' | 'price'; value: number | Money } | null;
+  planAdjustment(
+    plan: ShopifySellingPlan | null | undefined,
+  ): { type: 'percentage' | 'amount' | 'price'; value: number | Money } | null;
   findPlan(product: ShopifyProduct, ref: string | null | undefined): ShopifySellingPlan | null;
   toGid(value: string | number, type: string): string | null;
-  GID: { product(v: string | number): string | null; variant(v: string | number): string | null; sellingPlan(v: string | number): string | null };
+  GID: {
+    product(v: string | number): string | null;
+    variant(v: string | number): string | null;
+    sellingPlan(v: string | number): string | null;
+  };
 }
 
 export interface ProductPage {
@@ -294,7 +330,12 @@ export interface ProductPage {
 export interface Localization {
   country?: { isoCode: string; name: string; currency?: { isoCode: string; symbol: string } };
   language?: { isoCode: string; name: string };
-  availableCountries: { isoCode: string; name: string; currency?: { isoCode: string; symbol: string }; availableLanguages?: { isoCode: string; name: string }[] }[];
+  availableCountries: {
+    isoCode: string;
+    name: string;
+    currency?: { isoCode: string; symbol: string };
+    availableLanguages?: { isoCode: string; name: string }[];
+  }[];
 }
 
 export interface DiagnoseReport {
@@ -316,7 +357,13 @@ export interface TetherEvents {
   'product-ready': { product: ShopifyProduct; scope: ProductScope };
   'product-updated': { product: ShopifyProduct; scope: ProductScope };
   'product-not-found': { key: string | null; source: string };
-  'variant-changed': { product: ShopifyProduct; variant: ShopifyVariant; selected: Record<string, string>; purchase: 'one-time' | 'subscription'; sellingPlanId: string | null };
+  'variant-changed': {
+    product: ShopifyProduct;
+    variant: ShopifyVariant;
+    selected: Record<string, string>;
+    purchase: 'one-time' | 'subscription';
+    sellingPlanId: string | null;
+  };
   'product-added': { product: ShopifyProduct; variant: ShopifyVariant; line: LineInput };
   added: { cart: ShopifyCart; lines: LineInput[] };
   'group-added': { group: string | null; lines: LineInput[] };
@@ -348,27 +395,66 @@ export interface Tether {
   withContext(query: string, ctx?: { country?: string; language?: string }): string;
   cart: Cart;
   getProduct(handleOrId: string): Promise<ShopifyProduct>;
-  getProducts(opts?: { collection?: string; query?: string; first?: number; after?: string | null; sortKey?: string; reverse?: boolean; filters?: unknown[] }): Promise<ProductPage>;
-  getRecommendations(product: string | Pick<ShopifyProduct, 'id'>, intent?: 'RELATED' | 'COMPLEMENTARY'): Promise<ShopifyProduct[]>;
+  getProducts(opts?: {
+    collection?: string;
+    query?: string;
+    first?: number;
+    after?: string | null;
+    sortKey?: string;
+    reverse?: boolean;
+    filters?: unknown[];
+  }): Promise<ProductPage>;
+  getRecommendations(
+    product: string | Pick<ShopifyProduct, 'id'>,
+    intent?: 'RELATED' | 'COMPLEMENTARY',
+  ): Promise<ShopifyProduct[]>;
   getScope(el: Element | null | undefined): ProductScope | null;
   addGroup(button: Element): Promise<ShopifyCart | null>;
   /** Customer accounts (loads the account part): login(), logout(), customer(), orders(), query(gql, vars), getToken(). */
   account: {
     login(opts?: { returnTo?: string; locale?: string }): Promise<void>;
     logout(opts?: { returnTo?: string }): Promise<void>;
-    customer(): Promise<{ id: string; firstName?: string | null; lastName?: string | null; displayName?: string; emailAddress?: { emailAddress: string } | null } | null>;
-    orders(opts?: { first?: number }): Promise<Array<{ id: string; name: string; processedAt: string; financialStatus?: string; fulfillmentStatus?: string; statusPageUrl: string; totalPrice: Money }>>;
+    customer(): Promise<{
+      id: string;
+      firstName?: string | null;
+      lastName?: string | null;
+      displayName?: string;
+      emailAddress?: { emailAddress: string } | null;
+    } | null>;
+    orders(opts?: { first?: number }): Promise<
+      Array<{
+        id: string;
+        name: string;
+        processedAt: string;
+        financialStatus?: string;
+        fulfillmentStatus?: string;
+        statusPageUrl: string;
+        totalPrice: Money;
+      }>
+    >;
     query<T = any>(query: string, variables?: Record<string, unknown>): Promise<T>;
     getToken(): Promise<string | null>;
     /** One order in full (lines, totals, addresses, fulfillments with tracking, returnable lines); null if not the customer's. */
     order(id: string | number): Promise<Record<string, any> | null>;
-    updateProfile(fields: { firstName?: string; lastName?: string }): Promise<{ firstName?: string | null; lastName?: string | null }>;
+    updateProfile(fields: {
+      firstName?: string;
+      lastName?: string;
+    }): Promise<{ firstName?: string | null; lastName?: string | null }>;
     addresses(): Promise<Array<CustomerAddress & { isDefault: boolean }>>;
-    saveAddress(address: Partial<CustomerAddressInput> | null, opts?: { id?: string; isDefault?: boolean }): Promise<CustomerAddress>;
+    saveAddress(
+      address: Partial<CustomerAddressInput> | null,
+      opts?: { id?: string; isDefault?: boolean },
+    ): Promise<CustomerAddress>;
     deleteAddress(id: string): Promise<string>;
     subscriptions(): Promise<Array<Record<string, any>>>;
-    subscriptionAction(id: string | number, action: 'pause' | 'resume' | 'skip' | 'unskip' | 'cancel'): Promise<Record<string, any>>;
-    requestReturn(orderId: string | number, lines: Array<{ lineItemId: string; quantity: number; reasonId?: string; note?: string }>): Promise<{ id: string; status: string }>;
+    subscriptionAction(
+      id: string | number,
+      action: 'pause' | 'resume' | 'skip' | 'unskip' | 'cancel',
+    ): Promise<Record<string, any>>;
+    requestReturn(
+      orderId: string | number,
+      lines: Array<{ lineItemId: string; quantity: number; reasonId?: string; note?: string }>,
+    ): Promise<{ id: string; status: string }>;
   };
   primeProduct(product: ShopifyProduct): void;
   normalizeProductKey(raw: string | number): string | null;
@@ -381,12 +467,17 @@ export interface Tether {
   resolveProductKey(el: Element, location?: Location | URL): { key: string | null; fromUrl: boolean; raw: string };
   /** Switch market: prices, currency, cart and every product on the page follow. */
   setCountry(code: string, opts?: SetCountryOptions): Promise<ShopifyCart | null>;
-  detectMarket(markets?: MarketsConfig): Promise<{ country?: string; language?: string; locale?: string; sources: Record<string, string> }>;
+  detectMarket(
+    markets?: MarketsConfig,
+  ): Promise<{ country?: string; language?: string; locale?: string; sources: Record<string, string> }>;
   getLocalization(): Promise<Localization>;
   /** Logs and returns what's wrong on this page (config, token, API version, plans, markup). */
   diagnose(opts?: { root?: ParentNode; silent?: boolean }): Promise<DiagnoseReport>;
   /** Listen to a Tether event; returns a function that stops listening. */
-  on<K extends keyof TetherEvents>(name: K, fn: (detail: TetherEvents[K], event: CustomEvent<TetherEvents[K]>) => void): () => void;
+  on<K extends keyof TetherEvents>(
+    name: K,
+    fn: (detail: TetherEvents[K], event: CustomEvent<TetherEvents[K]>) => void,
+  ): () => void;
   on(name: string, fn: (detail: any, event: CustomEvent) => void): () => void;
 }
 
@@ -418,9 +509,20 @@ declare global {
 }
 
 export interface CustomerAddressInput {
-  firstName: string; lastName: string; company: string; address1: string; address2: string;
-  city: string; zip: string; zoneCode: string; countryCode: string; phoneNumber: string;
+  firstName: string;
+  lastName: string;
+  company: string;
+  address1: string;
+  address2: string;
+  city: string;
+  zip: string;
+  zoneCode: string;
+  countryCode: string;
+  phoneNumber: string;
 }
 export interface CustomerAddress extends Partial<CustomerAddressInput> {
-  id: string; province?: string | null; country?: string | null; formatted: string[];
+  id: string;
+  province?: string | null;
+  country?: string | null;
+  formatted: string[];
 }

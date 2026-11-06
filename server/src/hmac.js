@@ -7,12 +7,20 @@
 
 function toBase64(bytes) {
   let s = '';
-  bytes.forEach((b) => { s += String.fromCharCode(b); });
+  bytes.forEach((b) => {
+    s += String.fromCharCode(b);
+  });
   return btoa(s);
 }
 
 export async function signShopify(rawBody, secret) {
-  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  const key = await crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  );
   const body = typeof rawBody === 'string' ? new TextEncoder().encode(rawBody) : new Uint8Array(rawBody);
   const sig = await crypto.subtle.sign('HMAC', key, body);
   return toBase64(new Uint8Array(sig));

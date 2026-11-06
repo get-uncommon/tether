@@ -17,19 +17,9 @@
     "e2e/*.{js,mjs}",
     "types/check.ts"
   ],
-  "project": [
-    "src/**/*.js",
-    "server/src/**/*.js",
-    "server/bin/*.js",
-    "server/scripts/*.mjs",
-    "scripts/*.mjs"
-  ],
-  "ignoreBinaries": [
-    "tsc"
-  ],
-  "ignoreDependencies": [
-    "astro"
-  ],
+  "project": ["src/**/*.js", "server/src/**/*.js", "server/bin/*.js", "server/scripts/*.mjs", "scripts/*.mjs"],
+  "ignoreBinaries": ["tsc"],
+  "ignoreDependencies": ["astro"],
   "rules": {
     "duplicates": "off"
   }

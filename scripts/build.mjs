@@ -34,7 +34,11 @@ function splitTemplate(body) {
   const parts = [];
   let text = '';
   for (let i = 0; i < body.length; i++) {
-    if (body[i] === '\\') { text += body[i] + (body[i + 1] ?? ''); i++; continue; }
+    if (body[i] === '\\') {
+      text += body[i] + (body[i + 1] ?? '');
+      i++;
+      continue;
+    }
     if (body[i] === '$' && body[i + 1] === '{') {
       parts.push({ text });
       text = '';
@@ -57,13 +61,20 @@ function splitTemplate(body) {
 export function minifyGraphqlTemplates(code) {
   return code.replace(/`((?:[^`\\]|\\.)*)`/gs, (whole, body) => {
     const parts = splitTemplate(body);
-    const plain = parts.filter((p) => 'text' in p).map((p) => p.text).join(' ');
+    const plain = parts
+      .filter((p) => 'text' in p)
+      .map((p) => p.text)
+      .join(' ');
     const graphql = /\b(query|mutation|fragment)\b|\.\.\. ?on |\{[^}]*\b(id|nodes|amount|cart)\b/.test(plain);
     if (!graphql) return whole;
-    const out = parts.map((p) => ('expr' in p ? p.expr : p.text
-      .replace(/\\n/g, ' ')
-      .replace(/\s+/g, ' ')
-      .replace(/ ?([{}():,!=@[\]]) ?/g, '$1')));
+    const out = parts.map((p) =>
+      'expr' in p
+        ? p.expr
+        : p.text
+            .replace(/\\n/g, ' ')
+            .replace(/\s+/g, ' ')
+            .replace(/ ?([{}():,!=@[\]]) ?/g, '$1'),
+    );
     return `\`${out.join('')}\``;
   });
 }
@@ -87,7 +98,20 @@ const iifeLazyPlugin = {
 };
 
 // Parts reuse the main script's modules (window.Tether.__core) instead of bundling copies.
-const CORE = ['config.js', 'client.js', 'dom.js', 'fragments.js', 'loader.js', 'selling-plans.js', 'status.js', 'cart.js', 'product.js', 'collection.js', 'mounting.js', 'lazy.js'];
+const CORE = [
+  'config.js',
+  'client.js',
+  'dom.js',
+  'fragments.js',
+  'loader.js',
+  'selling-plans.js',
+  'status.js',
+  'cart.js',
+  'product.js',
+  'collection.js',
+  'mounting.js',
+  'lazy.js',
+];
 async function coreExports() {
   const out = {};
   for (const f of CORE) out[f] = Object.keys(await import(pathToFileURL(join(SRC, f)).href));
@@ -114,7 +138,12 @@ const common = { bundle: true, target: TARGET, logLevel: 'warning', legalComment
 
 async function builds() {
   const exportsByFile = await coreExports();
-  const iife = { ...common, entryPoints: [join(SRC, 'index.js')], format: 'iife', plugins: [iifeLazyPlugin, graphqlPlugin] };
+  const iife = {
+    ...common,
+    entryPoints: [join(SRC, 'index.js')],
+    format: 'iife',
+    plugins: [iifeLazyPlugin, graphqlPlugin],
+  };
   const part = (name, minify) => ({
     ...common,
     entryPoints: [join(SRC, 'parts', `${name}.js`)],
@@ -126,28 +155,56 @@ async function builds() {
   return [
     { ...iife, outfile: join(OUT, 'tether.js') },
     { ...iife, outfile: join(OUT, 'tether.min.js'), minify: true, sourcemap: true },
-    ...['diagnose', 'markets', 'search', 'extras', 'account', 'account-pages', 'analytics'].flatMap((n) => [part(n, false), part(n, true)]),
+    ...['diagnose', 'markets', 'search', 'extras', 'account', 'account-pages', 'analytics'].flatMap((n) => [
+      part(n, false),
+      part(n, true),
+    ]),
     {
-      ...common, entryPoints: [join(SRC, 'index.js'), join(SRC, 'server.js'), join(SRC, 'astro.js')], format: 'esm', splitting: true, minify: true,
+      ...common,
+      entryPoints: [join(SRC, 'index.js'), join(SRC, 'server.js'), join(SRC, 'astro.js')],
+      format: 'esm',
+      splitting: true,
+      minify: true,
       external: ['@occluze/tether', 'node:*'],
-      outdir: join(OUT, 'esm'), chunkNames: 'chunks/[name]-[hash]', entryNames: '[name]',
+      outdir: join(OUT, 'esm'),
+      chunkNames: 'chunks/[name]-[hash]',
+      entryNames: '[name]',
     },
-    { ...common, entryPoints: [join(SRC, 'presets/barba.js')], format: 'esm', outfile: join(OUT, 'presets/barba.esm.js') },
+    {
+      ...common,
+      entryPoints: [join(SRC, 'presets/barba.js')],
+      format: 'esm',
+      outfile: join(OUT, 'presets/barba.esm.js'),
+    },
   ];
 }
 
 async function report() {
   const rows = [];
-  for (const f of ['tether.min.js', 'tether.diagnose.min.js', 'tether.markets.min.js', 'tether.search.min.js', 'tether.extras.min.js', 'tether.account.min.js', 'tether.account-pages.min.js', 'tether.analytics.min.js']) {
+  for (const f of [
+    'tether.min.js',
+    'tether.diagnose.min.js',
+    'tether.markets.min.js',
+    'tether.search.min.js',
+    'tether.extras.min.js',
+    'tether.account.min.js',
+    'tether.account-pages.min.js',
+    'tether.analytics.min.js',
+  ]) {
     const buf = await readFile(join(OUT, f));
-    rows.push(`${f.padEnd(24)} ${(buf.length / 1024).toFixed(1).padStart(5)} KB  gzip ${(gzipSync(buf, { level: 9 }).length / 1024).toFixed(1).padStart(4)} KB  brotli ${(brotliCompressSync(buf).length / 1024).toFixed(1).padStart(4)} KB`);
+    rows.push(
+      `${f.padEnd(24)} ${(buf.length / 1024).toFixed(1).padStart(5)} KB  gzip ${(gzipSync(buf, { level: 9 }).length / 1024).toFixed(1).padStart(4)} KB  brotli ${(brotliCompressSync(buf).length / 1024).toFixed(1).padStart(4)} KB`,
+    );
   }
   console.log(rows.join('\n'));
 }
 
 await rm(join(OUT, 'esm'), { recursive: true, force: true });
 await mkdir(OUT, { recursive: true });
-await writeFile(join(OUT, 'tether.esm.js'), "export * from './esm/index.js';\nexport { default } from './esm/index.js';\n");
+await writeFile(
+  join(OUT, 'tether.esm.js'),
+  "export * from './esm/index.js';\nexport { default } from './esm/index.js';\n",
+);
 const all = await builds();
 if (watch) {
   for (const b of all) (await esbuild.context(b)).watch();

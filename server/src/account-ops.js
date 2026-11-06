@@ -9,7 +9,8 @@
  */
 
 const MONEY = 'amount currencyCode';
-const ADDRESS = 'id firstName lastName company address1 address2 city province zoneCode zip country countryCode phoneNumber formatted';
+const ADDRESS =
+  'id firstName lastName company address1 address2 city province zoneCode zip country countryCode phoneNumber formatted';
 
 const Q = {
   order: `query TetherOrder($id: ID!) { order(id: $id) {
@@ -33,16 +34,23 @@ const Q = {
 };
 
 const M = {
-  profile: 'mutation TetherProfile($input: CustomerUpdateInput!) { customerUpdate(input: $input) { customer { firstName lastName } userErrors { field message } } }',
+  profile:
+    'mutation TetherProfile($input: CustomerUpdateInput!) { customerUpdate(input: $input) { customer { firstName lastName } userErrors { field message } } }',
   addressCreate: `mutation TetherAddressCreate($address: CustomerAddressInput!, $default: Boolean) { customerAddressCreate(address: $address, defaultAddress: $default) { customerAddress { ${ADDRESS} } userErrors { field message } } }`,
   addressUpdate: `mutation TetherAddressUpdate($id: ID!, $address: CustomerAddressInput, $default: Boolean) { customerAddressUpdate(addressId: $id, address: $address, defaultAddress: $default) { customerAddress { ${ADDRESS} } userErrors { field message } } }`,
-  addressDelete: 'mutation TetherAddressDelete($id: ID!) { customerAddressDelete(addressId: $id) { deletedAddressId userErrors { field message } } }',
-  pause: 'mutation TetherPause($id: ID!) { subscriptionContractPause(subscriptionContractId: $id) { contract { id status } userErrors { field message } } }',
-  resume: 'mutation TetherResume($id: ID!) { subscriptionContractActivate(subscriptionContractId: $id) { contract { id status } userErrors { field message } } }',
-  cancel: 'mutation TetherCancel($id: ID!) { subscriptionContractCancel(subscriptionContractId: $id) { contract { id status } userErrors { field message } } }',
+  addressDelete:
+    'mutation TetherAddressDelete($id: ID!) { customerAddressDelete(addressId: $id) { deletedAddressId userErrors { field message } } }',
+  pause:
+    'mutation TetherPause($id: ID!) { subscriptionContractPause(subscriptionContractId: $id) { contract { id status } userErrors { field message } } }',
+  resume:
+    'mutation TetherResume($id: ID!) { subscriptionContractActivate(subscriptionContractId: $id) { contract { id status } userErrors { field message } } }',
+  cancel:
+    'mutation TetherCancel($id: ID!) { subscriptionContractCancel(subscriptionContractId: $id) { contract { id status } userErrors { field message } } }',
   skip: 'mutation TetherSkip($input: SubscriptionBillingCycleInput!) { subscriptionBillingCycleSkip(billingCycleInput: $input) { billingCycle { cycleIndex skipped } userErrors { field message } } }',
-  unskip: 'mutation TetherUnskip($input: SubscriptionBillingCycleInput!) { subscriptionBillingCycleUnskip(billingCycleInput: $input) { billingCycle { cycleIndex skipped } userErrors { field message } } }',
-  returnRequest: 'mutation TetherReturn($orderId: ID!, $lines: [RequestedLineItemInput!]!) { orderRequestReturn(orderId: $orderId, requestedLineItems: $lines) { return { id status } userErrors { field message } } }',
+  unskip:
+    'mutation TetherUnskip($input: SubscriptionBillingCycleInput!) { subscriptionBillingCycleUnskip(billingCycleInput: $input) { billingCycle { cycleIndex skipped } userErrors { field message } } }',
+  returnRequest:
+    'mutation TetherReturn($orderId: ID!, $lines: [RequestedLineItemInput!]!) { orderRequestReturn(orderId: $orderId, requestedLineItems: $lines) { return { id status } userErrors { field message } } }',
 };
 
 // ---------------------------------------------------------------- input checks
@@ -50,8 +58,11 @@ const M = {
 export class InputError extends Error {}
 const gid = (type) => new RegExp(`^gid://shopify/${type}/\\d+(\\?[\\w=&.-]{1,80})?$`);
 const IDS = {
-  Order: gid('Order'), CustomerAddress: gid('CustomerAddress'), SubscriptionContract: gid('SubscriptionContract'),
-  LineItem: gid('LineItem'), ReturnReasonDefinition: gid('ReturnReasonDefinition'),
+  Order: gid('Order'),
+  CustomerAddress: gid('CustomerAddress'),
+  SubscriptionContract: gid('SubscriptionContract'),
+  LineItem: gid('LineItem'),
+  ReturnReasonDefinition: gid('ReturnReasonDefinition'),
 };
 /** A gid of exactly this type ('123' becomes gid://shopify/Type/123). */
 function idOf(type, value) {
@@ -62,11 +73,23 @@ function idOf(type, value) {
 const text = (v, max = 255) => {
   if (v == null || v === '') return undefined;
   if (typeof v !== 'string' && typeof v !== 'number') throw new InputError('text');
-  const s = String(v).replace(/[\u0000-\u001f\u007f]/g, '').trim();
+  const s = String(v)
+    .replace(/[\u0000-\u001f\u007f]/g, '')
+    .trim();
   if (s.length > max) throw new InputError('too long');
   return s;
 };
-const ADDRESS_FIELDS = ['firstName', 'lastName', 'company', 'address1', 'address2', 'city', 'zip', 'zoneCode', 'phoneNumber'];
+const ADDRESS_FIELDS = [
+  'firstName',
+  'lastName',
+  'company',
+  'address1',
+  'address2',
+  'city',
+  'zip',
+  'zoneCode',
+  'phoneNumber',
+];
 /**
  * Only the CustomerAddressInput fields, as bounded strings; countryCode two letters. On an update
  * (clear: true) a field sent empty is cleared ('') instead of left out, so an emptied apartment
@@ -89,7 +112,11 @@ export function addressInput(a = {}, { clear = false } = {}) {
 }
 const userErrors = (payload) => {
   const errs = payload?.userErrors || [];
-  if (errs.length) { const e = new InputError(errs.map((x) => x.message).join(' | ')); e.userErrors = errs; throw e; }
+  if (errs.length) {
+    const e = new InputError(errs.map((x) => x.message).join(' | '));
+    e.userErrors = errs;
+    throw e;
+  }
   return payload;
 };
 
@@ -121,7 +148,15 @@ export const ops = {
     const a = addressInput(address || {}, { clear: Boolean(id) });
     const def = isDefault === true ? true : undefined;
     const p = id // an update without fields only sets the default
-      ? userErrors((await ask(M.addressUpdate, { id: idOf('CustomerAddress', id), address: Object.keys(a).length ? a : null, default: def ?? null }))?.customerAddressUpdate)
+      ? userErrors(
+          (
+            await ask(M.addressUpdate, {
+              id: idOf('CustomerAddress', id),
+              address: Object.keys(a).length ? a : null,
+              default: def ?? null,
+            })
+          )?.customerAddressUpdate,
+        )
       : userErrors((await ask(M.addressCreate, { address: a, default: def ?? false }))?.customerAddressCreate);
     return { address: p.customerAddress };
   },
@@ -137,15 +172,27 @@ export const ops = {
     const contractId = idOf('SubscriptionContract', id);
     // Looked up through the customer: a contract that isn't theirs is simply not found.
     const contract = (await ask(Q.contract, { id: contractId }))?.customer?.subscriptionContract;
-    if (!contract) { const e = new InputError('not found'); e.status = 404; throw e; }
+    if (!contract) {
+      const e = new InputError('not found');
+      e.status = 404;
+      throw e;
+    }
     if (action === 'skip' || action === 'unskip') {
       const cycles = contract.upcomingBillingCycles?.nodes || [];
       const cycle = action === 'skip' ? cycles.find((c) => !c.skipped) : cycles.find((c) => c.skipped);
       if (!cycle) throw new InputError(action === 'skip' ? 'no upcoming delivery to skip' : 'nothing skipped');
-      const p = userErrors((await ask(M[action], { input: { contractId, selector: { index: cycle.cycleIndex } } }))?.[action === 'skip' ? 'subscriptionBillingCycleSkip' : 'subscriptionBillingCycleUnskip']);
+      const p = userErrors(
+        (await ask(M[action], { input: { contractId, selector: { index: cycle.cycleIndex } } }))?.[
+          action === 'skip' ? 'subscriptionBillingCycleSkip' : 'subscriptionBillingCycleUnskip'
+        ],
+      );
       return { billingCycle: p.billingCycle };
     }
-    const name = { pause: 'subscriptionContractPause', resume: 'subscriptionContractActivate', cancel: 'subscriptionContractCancel' }[action];
+    const name = {
+      pause: 'subscriptionContractPause',
+      resume: 'subscriptionContractActivate',
+      cancel: 'subscriptionContractCancel',
+    }[action];
     const p = userErrors((await ask(M[action], { id: contractId }))?.[name]);
     return { contract: p.contract };
   },

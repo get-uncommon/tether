@@ -5,9 +5,13 @@ import { product, cartFrom, PLAN_MONTH, PLAN_2MONTH } from './fixtures.js';
 
 const dom = new JSDOM('<!doctype html><body></body>', { url: 'https://site.test/product/coffee-box' });
 Object.assign(globalThis, {
-  window: dom.window, document: dom.window.document, localStorage: dom.window.localStorage,
-  CustomEvent: dom.window.CustomEvent, MutationObserver: dom.window.MutationObserver,
-  Option: dom.window.Option, getComputedStyle: dom.window.getComputedStyle,
+  window: dom.window,
+  document: dom.window.document,
+  localStorage: dom.window.localStorage,
+  CustomEvent: dom.window.CustomEvent,
+  MutationObserver: dom.window.MutationObserver,
+  Option: dom.window.Option,
+  getComputedStyle: dom.window.getComputedStyle,
 });
 
 // ---- fake Storefront API ---------------------------------------------------
@@ -23,12 +27,19 @@ globalThis.fetch = async (url, init) => {
   switch (op) {
     case 'TetherProducts': {
       const data = {};
-      Object.keys(variables).forEach((k) => { if (k.startsWith('h')) data[k] = variables[k] === product.handle ? product : null; });
+      Object.keys(variables).forEach((k) => {
+        if (k.startsWith('h')) data[k] = variables[k] === product.handle ? product : null;
+      });
       return ok(data);
     }
-    case 'TetherCart': return ok({ cart: cartLines.length ? cartFrom(cartLines) : null });
-    case 'Tether_cartCreate': cartLines = [...variables.input.lines]; return ok({ cartCreate: payload() });
-    case 'Tether_cartLinesAdd': cartLines = [...cartLines, ...variables.lines]; return ok({ cartLinesAdd: payload() });
+    case 'TetherCart':
+      return ok({ cart: cartLines.length ? cartFrom(cartLines) : null });
+    case 'Tether_cartCreate':
+      cartLines = [...variables.input.lines];
+      return ok({ cartCreate: payload() });
+    case 'Tether_cartLinesAdd':
+      cartLines = [...cartLines, ...variables.lines];
+      return ok({ cartLinesAdd: payload() });
     case 'Tether_cartLinesUpdate': {
       variables.lines.forEach((u) => {
         const i = Number(u.id.split('/').pop()) - 1;
@@ -40,7 +51,8 @@ globalThis.fetch = async (url, init) => {
     case 'Tether_cartLinesRemove':
       cartLines = cartLines.filter((_, i) => !variables.lineIds.includes(`gid://shopify/CartLine/${i + 1}`));
       return ok({ cartLinesRemove: payload() });
-    default: throw new Error(`unexpected op ${op}`);
+    default:
+      throw new Error(`unexpected op ${op}`);
   }
 };
 
@@ -51,15 +63,27 @@ let plans;
 before(async () => {
   ({ default: Tether } = await import('../src/index.js'));
   plans = Tether.plans;
-  await Tether.init({ domain: 'shop.test', token: 't', autoMount: false, country: 'NL', locale: 'nl-NL', metafields: ['custom.origin'] });
+  await Tether.init({
+    domain: 'shop.test',
+    token: 't',
+    autoMount: false,
+    country: 'NL',
+    locale: 'nl-NL',
+    metafields: ['custom.origin'],
+  });
 });
 
-beforeEach(() => { calls.length = 0; });
+beforeEach(() => {
+  calls.length = 0;
+});
 
 // ---- pure helpers ----------------------------------------------------------
 
 test('withContext adds @inContext to the operation', () => {
-  const q = Tether.withContext('query A($id: ID!) { x }\nfragment F on Product { id }', { country: 'nl', language: 'nl' });
+  const q = Tether.withContext('query A($id: ID!) { x }\nfragment F on Product { id }', {
+    country: 'nl',
+    language: 'nl',
+  });
   assert.match(q, /^query A\(\$id: ID!\) @inContext\(country: NL, language: NL\) \{/);
 });
 
@@ -117,7 +141,8 @@ test('renders product, metafield and one-time price by default', async () => {
 });
 
 test('subscription toggle changes price and adds sellingPlanId to the cart line', async () => {
-  localStorage.clear(); cartLines = [];
+  localStorage.clear();
+  cartLines = [];
   await mountProduct();
   document.querySelector('#sub').click();
   assert.match(document.querySelector('#price').textContent, /27/);
@@ -152,7 +177,8 @@ test('picking a plan the variant lacks falls back to a plan it has', async () =>
 });
 
 test('one-time add has no sellingPlanId; lines can switch plan and be removed', async () => {
-  localStorage.clear(); cartLines = [];
+  localStorage.clear();
+  cartLines = [];
   await mountProduct();
   document.querySelector('#one').click();
   document.querySelector('#add').click();
@@ -172,7 +198,8 @@ test('one-time add has no sellingPlanId; lines can switch plan and be removed', 
 });
 
 test('group add sends all scopes in one request with _group attribute', async () => {
-  localStorage.clear(); cartLines = [];
+  localStorage.clear();
+  cartLines = [];
   document.body.innerHTML = `
   <div tether-group="Starter set">
     <div tether-product="coffee-box"></div>
@@ -190,14 +217,16 @@ test('group add sends all scopes in one request with _group attribute', async ()
 });
 
 test('binds on the product root itself (card link)', async () => {
-  document.body.innerHTML = '<a href="#" tether-product="coffee-box" tether-bind="link"><span tether-bind="title"></span></a>';
+  document.body.innerHTML =
+    '<a href="#" tether-product="coffee-box" tether-bind="link"><span tether-bind="title"></span></a>';
   Tether.mount(document);
   await tick();
   assert.equal(document.querySelector('a').getAttribute('href'), '/product/coffee-box');
 });
 
 test('image:N binds the nth product image, background for non-img', async () => {
-  document.body.innerHTML = '<div tether-product="coffee-box"><div id="bg" tether-bind="image:1"></div><img id="i9" tether-bind="image:9"></div>';
+  document.body.innerHTML =
+    '<div tether-product="coffee-box"><div id="bg" tether-bind="image:1"></div><img id="i9" tether-bind="image:9"></div>';
   Tether.mount(document);
   await tick();
   assert.match(document.querySelector('#bg').style.backgroundImage, /a\.jpg/);

@@ -9,8 +9,14 @@ import { createThrottle } from './throttle.js';
 const BASE = 'https://api.webflow.com/v2';
 
 export function createWebflow({
-  token, collectionId, fetch: fetchImpl = globalThis.fetch, throttle, perMinute = 50,
-  sleep = realSleep, retries = 4, log,
+  token,
+  collectionId,
+  fetch: fetchImpl = globalThis.fetch,
+  throttle,
+  perMinute = 50,
+  sleep = realSleep,
+  retries = 4,
+  log,
   maxRetryWaitMs = Infinity, // webhook runs: give up instead of waiting out a long Retry-After
 }) {
   if (!token) throw new SyncError('WEBFLOW_TOKEN is required');
@@ -33,18 +39,25 @@ export function createWebflow({
       });
       if (res.status === 429 && attempt < retries) {
         const wait = (parseFloat(res.headers.get('retry-after')) || 60) * 1000;
-        if (wait > maxRetryWaitMs) throw new SyncError(`Webflow rate limit: retry after ${wait / 1000}s`, { status: 429 });
+        if (wait > maxRetryWaitMs)
+          throw new SyncError(`Webflow rate limit: retry after ${wait / 1000}s`, { status: 429 });
         log?.warn?.(`webflow 429, waiting ${wait / 1000}s`);
         gate.pause(wait);
         continue;
       }
-      if (res.status >= 500 && attempt < retries) { await sleep(1000 * 2 ** attempt); continue; }
+      if (res.status >= 500 && attempt < retries) {
+        await sleep(1000 * 2 ** attempt);
+        continue;
+      }
       if (res.status === 204) return null;
       const json = await res.json().catch(() => null);
       if (!res.ok) {
         const msg = json?.message || json?.msg || res.statusText || 'error';
         const details = json?.details ? ` ${JSON.stringify(json.details)}` : '';
-        throw new SyncError(`Webflow ${method} ${path}: ${res.status} ${msg}${details}`, { status: res.status, body: json });
+        throw new SyncError(`Webflow ${method} ${path}: ${res.status} ${msg}${details}`, {
+          status: res.status,
+          body: json,
+        });
       }
       return json;
     }
@@ -54,7 +67,9 @@ export function createWebflow({
 
   return {
     collectionId,
-    get requests() { return requests; },
+    get requests() {
+      return requests;
+    },
     call,
     getCollection: () => call('GET', c),
 
@@ -70,12 +85,15 @@ export function createWebflow({
     },
 
     getItem: async (id) => {
-      try { return await call('GET', `${c}/items/${id}`); } catch (err) {
+      try {
+        return await call('GET', `${c}/items/${id}`);
+      } catch (err) {
         if (err.status === 404) return null;
         throw err;
       }
     },
-    createItem: (fieldData, { isDraft = false, isArchived = false } = {}) => call('POST', `${c}/items`, { isArchived, isDraft, fieldData }),
+    createItem: (fieldData, { isDraft = false, isArchived = false } = {}) =>
+      call('POST', `${c}/items`, { isArchived, isDraft, fieldData }),
     updateItem: (id, fieldData, flags = {}) => call('PATCH', `${c}/items/${id}`, { ...flags, fieldData }),
     deleteItem: (id) => call('DELETE', `${c}/items/${id}`),
 
@@ -83,13 +101,16 @@ export function createWebflow({
     async publish(itemIds) {
       const ids = [...new Set(itemIds)].filter(Boolean);
       const results = [];
-      for (let i = 0; i < ids.length; i += 100) results.push(await call('POST', `${c}/items/publish`, { itemIds: ids.slice(i, i + 100) }));
+      for (let i = 0; i < ids.length; i += 100)
+        results.push(await call('POST', `${c}/items/publish`, { itemIds: ids.slice(i, i + 100) }));
       return results;
     },
 
     /** Removes the item from the live site (no-op when it isn't live). */
     async unpublish(id) {
-      try { return await call('DELETE', `${c}/items/${id}/live`); } catch (err) {
+      try {
+        return await call('DELETE', `${c}/items/${id}/live`);
+      } catch (err) {
         if (err.status === 404) return null;
         throw err;
       }

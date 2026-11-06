@@ -32,18 +32,29 @@ export const storageKey = () => `${cfg.prefix}:market:${cfg.domain}`;
 const defaultEnv = () => ({
   document: typeof document !== 'undefined' ? document : null,
   location: typeof window !== 'undefined' ? window.location : null,
-  storage: (() => { try { return window.localStorage; } catch { return null; } })(),
+  storage: (() => {
+    try {
+      return window.localStorage;
+    } catch {
+      return null;
+    }
+  })(),
   global: typeof window !== 'undefined' ? window : {},
 });
 
 export function toCountry(v) {
-  const c = String(v || '').trim().toUpperCase();
+  const c = String(v || '')
+    .trim()
+    .toUpperCase();
   return COUNTRY.test(c) && c !== 'XX' && c !== 'T1' ? c : null; // XX/T1: Cloudflare's unknown/Tor
 }
 
 /** 'de-DE' -> 'DE', 'pt-BR' -> 'PT_BR', 'en' -> 'EN'. */
 export function toLanguage(v) {
-  const raw = String(v || '').trim().replace('-', '_').toUpperCase();
+  const raw = String(v || '')
+    .trim()
+    .replace('-', '_')
+    .toUpperCase();
   if (!raw) return null;
   if (REGIONAL_LANGUAGES.has(raw)) return raw;
   const primary = raw.split('_')[0];
@@ -52,7 +63,10 @@ export function toLanguage(v) {
 
 function readCookie(doc, name) {
   if (!doc || !name) return null;
-  const hit = String(doc.cookie || '').split(';').map((c) => c.trim()).find((c) => c.startsWith(`${name}=`));
+  const hit = String(doc.cookie || '')
+    .split(';')
+    .map((c) => c.trim())
+    .find((c) => c.startsWith(`${name}=`));
   return hit ? decodeURIComponent(hit.slice(name.length + 1)) : null;
 }
 
@@ -66,11 +80,16 @@ const lookup = (locales, key) => {
 const readers = {
   saved(m, env) {
     if (m.remember === false || !env.storage) return null;
-    try { return JSON.parse(env.storage.getItem(storageKey()) || 'null'); } catch { return null; }
+    try {
+      return JSON.parse(env.storage.getItem(storageKey()) || 'null');
+    } catch {
+      return null;
+    }
   },
   server(m, env) {
     const meta = (name) => env.document?.querySelector?.(`meta[name="${name}"]`)?.getAttribute('content');
-    const country = env.global.TETHER_COUNTRY || meta('tether-country') || readCookie(env.document, m.cookie || 'tether_country');
+    const country =
+      env.global.TETHER_COUNTRY || meta('tether-country') || readCookie(env.document, m.cookie || 'tether_country');
     const language = env.global.TETHER_LANGUAGE || meta('tether-language');
     return { country, language };
   },
@@ -105,7 +124,10 @@ export function detectMarket(markets = cfg.markets, env = defaultEnv()) {
     if (!r) return;
     const vals = { country: toCountry(r.country), language: toLanguage(r.language), locale: r.locale || null };
     Object.entries(vals).forEach(([k, v]) => {
-      if (v && !out[k]) { out[k] = v; out.sources[k] = name; }
+      if (v && !out[k]) {
+        out[k] = v;
+        out.sources[k] = name;
+      }
     });
   });
   return out;
@@ -113,11 +135,24 @@ export function detectMarket(markets = cfg.markets, env = defaultEnv()) {
 
 export function rememberMarket(market) {
   if (cfg.markets?.remember === false) return;
-  try { localStorage.setItem(storageKey(), JSON.stringify({ country: market.country, language: market.language || undefined, locale: market.locale || undefined })); } catch { /* private mode */ }
+  try {
+    localStorage.setItem(
+      storageKey(),
+      JSON.stringify({
+        country: market.country,
+        language: market.language || undefined,
+        locale: market.locale || undefined,
+      }),
+    );
+  } catch {
+    /* private mode */
+  }
 }
 
 let localizationPromise = null;
-export function clearLocalization() { localizationPromise = null; }
+export function clearLocalization() {
+  localizationPromise = null;
+}
 
 /** Countries the store sells to (Shopify Markets), with currency. Cached per page. */
 export function getLocalization() {
@@ -128,7 +163,12 @@ export function getLocalization() {
     language { isoCode name }
     availableCountries { isoCode name currency { isoCode symbol } availableLanguages { isoCode name } }
   }
-}`).then((d) => d.localization).catch((err) => { localizationPromise = null; throw err; });
+}`)
+      .then((d) => d.localization)
+      .catch((err) => {
+        localizationPromise = null;
+        throw err;
+      });
   }
   return localizationPromise;
 }

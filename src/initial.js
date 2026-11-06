@@ -16,7 +16,7 @@ export function initialState(product, { variant, sellingPlan, defaultPurchase = 
 
   const plans = allPlans(product);
   const fromUrl = findPlan(product, sellingPlan);
-  let plan = plans.length ? (fromUrl || plans[0]) : null;
+  let plan = plans.length ? fromUrl || plans[0] : null;
   if (plan && !allocationFor(v, plan.id)) plan = plans.find((p) => allocationFor(v, p.id)) || plan;
   const wantsSub = product.requiresSellingPlan || fromUrl || defaultPurchase === 'subscription';
   const subscriptionAvailable = plans.some((p) => allocationFor(v, p.id));
@@ -24,7 +24,9 @@ export function initialState(product, { variant, sellingPlan, defaultPurchase = 
   const sub = purchase === 'subscription' && subscriptionAvailable;
 
   const price = sub ? planPrice(v, plan.id) : v.price;
-  const compareAt = sub ? (allocationFor(v, plan.id)?.priceAdjustments?.[0]?.compareAtPrice || v.compareAtPrice) : v.compareAtPrice;
+  const compareAt = sub
+    ? allocationFor(v, plan.id)?.priceAdjustments?.[0]?.compareAtPrice || v.compareAtPrice
+    : v.compareAtPrice;
   const onSale = Boolean(compareAt && parseFloat(compareAt.amount) > parseFloat(price.amount));
   const q = v.quantityAvailable;
   const low = q != null && q > 0 && q <= lowStock;
@@ -37,8 +39,12 @@ export function initialState(product, { variant, sellingPlan, defaultPurchase = 
     plan: sub ? plan : null,
     /** The plan list (tether-plan-list="all"): selected one gets is-selected, unavailable ones is-unavailable. */
     plans: plans.map((p) => ({
-      id: p.id, name: p.name, price: planPrice(v, p.id), savings: planSavings(v, p.id).percentage,
-      selected: sub && p.id === plan.id, available: Boolean(allocationFor(v, p.id)),
+      id: p.id,
+      name: p.name,
+      price: planPrice(v, p.id),
+      savings: planSavings(v, p.id).percentage,
+      selected: sub && p.id === plan.id,
+      available: Boolean(allocationFor(v, p.id)),
     })),
     /** Savings of the selected plan in % (tether-bind="subscription-savings"), 0 without one. */
     savings: plan ? planSavings(v, plan.id).percentage : 0,
@@ -65,12 +71,20 @@ export function initialState(product, { variant, sellingPlan, defaultPurchase = 
       'has-savings': sub ? savingsNow > 0 : onSale,
     },
     /** Option values without an available variant, as plain data (for frameworks that serialise props). */
-    unavailable: Object.fromEntries((product.options || []).map((o) => [o.name, o.optionValues.map((x) => x.name).filter((n) => isUnavail(o.name, n))])),
+    unavailable: Object.fromEntries(
+      (product.options || []).map((o) => [
+        o.name,
+        o.optionValues.map((x) => x.name).filter((n) => isUnavail(o.name, n)),
+      ]),
+    ),
     /** Option values with no available variant (given the other selected options): class is-unavailable. */
     isUnavailable: (name, value) => isUnavail(name, value),
   };
   function isUnavail(name, value) {
-    return !vs.some((x) => x.availableForSale && x.selectedOptions.every((o) =>
-      (o.name === name ? o.value === value : selected[o.name] === o.value)));
+    return !vs.some(
+      (x) =>
+        x.availableForSale &&
+        x.selectedOptions.every((o) => (o.name === name ? o.value === value : selected[o.name] === o.value)),
+    );
   }
 }

@@ -5,13 +5,41 @@
  */
 import { cfg, reportError } from './config.js';
 import {
-  attr, sel, get, has, qsa, scoped, emit, formatMoney, formatDate, setText, setImage, show,
-  setSelected, repeat, productUrl, notifyLayoutChanged, watchImages, busy, parseJSONAttr, toAttributes, sameImage, hasTemplate, formatPercent,
+  attr,
+  sel,
+  get,
+  has,
+  qsa,
+  scoped,
+  emit,
+  formatMoney,
+  formatDate,
+  setText,
+  setImage,
+  show,
+  setSelected,
+  repeat,
+  productUrl,
+  notifyLayoutChanged,
+  watchImages,
+  busy,
+  parseJSONAttr,
+  toAttributes,
+  sameImage,
+  hasTemplate,
+  formatPercent,
 } from './dom.js';
 import { Cart } from './cart.js';
 import { STATUS_KEYS, ownedBy } from './status.js';
 import {
-  allPlans, allocationFor, planPrice, planCheckoutCharge, planSavings, planAdjustment, findPlan, GID,
+  allPlans,
+  allocationFor,
+  planPrice,
+  planCheckoutCharge,
+  planSavings,
+  planAdjustment,
+  findPlan,
+  GID,
 } from './selling-plans.js';
 
 export const scopes = new WeakMap(); // element -> ProductScope
@@ -30,7 +58,13 @@ function metafieldValue(product, ref) {
 // language Shopify translates them (Size -> Größe), so attributes are matched by position instead.
 const knownOptionNames = new Map();
 export function rememberOptionNames(products) {
-  (products || []).forEach((p) => { if (p?.handle && !knownOptionNames.has(p.handle)) knownOptionNames.set(p.handle, (p.options || []).map((o) => o.name)); });
+  (products || []).forEach((p) => {
+    if (p?.handle && !knownOptionNames.has(p.handle))
+      knownOptionNames.set(
+        p.handle,
+        (p.options || []).map((o) => o.name),
+      );
+  });
 }
 
 export class ProductScope {
@@ -67,7 +101,12 @@ export class ProductScope {
     if (this.planId && !this.plans.some((p) => p.id === this.planId)) this.planId = this.plans[0]?.id || null;
     if (!this.plans.length && this.purchase === 'subscription') this.purchase = 'one-time';
     const v = product.variants.nodes.find((x) => x.id === variantId);
-    if (v) { this.selected = {}; v.selectedOptions.forEach((o) => { this.selected[o.name] = o.value; }); }
+    if (v) {
+      this.selected = {};
+      v.selectedOptions.forEach((o) => {
+        this.selected[o.name] = o.value;
+      });
+    }
     this.root.setAttribute(attr('state'), 'ready');
     this.root.removeAttribute(attr('error'));
     this.renderProduct();
@@ -95,7 +134,10 @@ export class ProductScope {
   initSelection() {
     const vs = this.product.variants.nodes;
     const first = vs.find((v) => v.availableForSale) || vs[0];
-    if (first) first.selectedOptions.forEach((o) => { this.selected[o.name] = o.value; });
+    if (first)
+      first.selectedOptions.forEach((o) => {
+        this.selected[o.name] = o.value;
+      });
 
     const param = new URLSearchParams(window.location.search).get('variant') || get(this.root, 'variant');
     if (param) {
@@ -103,7 +145,9 @@ export class ProductScope {
       const match = vs.find((v) => v.id === gid);
       if (match) {
         this.selected = {};
-        match.selectedOptions.forEach((o) => { this.selected[o.name] = o.value; });
+        match.selectedOptions.forEach((o) => {
+          this.selected[o.name] = o.value;
+        });
       }
     }
   }
@@ -115,22 +159,27 @@ export class ProductScope {
     const fromAttr = findPlan(this.product, get(this.root, 'default-plan'));
     this.planId = (fromUrl || fromAttr || this.plans[0]).id;
 
-    const wanted = fromUrl ? 'subscription' : (get(this.root, 'default-purchase') || cfg.defaultPurchase);
+    const wanted = fromUrl ? 'subscription' : get(this.root, 'default-purchase') || cfg.defaultPurchase;
     this.purchase = this.product.requiresSellingPlan || wanted === 'subscription' ? 'subscription' : 'one-time';
   }
 
   findVariant() {
-    return this.product.variants.nodes.find((v) =>
-      v.selectedOptions.every((o) => this.selected[o.name] === o.value)) || null;
+    return (
+      this.product.variants.nodes.find((v) => v.selectedOptions.every((o) => this.selected[o.name] === o.value)) || null
+    );
   }
 
   isValueAvailable(name, value) {
-    return this.product.variants.nodes.some((v) =>
-      v.availableForSale && v.selectedOptions.every((o) =>
-        (o.name === name ? o.value === value : this.selected[o.name] === o.value)));
+    return this.product.variants.nodes.some(
+      (v) =>
+        v.availableForSale &&
+        v.selectedOptions.every((o) => (o.name === name ? o.value === value : this.selected[o.name] === o.value)),
+    );
   }
 
-  get plan() { return this.plans.find((p) => p.id === this.planId) || null; }
+  get plan() {
+    return this.plans.find((p) => p.id === this.planId) || null;
+  }
 
   /** True when the current variant can be bought on the selected plan. */
   get subscriptionAvailable() {
@@ -153,14 +202,16 @@ export class ProductScope {
 
   collectAttributes() {
     const fixed = toAttributes(parseJSONAttr(this.root, 'line-attributes'));
-    const inputs = this.$(sel('line-attribute')).map((el) => {
-      const key = get(el, 'line-attribute');
-      let value;
-      if (el.type === 'checkbox') value = el.checked ? (el.value && el.value !== 'on' ? el.value : 'Yes') : '';
-      else if (el.type === 'radio') value = el.checked ? el.value : null;
-      else value = el.value;
-      return value == null || value === '' ? null : { key, value: String(value) };
-    }).filter(Boolean);
+    const inputs = this.$(sel('line-attribute'))
+      .map((el) => {
+        const key = get(el, 'line-attribute');
+        let value;
+        if (el.type === 'checkbox') value = el.checked ? (el.value && el.value !== 'on' ? el.value : 'Yes') : '';
+        else if (el.type === 'radio') value = el.checked ? el.value : null;
+        else value = el.value;
+        return value == null || value === '' ? null : { key, value: String(value) };
+      })
+      .filter(Boolean);
     return [...fixed, ...inputs];
   }
 
@@ -168,14 +219,20 @@ export class ProductScope {
 
   select(name, value) {
     if (this.selected[name] === value) return;
-    const vs = this.product.variants.nodes.filter((v) => v.selectedOptions.some((o) => o.name === name && o.value === value));
+    const vs = this.product.variants.nodes.filter((v) =>
+      v.selectedOptions.some((o) => o.name === name && o.value === value),
+    );
     if (!vs.length) return; // a value no variant has: nothing to select, keep the visitor's choice
     const next = { ...this.selected, [name]: value };
     if (!vs.some((v) => v.selectedOptions.every((o) => next[o.name] === o.value))) {
       // That combination doesn't exist: the closest variant with this value (most other choices kept, available first).
-      const score = (v) => v.selectedOptions.filter((o) => o.name !== name && this.selected[o.name] === o.value).length * 2 + (v.availableForSale ? 1 : 0);
+      const score = (v) =>
+        v.selectedOptions.filter((o) => o.name !== name && this.selected[o.name] === o.value).length * 2 +
+        (v.availableForSale ? 1 : 0);
       const best = vs.reduce((a, b) => (score(b) > score(a) ? b : a));
-      best.selectedOptions.forEach((o) => { next[o.name] = o.value; });
+      best.selectedOptions.forEach((o) => {
+        next[o.name] = o.value;
+      });
     }
     this.selected = next;
     this.renderVariant();
@@ -185,7 +242,9 @@ export class ProductScope {
     const v = this.product.variants.nodes.find((x) => x.id === GID.variant(id));
     if (!v) return;
     this.selected = {};
-    v.selectedOptions.forEach((o) => { this.selected[o.name] = o.value; });
+    v.selectedOptions.forEach((o) => {
+      this.selected[o.name] = o.value;
+    });
     this.renderVariant();
   }
 
@@ -238,7 +297,11 @@ export class ProductScope {
       }
 
       const plan = t.closest(sel('plan-value'));
-      if (own(plan)) { e.preventDefault(); this.selectPlan(get(plan, 'plan-value')); return; }
+      if (own(plan)) {
+        e.preventDefault();
+        this.selectPlan(get(plan, 'plan-value'));
+        return;
+      }
 
       const purchase = t.closest(`${sel('purchase')}:not(select)`);
       if (own(purchase)) {
@@ -248,12 +311,23 @@ export class ProductScope {
       }
 
       const plus = t.closest(sel('qty-plus'));
-      if (own(plus)) { e.preventDefault(); this.setQuantity(this.quantity + 1); return; }
+      if (own(plus)) {
+        e.preventDefault();
+        this.setQuantity(this.quantity + 1);
+        return;
+      }
       const minus = t.closest(sel('qty-minus'));
-      if (own(minus)) { e.preventDefault(); this.setQuantity(this.quantity - 1); return; }
+      if (own(minus)) {
+        e.preventDefault();
+        this.setQuantity(this.quantity - 1);
+        return;
+      }
 
       const add = t.closest(sel('add-to-cart'));
-      if (own(add)) { e.preventDefault(); this.onAddClick(add); }
+      if (own(add)) {
+        e.preventDefault();
+        this.onAddClick(add);
+      }
     });
 
     this.root.addEventListener('change', (e) => {
@@ -262,7 +336,8 @@ export class ProductScope {
       if (t.matches(`select${sel('option')}`)) this.select(this.optName(get(t, 'option')), t.value);
       else if (t.matches(`select${sel('variant-select')}`)) this.selectVariant(t.value);
       else if (t.matches(`select${sel('plan')}`)) {
-        if (t.value) this.selectPlan(t.value); else this.setPurchase('one-time');
+        if (t.value) this.selectPlan(t.value);
+        else this.setPurchase('one-time');
       } else if (t.matches(`select${sel('purchase')}`)) this.setPurchase(t.value);
       else if (t.matches(sel('qty'))) this.setQuantity(t.value);
     });
@@ -272,11 +347,14 @@ export class ProductScope {
     const label = btn.querySelector(sel('add-label')) || btn;
     const busyText = get(btn, 'adding-text');
     const write = (txt) => setText(label, txt);
-    if (label.dataset.tetherLabel === undefined) label.dataset.tetherLabel = label.tagName === 'INPUT' ? label.value : label.textContent;
+    if (label.dataset.tetherLabel === undefined)
+      label.dataset.tetherLabel = label.tagName === 'INPUT' ? label.value : label.textContent;
 
     busy(btn, async () => {
       if (busyText) write(busyText);
-      try { await this.addToCart(); } catch (err) {
+      try {
+        await this.addToCart();
+      } catch (err) {
         reportError(err, 'add to cart failed');
         emit('error', { error: err, context: 'add-to-cart' }, this.root);
       } finally {
@@ -293,7 +371,9 @@ export class ProductScope {
   renderProduct() {
     const p0 = this.product;
     if (!knownOptionNames.has(p0.handle)) {
-      const authored = this.$(`${sel('option-list')},select${sel('option')}`).map((e) => get(e, 'option-list') || get(e, 'option'));
+      const authored = this.$(`${sel('option-list')},select${sel('option')}`).map(
+        (e) => get(e, 'option-list') || get(e, 'option'),
+      );
       if (authored.some((n) => p0.options.some((o) => o.name === n))) rememberOptionNames([p0]);
     }
     const p = this.product;
@@ -309,28 +389,47 @@ export class ProductScope {
       }[key];
       if (txt !== undefined) return setText(el, txt);
       switch (key) {
-        case 'description': el.innerHTML = p.descriptionHtml || ''; return undefined;
-        case 'published-at': return setText(el, formatDate(p.publishedAt));
-        case 'min-price': return setText(el, formatMoney(p.priceRange.minVariantPrice));
-        case 'max-price': return setText(el, formatMoney(p.priceRange.maxVariantPrice));
-        case 'featured-image': return setImage(el, p.featuredImage?.url, p.featuredImage?.altText || p.title);
+        case 'description':
+          el.innerHTML = p.descriptionHtml || '';
+          return undefined;
+        case 'published-at':
+          return setText(el, formatDate(p.publishedAt));
+        case 'min-price':
+          return setText(el, formatMoney(p.priceRange.minVariantPrice));
+        case 'max-price':
+          return setText(el, formatMoney(p.priceRange.maxVariantPrice));
+        case 'featured-image':
+          return setImage(el, p.featuredImage?.url, p.featuredImage?.altText || p.title);
         case 'url':
         case 'link':
           el.setAttribute('href', productUrl(p.handle, p.id));
           if (key === 'url' && !el.firstElementChild && !el.textContent.trim()) setText(el, p.title);
           return undefined;
-        case 'images': {
-          // Server-rendered gallery with the same images: keep it as it is.
-          const imgs = [...el.children].map((n) => (n.tagName === 'IMG' ? n : n.querySelector('img')));
-          if (!hasTemplate(el) && imgs.length === p.images.nodes.length && imgs.every((im, i) => sameImage(im?.getAttribute('src'), p.images.nodes[i].url))) return undefined;
-        }
+        case 'images':
+          {
+            // Server-rendered gallery with the same images: keep it as it is.
+            const imgs = [...el.children].map((n) => (n.tagName === 'IMG' ? n : n.querySelector('img')));
+            if (
+              !hasTemplate(el) &&
+              imgs.length === p.images.nodes.length &&
+              imgs.every((im, i) => sameImage(im?.getAttribute('src'), p.images.nodes[i].url))
+            )
+              return undefined;
+          }
           return repeat(el, p.images.nodes, (node, img) => {
             const target = node.matches(`img,${sel('bind', 'image')}`) ? node : node.querySelector('img') || node;
             setImage(target, img.url, img.altText || p.title);
           });
         case 'tags': {
-          const exclude = (el.getAttribute('exclude') || '').split(',').map((s) => s.trim()).filter(Boolean);
-          return repeat(el, p.tags.filter((t) => !exclude.includes(t)), (node, tag) => setText(node, tag));
+          const exclude = (el.getAttribute('exclude') || '')
+            .split(',')
+            .map((s) => s.trim())
+            .filter(Boolean);
+          return repeat(
+            el,
+            p.tags.filter((t) => !exclude.includes(t)),
+            (node, tag) => setText(node, tag),
+          );
         }
         default:
           // image:2 = the second product image (falls back to the featured image)
@@ -356,7 +455,8 @@ export class ProductScope {
       return repeat(container, opt.optionValues, (node, v) => {
         node.setAttribute(attr('option-value'), v.name);
         const t = node.querySelector(sel('bind', 'option-value'));
-        if (t) setText(t, v.name); else if (!node.firstElementChild) setText(node, v.name);
+        if (t) setText(t, v.name);
+        else if (!node.firstElementChild) setText(node, v.name);
         const sw = node.querySelector(sel('bind', 'swatch'));
         if (sw && v.swatch?.color) sw.style.backgroundColor = v.swatch.color;
         if (sw && v.swatch?.image?.previewImage) setImage(sw, v.swatch.image.previewImage.url, v.name);
@@ -405,7 +505,9 @@ export class ProductScope {
       [v] = p.variants.nodes;
       if (v) {
         this.selected = {};
-        v.selectedOptions.forEach((o) => { this.selected[o.name] = o.value; });
+        v.selectedOptions.forEach((o) => {
+          this.selected[o.name] = o.value;
+        });
       }
     }
     this.variant = v;
@@ -421,12 +523,17 @@ export class ProductScope {
     const oneTimePrice = v.price;
     const subPrice = this.planId ? planPrice(v, this.planId) : null;
     const price = sub ? subPrice : oneTimePrice;
-    const compareAt = sub ? (allocationFor(v, this.planId)?.priceAdjustments?.[0]?.compareAtPrice || v.compareAtPrice) : v.compareAtPrice;
+    const compareAt = sub
+      ? allocationFor(v, this.planId)?.priceAdjustments?.[0]?.compareAtPrice || v.compareAtPrice
+      : v.compareAtPrice;
     const onSale = compareAt && parseFloat(compareAt.amount) > parseFloat(price.amount);
     const discountPct = onSale ? Math.round((1 - parseFloat(price.amount) / parseFloat(compareAt.amount)) * 100) : 0;
     const savings = this.planId ? planSavings(v, this.planId) : { amount: null, percentage: 0 };
     const plan = this.plan;
-    const total = { amount: (parseFloat(price.amount) * Math.max(1, this.quantity)).toFixed(2), currencyCode: price.currencyCode };
+    const total = {
+      amount: (parseFloat(price.amount) * Math.max(1, this.quantity)).toFixed(2),
+      currencyCode: price.currencyCode,
+    };
 
     const fm = formatMoney;
     const pct = (n) => formatPercent(n);
@@ -439,14 +546,26 @@ export class ProductScope {
       'subscription-savings': () => pct(savings.percentage),
       'subscription-savings-amount': () => fm(savings.amount),
       // What the visitor pays today for the chosen quantity (prepaid plans charge more up front).
-      'checkout-charge': () => { const c = sub ? planCheckoutCharge(v, this.planId) : price; return c && fm({ amount: (parseFloat(c.amount) * Math.max(1, this.quantity)).toFixed(2), currencyCode: c.currencyCode }); },
+      'checkout-charge': () => {
+        const c = sub ? planCheckoutCharge(v, this.planId) : price;
+        return (
+          c &&
+          fm({ amount: (parseFloat(c.amount) * Math.max(1, this.quantity)).toFixed(2), currencyCode: c.currencyCode })
+        );
+      },
       'plan-name': () => plan?.name,
       'plan-description': () => plan?.description,
       'plan-group': () => plan?.group?.name,
       'compare-at-price': () => (onSale ? fm(compareAt) : ''),
       'unit-price': () => fm(v.unitPrice),
       'discount-percentage': () => `${discountPct}%`,
-      'discount-amount': () => (onSale ? fm({ amount: String(parseFloat(compareAt.amount) - parseFloat(price.amount)), currencyCode: price.currencyCode }) : ''),
+      'discount-amount': () =>
+        onSale
+          ? fm({
+              amount: String(parseFloat(compareAt.amount) - parseFloat(price.amount)),
+              currencyCode: price.currencyCode,
+            })
+          : '',
       'variant-title': () => v.title,
       'variant-id': () => v.id,
       sku: () => v.sku,
@@ -460,7 +579,9 @@ export class ProductScope {
       else if (text[k]) setText(el, text[k]());
     });
 
-    this.$(sel('option-selected')).forEach((el) => setText(el, this.selected[this.optName(get(el, 'option-selected'))] || ''));
+    this.$(sel('option-selected')).forEach((el) =>
+      setText(el, this.selected[this.optName(get(el, 'option-selected'))] || ''),
+    );
 
     this.$(sel('option-list')).forEach((container) => {
       const name = this.optName(get(container, 'option-list'));
@@ -473,12 +594,19 @@ export class ProductScope {
       });
     });
 
-    this.$(`select${sel('option')}`).forEach((s) => { s.value = this.selected[this.optName(get(s, 'option'))] || ''; });
-    this.$(`select${sel('variant-select')}`).forEach((s) => { s.value = v.id; });
+    this.$(`select${sel('option')}`).forEach((s) => {
+      s.value = this.selected[this.optName(get(s, 'option'))] || '';
+    });
+    this.$(`select${sel('variant-select')}`).forEach((s) => {
+      s.value = v.id;
+    });
 
     // Subscription UI
     this.$(sel('purchase')).forEach((el) => {
-      if (el.tagName === 'SELECT') { el.value = this.purchase; return; }
+      if (el.tagName === 'SELECT') {
+        el.value = this.purchase;
+        return;
+      }
       const mode = get(el, 'purchase');
       setSelected(el, mode === this.purchase);
       const unavailable = mode === 'subscription' ? !this.subscriptionAvailable : p.requiresSellingPlan;
@@ -508,13 +636,15 @@ export class ProductScope {
       });
     });
 
-    this.$(`select${sel('plan')}`).forEach((s) => { s.value = sub ? this.planId : ''; });
+    this.$(`select${sel('plan')}`).forEach((s) => {
+      s.value = sub ? this.planId : '';
+    });
 
     const low = v.quantityAvailable != null && v.quantityAvailable > 0 && v.quantityAvailable <= (cfg.lowStock ?? 5);
     const conds = {
       'in-stock': v.availableForSale,
       'out-of-stock': !v.availableForSale,
-      'backorder': v.availableForSale && v.currentlyNotInStock,
+      backorder: v.availableForSale && v.currentlyNotInStock,
       'on-sale': Boolean(onSale),
       'not-on-sale': !onSale,
       'has-variants': p.variants.nodes.length > 1,
@@ -529,9 +659,9 @@ export class ProductScope {
       'one-time-selected': !sub,
       'has-savings': sub ? savings.percentage > 0 : Boolean(onSale),
       // scope state (see status.js)
-      'loading': false,
-      'ready': true,
-      'error': false,
+      loading: false,
+      ready: true,
+      error: false,
       'not-found': false,
     };
     this.$(sel('show')).forEach((el) => {
@@ -554,7 +684,8 @@ export class ProductScope {
       const subText = get(btn, 'subscribe-text');
       if (soldOut || subText) {
         const label = btn.querySelector(sel('add-label')) || btn;
-        if (label.dataset.tetherLabel === undefined) label.dataset.tetherLabel = label.tagName === 'INPUT' ? label.value : label.textContent;
+        if (label.dataset.tetherLabel === undefined)
+          label.dataset.tetherLabel = label.tagName === 'INPUT' ? label.value : label.textContent;
         let text = label.dataset.tetherLabel;
         if (sub && subText) text = subText;
         if (disabled && soldOut) text = soldOut;
@@ -562,10 +693,16 @@ export class ProductScope {
       }
     });
 
-    emit('variant-changed', {
-      product: p, variant: v, selected: { ...this.selected },
-      purchase: this.purchase, sellingPlanId: sub ? this.planId : null,
-    }, this.root);
-
+    emit(
+      'variant-changed',
+      {
+        product: p,
+        variant: v,
+        selected: { ...this.selected },
+        purchase: this.purchase,
+        sellingPlanId: sub ? this.planId : null,
+      },
+      this.root,
+    );
   }
 }

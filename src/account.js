@@ -29,12 +29,29 @@ import { loadPart } from './lazy.js';
 const KEY = () => `${cfg.prefix}:account:${cfg.domain}`;
 const PENDING = () => `${cfg.prefix}:account-login:${cfg.domain}`;
 const store = () => (cfg.account?.remember ? window.localStorage : window.sessionStorage);
-const b64url = (bytes) => btoa(String.fromCharCode(...new Uint8Array(bytes))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+const b64url = (bytes) =>
+  btoa(String.fromCharCode(...new Uint8Array(bytes)))
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
 const random = () => b64url(crypto.getRandomValues(new Uint8Array(32)));
 const sha256 = async (s) => b64url(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s)));
 const go = (url) => (cfg.account?.navigate || ((u) => window.location.assign(u)))(url); // overridable (popup, tests)
-const read = (s, k) => { try { return JSON.parse(s.getItem(k) || 'null'); } catch { return null; } };
-const write = (s, k, v) => { try { if (v) s.setItem(k, JSON.stringify(v)); else s.removeItem(k); } catch { /* private mode */ } };
+const read = (s, k) => {
+  try {
+    return JSON.parse(s.getItem(k) || 'null');
+  } catch {
+    return null;
+  }
+};
+const write = (s, k, v) => {
+  try {
+    if (v) s.setItem(k, JSON.stringify(v));
+    else s.removeItem(k);
+  } catch {
+    /* private mode */
+  }
+};
 
 let discovery = null;
 let session = null; // { access, expiresAt, refresh, idToken }
@@ -44,22 +61,33 @@ let customerCache = null;
 // Server mode (account.server): the Worker holds the tokens, this browser only a session cookie it
 // can't read. Recommended for live sites.
 // A full URL or a path on this site ('/_tether/account').
-const server = () => (cfg.account?.server ? new URL(String(cfg.account.server), window.location.href).href.replace(/\/$/, '') : '');
+const server = () =>
+  cfg.account?.server ? new URL(String(cfg.account.server), window.location.href).href.replace(/\/$/, '') : '';
 const HINT = () => `${cfg.prefix}:account-hint:${cfg.domain}`; // "may be logged in": loads this part, no secret
 let serverState = null; // { loggedIn, customer }
 async function serverFetch(path, { method = 'GET', body } = {}) {
   const res = await fetch(`${server()}${path}`, {
-    method, credentials: 'include',
+    method,
+    credentials: 'include',
     headers: method === 'POST' ? { 'Content-Type': 'application/json', 'X-Tether-Account': '1' } : {},
     body: body ? JSON.stringify(body) : undefined,
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok && res.status !== 401) throw new TetherError(`Customer accounts: ${data.error || res.status}`, { status: res.status, userErrors: data.userErrors });
+  if (!res.ok && res.status !== 401)
+    throw new TetherError(`Customer accounts: ${data.error || res.status}`, {
+      status: res.status,
+      userErrors: data.userErrors,
+    });
   return data;
 }
 async function serverMe() {
   serverState ||= await serverFetch('/me');
-  try { if (serverState.loggedIn) window.localStorage.setItem(HINT(), '1'); else window.localStorage.removeItem(HINT()); } catch { /* private mode */ }
+  try {
+    if (serverState.loggedIn) window.localStorage.setItem(HINT(), '1');
+    else window.localStorage.removeItem(HINT());
+  } catch {
+    /* private mode */
+  }
   return serverState;
 }
 
@@ -67,10 +95,11 @@ async function serverMe() {
 async function discover() {
   if (discovery) return discovery;
   const shop = cfg.account?.shopDomain || cfg.domain;
-  const get = (p) => fetch(`https://${shop}/.well-known/${p}`).then((r) => {
-    if (!r.ok) throw new TetherError(`Customer accounts: ${p} answered ${r.status}`, { status: r.status });
-    return r.json();
-  });
+  const get = (p) =>
+    fetch(`https://${shop}/.well-known/${p}`).then((r) => {
+      if (!r.ok) throw new TetherError(`Customer accounts: ${p} answered ${r.status}`, { status: r.status });
+      return r.json();
+    });
   const [oidc, api] = await Promise.all([get('openid-configuration'), get('customer-account-api')]);
   discovery = { ...oidc, graphql: api.graphql_api };
   return discovery;
@@ -78,7 +107,11 @@ async function discover() {
 
 const callbackUrl = () => cfg.account?.callbackUrl || `${window.location.origin}${window.location.pathname}`;
 
-export function isLoggedIn() { return server() ? Boolean(serverState?.loggedIn) : Boolean(session?.refresh || (session?.access && session.expiresAt > Date.now())); }
+export function isLoggedIn() {
+  return server()
+    ? Boolean(serverState?.loggedIn)
+    : Boolean(session?.refresh || (session?.access && session.expiresAt > Date.now()));
+}
 
 /** Redirects to Shopify's login page; the visitor comes back to account.callbackUrl (default: this page). */
 export async function login({ returnTo = window.location.href, locale } = {}) {
@@ -91,7 +124,8 @@ export async function login({ returnTo = window.location.href, locale } = {}) {
     go(u.toString());
     return;
   }
-  if (!cfg.account?.clientId) throw new TetherError('Customer accounts: set account.clientId', { code: 'NOT_CONFIGURED' });
+  if (!cfg.account?.clientId)
+    throw new TetherError('Customer accounts: set account.clientId', { code: 'NOT_CONFIGURED' });
   const d = await discover();
   const state = random();
   const nonce = random();
@@ -100,8 +134,14 @@ export async function login({ returnTo = window.location.href, locale } = {}) {
   write(window.sessionStorage, PENDING(), { state, nonce, verifier, redirect, returnTo, at: Date.now() });
   const u = new URL(d.authorization_endpoint);
   const p = {
-    client_id: cfg.account.clientId, scope: 'openid email customer-account-api:full', response_type: 'code',
-    redirect_uri: redirect, state, nonce, code_challenge: await sha256(verifier), code_challenge_method: 'S256',
+    client_id: cfg.account.clientId,
+    scope: 'openid email customer-account-api:full',
+    response_type: 'code',
+    redirect_uri: redirect,
+    state,
+    nonce,
+    code_challenge: await sha256(verifier),
+    code_challenge_method: 'S256',
   };
   const lang = locale || cfg.account.locale || (cfg.locale || '').split('-')[0];
   if (lang) p.locale = lang;
@@ -113,14 +153,25 @@ export async function login({ returnTo = window.location.href, locale } = {}) {
 /** Token endpoint: from the browser (a "simple" request), or account.tokenUrl on your own server. */
 async function tokenRequest(params) {
   const d = await discover();
-  const res = await fetch(cfg.account.tokenUrl || d.token_endpoint, { method: 'POST', body: new URLSearchParams(params) });
+  const res = await fetch(cfg.account.tokenUrl || d.token_endpoint, {
+    method: 'POST',
+    body: new URLSearchParams(params),
+  });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok || !data.access_token) throw new TetherError(`Customer accounts: token ${res.status} ${data.error || ''}`.trim(), { status: res.status, code: res.status === 400 || res.status === 401 ? 'SESSION_ENDED' : 'TOKEN_FAILED' });
+  if (!res.ok || !data.access_token)
+    throw new TetherError(`Customer accounts: token ${res.status} ${data.error || ''}`.trim(), {
+      status: res.status,
+      code: res.status === 400 || res.status === 401 ? 'SESSION_ENDED' : 'TOKEN_FAILED',
+    });
   return data;
 }
 
 function decodeJwt(t) {
-  try { return JSON.parse(atob(t.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))); } catch { return null; }
+  try {
+    return JSON.parse(atob(t.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+  } catch {
+    return null;
+  }
 }
 
 function keep(data, previous = session) {
@@ -142,16 +193,29 @@ export async function handleCallback() {
   const clean = new URL(window.location.href);
   ['code', 'state', 'iss', 'error', 'error_description'].forEach((k) => clean.searchParams.delete(k));
   window.history.replaceState(window.history.state, '', clean);
-  if (q.has('error')) { emit('account-error', { error: q.get('error') }); return false; }
-  if (Date.now() - pending.at > 10 * 60000) throw new TetherError('Customer accounts: the login took too long, please try again');
+  if (q.has('error')) {
+    emit('account-error', { error: q.get('error') });
+    return false;
+  }
+  if (Date.now() - pending.at > 10 * 60000)
+    throw new TetherError('Customer accounts: the login took too long, please try again');
   const data = await tokenRequest({
-    grant_type: 'authorization_code', client_id: cfg.account.clientId, redirect_uri: pending.redirect,
-    code: q.get('code'), code_verifier: pending.verifier,
+    grant_type: 'authorization_code',
+    client_id: cfg.account.clientId,
+    redirect_uri: pending.redirect,
+    code: q.get('code'),
+    code_verifier: pending.verifier,
   });
   const d = await discover();
   const claims = decodeJwt(data.id_token || '');
   const aud = [].concat(claims?.aud || []);
-  if (!claims || claims.nonce !== pending.nonce || claims.iss !== d.issuer || !aud.includes(cfg.account.clientId) || claims.exp * 1000 < Date.now()) {
+  if (
+    !claims ||
+    claims.nonce !== pending.nonce ||
+    claims.iss !== d.issuer ||
+    !aud.includes(cfg.account.clientId) ||
+    claims.exp * 1000 < Date.now()
+  ) {
     throw new TetherError('Customer accounts: the login answer did not check out (nonce/issuer/audience)');
   }
   keep(data, null);
@@ -168,14 +232,26 @@ export async function getToken() {
   if (!session) session = read(store(), KEY());
   if (!session) return null;
   if (session.access && session.expiresAt > Date.now()) return session.access;
-  if (!session.refresh) { endSession(); return null; }
+  if (!session.refresh) {
+    endSession();
+    return null;
+  }
   refreshing ||= (async () => {
     try {
-      keep(await tokenRequest({ grant_type: 'refresh_token', client_id: cfg.account.clientId, refresh_token: session.refresh }));
+      keep(
+        await tokenRequest({
+          grant_type: 'refresh_token',
+          client_id: cfg.account.clientId,
+          refresh_token: session.refresh,
+        }),
+      );
       await linkCart();
     } catch (err) {
-      if (err.code === 'SESSION_ENDED') endSession(); else throw err;
-    } finally { refreshing = null; }
+      if (err.code === 'SESSION_ENDED') endSession();
+      else throw err;
+    } finally {
+      refreshing = null;
+    }
   })();
   await refreshing;
   return session?.access || null;
@@ -192,59 +268,93 @@ function endSession() {
 async function linkCart() {
   Cart.customerAccessToken = session?.access || null;
   if (Cart.id() && session?.access) {
-    await Cart.setBuyerIdentity({ customerAccessToken: session.access }, { create: false }).catch((err) => reportError(err, 'account cart'));
+    await Cart.setBuyerIdentity({ customerAccessToken: session.access }, { create: false }).catch((err) =>
+      reportError(err, 'account cart'),
+    );
   }
 }
 
 /** Any Customer Account API query. */
 export async function query(q, variables = {}) {
-  if (server()) throw new TetherError('Customer accounts in server mode only answer customer() and orders()', { code: 'NOT_ALLOWED' });
+  if (server())
+    throw new TetherError('Customer accounts in server mode only answer customer() and orders()', {
+      code: 'NOT_ALLOWED',
+    });
   const token = await getToken();
   if (!token) throw new TetherError('Not logged in', { code: 'NOT_LOGGED_IN' });
   const d = await discover();
-  const run = (t) => fetch(d.graphql, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: t }, body: JSON.stringify({ query: q, variables }) });
+  const run = (t) =>
+    fetch(d.graphql, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: t },
+      body: JSON.stringify({ query: q, variables }),
+    });
   let res = await run(token);
-  if (res.status === 401 && session?.refresh) { session.expiresAt = 0; res = await run(await getToken()); }
+  if (res.status === 401 && session?.refresh) {
+    session.expiresAt = 0;
+    res = await run(await getToken());
+  }
   const json = await res.json().catch(() => ({}));
-  if (!res.ok || json.errors?.length) throw new TetherError(json.errors?.map((e) => e.message).join(' | ') || `Customer accounts: ${res.status}`, { status: res.status });
+  if (!res.ok || json.errors?.length)
+    throw new TetherError(json.errors?.map((e) => e.message).join(' | ') || `Customer accounts: ${res.status}`, {
+      status: res.status,
+    });
   return json.data;
 }
 
 export async function customer() {
   if (server()) {
     const me = await serverMe();
-    return me.loggedIn ? { ...me.customer, emailAddress: { emailAddress: me.customer.email }, defaultAddress: { formatted: me.customer.address } } : null;
+    return me.loggedIn
+      ? {
+          ...me.customer,
+          emailAddress: { emailAddress: me.customer.email },
+          defaultAddress: { formatted: me.customer.address },
+        }
+      : null;
   }
   if (customerCache) return customerCache;
-  const data = await query(`query TetherCustomer { customer { id firstName lastName displayName emailAddress { emailAddress } defaultAddress { formatted } } }`);
+  const data = await query(
+    `query TetherCustomer { customer { id firstName lastName displayName emailAddress { emailAddress } defaultAddress { formatted } } }`,
+  );
   customerCache = data.customer;
   return customerCache;
 }
 
 export async function orders({ first = 10 } = {}) {
   if (server()) return (await serverFetch(`/orders?first=${first}`)).orders || [];
-  const data = await query(`query TetherOrders($first: Int!) { customer { orders(first: $first, sortKey: PROCESSED_AT, reverse: true) {
+  const data = await query(
+    `query TetherOrders($first: Int!) { customer { orders(first: $first, sortKey: PROCESSED_AT, reverse: true) {
     nodes { id name processedAt financialStatus fulfillmentStatus statusPageUrl totalPrice { amount currencyCode }
-      lineItems(first: 20) { nodes { title variantTitle quantity image { url altText } } } } } } }`, { first });
+      lineItems(first: 20) { nodes { title variantTitle quantity image { url altText } } } } } } }`,
+    { first },
+  );
   return data.customer?.orders?.nodes || [];
 }
-
 
 /** Logs out here and at Shopify, unlinks the cart. */
 export async function logout({ returnTo = cfg.account?.logoutUrl || `${window.location.origin}/` } = {}) {
   if (server()) {
     const r = await serverFetch('/logout', { method: 'POST', body: { returnTo, cartId: Cart.id() } });
     serverState = { loggedIn: false };
-    try { window.localStorage.removeItem(HINT()); } catch { /* private mode */ }
+    try {
+      window.localStorage.removeItem(HINT());
+    } catch {
+      /* private mode */
+    }
     emit('account-logout', {});
-    if (r.logoutUrl) go(r.logoutUrl); else render(document);
+    if (r.logoutUrl) go(r.logoutUrl);
+    else render(document);
     return;
   }
   const idToken = session?.idToken || read(store(), KEY())?.idToken;
   if (Cart.id()) await Cart.setBuyerIdentity({ customerAccessToken: null }, { create: false }).catch(() => {});
   endSession();
   emit('account-logout', {});
-  if (!idToken) { render(document); return; }
+  if (!idToken) {
+    render(document);
+    return;
+  }
   const d = await discover();
   const u = new URL(d.end_session_endpoint);
   u.searchParams.set('id_token_hint', idToken);
@@ -254,11 +364,25 @@ export async function logout({ returnTo = cfg.account?.logoutUrl || `${window.lo
 
 // ---------------------------------------------------------------- markup
 
-const https = (u) => { try { return new URL(u).protocol === 'https:'; } catch { return false; } }; // links from Shopify: https only
-const date = (s) => { try { return new Date(s).toLocaleDateString(cfg.locale || undefined); } catch { return s; } };
+const https = (u) => {
+  try {
+    return new URL(u).protocol === 'https:';
+  } catch {
+    return false;
+  }
+}; // links from Shopify: https only
+const date = (s) => {
+  try {
+    return new Date(s).toLocaleDateString(cfg.locale || undefined);
+  } catch {
+    return s;
+  }
+};
 
 export async function render(root = document) {
-  const logged = server() ? Boolean((await serverMe().catch(() => ({ loggedIn: false }))).loggedIn) : isLoggedIn() || Boolean(await getToken().catch(() => null));
+  const logged = server()
+    ? Boolean((await serverMe().catch(() => ({ loggedIn: false }))).loggedIn)
+    : isLoggedIn() || Boolean(await getToken().catch(() => null));
   qsa(root, sel('show')).forEach((el) => {
     const k = get(el, 'show');
     if (k === 'logged-in') show(el, logged);
@@ -268,46 +392,76 @@ export async function render(root = document) {
   // (account.subscriptionsUrl / paymentUrl), or the account itself.
   qsa(root, sel('account-link')).forEach((a) => {
     const k = get(a, 'account-link');
-    const u = (k === 'payment' && (cfg.account?.paymentUrl || cfg.account?.subscriptionsUrl)) || (k === 'subscriptions' && cfg.account?.subscriptionsUrl);
+    const u =
+      (k === 'payment' && (cfg.account?.paymentUrl || cfg.account?.subscriptionsUrl)) ||
+      (k === 'subscriptions' && cfg.account?.subscriptionsUrl);
     a.setAttribute('href', u || `https://${cfg.domain}/account`);
   });
   if (!logged) return;
   await bindCustomer(root);
   // The order list and the account pages (order, addresses, subscriptions) load side by side.
-  await Promise.all([renderOrderList(root), PAGE_ATTRS.some((n) => qsa(root, sel(n)).length) ? pages().then((m) => m.renderPages(root)) : null]);
+  await Promise.all([
+    renderOrderList(root),
+    PAGE_ATTRS.some((n) => qsa(root, sel(n)).length) ? pages().then((m) => m.renderPages(root)) : null,
+  ]);
 }
 
 async function renderOrderList(root) {
   const lists = qsa(root, sel('orders'));
   if (lists.length) {
     // tether-show="orders-loading" / "orders-empty" (no orders yet).
-    const ordersShow = (loading, empty) => qsa(root, sel('show')).forEach((el) => {
-      const k = get(el, 'show');
-      if (k === 'orders-loading') show(el, loading);
-      if (k === 'orders-empty') show(el, empty);
-    });
+    const ordersShow = (loading, empty) =>
+      qsa(root, sel('show')).forEach((el) => {
+        const k = get(el, 'show');
+        if (k === 'orders-loading') show(el, loading);
+        if (k === 'orders-empty') show(el, empty);
+      });
     ordersShow(true, false);
     let failed = false;
-    const list = await orders({ first: parseInt(get(lists[0], 'limit') || '10', 10) }).catch((err) => { reportError(err, 'orders'); failed = true; return []; });
+    const list = await orders({ first: parseInt(get(lists[0], 'limit') || '10', 10) }).catch((err) => {
+      reportError(err, 'orders');
+      failed = true;
+      return [];
+    });
     ordersShow(false, !failed && list.length === 0);
-    lists.forEach((c) => repeat(c, list, (node, o) => {
-      const items = o.lineItems?.nodes || [];
-      qsa(node, sel('order-bind')).forEach((el) => {
-        const k = get(el, 'order-bind');
-        if (k === 'url') { const u = orderUrl(o); if (u) el.setAttribute('href', u); return; }
-        if (k === 'image') { const im = items.find((l) => l.image)?.image; if (im) setImage(el, im.url, im.altText || items[0]?.title || ''); return; }
-        const v = { name: o.name, date: date(o.processedAt), total: formatMoney(o.totalPrice), status: o.financialStatus?.toLowerCase(), fulfillment: o.fulfillmentStatus?.toLowerCase(), items: items.map((l) => `${l.quantity}× ${l.title}`).join(', ') }[k];
-        if (v != null) setText(el, v);
-      });
-      // Per product of the order: <div tether-order-lines><div><img tether-order-line="image"> <span tether-order-line="title"></span></div></div>
-      qsa(node, sel('order-lines')).forEach((box) => fillLines(box, items));
-      if (get(node, 'order-bind') === 'url' && orderUrl(o)) node.setAttribute('href', orderUrl(o));
-    }));
+    lists.forEach((c) =>
+      repeat(c, list, (node, o) => {
+        const items = o.lineItems?.nodes || [];
+        qsa(node, sel('order-bind')).forEach((el) => {
+          const k = get(el, 'order-bind');
+          if (k === 'url') {
+            const u = orderUrl(o);
+            if (u) el.setAttribute('href', u);
+            return;
+          }
+          if (k === 'image') {
+            const im = items.find((l) => l.image)?.image;
+            if (im) setImage(el, im.url, im.altText || items[0]?.title || '');
+            return;
+          }
+          const v = {
+            name: o.name,
+            date: date(o.processedAt),
+            total: formatMoney(o.totalPrice),
+            status: o.financialStatus?.toLowerCase(),
+            fulfillment: o.fulfillmentStatus?.toLowerCase(),
+            items: items.map((l) => `${l.quantity}× ${l.title}`).join(', '),
+          }[k];
+          if (v != null) setText(el, v);
+        });
+        // Per product of the order: <div tether-order-lines><div><img tether-order-line="image"> <span tether-order-line="title"></span></div></div>
+        qsa(node, sel('order-lines')).forEach((box) => fillLines(box, items));
+        if (get(node, 'order-bind') === 'url' && orderUrl(o)) node.setAttribute('href', orderUrl(o));
+      }),
+    );
   }
 }
 
-
-const nid = (g) => String(g || '').split('/').pop().split('?')[0];
+const nid = (g) =>
+  String(g || '')
+    .split('/')
+    .pop()
+    .split('?')[0];
 /** The order's page: your own (account.orderUrl: '/account/order?id={id}') or Shopify's status page. */
 function orderUrl(o) {
   const t = cfg.account?.orderUrl;
@@ -316,12 +470,17 @@ function orderUrl(o) {
 }
 function fillLines(box, items) {
   repeat(box, items, (row, l) => {
-    qsa(row, sel('order-line')).concat(row.matches(sel('order-line')) ? [row] : []).forEach((el) => {
-      const k = get(el, 'order-line');
-      if (k === 'image') { if (l.image) setImage(el, l.image.url, l.image.altText || l.title); return; }
-      const v = { title: l.title, 'variant-title': l.variantTitle || '', quantity: String(l.quantity) }[k];
-      if (v != null) setText(el, v);
-    });
+    qsa(row, sel('order-line'))
+      .concat(row.matches(sel('order-line')) ? [row] : [])
+      .forEach((el) => {
+        const k = get(el, 'order-line');
+        if (k === 'image') {
+          if (l.image) setImage(el, l.image.url, l.image.altText || l.title);
+          return;
+        }
+        const v = { title: l.title, 'variant-title': l.variantTitle || '', quantity: String(l.quantity) }[k];
+        if (v != null) setText(el, v);
+      });
   });
 }
 
@@ -333,17 +492,42 @@ let pagesPart = null;
 async function bindCustomer(root) {
   const binds = qsa(root, sel('account-bind'));
   if (!binds.length) return;
-  const c = await customer().catch((err) => { reportError(err, 'account'); return null; });
+  const c = await customer().catch((err) => {
+    reportError(err, 'account');
+    return null;
+  });
   binds.forEach((el) => {
-    const v = { 'first-name': c?.firstName, 'last-name': c?.lastName, name: c?.displayName, email: c?.emailAddress?.emailAddress, address: c?.defaultAddress?.formatted?.join(', ') }[get(el, 'account-bind')];
+    const v = {
+      'first-name': c?.firstName,
+      'last-name': c?.lastName,
+      name: c?.displayName,
+      email: c?.emailAddress?.emailAddress,
+      address: c?.defaultAddress?.formatted?.join(', '),
+    }[get(el, 'account-bind')];
     if (v != null) setText(el, v);
   });
 }
 function pages() {
-  pagesPart ||= loadPart('account-pages').then((m) => { m.setup({ server, serverFetch, query, customer, bindCustomer, reset: () => { customerCache = null; serverState = null; } }); return m; });
+  pagesPart ||= loadPart('account-pages').then((m) => {
+    m.setup({
+      server,
+      serverFetch,
+      query,
+      customer,
+      bindCustomer,
+      reset: () => {
+        customerCache = null;
+        serverState = null;
+      },
+    });
+    return m;
+  });
   return pagesPart;
 }
-const viaPages = (name) => (...a) => pages().then((m) => m[name](...a));
+const viaPages =
+  (name) =>
+  (...a) =>
+    pages().then((m) => m[name](...a));
 /** One of the customer's orders, in full (lines, totals, addresses, fulfillments, returns). */
 export const order = viaPages('order');
 export const updateProfile = viaPages('updateProfile');
@@ -364,20 +548,33 @@ export async function mountAccount(root = document) {
     bound = true;
     document.addEventListener('click', (e) => {
       const t = e.target;
-      if (t.closest?.(sel('account-login'))) { e.preventDefault(); login().catch((err) => reportError(err, 'login')); }
-      else if (t.closest?.(sel('account-logout'))) { e.preventDefault(); logout().catch((err) => reportError(err, 'logout')); }
+      if (t.closest?.(sel('account-login'))) {
+        e.preventDefault();
+        login().catch((err) => reportError(err, 'login'));
+      } else if (t.closest?.(sel('account-logout'))) {
+        e.preventDefault();
+        logout().catch((err) => reportError(err, 'logout'));
+      }
     });
     if (server()) {
       // Back from the Worker's login: drop ?account=in; at checkout the Worker links the cart.
       const u = new URL(window.location.href);
-      if (u.searchParams.get('account')) { u.searchParams.delete('account'); window.history.replaceState(window.history.state, '', u); emit('account-login', {}); }
+      if (u.searchParams.get('account')) {
+        u.searchParams.delete('account');
+        window.history.replaceState(window.history.state, '', u);
+        emit('account-login', {});
+      }
       Cart.beforeCheckout = async () => {
         if (!(await serverMe()).loggedIn || !Cart.id()) return null;
         const r = await serverFetch('/cart', { method: 'POST', body: { cartId: Cart.id() } }).catch(() => null);
         return r?.checkoutUrl ? `${r.checkoutUrl}${r.checkoutUrl.includes('?') ? '&' : '?'}logged_in=true` : null;
       };
     } else {
-      try { await handleCallback(); } catch (err) { reportError(err, 'login'); }
+      try {
+        await handleCallback();
+      } catch (err) {
+        reportError(err, 'login');
+      }
       if (!Cart.customerAccessToken && (await getToken().catch(() => null))) Cart.customerAccessToken = session.access;
     }
     log('account', isLoggedIn() ? 'logged in' : 'logged out');

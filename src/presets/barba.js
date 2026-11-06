@@ -70,27 +70,47 @@ export function barbaPreset(options = {}) {
       const g = get(gsap);
       if (!canAnimate(node)) return;
       const st = getComputedStyle(node);
-      g.fromTo(node, {
-        height: 0, paddingTop: 0, paddingBottom: 0, borderBottomWidth: 0, opacity: 0, overflow: 'hidden',
-      }, {
-        height: node.offsetHeight,
-        paddingTop: st.paddingTop,
-        paddingBottom: st.paddingBottom,
-        borderBottomWidth: st.borderBottomWidth,
-        opacity: 1,
-        duration: lineDuration,
-        clearProps: 'height,paddingTop,paddingBottom,borderBottomWidth,opacity,overflow',
-        onComplete: () => onResize?.(),
-      });
+      g.fromTo(
+        node,
+        {
+          height: 0,
+          paddingTop: 0,
+          paddingBottom: 0,
+          borderBottomWidth: 0,
+          opacity: 0,
+          overflow: 'hidden',
+        },
+        {
+          height: node.offsetHeight,
+          paddingTop: st.paddingTop,
+          paddingBottom: st.paddingBottom,
+          borderBottomWidth: st.borderBottomWidth,
+          opacity: 1,
+          duration: lineDuration,
+          clearProps: 'height,paddingTop,paddingBottom,borderBottomWidth,opacity,overflow',
+          onComplete: () => onResize?.(),
+        },
+      );
     },
 
     onLineLeave(node, done) {
       const g = get(gsap);
-      if (!canAnimate(node)) { done(); return; }
+      if (!canAnimate(node)) {
+        done();
+        return;
+      }
       g.to(node, {
-        height: 0, paddingTop: 0, paddingBottom: 0, borderBottomWidth: 0, opacity: 0, overflow: 'hidden',
+        height: 0,
+        paddingTop: 0,
+        paddingBottom: 0,
+        borderBottomWidth: 0,
+        opacity: 0,
+        overflow: 'hidden',
         duration: lineDuration,
-        onComplete: () => { done(); onResize?.(); },
+        onComplete: () => {
+          done();
+          onResize?.();
+        },
       });
     },
 

@@ -23,7 +23,9 @@ export function createThrottle({ perMinute = 50, sleep = realSleep, now = () => 
   }
 
   /** Push everything back, e.g. after a 429. */
-  function pause(ms) { next = Math.max(next, now() + ms); }
+  function pause(ms) {
+    next = Math.max(next, now() + ms);
+  }
 
   return { wait, pause, gap };
 }

@@ -11,8 +11,21 @@ import { cartFragment } from './fragments.js';
 import { getProduct } from './loader.js';
 import { allPlans, GID } from './selling-plans.js';
 import {
-  attr, sel, get, qsa, emit, formatMoney, setText, setTextTracked, setImage, show,
-  repeat, repeatKeyed, toAttributes, productUrl, notifyLayoutChanged,
+  attr,
+  sel,
+  get,
+  qsa,
+  emit,
+  formatMoney,
+  setText,
+  setTextTracked,
+  setImage,
+  show,
+  repeat,
+  repeatKeyed,
+  toAttributes,
+  productUrl,
+  notifyLayoutChanged,
 } from './dom.js';
 
 /** Accepts many shapes and returns a Shopify CartLineInput. */
@@ -35,21 +48,27 @@ function mutation(name, args, inner) {
 ${cartFragment()}`;
 }
 
-const FOCUSABLE = 'a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
+const FOCUSABLE =
+  'a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
 let returnFocus = null;
 
 /** Focusable elements inside an open drawer, in order (visible ones only). */
-export const focusables = (d) => qsa(d, FOCUSABLE).filter((el) => el.offsetParent !== null || el === document.activeElement);
+export const focusables = (d) =>
+  qsa(d, FOCUSABLE).filter((el) => el.offsetParent !== null || el === document.activeElement);
 
 /** aria-expanded on the open buttons; dialog semantics on drawers (unless the markup has its own). */
 function ariaState(open) {
   qsa(document, sel('cart-open')).forEach((b) => b.setAttribute('aria-expanded', String(open)));
   qsa(document, sel('cart-drawer')).forEach((d) => {
     if (!d.hasAttribute('role')) d.setAttribute('role', 'dialog');
-    if (!d.hasAttribute('aria-label') && !d.hasAttribute('aria-labelledby')) d.setAttribute('aria-label', get(d, 'cart-label') || 'Cart');
+    if (!d.hasAttribute('aria-label') && !d.hasAttribute('aria-labelledby'))
+      d.setAttribute('aria-label', get(d, 'cart-label') || 'Cart');
     d.setAttribute('aria-modal', String(open));
     // Closed: hidden from screen readers and out of the Tab order (inert), like a closed dialog.
-    if (!d.classList.contains(cfg.cartDrawerOpenClass)) { d.setAttribute('aria-hidden', 'true'); if (cfg.cartFocus !== false) d.inert = true; }
+    if (!d.classList.contains(cfg.cartDrawerOpenClass)) {
+      d.setAttribute('aria-hidden', 'true');
+      if (cfg.cartFocus !== false) d.inert = true;
+    }
   });
 }
 
@@ -59,16 +78,28 @@ export const Cart = {
   state: null,
   _chain: Promise.resolve(),
 
-  id() { try { return localStorage.getItem(cfg.storageKey); } catch { return null; } },
+  id() {
+    try {
+      return localStorage.getItem(cfg.storageKey);
+    } catch {
+      return null;
+    }
+  },
   _setId(id) {
     try {
       if (id) localStorage.setItem(cfg.storageKey, id);
       else localStorage.removeItem(cfg.storageKey);
-    } catch { /* private mode */ }
+    } catch {
+      /* private mode */
+    }
   },
 
-  get lines() { return this.state?.lines?.nodes || []; },
-  get count() { return this.state?.totalQuantity || 0; },
+  get lines() {
+    return this.state?.lines?.nodes || [];
+  },
+  get count() {
+    return this.state?.totalQuantity || 0;
+  },
 
   lastError: null,
   /** Set by the account part while a customer is logged in (Customer Account API token). */
@@ -83,23 +114,30 @@ export const Cart = {
   _take(payload, name) {
     const p = unwrap(payload, name);
     // Shopify can repeat a warning per line or code: each message once.
-    this.warnings = (p.warnings || []).filter((w, i, all) => all.findIndex((x) => x.message === w.message) === i)
+    this.warnings = (p.warnings || [])
+      .filter((w, i, all) => all.findIndex((x) => x.message === w.message) === i)
       .map((w) => ({ ...w, message: (typeof cfg.warningText === 'function' && cfg.warningText(w)) || w.message }));
     if (this.warnings.length) emit('cart-warning', { warnings: this.warnings });
     return p.cart;
   },
 
   _queue(fn) {
-    const run = this._chain.then(fn, fn).then((value) => {
-      if (this.lastError) { this.lastError = null; this.render(); }
-      return value;
-    }, (err) => {
-      // tether-show="cart-error" becomes visible until the next successful cart call.
-      this.lastError = err;
-      this.render();
-      emit('cart-error', { error: err });
-      throw err;
-    });
+    const run = this._chain.then(fn, fn).then(
+      (value) => {
+        if (this.lastError) {
+          this.lastError = null;
+          this.render();
+        }
+        return value;
+      },
+      (err) => {
+        // tether-show="cart-error" becomes visible until the next successful cart call.
+        this.lastError = err;
+        this.render();
+        emit('cart-error', { error: err });
+        throw err;
+      },
+    );
     this._chain = run.catch(() => {});
     return run;
   },
@@ -108,7 +146,11 @@ export const Cart = {
     this.state = cart;
     if (cart?.id) this._setId(cart.id);
     // Other tabs reload the cart (storage event); the count also shows at once on the next page.
-    try { localStorage.setItem(`${cfg.storageKey}:seen`, `${Date.now()}|${cart?.totalQuantity || 0}`); } catch { /* private mode */ }
+    try {
+      localStorage.setItem(`${cfg.storageKey}:seen`, `${Date.now()}|${cart?.totalQuantity || 0}`);
+    } catch {
+      /* private mode */
+    }
     this.render();
     emit('cart-updated', { cart, reason });
     return cart;
@@ -116,17 +158,33 @@ export const Cart = {
 
   async init() {
     const id = this.id();
-    if (!id) { this.state = null; this.loaded = true; this.render(); emit('cart-updated', { cart: null, reason: 'load' }); return null; }
+    if (!id) {
+      this.state = null;
+      this.loaded = true;
+      this.render();
+      emit('cart-updated', { cart: null, reason: 'load' });
+      return null;
+    }
     // Until the saved cart has loaded, show its last known count instead of the page's 0.
     if (!this.loaded) {
       try {
         const n = (localStorage.getItem(`${cfg.storageKey}:seen`) || '').split('|')[1];
-        if (n) qsa(document, sel('cart-count')).forEach((el) => { if (/^\s*0?\s*$/.test(el.textContent)) el.textContent = n; });
-      } catch { /* private mode */ }
+        if (n)
+          qsa(document, sel('cart-count')).forEach((el) => {
+            if (/^\s*0?\s*$/.test(el.textContent)) el.textContent = n;
+          });
+      } catch {
+        /* private mode */
+      }
     }
     try {
-      const data = await gql(`query TetherCart($id: ID!) { cart(id: $id) { ...TetherCart } }\n${cartFragment()}`, { id });
-      if (!data.cart) { this._setId(null); this.state = null; } else this.state = data.cart;
+      const data = await gql(`query TetherCart($id: ID!) { cart(id: $id) { ...TetherCart } }\n${cartFragment()}`, {
+        id,
+      });
+      if (!data.cart) {
+        this._setId(null);
+        this.state = null;
+      } else this.state = data.cart;
     } catch (err) {
       reportError(err, 'cart load failed');
       this.lastError = err;
@@ -141,14 +199,16 @@ export const Cart = {
   },
 
   async _create(input = {}) {
-    const buyerIdentity = cfg.country || this.customerAccessToken ? {
-      ...(cfg.country ? { countryCode: String(cfg.country).toUpperCase() } : {}),
-      ...(this.customerAccessToken ? { customerAccessToken: this.customerAccessToken } : {}),
-    } : undefined;
-    const data = await gql(
-      mutation('cartCreate', '$input: CartInput!', 'input: $input'),
-      { input: { buyerIdentity, ...input } },
-    );
+    const buyerIdentity =
+      cfg.country || this.customerAccessToken
+        ? {
+            ...(cfg.country ? { countryCode: String(cfg.country).toUpperCase() } : {}),
+            ...(this.customerAccessToken ? { customerAccessToken: this.customerAccessToken } : {}),
+          }
+        : undefined;
+    const data = await gql(mutation('cartCreate', '$input: CartInput!', 'input: $input'), {
+      input: { buyerIdentity, ...input },
+    });
     return this._take(data.cartCreate, 'cartCreate');
   },
 
@@ -157,7 +217,10 @@ export const Cart = {
     const cartId = this.id();
     if (!cartId) return createInput ? this._create(createInput) : null;
     try {
-      const data = await gql(mutation(name, `$cartId: ID!, ${args}`, `cartId: $cartId, ${inner}`), { ...variables, cartId });
+      const data = await gql(mutation(name, `$cartId: ID!, ${args}`, `cartId: $cartId, ${inner}`), {
+        ...variables,
+        cartId,
+      });
       return this._take(data[name], name);
     } catch (err) {
       if (createInput && isMissingCart(err)) {
@@ -177,7 +240,13 @@ export const Cart = {
   add(input, quantity = 1, opts = {}) {
     const lines = (Array.isArray(input) ? input : [input]).map((l) => toLineInput(l, quantity, opts));
     return this._queue(async () => {
-      const cart = await this._mutate('cartLinesAdd', '$lines: [CartLineInput!]!', 'lines: $lines', { lines }, { lines });
+      const cart = await this._mutate(
+        'cartLinesAdd',
+        '$lines: [CartLineInput!]!',
+        'lines: $lines',
+        { lines },
+        { lines },
+      );
       this._commit(cart, 'add');
       emit('added', { cart, lines });
       if (cfg.openCartOnAdd) this.open();
@@ -200,10 +269,12 @@ export const Cart = {
     if (p.attributes) line.attributes = toAttributes(p.attributes);
     if (p.merchandiseId || p.variantId) line.merchandiseId = GID.variant(p.merchandiseId || p.variantId);
 
-    return this._queue(async () => this._commit(
-      await this._mutate('cartLinesUpdate', '$lines: [CartLineUpdateInput!]!', 'lines: $lines', { lines: [line] }),
-      'update',
-    ));
+    return this._queue(async () =>
+      this._commit(
+        await this._mutate('cartLinesUpdate', '$lines: [CartLineUpdateInput!]!', 'lines: $lines', { lines: [line] }),
+        'update',
+      ),
+    );
   },
 
   /**
@@ -224,27 +295,42 @@ export const Cart = {
       if (!latest()) return this.state;
       const now = this.lines.find((l) => l.id === lineId);
       if (now && now.quantity === target) return this.state; // e.g. + then -: nothing to change
-      const cart = target > 0
-        ? await this._mutate('cartLinesUpdate', '$lines: [CartLineUpdateInput!]!', 'lines: $lines', { lines: [{ id: lineId, quantity: target }] })
-        : await this._mutate('cartLinesRemove', '$lineIds: [ID!]!', 'lineIds: $lineIds', { lineIds: [lineId] });
+      const cart =
+        target > 0
+          ? await this._mutate('cartLinesUpdate', '$lines: [CartLineUpdateInput!]!', 'lines: $lines', {
+              lines: [{ id: lineId, quantity: target }],
+            })
+          : await this._mutate('cartLinesRemove', '$lineIds: [ID!]!', 'lineIds: $lineIds', { lineIds: [lineId] });
       // A newer click is on its way: keep this answer, but show totals and count only once that
       // one is in (no stepping through every reply).
-      if (!latest()) { this.state = cart; if (cart?.id) this._setId(cart.id); return cart; }
+      if (!latest()) {
+        this.state = cart;
+        if (cart?.id) this._setId(cart.id);
+        return cart;
+      }
       return this._commit(cart, target > 0 ? 'update' : 'remove');
     }).finally(() => {
-      if (latest()) { this.pendingQty.delete(lineId); this.render(); emit('cart-updated', { cart: this.state, reason: 'settled' }); }
+      if (latest()) {
+        this.pendingQty.delete(lineId);
+        this.render();
+        emit('cart-updated', { cart: this.state, reason: 'settled' });
+      }
     });
   },
 
   /** Quantity to show for a line: the one asked for while an update is on its way. */
-  quantityOf(line) { return this.pendingQty.get(line.id)?.qty ?? line.quantity; },
+  quantityOf(line) {
+    return this.pendingQty.get(line.id)?.qty ?? line.quantity;
+  },
 
   removeLine(lineIds) {
     const ids = Array.isArray(lineIds) ? lineIds : [lineIds];
-    return this._queue(async () => this._commit(
-      await this._mutate('cartLinesRemove', '$lineIds: [ID!]!', 'lineIds: $lineIds', { lineIds: ids }),
-      'remove',
-    ));
+    return this._queue(async () =>
+      this._commit(
+        await this._mutate('cartLinesRemove', '$lineIds: [ID!]!', 'lineIds: $lineIds', { lineIds: ids }),
+        'remove',
+      ),
+    );
   },
 
   clear() {
@@ -254,10 +340,18 @@ export const Cart = {
   },
 
   setNote(note) {
-    return this._queue(async () => this._commit(
-      await this._mutate('cartNoteUpdate', '$note: String!', 'note: $note', { note: note ?? '' }, { note: note ?? '' }),
-      'note',
-    ));
+    return this._queue(async () =>
+      this._commit(
+        await this._mutate(
+          'cartNoteUpdate',
+          '$note: String!',
+          'note: $note',
+          { note: note ?? '' },
+          { note: note ?? '' },
+        ),
+        'note',
+      ),
+    );
   },
 
   /** Cart-level attributes, merged with existing ones. Value '' removes a key. */
@@ -269,7 +363,13 @@ export const Cart = {
       add.forEach((a) => merged.set(a.key, a.value));
       const attributes = [...merged].filter(([, v]) => v !== '').map(([key, value]) => ({ key, value }));
       return this._commit(
-        await this._mutate('cartAttributesUpdate', '$attributes: [AttributeInput!]!', 'attributes: $attributes', { attributes }, { attributes }),
+        await this._mutate(
+          'cartAttributesUpdate',
+          '$attributes: [AttributeInput!]!',
+          'attributes: $attributes',
+          { attributes },
+          { attributes },
+        ),
         'attributes',
       );
     });
@@ -282,7 +382,13 @@ export const Cart = {
       const list = typeof codes === 'function' ? codes((this.state?.discountCodes || []).map((d) => d.code)) : codes;
       const discountCodes = (Array.isArray(list) ? list : [list]).map((c) => String(c).trim()).filter(Boolean);
       return this._commit(
-        await this._mutate('cartDiscountCodesUpdate', '$discountCodes: [String!]!', 'discountCodes: $discountCodes', { discountCodes }, { discountCodes }),
+        await this._mutate(
+          'cartDiscountCodesUpdate',
+          '$discountCodes: [String!]!',
+          'discountCodes: $discountCodes',
+          { discountCodes },
+          { discountCodes },
+        ),
         'discount',
       );
     });
@@ -308,12 +414,17 @@ export const Cart = {
   /** { countryCode, email, phone } — changes currency/prices for that market. */
   setBuyerIdentity(buyerIdentity, { create = true } = {}) {
     return this._queue(async () => {
-      const cart = await this._mutate('cartBuyerIdentityUpdate', '$buyerIdentity: CartBuyerIdentityInput!', 'buyerIdentity: $buyerIdentity', { buyerIdentity }, create ? { buyerIdentity } : null)
-        .catch((err) => {
-          if (create || !isMissingCart(err)) throw err;
-          this._setId(null); // expired cart: forget it instead of creating an empty one
-          return null;
-        });
+      const cart = await this._mutate(
+        'cartBuyerIdentityUpdate',
+        '$buyerIdentity: CartBuyerIdentityInput!',
+        'buyerIdentity: $buyerIdentity',
+        { buyerIdentity },
+        create ? { buyerIdentity } : null,
+      ).catch((err) => {
+        if (create || !isMissingCart(err)) throw err;
+        this._setId(null); // expired cart: forget it instead of creating an empty one
+        return null;
+      });
       return this._commit(cart, 'buyer-identity');
     });
   },
@@ -327,13 +438,21 @@ export const Cart = {
     const id = this.id();
     if (!id || (this.state && !this.count)) return null; // nothing to check out
     const tab = target === '_blank' ? window.open('', '_blank') : null;
-    if (tab) { try { tab.opener = null; } catch { /* ignore */ } }
+    if (tab) {
+      try {
+        tab.opener = null;
+      } catch {
+        /* ignore */
+      }
+    }
 
     try {
       // Side by side: the cart's current checkout URL, and the account's own (beforeCheckout) if any.
-      const fresh = gql('query TetherCheckout($id: ID!) { cart(id: $id) { checkoutUrl } }', { id }).then((d) => d.cart?.checkoutUrl);
+      const fresh = gql('query TetherCheckout($id: ID!) { cart(id: $id) { checkoutUrl } }', { id }).then(
+        (d) => d.cart?.checkoutUrl,
+      );
       fresh.catch(() => {}); // not needed when beforeCheckout answers
-      let url = (this.beforeCheckout && await this.beforeCheckout().catch(() => null)) || await fresh;
+      let url = (this.beforeCheckout && (await this.beforeCheckout().catch(() => null))) || (await fresh);
       if (url && this.customerAccessToken) url += `${url.includes('?') ? '&' : '?'}logged_in=true`;
       if (!url) throw new TetherError('No checkoutUrl (cart empty or expired)');
       emit('checkout', { url, cart: this.state });
@@ -349,7 +468,9 @@ export const Cart = {
 
   // -------------------------------------------------------------- drawer
 
-  drawers() { return qsa(document, sel('cart-drawer')); },
+  drawers() {
+    return qsa(document, sel('cart-drawer'));
+  },
 
   /** Without a tether-cart-drawer (a React/Svelte/Vue cart), open/close still work: as state for subscribe. */
   _open: false,
@@ -362,7 +483,11 @@ export const Cart = {
     if (this.isOpen()) return;
     this._open = true;
     const ds = this.drawers().filter((d) => get(d, 'cart-drawer') !== 'manual');
-    ds.forEach((d) => { d.inert = false; d.classList.add(cfg.cartDrawerOpenClass); d.setAttribute('aria-hidden', 'false'); });
+    ds.forEach((d) => {
+      d.inert = false;
+      d.classList.add(cfg.cartDrawerOpenClass);
+      d.setAttribute('aria-hidden', 'false');
+    });
     ariaState(true);
     if (cfg.cartFocus !== false && ds[0]) {
       // Move focus into the cart (after the open transition has made it visible).
@@ -382,7 +507,11 @@ export const Cart = {
     this._open = false;
     const ds = this.drawers();
     const hadFocus = ds.some((d) => d.contains(document.activeElement));
-    ds.forEach((d) => { d.classList.remove(cfg.cartDrawerOpenClass); d.setAttribute('aria-hidden', 'true'); if (cfg.cartFocus !== false) d.inert = true; });
+    ds.forEach((d) => {
+      d.classList.remove(cfg.cartDrawerOpenClass);
+      d.setAttribute('aria-hidden', 'true');
+      if (cfg.cartFocus !== false) d.inert = true;
+    });
     ariaState(false);
     if (hadFocus && returnFocus?.isConnected) returnFocus.focus({ preventScroll: true });
     returnFocus = null;
@@ -390,14 +519,18 @@ export const Cart = {
     emit('cart-toggled', { open: false });
   },
 
-  toggle() { if (this.isOpen()) this.close(); else this.open(); },
+  toggle() {
+    if (this.isOpen()) this.close();
+    else this.open();
+  },
 
   /**
    * For framework islands (React, Svelte, Vue): fn(cart, { open }) now and on every change.
    * Returns a function that stops listening.
    */
   subscribe(fn) {
-    const call = () => fn(this.state, { open: this.isOpen(), count: this.count, loaded: this.loaded, warnings: this.warnings });
+    const call = () =>
+      fn(this.state, { open: this.isOpen(), count: this.count, loaded: this.loaded, warnings: this.warnings });
     const h = () => call();
     ['cart-updated', 'cart-toggled'].forEach((e) => document.addEventListener(`${cfg.prefix}:${e}`, h));
     call();
@@ -427,7 +560,9 @@ export const Cart = {
       'cart-error': Boolean(this.lastError),
       'cart-warning': this.warnings.length > 0,
     };
-    qsa(document, sel('cart-warning')).forEach((el) => setTextTracked(el, [...new Set(this.warnings.map((w) => w.message))].join(' ')));
+    qsa(document, sel('cart-warning')).forEach((el) =>
+      setTextTracked(el, [...new Set(this.warnings.map((w) => w.message))].join(' ')),
+    );
     qsa(document, sel('show')).forEach((el) => {
       const k = get(el, 'show');
       if (k in conds && !el.closest(sel('product'))) show(el, conds[k]);
@@ -451,9 +586,16 @@ export const Cart = {
     });
 
     qsa(document, sel('cart-lines')).forEach((container) => {
-      repeatKeyed(container, this.lines, (l) => l.id, (node, line) => renderLine(node, line), {
-        onEnter: cfg.onLineEnter, onLeave: cfg.onLineLeave,
-      });
+      repeatKeyed(
+        container,
+        this.lines,
+        (l) => l.id,
+        (node, line) => renderLine(node, line),
+        {
+          onEnter: cfg.onLineEnter,
+          onLeave: cfg.onLineLeave,
+        },
+      );
     });
 
     if (cart) notifyLayoutChanged('cart');
@@ -464,22 +606,39 @@ function lineValue(line, key) {
   const m = line.merchandise || {};
   const plan = line.sellingPlanAllocation?.sellingPlan;
   switch (key) {
-    case 'title': return m.product?.title;
-    case 'product-title': return m.product?.title;
-    case 'variant-title': return m.title === 'Default Title' ? '' : m.title;
-    case 'options': return (m.selectedOptions || [])
-      .filter((o) => o.value !== 'Default Title').map((o) => `${o.name}: ${o.value}`).join(', ');
-    case 'vendor': return m.product?.vendor;
-    case 'sku': return m.sku;
-    case 'price': return formatMoney(line.cost?.amountPerQuantity || m.price);
-    case 'compare-at-price': return formatMoney(line.cost?.compareAtAmountPerQuantity || m.compareAtPrice);
-    case 'line-total': return formatMoney(line.cost?.totalAmount);
-    case 'line-subtotal': return formatMoney(line.cost?.subtotalAmount);
-    case 'quantity': return Cart.quantityOf(line);
-    case 'plan': return plan?.name || '';
-    case 'plan-description': return plan?.description || '';
-    case 'components': return (line.lineComponents || [])
-      .map((c) => `${c.quantity} × ${c.merchandise?.product?.title || ''}`).join(', ');
+    case 'title':
+      return m.product?.title;
+    case 'product-title':
+      return m.product?.title;
+    case 'variant-title':
+      return m.title === 'Default Title' ? '' : m.title;
+    case 'options':
+      return (m.selectedOptions || [])
+        .filter((o) => o.value !== 'Default Title')
+        .map((o) => `${o.name}: ${o.value}`)
+        .join(', ');
+    case 'vendor':
+      return m.product?.vendor;
+    case 'sku':
+      return m.sku;
+    case 'price':
+      return formatMoney(line.cost?.amountPerQuantity || m.price);
+    case 'compare-at-price':
+      return formatMoney(line.cost?.compareAtAmountPerQuantity || m.compareAtPrice);
+    case 'line-total':
+      return formatMoney(line.cost?.totalAmount);
+    case 'line-subtotal':
+      return formatMoney(line.cost?.subtotalAmount);
+    case 'quantity':
+      return Cart.quantityOf(line);
+    case 'plan':
+      return plan?.name || '';
+    case 'plan-description':
+      return plan?.description || '';
+    case 'components':
+      return (line.lineComponents || [])
+        .map((c) => `${c.quantity} × ${c.merchandise?.product?.title || ''}`)
+        .join(', ');
     default:
       if (key.startsWith('attribute:')) {
         const k = key.slice('attribute:'.length);
@@ -517,12 +676,14 @@ function renderLine(node, line) {
   node.classList.toggle('is-warning', Boolean(warning));
   const pending = Cart.pendingQty.has(line.id);
   node.classList.toggle('is-busy', pending);
-  if (pending) node.setAttribute('aria-busy', 'true'); else node.removeAttribute('aria-busy');
+  if (pending) node.setAttribute('aria-busy', 'true');
+  else node.removeAttribute('aria-busy');
   qsa(node, sel('line', 'warning')).forEach((el) => setTextTracked(el, warning?.message || ''));
   const lineConds = {
     subscription: isSub,
     'one-time': !isSub,
-    'on-sale': parseFloat(line.cost?.compareAtAmountPerQuantity?.amount) > parseFloat(line.cost?.amountPerQuantity?.amount),
+    'on-sale':
+      parseFloat(line.cost?.compareAtAmountPerQuantity?.amount) > parseFloat(line.cost?.amountPerQuantity?.amount),
     'has-components': (line.lineComponents || []).length > 0,
     warning: Boolean(warning),
   };
@@ -535,26 +696,30 @@ function renderLine(node, line) {
   qsa(node, `select${sel('line-plan')}`).forEach((select) => {
     const handle = m.product?.handle;
     if (!handle) return;
-    getProduct(handle).then((product) => {
-      const plans = allPlans(product);
-      const allowOneTime = !product.requiresSellingPlan && get(select, 'line-plan') !== 'subscription-only';
-      const want = [
-        ...(allowOneTime ? [{ value: '', label: select.getAttribute(attr('one-time-label')) || 'One-time purchase' }] : []),
-        ...plans.map((p) => ({ value: p.id, label: p.name })),
-      ];
-      const sig = want.map((w) => w.value).join('|');
-      if (select.dataset.tetherSig !== sig) {
-        select.innerHTML = '';
-        want.forEach((w) => {
-          const o = document.createElement('option');
-          o.value = w.value; o.textContent = w.label;
-          select.appendChild(o);
-        });
-        select.dataset.tetherSig = sig;
-      }
-      select.value = line.sellingPlanAllocation?.sellingPlan?.id || '';
-      show(select, plans.length > 0);
-    }).catch((err) => reportError(err, 'line plan options'));
+    getProduct(handle)
+      .then((product) => {
+        const plans = allPlans(product);
+        const allowOneTime = !product.requiresSellingPlan && get(select, 'line-plan') !== 'subscription-only';
+        const want = [
+          ...(allowOneTime
+            ? [{ value: '', label: select.getAttribute(attr('one-time-label')) || 'One-time purchase' }]
+            : []),
+          ...plans.map((p) => ({ value: p.id, label: p.name })),
+        ];
+        const sig = want.map((w) => w.value).join('|');
+        if (select.dataset.tetherSig !== sig) {
+          select.innerHTML = '';
+          want.forEach((w) => {
+            const o = document.createElement('option');
+            o.value = w.value;
+            o.textContent = w.label;
+            select.appendChild(o);
+          });
+          select.dataset.tetherSig = sig;
+        }
+        select.value = line.sellingPlanAllocation?.sellingPlan?.id || '';
+        show(select, plans.length > 0);
+      })
+      .catch((err) => reportError(err, 'line plan options'));
   });
 }
-

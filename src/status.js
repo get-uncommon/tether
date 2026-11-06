@@ -27,7 +27,13 @@ export function resolveProductKey(el, location = window.location, name = 'produc
   return { key, fromUrl: true, raw };
 }
 
-function safeDecode(s) { try { return decodeURIComponent(s); } catch { return s; } }
+function safeDecode(s) {
+  try {
+    return decodeURIComponent(s);
+  } catch {
+    return s;
+  }
+}
 
 /** Values of tether-show that follow the scope state. */
 export const STATUS_KEYS = ['loading', 'ready', 'error', 'not-found'];
@@ -48,7 +54,7 @@ export const ownedBy = (el, root) => el === root || el.parentElement?.closest(bo
 export function setScopeStatus(root, status, err) {
   const notFound = status === 'not-found';
   root.setAttribute(attr('state'), notFound ? 'error' : status);
-  if (status === 'error' || notFound) root.setAttribute(attr('error'), notFound ? 'not-found' : (err?.code || 'error'));
+  if (status === 'error' || notFound) root.setAttribute(attr('error'), notFound ? 'not-found' : err?.code || 'error');
   else root.removeAttribute(attr('error'));
 
   scoped(root, sel('show'), boundary()).forEach((el) => {

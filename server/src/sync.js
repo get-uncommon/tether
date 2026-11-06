@@ -12,21 +12,30 @@ import { sha256, stableStringify, numericId, productGid, noopLogger } from './ut
 
 const stateKey = (id) => `p:${numericId(id)}`;
 const SINCE = 'reconcile:since';
-const PAGE = 'reconcile:page';   // { since, after, offset, newest } while a reconcile window is half done
+const PAGE = 'reconcile:page'; // { since, after, offset, newest } while a reconcile window is half done
 const RETRY = 'reconcile:retry';
-const INDEX = 'index';           // { at, byId: { shopifyId: itemId }, bySlug: { slug: [itemId, shopifyId] } }
+const INDEX = 'index'; // { at, byId: { shopifyId: itemId }, bySlug: { slug: [itemId, shopifyId] } }
 
-const isSlugConflict = (err) => (err.status === 400 || err.status === 409) && /slug|unique|already/i.test(`${err.message} ${JSON.stringify(err.body || '')}`);
+const isSlugConflict = (err) =>
+  (err.status === 400 || err.status === 409) &&
+  /slug|unique|already/i.test(`${err.message} ${JSON.stringify(err.body || '')}`);
 
 export function createSync({
-  config, shopify, webflow, store, log = noopLogger, now = () => Date.now(), dryRun = false,
+  config,
+  shopify,
+  webflow,
+  store,
+  log = noopLogger,
+  now = () => Date.now(),
+  dryRun = false,
   budget = null, // { left(): number } remaining subrequests, or null for no limit
 }) {
-  const cfg = config.fields && config.match?.idField && config.reconcile?.maxProductsPerRun ? config : normalizeConfig(config);
+  const cfg =
+    config.fields && config.match?.idField && config.reconcile?.maxProductsPerRun ? config : normalizeConfig(config);
   const idField = cfg.match.idField;
-  let index = null;        // { byId: Map, bySlug: Map, items?: [] }
+  let index = null; // { byId: Map, bySlug: Map, items?: [] }
   let indexDirty = false;
-  let fieldSlugs = null;   // Set of collection field slugs (skipMissingFields)
+  let fieldSlugs = null; // Set of collection field slugs (skipMissingFields)
   let toPublish = new Map(); // itemId -> state to commit once published
   let chain = Promise.resolve();
   const stats = { created: 0, updated: 0, unchanged: 0, archived: 0, deleted: 0, skipped: 0, failed: 0 };
@@ -60,7 +69,11 @@ export function createSync({
     if (!fresh && !index) {
       const cached = await store.get(INDEX);
       if (cached && now() - Date.parse(cached.at) < cfg.match.indexTtlMinutes * 60000) {
-        index = { byId: new Map(Object.entries(cached.byId)), bySlug: new Map(Object.entries(cached.bySlug)), at: cached.at };
+        index = {
+          byId: new Map(Object.entries(cached.byId)),
+          bySlug: new Map(Object.entries(cached.bySlug)),
+          at: cached.at,
+        };
         return index;
       }
     }
@@ -86,7 +99,11 @@ export function createSync({
   async function saveIndex() {
     if (!indexDirty || dryRun || !index) return;
     indexDirty = false;
-    await store.put(INDEX, { at: index.at, byId: Object.fromEntries(index.byId), bySlug: Object.fromEntries(index.bySlug) });
+    await store.put(INDEX, {
+      at: index.at,
+      byId: Object.fromEntries(index.byId),
+      bySlug: Object.fromEntries(index.bySlug),
+    });
   }
 
   async function findItemId(product, state, opts) {
@@ -102,7 +119,10 @@ export function createSync({
     return null;
   }
 
-  const record = (action, extra = {}) => { stats[action] = (stats[action] || 0) + 1; return { action, ...extra }; };
+  const record = (action, extra = {}) => {
+    stats[action] = (stats[action] || 0) + 1;
+    return { action, ...extra };
+  };
 
   // ------------------------------------------------------------ one product
 
@@ -110,7 +130,9 @@ export function createSync({
     const inactive = product.status && product.status !== 'ACTIVE';
     const hide = inactive && cfg.inactive !== 'keep';
     const fieldData = onlyExisting(mapProduct(product, cfg), await collectionFields());
-    const hash = await sha256(stableStringify({ fieldData, hide: hide ? cfg.inactive : false, owned: cfg.webflowOwned }));
+    const hash = await sha256(
+      stableStringify({ fieldData, hide: hide ? cfg.inactive : false, owned: cfg.webflowOwned }),
+    );
     const key = stateKey(product.id);
     const state = await store.get(key);
 
@@ -119,10 +141,14 @@ export function createSync({
     let itemId = await findItemId(product, state);
 
     if (hide && !itemId) return record('skipped', { reason: `status ${product.status}` });
-    if (dryRun) return record(itemId ? (hide ? 'archived' : 'updated') : 'created', { itemId, dryRun: true, fieldData });
+    if (dryRun)
+      return record(itemId ? (hide ? 'archived' : 'updated') : 'created', { itemId, dryRun: true, fieldData });
 
     const update = async (id) => {
-      const flags = hide && cfg.inactive === 'archive' ? { isArchived: true, isDraft: false } : { isArchived: false, isDraft: false };
+      const flags =
+        hide && cfg.inactive === 'archive'
+          ? { isArchived: true, isDraft: false }
+          : { isArchived: false, isDraft: false };
       if (hide) await webflow.unpublish(id);
       await webflow.updateItem(id, withoutOwned(fieldData, cfg), flags);
       remember(id, fieldData);
@@ -137,7 +163,10 @@ export function createSync({
         if (err.status !== 404) throw err;
         // Deleted in Webflow by hand.
         if (index) index.byId.delete(String(product.legacyId));
-        if (hide) { await store.delete(key); return record('skipped', { reason: 'item deleted in Webflow, product inactive' }); }
+        if (hide) {
+          await store.delete(key);
+          return record('skipped', { reason: 'item deleted in Webflow, product inactive' });
+        }
         log.warn(`item ${itemId} is gone from Webflow, recreating`);
         itemId = null;
       }
@@ -202,14 +231,25 @@ export function createSync({
 
     await webflow.unpublish(itemId);
     if (cfg.onDelete === 'delete') {
-      try { await webflow.deleteItem(itemId); } catch (err) { if (err.status !== 404) throw err; }
+      try {
+        await webflow.deleteItem(itemId);
+      } catch (err) {
+        if (err.status !== 404) throw err;
+      }
       await store.delete(key);
-      if (index) { index.byId.delete(String(numericId(id))); indexDirty = true; }
+      if (index) {
+        index.byId.delete(String(numericId(id)));
+        indexDirty = true;
+      }
       log.info(`deleted item ${itemId}`);
       return record('deleted', { itemId });
     }
     if (cfg.onDelete === 'archive') {
-      try { await webflow.updateItem(itemId, {}, { isArchived: true }); } catch (err) { if (err.status !== 404) throw err; }
+      try {
+        await webflow.updateItem(itemId, {}, { isArchived: true });
+      } catch (err) {
+        if (err.status !== 404) throw err;
+      }
     }
     await store.put(key, { itemId, hash: null, removed: true, at: new Date(now()).toISOString() });
     log.info(`${cfg.onDelete} item ${itemId}`);
@@ -236,11 +276,12 @@ export function createSync({
     syncProduct: (product, opts) => serial(() => syncProductInner(product, opts)),
 
     /** Fetch the current product from Shopify, then sync or remove it. Used by webhooks. */
-    syncById: (id) => serial(async () => {
-      const product = await shopify.getProduct(productGid(id));
-      if (!product) return removeInner(id);
-      return syncProductInner(product);
-    }),
+    syncById: (id) =>
+      serial(async () => {
+        const product = await shopify.getProduct(productGid(id));
+        if (!product) return removeInner(id);
+        return syncProductInner(product);
+      }),
 
     /** Product deleted in Shopify. */
     removeProduct: (id) => serial(() => removeInner(id)),
@@ -260,138 +301,182 @@ export function createSync({
       maxProducts = cfg.reconcile.maxProductsPerRun,
       maxPages = cfg.reconcile.maxPagesPerRun,
       since: sinceOverride,
-    } = {}) => serial(async () => {
-      const storedSince = await store.get(SINCE);
-      // A half-done window (also one started with `since`, e.g. a first import) is finished first.
-      const resume = sinceOverride ? null : await store.get(PAGE);
-      const start = sinceOverride || resume?.since || storedSince || new Date(now() - cfg.reconcile.lookbackMinutes * 60000).toISOString();
-      const resuming = Boolean(resume) && resume.since === start;
-      let after = resuming ? resume.after : null;
-      let offset = resuming ? resume.offset || 0 : 0; // products of that page already done
-      let newest = resuming ? resume.newest : start;
-      const retry = (await store.get(RETRY)) || [];
-      const failures = [];
-      let changes = 0;
-      let processed = 0;
-      let pages = 0;
-      let complete = true;
-      let stopped = null;
-      const stop = (why) => { complete = false; stopped = why; };
-      const counts = (res) => res.action !== 'unchanged' && res.action !== 'skipped';
+    } = {}) =>
+      serial(async () => {
+        const storedSince = await store.get(SINCE);
+        // A half-done window (also one started with `since`, e.g. a first import) is finished first.
+        const resume = sinceOverride ? null : await store.get(PAGE);
+        const start =
+          sinceOverride ||
+          resume?.since ||
+          storedSince ||
+          new Date(now() - cfg.reconcile.lookbackMinutes * 60000).toISOString();
+        const resuming = Boolean(resume) && resume.since === start;
+        let after = resuming ? resume.after : null;
+        let offset = resuming ? resume.offset || 0 : 0; // products of that page already done
+        let newest = resuming ? resume.newest : start;
+        const retry = (await store.get(RETRY)) || [];
+        const failures = [];
+        let changes = 0;
+        let processed = 0;
+        let pages = 0;
+        let complete = true;
+        let stopped = null;
+        const stop = (why) => {
+          complete = false;
+          stopped = why;
+        };
+        const counts = (res) => res.action !== 'unchanged' && res.action !== 'skipped';
 
-      // Products that failed before (webhooks or earlier runs) first.
-      const retryLeft = [];
-      for (const r of retry) {
-        if (outOfBudget() || changes >= maxChanges) { retryLeft.push(r); continue; }
-        try {
-          const product = await shopify.getProduct(productGid(r.id));
-          const res = product ? await syncProductInner(product, { publishNow: false }) : await removeInner(r.id);
-          if (counts(res)) changes++;
-        } catch (err) {
-          if ((r.attempts || 1) < 5) failures.push({ id: r.id, attempts: (r.attempts || 1) + 1, error: err.message });
-          else log.error(`giving up on product ${r.id}: ${err.message}`);
-        }
-      }
-
-      const query = `updated_at:>='${isoMinus(start, cfg.reconcile.overlapMinutes)}'`;
-      outer: for (;;) {
-        if (pages >= maxPages) { stop('pages'); break; }
-        if (outOfBudget()) { stop('subrequests'); break; }
-        let page;
-        try {
-          page = await shopify.listProducts({ after, query });
-        } catch (err) {
-          log.error(`listing products failed: ${err.message}`);
-          stop('error');
-          failures.push({ id: null, error: err.message });
-          break;
-        }
-        pages++;
-        for (let i = offset; i < page.products.length; i++) {
-          const product = page.products[i];
-          // Stopping mid-page: remember how far into this page we got.
-          if (changes >= maxChanges) { offset = i; stop('changes'); break outer; }
-          if (processed >= maxProducts) { offset = i; stop('products'); break outer; }
-          if (outOfBudget()) { offset = i; stop('subrequests'); break outer; }
-          processed++;
-          try {
-            if (counts(await syncProductInner(product, { publishNow: false }))) changes++;
-          } catch (err) {
-            stats.failed++;
-            log.error(`sync ${product.handle} failed: ${err.message}`);
-            failures.push({ id: numericId(product.id), attempts: 1, error: err.message });
+        // Products that failed before (webhooks or earlier runs) first.
+        const retryLeft = [];
+        for (const r of retry) {
+          if (outOfBudget() || changes >= maxChanges) {
+            retryLeft.push(r);
+            continue;
           }
-          if (product.updatedAt > newest) newest = product.updatedAt;
+          try {
+            const product = await shopify.getProduct(productGid(r.id));
+            const res = product ? await syncProductInner(product, { publishNow: false }) : await removeInner(r.id);
+            if (counts(res)) changes++;
+          } catch (err) {
+            if ((r.attempts || 1) < 5) failures.push({ id: r.id, attempts: (r.attempts || 1) + 1, error: err.message });
+            else log.error(`giving up on product ${r.id}: ${err.message}`);
+          }
         }
-        offset = 0;
-        if (!page.pageInfo.hasNextPage) break;
-        after = page.pageInfo.endCursor;
-      }
 
-      try { await flushPublish(); } catch (err) {
-        log.error(`publish failed: ${err.message}`); // hashes weren't stored: retried next run
-        stop('publish');
-      }
-
-      if (!dryRun) {
-        // Only write what moved: KV's free tier allows 1,000 writes a day.
-        if (complete) {
-          if (storedSince !== newest) await store.put(SINCE, newest);
-          if (resume || sinceOverride) await store.delete(PAGE);
-        } else if (!resuming || resume.after !== after || resume.offset !== offset || resume.newest !== newest) {
-          await store.put(PAGE, { since: start, after, offset, newest });
+        const query = `updated_at:>='${isoMinus(start, cfg.reconcile.overlapMinutes)}'`;
+        outer: for (;;) {
+          if (pages >= maxPages) {
+            stop('pages');
+            break;
+          }
+          if (outOfBudget()) {
+            stop('subrequests');
+            break;
+          }
+          let page;
+          try {
+            page = await shopify.listProducts({ after, query });
+          } catch (err) {
+            log.error(`listing products failed: ${err.message}`);
+            stop('error');
+            failures.push({ id: null, error: err.message });
+            break;
+          }
+          pages++;
+          for (let i = offset; i < page.products.length; i++) {
+            const product = page.products[i];
+            // Stopping mid-page: remember how far into this page we got.
+            if (changes >= maxChanges) {
+              offset = i;
+              stop('changes');
+              break outer;
+            }
+            if (processed >= maxProducts) {
+              offset = i;
+              stop('products');
+              break outer;
+            }
+            if (outOfBudget()) {
+              offset = i;
+              stop('subrequests');
+              break outer;
+            }
+            processed++;
+            try {
+              if (counts(await syncProductInner(product, { publishNow: false }))) changes++;
+            } catch (err) {
+              stats.failed++;
+              log.error(`sync ${product.handle} failed: ${err.message}`);
+              failures.push({ id: numericId(product.id), attempts: 1, error: err.message });
+            }
+            if (product.updatedAt > newest) newest = product.updatedAt;
+          }
+          offset = 0;
+          if (!page.pageInfo.hasNextPage) break;
+          after = page.pageInfo.endCursor;
         }
-        const nextRetry = [...retryLeft, ...failures.filter((f) => f.id)];
-        if (nextRetry.length || retry.length) await store.put(RETRY, nextRetry);
-      }
-      return { since: start, until: newest, processed, pages, changes, complete, stopped, failures, stats: { ...stats } };
-    }),
+
+        try {
+          await flushPublish();
+        } catch (err) {
+          log.error(`publish failed: ${err.message}`); // hashes weren't stored: retried next run
+          stop('publish');
+        }
+
+        if (!dryRun) {
+          // Only write what moved: KV's free tier allows 1,000 writes a day.
+          if (complete) {
+            if (storedSince !== newest) await store.put(SINCE, newest);
+            if (resume || sinceOverride) await store.delete(PAGE);
+          } else if (!resuming || resume.after !== after || resume.offset !== offset || resume.newest !== newest) {
+            await store.put(PAGE, { since: start, after, offset, newest });
+          }
+          const nextRetry = [...retryLeft, ...failures.filter((f) => f.id)];
+          if (nextRetry.length || retry.length) await store.put(RETRY, nextRetry);
+        }
+        return {
+          since: start,
+          until: newest,
+          processed,
+          pages,
+          changes,
+          complete,
+          stopped,
+          failures,
+          stats: { ...stats },
+        };
+      }),
 
     /**
      * Every product. prune: archive/delete Webflow items whose Shopify product
      * no longer exists. Sets the reconcile cursor, so reconcile picks up from here.
      * Meant for the Node CLI (no subrequest budget).
      */
-    importAll: ({ prune = false, force = false, query = cfg.shopify.query || null, onProgress } = {}) => serial(async () => {
-      const seen = new Set();
-      const failures = [];
-      let newest = null;
-      let after = null;
-      let n = 0;
-      for (;;) {
-        const page = await shopify.listProducts({ after, query });
-        for (const product of page.products) {
-          seen.add(String(product.legacyId));
-          try { await syncProductInner(product, { force, publishNow: false }); } catch (err) {
-            stats.failed++;
-            failures.push({ id: product.legacyId, handle: product.handle, error: err.message });
-            log.error(`sync ${product.handle} failed: ${err.message}`);
+    importAll: ({ prune = false, force = false, query = cfg.shopify.query || null, onProgress } = {}) =>
+      serial(async () => {
+        const seen = new Set();
+        const failures = [];
+        let newest = null;
+        let after = null;
+        let n = 0;
+        for (;;) {
+          const page = await shopify.listProducts({ after, query });
+          for (const product of page.products) {
+            seen.add(String(product.legacyId));
+            try {
+              await syncProductInner(product, { force, publishNow: false });
+            } catch (err) {
+              stats.failed++;
+              failures.push({ id: product.legacyId, handle: product.handle, error: err.message });
+              log.error(`sync ${product.handle} failed: ${err.message}`);
+            }
+            if (!newest || product.updatedAt > newest) newest = product.updatedAt;
+            n++;
+            if (onProgress) onProgress(n, product);
           }
-          if (!newest || product.updatedAt > newest) newest = product.updatedAt;
-          n++;
-          if (onProgress) onProgress(n, product);
+          // Publish in batches as we go, so a crash halfway leaves published items behind.
+          if (toPublish.size >= 100) await flushPublish();
+          if (!page.pageInfo.hasNextPage) break;
+          after = page.pageInfo.endCursor;
         }
-        // Publish in batches as we go, so a crash halfway leaves published items behind.
-        if (toPublish.size >= 100) await flushPublish();
-        if (!page.pageInfo.hasNextPage) break;
-        after = page.pageInfo.endCursor;
-      }
-      await flushPublish();
+        await flushPublish();
 
-      const pruned = [];
-      if (prune && !query) {
-        const idx = await getIndex({ fresh: true });
-        for (const item of idx.items) {
-          const sid = item.fieldData?.[idField];
-          if (!sid || seen.has(String(sid)) || item.isArchived) continue;
-          const res = await removeInner(sid);
-          if (res.action !== 'skipped') pruned.push({ itemId: item.id, shopifyId: sid, slug: item.fieldData.slug });
-        }
-      } else if (prune) log.warn('prune skipped: it needs a full import (no shopify.query filter)');
+        const pruned = [];
+        if (prune && !query) {
+          const idx = await getIndex({ fresh: true });
+          for (const item of idx.items) {
+            const sid = item.fieldData?.[idField];
+            if (!sid || seen.has(String(sid)) || item.isArchived) continue;
+            const res = await removeInner(sid);
+            if (res.action !== 'skipped') pruned.push({ itemId: item.id, shopifyId: sid, slug: item.fieldData.slug });
+          }
+        } else if (prune) log.warn('prune skipped: it needs a full import (no shopify.query filter)');
 
-      if (!dryRun && newest) await store.put(SINCE, newest);
-      return { products: n, failures, pruned, stats: { ...stats } };
-    }),
+        if (!dryRun && newest) await store.put(SINCE, newest);
+        return { products: n, failures, pruned, stats: { ...stats } };
+      }),
   };
   return api;
 }

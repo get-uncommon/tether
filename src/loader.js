@@ -87,28 +87,51 @@ async function flush() {
   try {
     const data = await gql(query, vars);
     const got = new Map();
-    (data.byId || []).forEach((p) => { if (p) got.set(p.id, p); });
-    handles.forEach((h, i) => { if (data[`h${i}`]) got.set(h, data[`h${i}`]); });
+    (data.byId || []).forEach((p) => {
+      if (p) got.set(p.id, p);
+    });
+    handles.forEach((h, i) => {
+      if (data[`h${i}`]) got.set(h, data[`h${i}`]);
+    });
 
-    keys.forEach((k) => settle(k, (r) => {
-      if (got.has(k)) {
-        const p = got.get(k);
-        if (gen === generation) { primeProduct(p); freshAt.set(p.handle, Date.now()); freshAt.set(p.id, Date.now()); }
-        r.resolve(p);
-      } else {
-        // A miss is remembered for a few seconds (one page load asking twice makes one request),
-        // not longer: a product published in Shopify shows up on the next visit.
-        const miss = productCache.get(k);
-        if (gen === generation) setTimeout(() => { if (productCache.get(k) === miss) productCache.delete(k); }, 10000);
-        r.reject(new TetherError(`Product not found: ${k}`, { code: 'NOT_FOUND' }));
-      }
-    }));
+    keys.forEach((k) =>
+      settle(k, (r) => {
+        if (got.has(k)) {
+          const p = got.get(k);
+          if (gen === generation) {
+            primeProduct(p);
+            freshAt.set(p.handle, Date.now());
+            freshAt.set(p.id, Date.now());
+          }
+          r.resolve(p);
+        } else {
+          // A miss is remembered for a few seconds (one page load asking twice makes one request),
+          // not longer: a product published in Shopify shows up on the next visit.
+          const miss = productCache.get(k);
+          if (gen === generation)
+            setTimeout(() => {
+              if (productCache.get(k) === miss) productCache.delete(k);
+            }, 10000);
+          r.reject(new TetherError(`Product not found: ${k}`, { code: 'NOT_FOUND' }));
+        }
+      }),
+    );
   } catch (err) {
-    keys.forEach((k) => settle(k, (r) => { if (gen === generation) productCache.delete(k); r.reject(err); }));
+    keys.forEach((k) =>
+      settle(k, (r) => {
+        if (gen === generation) productCache.delete(k);
+        r.reject(err);
+      }),
+    );
   }
 }
 
-export function clearProductCache() { productCache.clear(); generation++; stale.clear(); freshAt.clear(); }
+export function clearProductCache() {
+  productCache.clear();
+  generation++;
+  stale.clear();
+  freshAt.clear();
+}
 
 // ---------------------------------------------------------------------------
 // Hydration: products rendered on the server (tether/server hydrate()) are used at once and
@@ -137,7 +160,10 @@ export function takeStale(key) {
   const p = productCache.get(k);
   stale.delete(k);
   // Both keys point to the same product: refresh it once.
-  p?.then?.((x) => { stale.delete(x.handle); stale.delete(x.id); });
+  p?.then?.((x) => {
+    stale.delete(x.handle);
+    stale.delete(x.id);
+  });
   return true;
 }
 
@@ -152,12 +178,19 @@ export function refreshProducts(keys) {
  * Returns { collection, products, pageInfo }.
  */
 export async function getProducts({
-  collection, query, first = cfg.collectionFirst, after = null, sortKey, reverse = false, filters,
+  collection,
+  query,
+  first = cfg.collectionFirst,
+  after = null,
+  sortKey,
+  reverse = false,
+  filters,
 } = {}) {
   const fragment = productFragment();
 
   if (collection) {
-    const data = await gql(`query TetherCollection($handle: String!, $first: Int!, $after: String, $sortKey: ProductCollectionSortKeys, $reverse: Boolean, $filters: [ProductFilter!]) {
+    const data = await gql(
+      `query TetherCollection($handle: String!, $first: Int!, $after: String, $sortKey: ProductCollectionSortKeys, $reverse: Boolean, $filters: [ProductFilter!]) {
   collection(handle: $handle) {
     ${collectionFields()}
     products(first: $first, after: $after, sortKey: $sortKey, reverse: $reverse, filters: $filters) {
@@ -166,22 +199,32 @@ export async function getProducts({
     }
   }
 }
-${fragment}`, {
-      handle: collection, first, after, sortKey: sortKey || undefined, reverse, filters: filters || undefined,
-    });
+${fragment}`,
+      {
+        handle: collection,
+        first,
+        after,
+        sortKey: sortKey || undefined,
+        reverse,
+        filters: filters || undefined,
+      },
+    );
     if (!data.collection) throw new TetherError(`Collection not found: ${collection}`, { code: 'NOT_FOUND' });
     const { products, ...rest } = data.collection;
     products.nodes.forEach(primeProduct);
     return { collection: rest, products: products.nodes, pageInfo: products.pageInfo };
   }
 
-  const data = await gql(`query TetherSearch($first: Int!, $after: String, $query: String, $sortKey: ProductSortKeys, $reverse: Boolean) {
+  const data = await gql(
+    `query TetherSearch($first: Int!, $after: String, $query: String, $sortKey: ProductSortKeys, $reverse: Boolean) {
   products(first: $first, after: $after, query: $query, sortKey: $sortKey, reverse: $reverse) {
     nodes { ...TetherProduct }
     pageInfo { hasNextPage endCursor }
   }
 }
-${fragment}`, { first, after, query: query || undefined, sortKey: sortKey || undefined, reverse });
+${fragment}`,
+    { first, after, query: query || undefined, sortKey: sortKey || undefined, reverse },
+  );
   data.products.nodes.forEach(primeProduct);
   return { collection: null, products: data.products.nodes, pageInfo: data.products.pageInfo };
 }
@@ -189,10 +232,13 @@ ${fragment}`, { first, after, query: query || undefined, sortKey: sortKey || und
 export async function getRecommendations(product, intent = 'RELATED') {
   const key = normalizeProductKey(typeof product === 'object' ? product?.id : product);
   const byId = key?.startsWith('gid://');
-  const data = await gql(`query TetherRecs(${byId ? '$id: ID!' : '$handle: String!'}, $intent: ProductRecommendationIntent) {
+  const data = await gql(
+    `query TetherRecs(${byId ? '$id: ID!' : '$handle: String!'}, $intent: ProductRecommendationIntent) {
   productRecommendations(${byId ? 'productId: $id' : 'productHandle: $handle'}, intent: $intent) { ...TetherProduct }
 }
-${productFragment()}`, byId ? { id: key, intent } : { handle: key, intent });
+${productFragment()}`,
+    byId ? { id: key, intent } : { handle: key, intent },
+  );
   const list = data.productRecommendations || [];
   list.forEach(primeProduct);
   return list;

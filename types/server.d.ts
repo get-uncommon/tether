@@ -1,8 +1,25 @@
 import type { ShopifyProduct, ShopifyVariant, Money, TetherError, SellingPlanHelpers, TetherConfig } from './index.js';
 export type { ShopifyProduct, ShopifyVariant, ShopifyCart, ShopifyCartLine, Money } from './index.js';
 
-export interface StorefrontOptions extends Partial<Pick<TetherConfig,
-  'apiVersion' | 'country' | 'language' | 'locale' | 'productPath' | 'maxAge' | 'lowStock' | 'defaultPurchase' | 'metafields' | 'imagesFirst' | 'variantsFirst' | 'sellingPlanGroupsFirst' | 'sellingPlansFirst' | 'retries'>> {
+export interface StorefrontOptions extends Partial<
+  Pick<
+    TetherConfig,
+    | 'apiVersion'
+    | 'country'
+    | 'language'
+    | 'locale'
+    | 'productPath'
+    | 'maxAge'
+    | 'lowStock'
+    | 'defaultPurchase'
+    | 'metafields'
+    | 'imagesFirst'
+    | 'variantsFirst'
+    | 'sellingPlanGroupsFirst'
+    | 'sellingPlansFirst'
+    | 'retries'
+  >
+> {
   /** your-store.myshopify.com (or pass import.meta.env with PUBLIC_SHOPIFY_DOMAIN). */
   domain?: string;
   /** Public Storefront API token (or PUBLIC_SHOPIFY_STOREFRONT_TOKEN in import.meta.env). */
@@ -16,11 +33,21 @@ export interface StorefrontOptions extends Partial<Pick<TetherConfig,
   PUBLIC_SHOPIFY_DOMAIN?: string;
   PUBLIC_SHOPIFY_STOREFRONT_TOKEN?: string;
   /** Astro's import.meta.env carries these too; ignored. */
-  MODE?: string; BASE_URL?: string; PROD?: boolean; DEV?: boolean; SSR?: boolean; SITE?: string; ASSETS_PREFIX?: string;
+  MODE?: string;
+  BASE_URL?: string;
+  PROD?: boolean;
+  DEV?: boolean;
+  SSR?: boolean;
+  SITE?: string;
+  ASSETS_PREFIX?: string;
 }
 
 export interface ShopifyCollection {
-  id: string; handle: string; title: string; description: string; descriptionHtml: string;
+  id: string;
+  handle: string;
+  title: string;
+  description: string;
+  descriptionHtml: string;
   image?: { url: string; altText?: string | null } | null;
   seo?: { title?: string | null; description?: string | null };
 }
@@ -41,24 +68,40 @@ export interface Storefront {
   query<T = any>(query: string, variables?: Record<string, unknown>, opts?: { context?: boolean }): Promise<T>;
   /** By handle, numeric id, gid or product URL. null when it doesn't exist. */
   getProduct(handleOrId: string | number | null | undefined): Promise<ShopifyProduct | null>;
-  getProducts(opts?: ProductQuery): Promise<{ collection: ShopifyCollection | null; products: ShopifyProduct[]; pageInfo: { hasNextPage: boolean; endCursor: string | null } }>;
+  getProducts(opts?: ProductQuery): Promise<{
+    collection: ShopifyCollection | null;
+    products: ShopifyProduct[];
+    pageInfo: { hasNextPage: boolean; endCursor: string | null };
+  }>;
   /** Every product (of a collection or a search query), page by page. For getStaticPaths(). */
   allProducts(opts?: Omit<ProductQuery, 'first' | 'after'>): Promise<ShopifyProduct[]>;
-  getCollection(handle: string, opts?: Omit<ProductQuery, 'collection'>): Promise<(ShopifyCollection & { products: ShopifyProduct[]; pageInfo: { hasNextPage: boolean; endCursor: string | null } }) | null>;
+  getCollection(
+    handle: string,
+    opts?: Omit<ProductQuery, 'collection'>,
+  ): Promise<
+    | (ShopifyCollection & { products: ShopifyProduct[]; pageInfo: { hasNextPage: boolean; endCursor: string | null } })
+    | null
+  >;
   allCollections(): Promise<ShopifyCollection[]>;
   /** By handle, id or product (runs in parallel with getProduct when you pass the handle). */
-  getRecommendations(product: string | number | Pick<ShopifyProduct, 'id'>, intent?: 'RELATED' | 'COMPLEMENTARY'): Promise<ShopifyProduct[]>;
+  getRecommendations(
+    product: string | number | Pick<ShopifyProduct, 'id'>,
+    intent?: 'RELATED' | 'COMPLEMENTARY',
+  ): Promise<ShopifyProduct[]>;
   /**
    * A <script type="application/json" data-tether-hydrate> tag: the browser script renders these
    * products without its own request, then refreshes prices and stock once in the background.
    * Astro: <Fragment set:html={shop.hydrate(product)} />
    */
-  hydrate(products: ShopifyProduct | ShopifyProduct[], opts?: {
-    /** For lists: without descriptions and variant images, about 40% smaller. */
-    card?: boolean;
-    /** Images a card keeps (default 2: the main one and a hover image). */
-    images?: number;
-  }): string;
+  hydrate(
+    products: ShopifyProduct | ShopifyProduct[],
+    opts?: {
+      /** For lists: without descriptions and variant images, about 40% smaller. */
+      card?: boolean;
+      /** Images a card keeps (default 2: the main one and a hover image). */
+      images?: number;
+    },
+  ): string;
   formatMoney(money: Money | null | undefined, locale?: string): string;
   /** 30 -> '30%' (nl, en) / '30 %' (de, fr), the way Tether shows savings. '' for 0. */
   formatPercent(n: number, locale?: string): string;
@@ -91,15 +134,44 @@ export interface InitialState {
   compareAtPrice: Money | null;
   available: boolean;
   /** tether-show conditions: hidden={!state.show['out-of-stock']}. */
-  show: Record<'in-stock' | 'out-of-stock' | 'backorder' | 'on-sale' | 'not-on-sale' | 'has-variants' | 'single-variant' | 'low-stock' | 'subscription-available' | 'subscription-unavailable' | 'subscription-only' | 'one-time-available' | 'subscription-selected' | 'one-time-selected' | 'plenty-in-stock' | 'has-savings', boolean>;
+  show: Record<
+    | 'in-stock'
+    | 'out-of-stock'
+    | 'backorder'
+    | 'on-sale'
+    | 'not-on-sale'
+    | 'has-variants'
+    | 'single-variant'
+    | 'low-stock'
+    | 'subscription-available'
+    | 'subscription-unavailable'
+    | 'subscription-only'
+    | 'one-time-available'
+    | 'subscription-selected'
+    | 'one-time-selected'
+    | 'plenty-in-stock'
+    | 'has-savings',
+    boolean
+  >;
   /** true for option values without an available variant: class is-unavailable. */
   isUnavailable(optionName: string, value: string): boolean;
 }
-export interface InitialOptions { variant?: string | null; sellingPlan?: string | null; defaultPurchase?: 'one-time' | 'subscription' }
+export interface InitialOptions {
+  variant?: string | null;
+  sellingPlan?: string | null;
+  defaultPurchase?: 'one-time' | 'subscription';
+}
 export declare function initialState(product: ShopifyProduct, opts?: InitialOptions): InitialState;
-export declare function initialState(product: ShopifyProduct | null | undefined, opts?: InitialOptions): InitialState | null;
+export declare function initialState(
+  product: ShopifyProduct | null | undefined,
+  opts?: InitialOptions,
+): InitialState | null;
 
-export interface ImageSize { width?: number; height?: number; crop?: 'center' | 'top' | 'bottom' | 'left' | 'right' }
+export interface ImageSize {
+  width?: number;
+  height?: number;
+  crop?: 'center' | 'top' | 'bottom' | 'left' | 'right';
+}
 export declare function imageUrl(url: string | null | undefined, size?: ImageSize): string;
 export declare function createStorefront(options?: StorefrontOptions): Storefront;
 export declare function formatMoney(money: Money | null | undefined, locale?: string): string;

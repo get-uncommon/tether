@@ -7,7 +7,20 @@
  */
 import { reportError } from './config.js';
 import { TetherError } from './client.js';
-import { attr, sel, get, has, scoped, emit, setText, setImage, repeat, notifyLayoutChanged, busy, show } from './dom.js';
+import {
+  attr,
+  sel,
+  get,
+  has,
+  scoped,
+  emit,
+  setText,
+  setImage,
+  repeat,
+  notifyLayoutChanged,
+  busy,
+  show,
+} from './dom.js';
 import { getProducts, getRecommendations } from './loader.js';
 import { setScopeStatus, isNotFound, resolveProductKey } from './status.js';
 
@@ -29,7 +42,9 @@ export class ListScope {
     });
   }
 
-  $(s) { return scoped(this.root, s, listSelector()); }
+  $(s) {
+    return scoped(this.root, s, listSelector());
+  }
 
   options() {
     const r = this.root;
@@ -85,11 +100,17 @@ export class ListScope {
     const c = this.collection;
     this.$(sel('collection-bind')).forEach((el) => {
       switch (get(el, 'collection-bind')) {
-        case 'title': return setText(el, c?.title || '');
-        case 'description': el.innerHTML = c?.descriptionHtml || ''; return undefined;
-        case 'image': return setImage(el, c?.image?.url, c?.image?.altText || c?.title);
-        case 'count': return setText(el, this.products.length);
-        default: return undefined;
+        case 'title':
+          return setText(el, c?.title || '');
+        case 'description':
+          el.innerHTML = c?.descriptionHtml || '';
+          return undefined;
+        case 'image':
+          return setImage(el, c?.image?.url, c?.image?.altText || c?.title);
+        case 'count':
+          return setText(el, this.products.length);
+        default:
+          return undefined;
       }
     });
 
@@ -112,4 +133,3 @@ export class ListScope {
     notifyLayoutChanged('list');
   }
 }
-

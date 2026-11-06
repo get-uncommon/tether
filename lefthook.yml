@@ -3,10 +3,10 @@ pre-commit:
   parallel: true
   commands:
     format:
-      glob: "*.{js,mjs,cjs,ts,json,yml,yaml,html}"
+      glob: '*.{js,mjs,cjs,ts,json,yml,yaml,html}'
       run: npx prettier --check {staged_files}
     lint:
-      glob: "*.{js,mjs,cjs}"
+      glob: '*.{js,mjs,cjs}'
       run: npx eslint {staged_files}
 pre-push:
   commands:

@@ -18,7 +18,11 @@ export function stableStringify(v) {
   if (v === undefined) return 'null';
   if (v === null || typeof v !== 'object') return JSON.stringify(v);
   if (Array.isArray(v)) return `[${v.map(stableStringify).join(',')}]`;
-  return `{${Object.keys(v).sort().filter((k) => v[k] !== undefined).map((k) => `${JSON.stringify(k)}:${stableStringify(v[k])}`).join(',')}}`;
+  return `{${Object.keys(v)
+    .sort()
+    .filter((k) => v[k] !== undefined)
+    .map((k) => `${JSON.stringify(k)}:${stableStringify(v[k])}`)
+    .join(',')}}`;
 }
 
 export async function sha256(text) {

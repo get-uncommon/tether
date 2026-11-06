@@ -14,8 +14,12 @@ import { JSDOM } from 'jsdom';
 
 const dom = new JSDOM('<!doctype html><body></body>', { url: 'https://example.test/' });
 Object.assign(globalThis, {
-  window: dom.window, document: dom.window.document, localStorage: dom.window.localStorage,
-  CustomEvent: dom.window.CustomEvent, MutationObserver: dom.window.MutationObserver, Option: dom.window.Option,
+  window: dom.window,
+  document: dom.window.document,
+  localStorage: dom.window.localStorage,
+  CustomEvent: dom.window.CustomEvent,
+  MutationObserver: dom.window.MutationObserver,
+  Option: dom.window.Option,
 });
 
 // The built ES modules: the same minified GraphQL the browser build sends.
@@ -27,12 +31,25 @@ const country = process.env.TETHER_COUNTRY || 'NL';
 const collection = process.env.TETHER_COLLECTION || null;
 const apiVersion = process.env.TETHER_API_VERSION || undefined; // try a new version before bumping the default
 
-await Tether.init({ domain, token, country, metafields: ['custom.material'], autoMount: false, ...(apiVersion ? { apiVersion } : {}) });
+await Tether.init({
+  domain,
+  token,
+  country,
+  metafields: ['custom.material'],
+  autoMount: false,
+  ...(apiVersion ? { apiVersion } : {}),
+});
 
 const ok = (m) => console.log(`  ok  ${m}`);
 let failed = 0;
 async function step(name, fn) {
-  try { await fn(); ok(name); } catch (e) { failed++; console.log(`  FAIL ${name}: ${e.message}`); }
+  try {
+    await fn();
+    ok(name);
+  } catch (e) {
+    failed++;
+    console.log(`  FAIL ${name}: ${e.message}`);
+  }
 }
 
 console.log(`Smoke test against ${domain} (country ${country}, API ${Tether.config.apiVersion})`);
@@ -60,7 +77,10 @@ if (collection) {
 let product;
 await step('product by handle (batched)', async () => {
   Tether.clearProductCache();
-  const [a, b] = await Promise.all([Tether.getProduct(products[0].handle), Tether.getProduct(products[1]?.handle || products[0].handle)]);
+  const [a, b] = await Promise.all([
+    Tether.getProduct(products[0].handle),
+    Tether.getProduct(products[1]?.handle || products[0].handle),
+  ]);
   product = a;
   if (!a || !b) throw new Error('missing');
 });
@@ -72,10 +92,14 @@ await step('product by numeric id', async () => {
   if (p.handle !== product.handle) throw new Error('mismatch');
 });
 
-await step('recommendations', async () => { await Tether.getRecommendations(product.id); });
+await step('recommendations', async () => {
+  await Tether.getRecommendations(product.id);
+});
 
 await step('unknown handle rejects with NOT_FOUND', async () => {
-  try { await Tether.getProduct('tether-smoke-does-not-exist'); } catch (e) {
+  try {
+    await Tether.getProduct('tether-smoke-does-not-exist');
+  } catch (e) {
     if (e.code !== 'NOT_FOUND') throw new Error(`code ${e.code}`);
     return;
   }
@@ -83,16 +107,28 @@ await step('unknown handle rejects with NOT_FOUND', async () => {
 });
 
 const withPlans = products.find((p) => Tether.plans.hasPlans(p));
-console.log(withPlans
-  ? `  ..  selling plans found on "${withPlans.handle}": ${Tether.plans.allPlans(withPlans).map((p) => p.name).join(', ')}`
-  : '  ..  no product with selling plans on this store (subscription path not exercised live)');
+console.log(
+  withPlans
+    ? `  ..  selling plans found on "${withPlans.handle}": ${Tether.plans
+        .allPlans(withPlans)
+        .map((p) => p.name)
+        .join(', ')}`
+    : '  ..  no product with selling plans on this store (subscription path not exercised live)',
+);
 
 const variant = (withPlans || product).variants.nodes.find((v) => v.availableForSale) || product.variants.nodes[0];
-const planId = withPlans ? Tether.plans.allPlans(withPlans).find((p) => Tether.plans.allocationFor(variant, p.id))?.id : null;
+const planId = withPlans
+  ? Tether.plans.allPlans(withPlans).find((p) => Tether.plans.allocationFor(variant, p.id))?.id
+  : null;
 
 await step('cart create + add', async () => {
   localStorage.clear();
-  await Tether.cart.add({ variantId: variant.id, quantity: 1, attributes: { _source: 'tether-smoke' }, sellingPlanId: planId || undefined });
+  await Tether.cart.add({
+    variantId: variant.id,
+    quantity: 1,
+    attributes: { _source: 'tether-smoke' },
+    sellingPlanId: planId || undefined,
+  });
   if (Tether.cart.count !== 1) throw new Error(`count ${Tether.cart.count}`);
 });
 if (planId) {
@@ -114,21 +150,40 @@ const other = countries.find((c) => c.isoCode !== country)?.isoCode;
 if (other) {
   await step(`setCountry(${other}) updates the cart market`, async () => {
     await Tether.setCountry(other, { remember: false });
-    if (Tether.cart.state.buyerIdentity?.countryCode !== other) throw new Error(`cart country ${Tether.cart.state.buyerIdentity?.countryCode}`);
+    if (Tether.cart.state.buyerIdentity?.countryCode !== other)
+      throw new Error(`cart country ${Tether.cart.state.buyerIdentity?.countryCode}`);
     await Tether.setCountry(country, { remember: false });
   });
 }
 await step('add second line (array)', async () => {
   await Tether.cart.add([{ variantId: variant.id, quantity: 1, attributes: { _group: 'smoke' } }]);
 });
-await step('update quantity', async () => { await Tether.cart.updateLine(Tether.cart.lines[0].id, 2); });
-await step('note', async () => { await Tether.cart.setNote('smoke test'); });
-await step('attributes', async () => { await Tether.cart.setAttributes({ source: 'tether' }); });
-await step('discount (invalid code is fine)', async () => { await Tether.cart.setDiscountCodes(['TETHERSMOKE']); });
-await step('buyer identity', async () => { await Tether.cart.setBuyerIdentity({ countryCode: 'DE' }); });
-await step('checkoutUrl present', async () => { if (!Tether.cart.state.checkoutUrl) throw new Error('none'); });
-await step('reload cart from storage', async () => { const c = await Tether.cart.init(); if (!c) throw new Error('lost'); });
-await step('clear', async () => { await Tether.cart.clear(); if (Tether.cart.count) throw new Error('not empty'); });
+await step('update quantity', async () => {
+  await Tether.cart.updateLine(Tether.cart.lines[0].id, 2);
+});
+await step('note', async () => {
+  await Tether.cart.setNote('smoke test');
+});
+await step('attributes', async () => {
+  await Tether.cart.setAttributes({ source: 'tether' });
+});
+await step('discount (invalid code is fine)', async () => {
+  await Tether.cart.setDiscountCodes(['TETHERSMOKE']);
+});
+await step('buyer identity', async () => {
+  await Tether.cart.setBuyerIdentity({ countryCode: 'DE' });
+});
+await step('checkoutUrl present', async () => {
+  if (!Tether.cart.state.checkoutUrl) throw new Error('none');
+});
+await step('reload cart from storage', async () => {
+  const c = await Tether.cart.init();
+  if (!c) throw new Error('lost');
+});
+await step('clear', async () => {
+  await Tether.cart.clear();
+  if (Tether.cart.count) throw new Error('not empty');
+});
 
 console.log(failed ? `\n${failed} step(s) failed` : '\nAll steps passed');
 process.exit(failed ? 1 : 0);

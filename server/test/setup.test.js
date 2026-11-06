@@ -9,14 +9,24 @@ import { createMockApis, shopifyProduct, instantSleep } from './mocks.js';
 
 const COL = '0123456789abcdef01234567';
 const deployEnv = {
-  SHOPIFY_DOMAIN: 'shop.myshopify.com', WEBFLOW_COLLECTION_ID: COL, WEBFLOW_TOKEN: 'wf',
-  SHOPIFY_CLIENT_ID: 'cid', SHOPIFY_CLIENT_SECRET: 'csecret',
-  SHOPIFY_ADMIN_TOKEN: 'none', SHOPIFY_WEBHOOK_SECRET: 'none', SYNC_SECRET: 'a-long-random-sync-secret-123', FIELD_MAP: 'none',
+  SHOPIFY_DOMAIN: 'shop.myshopify.com',
+  WEBFLOW_COLLECTION_ID: COL,
+  WEBFLOW_TOKEN: 'wf',
+  SHOPIFY_CLIENT_ID: 'cid',
+  SHOPIFY_CLIENT_SECRET: 'csecret',
+  SHOPIFY_ADMIN_TOKEN: 'none',
+  SHOPIFY_WEBHOOK_SECRET: 'none',
+  SYNC_SECRET: 'a-long-random-sync-secret-123',
+  FIELD_MAP: 'none',
 };
 
 test('cleanEnv treats none/-/empty as unset; applyEnv merges FIELD_MAP and WEBFLOW_OWNED', () => {
   assert.deepEqual(cleanEnv({ A: 'none', B: ' - ', C: '', D: 'x' }), { D: 'x' });
-  const raw = applyEnv(defaultConfig, { FIELD_MAP: '{"material":"metafield:custom.material","gallery":null}', WEBFLOW_OWNED: 'description, intro', SHOPIFY_DOMAIN: 's.myshopify.com' });
+  const raw = applyEnv(defaultConfig, {
+    FIELD_MAP: '{"material":"metafield:custom.material","gallery":null}',
+    WEBFLOW_OWNED: 'description, intro',
+    SHOPIFY_DOMAIN: 's.myshopify.com',
+  });
   assert.equal(raw.fields.material, 'metafield:custom.material');
   assert.ok(!('gallery' in raw.fields));
   assert.deepEqual(raw.webflowOwned, ['description', 'intro']);
@@ -34,7 +44,14 @@ test('default config + env (what the Deploy button provides) syncs a standard co
   assert.equal(r.stats.created, 1);
   const item = [...apis.wf.items.values()][0];
   // the mock collection has name, slug, shopify-id, price, main-image, description, material
-  assert.deepEqual(Object.keys(item.fieldData).sort(), ['description', 'main-image', 'name', 'price', 'shopify-id', 'slug']);
+  assert.deepEqual(Object.keys(item.fieldData).sort(), [
+    'description',
+    'main-image',
+    'name',
+    'price',
+    'shopify-id',
+    'slug',
+  ]);
   assert.equal(item.fieldData['shopify-id'], '1');
 });
 
@@ -51,7 +68,11 @@ test('check without anything set lists every missing piece with a fix, and makes
 });
 
 test('check catches a custom domain and half-set client credentials', async () => {
-  const r = await runCheck(defaultConfig, { SHOPIFY_DOMAIN: 'shop.example.com', SHOPIFY_CLIENT_ID: 'x' }, { deep: false });
+  const r = await runCheck(
+    defaultConfig,
+    { SHOPIFY_DOMAIN: 'shop.example.com', SHOPIFY_CLIENT_ID: 'x' },
+    { deep: false },
+  );
   assert.match(r.steps.find((s) => s.title === 'Shopify store').message, /isn't a \.myshopify\.com domain/);
   assert.match(r.steps.find((s) => s.title === 'Shopify access').message, /Only one of/);
 });
@@ -74,8 +95,10 @@ test('check with everything set tests the APIs, reports mapping problems and a s
 
 test('check explains a wrong collection id and a rejected Webflow token', async () => {
   const apis = createMockApis({ products: [shopifyProduct(3)] });
-  const failing = (status) => async (url, init) => (String(url).includes('api.webflow.com')
-    ? new Response(JSON.stringify({ message: 'nope' }), { status }) : apis.fetch(url, init));
+  const failing = (status) => async (url, init) =>
+    String(url).includes('api.webflow.com')
+      ? new Response(JSON.stringify({ message: 'nope' }), { status })
+      : apis.fetch(url, init);
   let r = await runCheck(defaultConfig, deployEnv, { fetch: failing(404) });
   assert.match(r.steps.find((s) => s.title === 'Webflow API').fix, /check WEBFLOW_COLLECTION_ID/);
   r = await runCheck(defaultConfig, deployEnv, { fetch: failing(401) });
@@ -94,7 +117,11 @@ test('worker GET /check: config presence for anyone, API tests only with SYNC_SE
   assert.ok(!body.steps.some((s) => s.title === 'Shopify API'));
   assert.equal(apis.calls.length, 0);
 
-  res = await worker.fetch(new Request('https://sync.test/check', { headers: { authorization: 'Bearer a-long-random-sync-secret-123' } }), deployEnv, ctx);
+  res = await worker.fetch(
+    new Request('https://sync.test/check', { headers: { authorization: 'Bearer a-long-random-sync-secret-123' } }),
+    deployEnv,
+    ctx,
+  );
   body = await res.json();
   assert.ok(body.steps.some((s) => s.title === 'Shopify API' && s.level === 'ok'));
   assert.ok(body.config.fields.name);
@@ -106,8 +133,11 @@ test('worker GET /check: config presence for anyone, API tests only with SYNC_SE
 test('example values and a short SYNC_SECRET count as not set, and check names them', async () => {
   const { cleanEnv: clean } = await import('../src/mapping.js');
   const filled = {
-    SHOPIFY_DOMAIN: 'your-store.myshopify.com', WEBFLOW_TOKEN: 'your-webflow-site-token',
-    WEBFLOW_COLLECTION_ID: '0123456789abcdef01234567', SHOPIFY_ADMIN_TOKEN: 'shpat_…', SYNC_SECRET: 'short',
+    SHOPIFY_DOMAIN: 'your-store.myshopify.com',
+    WEBFLOW_TOKEN: 'your-webflow-site-token',
+    WEBFLOW_COLLECTION_ID: '0123456789abcdef01234567',
+    SHOPIFY_ADMIN_TOKEN: 'shpat_…',
+    SYNC_SECRET: 'short',
     SHOPIFY_CLIENT_SECRET: 'choose-a-long-random-string',
   };
   assert.deepEqual(Object.keys(clean(filled)), ['WEBFLOW_COLLECTION_ID']);
@@ -124,9 +154,22 @@ test('worker: placeholder SYNC_SECRET never unlocks /reconcile or the deep check
   const apis = createMockApis();
   const worker = createWorker(defaultConfig, { fetch: apis.fetch, sleep: instantSleep });
   const wenv = { ...deployEnv, SYNC_SECRET: 'choose-a-long-random-string' };
-  const r = await worker.fetch(new Request('https://w.test/reconcile', { method: 'POST', headers: { authorization: 'Bearer choose-a-long-random-string' } }), wenv, {});
+  const r = await worker.fetch(
+    new Request('https://w.test/reconcile', {
+      method: 'POST',
+      headers: { authorization: 'Bearer choose-a-long-random-string' },
+    }),
+    wenv,
+    {},
+  );
   assert.equal(r.status, 401);
-  const c = await (await worker.fetch(new Request('https://w.test/check', { headers: { authorization: 'Bearer choose-a-long-random-string' } }), wenv, {})).json();
+  const c = await (
+    await worker.fetch(
+      new Request('https://w.test/check', { headers: { authorization: 'Bearer choose-a-long-random-string' } }),
+      wenv,
+      {},
+    )
+  ).json();
   assert.ok(!c.steps.some((s) => s.title === 'Shopify API'));
   assert.equal(apis.calls.length, 0);
 });
@@ -135,7 +178,17 @@ test('.dev.vars.example: only the six fields a deploy needs, all empty and descr
   const { readFile } = await import('node:fs/promises');
   const text = await readFile(new URL('../.dev.vars.example', import.meta.url), 'utf8');
   const lines = text.split('\n').filter((l) => l.trim() && !l.trim().startsWith('#'));
-  assert.deepEqual(lines.map((l) => l.slice(0, -1)), ['SHOPIFY_DOMAIN', 'WEBFLOW_COLLECTION_ID', 'WEBFLOW_TOKEN', 'SHOPIFY_CLIENT_ID', 'SHOPIFY_CLIENT_SECRET', 'SYNC_SECRET']);
+  assert.deepEqual(
+    lines.map((l) => l.slice(0, -1)),
+    [
+      'SHOPIFY_DOMAIN',
+      'WEBFLOW_COLLECTION_ID',
+      'WEBFLOW_TOKEN',
+      'SHOPIFY_CLIENT_ID',
+      'SHOPIFY_CLIENT_SECRET',
+      'SYNC_SECRET',
+    ],
+  );
   lines.forEach((l) => assert.match(l, /^[A-Z_]+=$/, l));
   const pkg = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
   lines.forEach((l) => assert.ok(pkg.cloudflare.bindings[l.slice(0, -1)]?.description, `description for ${l}`));
@@ -144,7 +197,18 @@ test('.dev.vars.example: only the six fields a deploy needs, all empty and descr
 test('webhooks: the first reconcile registers them through the app, once; check reports them', async () => {
   const apis = createMockApis({ products: [shopifyProduct(1)] });
   const kv = new Map();
-  const TETHER_SYNC = { async get(k, t) { const v = kv.get(k); return v == null ? null : t === 'json' ? JSON.parse(v) : v; }, async put(k, v) { kv.set(k, v); }, async delete(k) { kv.delete(k); } };
+  const TETHER_SYNC = {
+    async get(k, t) {
+      const v = kv.get(k);
+      return v == null ? null : t === 'json' ? JSON.parse(v) : v;
+    },
+    async put(k, v) {
+      kv.set(k, v);
+    },
+    async delete(k) {
+      kv.delete(k);
+    },
+  };
   const worker = createWorker(defaultConfig, { fetch: apis.fetch, sleep: instantSleep });
   const wenv = { ...deployEnv, TETHER_SYNC };
   const auth = { authorization: `Bearer ${deployEnv.SYNC_SECRET}` };
@@ -152,10 +216,14 @@ test('webhooks: the first reconcile registers them through the app, once; check 
   let c = await (await worker.fetch(new Request('https://w.test/check', { headers: auth }), wenv, {})).json();
   assert.match(c.steps.find((s) => s.title === 'Shopify webhooks').message, /not registered yet/);
 
-  const r = await (await worker.fetch(new Request('https://w.test/reconcile?since=all', { method: 'POST', headers: auth }), wenv, {})).json();
+  const r = await (
+    await worker.fetch(new Request('https://w.test/reconcile?since=all', { method: 'POST', headers: auth }), wenv, {})
+  ).json();
   assert.deepEqual(r.webhooks.created, ['PRODUCTS_CREATE', 'PRODUCTS_UPDATE', 'PRODUCTS_DELETE']);
   assert.ok(apis.shop.webhooks.every((w) => w.uri === 'https://w.test/webhooks/shopify'));
-  const again = await (await worker.fetch(new Request('https://w.test/reconcile', { method: 'POST', headers: auth }), wenv, {})).json();
+  const again = await (
+    await worker.fetch(new Request('https://w.test/reconcile', { method: 'POST', headers: auth }), wenv, {})
+  ).json();
   assert.equal(again.webhooks.cached, true);
   assert.equal(apis.shop.webhooks.length, 3, 'no duplicates');
 
@@ -169,7 +237,15 @@ test('webhooks signed with either the client secret or SHOPIFY_WEBHOOK_SECRET ar
   const { signShopify } = await import('../src/hmac.js');
   const send = async (key) => {
     const body = JSON.stringify({ id: 1 });
-    return worker.fetch(new Request('https://w.test/webhooks/shopify', { method: 'POST', body, headers: { 'x-shopify-topic': 'products/update', 'x-shopify-hmac-sha256': await signShopify(body, key) } }), { ...deployEnv, SHOPIFY_WEBHOOK_SECRET: 'admin-key' }, { waitUntil() {} });
+    return worker.fetch(
+      new Request('https://w.test/webhooks/shopify', {
+        method: 'POST',
+        body,
+        headers: { 'x-shopify-topic': 'products/update', 'x-shopify-hmac-sha256': await signShopify(body, key) },
+      }),
+      { ...deployEnv, SHOPIFY_WEBHOOK_SECRET: 'admin-key' },
+      { waitUntil() {} },
+    );
   };
   assert.equal((await send('csecret')).status, 200);
   assert.equal((await send('admin-key')).status, 200);
@@ -185,13 +261,31 @@ test('the shipped config equals the test copy (skipped in a deployed, customizab
 
 test('check says when a newer release in the range exists (a stalled updater shows up)', async () => {
   const apis = createMockApis({ products: [shopifyProduct(1)] });
-  const tags = (names) => async (url, init) => (String(url).startsWith('https://data.jsdelivr.com/') ? new Response(JSON.stringify({ versions: names.map((n) => ({ version: n.replace(/^v/, '') })) }), { status: 200 }) : apis.fetch(url, init));
-  let r = await runCheck(defaultConfig, deployEnv, { fetch: tags(['v0.3.3', 'v0.3.9', 'v0.4.0']), version: '0.3.3', sleep: instantSleep });
+  const tags = (names) => async (url, init) =>
+    String(url).startsWith('https://data.jsdelivr.com/')
+      ? new Response(JSON.stringify({ versions: names.map((n) => ({ version: n.replace(/^v/, '') })) }), {
+          status: 200,
+        })
+      : apis.fetch(url, init);
+  let r = await runCheck(defaultConfig, deployEnv, {
+    fetch: tags(['v0.3.3', 'v0.3.9', 'v0.4.0']),
+    version: '0.3.3',
+    sleep: instantSleep,
+  });
   const v = r.steps.find((s) => s.title === 'Tether version');
   assert.equal(v.level, 'warn');
   assert.match(v.message, /0\.3\.9 is available \(range 0\.3\)/);
-  r = await runCheck(defaultConfig, deployEnv, { fetch: tags(['v0.3.3', 'v0.4.0']), version: '0.3.3', sleep: instantSleep });
+  r = await runCheck(defaultConfig, deployEnv, {
+    fetch: tags(['v0.3.3', 'v0.4.0']),
+    version: '0.3.3',
+    sleep: instantSleep,
+  });
   assert.equal(r.steps.find((s) => s.title === 'Tether version').level, 'ok');
-  r = await runCheck(defaultConfig, deployEnv, { fetch: tags(['v0.3.3', 'v0.4.0']), version: '0.3.3', range: 'latest', sleep: instantSleep });
+  r = await runCheck(defaultConfig, deployEnv, {
+    fetch: tags(['v0.3.3', 'v0.4.0']),
+    version: '0.3.3',
+    range: 'latest',
+    sleep: instantSleep,
+  });
   assert.match(r.steps.find((s) => s.title === 'Tether version').message, /0\.4\.0 is available/);
 });

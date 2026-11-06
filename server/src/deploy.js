@@ -28,16 +28,26 @@ export const DEPLOY_FIELDS = {
   'seo-title': 'seoTitle',
   'seo-description': 'seoDescription',
   options: 'options',
-  variants: (p) => p.variants.map((v) => ({ id: v.id, title: v.title, price: v.price, compareAtPrice: v.compareAtPrice, sku: v.sku })),
+  variants: (p) =>
+    p.variants.map((v) => ({ id: v.id, title: v.title, price: v.price, compareAtPrice: v.compareAtPrice, sku: v.sku })),
   metafields: 'metafields',
 };
 
 const KEY = 'deploy:state'; // { dirty, lastAt }
 
-export function createDeployHook({ url, minIntervalSeconds = 60, store, fetch: fetchImpl = globalThis.fetch, now = () => Date.now(), log }) {
+export function createDeployHook({
+  url,
+  minIntervalSeconds = 60,
+  store,
+  fetch: fetchImpl = globalThis.fetch,
+  now = () => Date.now(),
+  log,
+}) {
   let dirty = false; // changed during this run (written to the store once, in maybeTrigger)
 
-  const markDirty = () => { dirty = true; };
+  const markDirty = () => {
+    dirty = true;
+  };
 
   /** Trigger a build if something changed (now or in an earlier run) and the interval passed. */
   async function maybeTrigger({ force = false } = {}) {
@@ -52,7 +62,9 @@ export function createDeployHook({ url, minIntervalSeconds = 60, store, fetch: f
       return { triggered: false, pending: true, waitMs: wait };
     }
     let res;
-    try { res = await fetchImpl(url, { method: 'POST' }); } catch (err) {
+    try {
+      res = await fetchImpl(url, { method: 'POST' });
+    } catch (err) {
       await store.put(KEY, { ...state, dirty: true }); // network error: keep the build pending for the next run
       throw err;
     }
@@ -76,16 +88,40 @@ export function deployOnlyTarget(hook) {
     getCollection: async () => ({ displayName: 'deploy hook', fields: [] }),
     listAllItems: async () => [],
     getItem: async () => null,
-    createItem: async (fieldData) => { hook.markDirty(); return { id: `site:${fieldData['shopify-id'] || fieldData.slug}`, fieldData }; },
-    updateItem: async (id, fieldData) => { hook.markDirty(); return { id, fieldData }; },
-    deleteItem: async () => { hook.markDirty(); return null; },
+    createItem: async (fieldData) => {
+      hook.markDirty();
+      return { id: `site:${fieldData['shopify-id'] || fieldData.slug}`, fieldData };
+    },
+    updateItem: async (id, fieldData) => {
+      hook.markDirty();
+      return { id, fieldData };
+    },
+    deleteItem: async () => {
+      hook.markDirty();
+      return null;
+    },
     publish: async (ids) => [{ publishedItemIds: ids, errors: [] }],
-    unpublish: async () => { hook.markDirty(); return null; },
+    unpublish: async () => {
+      hook.markDirty();
+      return null;
+    },
   };
 }
 
 /** Real Webflow client + a build after each Webflow change (Webflow and a static site together). */
 export function withDeployHook(webflow, hook) {
-  const wrap = (fn) => async (...args) => { const r = await fn(...args); hook.markDirty(); return r; };
-  return { ...webflow, createItem: wrap(webflow.createItem), updateItem: wrap(webflow.updateItem), deleteItem: wrap(webflow.deleteItem), unpublish: wrap(webflow.unpublish) };
+  const wrap =
+    (fn) =>
+    async (...args) => {
+      const r = await fn(...args);
+      hook.markDirty();
+      return r;
+    };
+  return {
+    ...webflow,
+    createItem: wrap(webflow.createItem),
+    updateItem: wrap(webflow.updateItem),
+    deleteItem: wrap(webflow.deleteItem),
+    unpublish: wrap(webflow.unpublish),
+  };
 }

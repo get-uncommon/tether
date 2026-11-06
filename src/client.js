@@ -45,7 +45,9 @@ function statusText(status, conf) {
   if (status === 401 || status === 403) {
     return `Shopify rejected the Storefront token for ${conf.domain} (${status}): use the public Storefront API token (Headless channel)${/^shpat_/.test(conf.token) ? ', not an Admin API token (shpat_…)' : ''}`;
   }
-  return status === 404 ? `Store or API version not found (404): check domain ${conf.domain} and apiVersion ${conf.apiVersion}` : `HTTP ${status} from ${conf.domain}`;
+  return status === 404
+    ? `Store or API version not found (404): check domain ${conf.domain} and apiVersion ${conf.apiVersion}`
+    : `HTTP ${status} from ${conf.domain}`;
 }
 
 /**
@@ -77,7 +79,10 @@ export async function request(conf, query, variables = {}, { context = true } = 
         body,
       });
     } catch (err) {
-      if (attempt++ < conf.retries) { await sleep(300 * 2 ** attempt); continue; }
+      if (attempt++ < conf.retries) {
+        await sleep(300 * 2 ** attempt);
+        continue;
+      }
       throw new TetherError(`Network error: ${err.message}`, { code: 'NETWORK' });
     }
 
@@ -91,8 +96,12 @@ export async function request(conf, query, variables = {}, { context = true } = 
     }
 
     let json;
-    try { json = await res.json(); } catch {
-      throw new TetherError(res.ok ? `Invalid response (${res.status})` : statusText(res.status, conf), { status: res.status });
+    try {
+      json = await res.json();
+    } catch {
+      throw new TetherError(res.ok ? `Invalid response (${res.status})` : statusText(res.status, conf), {
+        status: res.status,
+      });
     }
 
     if (json.errors?.length) {
@@ -103,15 +112,32 @@ export async function request(conf, query, variables = {}, { context = true } = 
         return request(conf, query.replace(/\bquantityAvailable\b/g, ''), variables, { context });
       }
       // An older apiVersion without cart warnings (before 2024-07): retry without them.
-      if (json.errors.some((e) => /'warnings'/.test(e.message || '')) && /warnings \{ code message target \}/.test(query)) {
+      if (
+        json.errors.some((e) => /'warnings'/.test(e.message || '')) &&
+        /warnings \{ code message target \}/.test(query)
+      ) {
         return request(conf, query.replace(/ warnings \{ code message target \}/g, ''), variables, { context });
       }
       const throttled = json.errors.some((e) => e.extensions?.code === 'THROTTLED');
-      if (throttled && attempt++ < conf.retries) { await sleep(500 * 2 ** attempt); continue; }
-      const message = json.errors.map((e) => e.message).filter(Boolean).join(' | ');
-      throw new TetherError(res.ok ? message || 'Storefront API error' : (res.status === 401 || res.status === 403 || !message ? statusText(res.status, conf) : message), {
-        status: res.status, errors: json.errors,
-      });
+      if (throttled && attempt++ < conf.retries) {
+        await sleep(500 * 2 ** attempt);
+        continue;
+      }
+      const message = json.errors
+        .map((e) => e.message)
+        .filter(Boolean)
+        .join(' | ');
+      throw new TetherError(
+        res.ok
+          ? message || 'Storefront API error'
+          : res.status === 401 || res.status === 403 || !message
+            ? statusText(res.status, conf)
+            : message,
+        {
+          status: res.status,
+          errors: json.errors,
+        },
+      );
     }
     if (!res.ok) throw new TetherError(statusText(res.status, conf), { status: res.status });
 

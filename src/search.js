@@ -34,7 +34,12 @@ let uid = 0;
 
 export function mountSearch(root = document) {
   const roots = [...(root.matches?.(sel('search')) ? [root] : []), ...qsa(root, sel('search'))];
-  roots.forEach((el) => { if (!mounted.has(el)) { mounted.add(el); setup(el); } });
+  roots.forEach((el) => {
+    if (!mounted.has(el)) {
+      mounted.add(el);
+      setup(el);
+    }
+  });
 }
 
 function setup(rootEl) {
@@ -68,7 +73,11 @@ function setup(rootEl) {
 
   async function run(term) {
     const t = ++token;
-    if (term.length < min) { open(false); setState('idle'); return; }
+    if (term.length < min) {
+      open(false);
+      setState('idle');
+      return;
+    }
     setState('loading');
     try {
       const data = cache.get(term) || (await gql(QUERY, { q: term, limit })).predictiveSearch;
@@ -86,10 +95,11 @@ function setup(rootEl) {
     const products = data?.products || [];
     const collections = data?.collections || [];
     const queries = (data?.queries || []).filter((q) => q.text.toLowerCase() !== term.toLowerCase());
-    const fill = (name, list, each) => qsa(results, sel(name)).forEach((c) => {
-      repeat(c, list, each);
-      show(c, list.length > 0);
-    });
+    const fill = (name, list, each) =>
+      qsa(results, sel(name)).forEach((c) => {
+        repeat(c, list, each);
+        show(c, list.length > 0);
+      });
     fill('search-products', products, (node, p) => {
       binds(node, { title: p.title, price: formatMoney(p.priceRange?.minVariantPrice), image: p.featuredImage });
       link(node, productUrl(p.handle, p.id));
@@ -103,7 +113,11 @@ function setup(rootEl) {
       binds(node, { text: q.text });
       const a = node.tagName === 'A' ? node : node.querySelector('a');
       const action = rootEl.getAttribute('action') || '/search';
-      if (a) a.setAttribute('href', `${action}${action.includes('?') ? '&' : '?'}${input.name || 'q'}=${encodeURIComponent(q.text)}`);
+      if (a)
+        a.setAttribute(
+          'href',
+          `${action}${action.includes('?') ? '&' : '?'}${input.name || 'q'}=${encodeURIComponent(q.text)}`,
+        );
     });
     const count = products.length + collections.length + queries.length;
     qsa(rootEl, sel('show')).forEach((el) => {
@@ -111,7 +125,10 @@ function setup(rootEl) {
       if (k === 'search-empty') show(el, count === 0);
       if (k === 'search-results') show(el, count > 0);
     });
-    items().forEach((el, i) => { el.id ||= `${id}-${i}`; el.setAttribute('aria-selected', 'false'); });
+    items().forEach((el, i) => {
+      el.id ||= `${id}-${i}`;
+      el.setAttribute('aria-selected', 'false');
+    });
     setState(count ? 'ready' : 'empty');
     open(true);
     emit('search', { term, products, collections, queries }, rootEl);
@@ -127,7 +144,10 @@ function setup(rootEl) {
 
   function link(node, href) {
     const a = node.tagName === 'A' ? node : node.querySelector('a');
-    if (a) { a.setAttribute('href', href); a.setAttribute('role', 'option'); }
+    if (a) {
+      a.setAttribute('href', href);
+      a.setAttribute('role', 'option');
+    }
   }
 
   input.addEventListener('input', () => {
@@ -137,18 +157,34 @@ function setup(rootEl) {
     clearTimeout(timer);
     timer = setTimeout(() => run(term), cfg.searchDelay ?? 150);
   });
-  input.addEventListener('focus', () => { if (input.value.trim().length >= min && items().length) open(true); });
+  input.addEventListener('focus', () => {
+    if (input.value.trim().length >= min && items().length) open(true);
+  });
   input.addEventListener('keydown', (e) => {
     const list = items();
     const cur = list.findIndex((el) => el.getAttribute('aria-selected') === 'true');
     const move = (i) => {
       list.forEach((el, j) => el.setAttribute('aria-selected', String(j === i)));
-      if (list[i]) { input.setAttribute('aria-activedescendant', list[i].id); list[i].scrollIntoView?.({ block: 'nearest' }); }
+      if (list[i]) {
+        input.setAttribute('aria-activedescendant', list[i].id);
+        list[i].scrollIntoView?.({ block: 'nearest' });
+      }
     };
-    if (e.key === 'ArrowDown' && list.length) { e.preventDefault(); open(true); move((cur + 1) % list.length); }
-    else if (e.key === 'ArrowUp' && list.length) { e.preventDefault(); move(cur <= 0 ? list.length - 1 : cur - 1); }
-    else if (e.key === 'Enter' && cur >= 0) { e.preventDefault(); list[cur].click(); }
-    else if (e.key === 'Escape') { open(false); }
+    if (e.key === 'ArrowDown' && list.length) {
+      e.preventDefault();
+      open(true);
+      move((cur + 1) % list.length);
+    } else if (e.key === 'ArrowUp' && list.length) {
+      e.preventDefault();
+      move(cur <= 0 ? list.length - 1 : cur - 1);
+    } else if (e.key === 'Enter' && cur >= 0) {
+      e.preventDefault();
+      list[cur].click();
+    } else if (e.key === 'Escape') {
+      open(false);
+    }
   });
-  document.addEventListener('click', (e) => { if (!rootEl.contains(e.target)) open(false); });
+  document.addEventListener('click', (e) => {
+    if (!rootEl.contains(e.target)) open(false);
+  });
 }

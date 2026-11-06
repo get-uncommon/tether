@@ -35,7 +35,17 @@ const fromIdx = args.indexOf('--from');
 const fromDir = fromIdx > -1 ? resolve(args[fromIdx + 1]) : null;
 
 // What a release replaces. Everything else in the copy is left alone.
-export const MANAGED = ['src', 'bin', 'scripts', 'test', 'docs', 'package.json', 'README.md', '.dev.vars.example', '.gitignore'];
+export const MANAGED = [
+  'src',
+  'bin',
+  'scripts',
+  'test',
+  'docs',
+  'package.json',
+  'README.md',
+  '.dev.vars.example',
+  '.gitignore',
+];
 export const KEPT = ['tether-sync.config.js', 'wrangler.jsonc', 'TETHER_VERSION'];
 
 export const parse = (v) => {
@@ -46,22 +56,33 @@ const cmp = (a, b) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2];
 
 /** Newest tag matching the spec ('latest', '0.3', '0.3.3'), or null. */
 export function pickVersion(tags, spec) {
-  const s = String(spec || '').trim().replace(/^v/, '').toLowerCase();
+  const s = String(spec || '')
+    .trim()
+    .replace(/^v/, '')
+    .toLowerCase();
   const versions = tags.map(parse).filter(Boolean).sort(cmp);
   if (!versions.length) return null;
   let ok;
   if (s === 'latest' || s === '*' || s === '') ok = () => true;
   else if (/^\d+$/.test(s)) ok = (v) => v[0] === +s;
-  else if (/^\d+\.\d+$/.test(s)) { const [a, b] = s.split('.').map(Number); ok = (v) => v[0] === a && v[1] === b; }
-  else if (parse(s)) { const p = parse(s); ok = (v) => cmp(v, p) === 0; }
-  else throw new Error(`TETHER_VERSION must be latest, 0.3 or 0.3.3 (got "${spec}")`);
+  else if (/^\d+\.\d+$/.test(s)) {
+    const [a, b] = s.split('.').map(Number);
+    ok = (v) => v[0] === a && v[1] === b;
+  } else if (parse(s)) {
+    const p = parse(s);
+    ok = (v) => cmp(v, p) === 0;
+  } else throw new Error(`TETHER_VERSION must be latest, 0.3 or 0.3.3 (got "${spec}")`);
   const hit = versions.filter(ok).pop();
   return hit ? hit.join('.') : null;
 }
 
 async function githubJson(path) {
   const res = await fetch(`https://api.github.com${path}`, {
-    headers: { accept: 'application/vnd.github+json', 'user-agent': 'tether-sync-updater', ...(process.env.GITHUB_TOKEN ? { authorization: `Bearer ${process.env.GITHUB_TOKEN}` } : {}) },
+    headers: {
+      accept: 'application/vnd.github+json',
+      'user-agent': 'tether-sync-updater',
+      ...(process.env.GITHUB_TOKEN ? { authorization: `Bearer ${process.env.GITHUB_TOKEN}` } : {}),
+    },
   });
   if (!res.ok) throw new Error(`GitHub ${path}: ${res.status}`);
   return res.json();
@@ -96,8 +117,16 @@ async function main() {
   }
   console.log(`current ${current}, TETHER_VERSION ${spec || `(none: ${effective})`}, newest match ${target || 'none'}`);
   if (!target) throw new Error(`no release matches "${effective}"`);
-  if (cmp(parse(target), parse(current)) <= 0) { console.log('up to date'); console.log('updated='); return; }
-  if (dryRun) { console.log(`would update to ${target}`); console.log('updated='); return; }
+  if (cmp(parse(target), parse(current)) <= 0) {
+    console.log('up to date');
+    console.log('updated=');
+    return;
+  }
+  if (dryRun) {
+    console.log(`would update to ${target}`);
+    console.log('updated=');
+    return;
+  }
 
   source = source || (await fetchRelease(target));
   for (const name of MANAGED) {
@@ -109,7 +138,8 @@ async function main() {
   }
   for (const name of KEPT) {
     // A brand-new copy may not have these yet: take the release's version once.
-    if (!existsSync(join(ROOT, name)) && existsSync(join(source, name)) && name !== 'TETHER_VERSION') await cp(join(source, name), join(ROOT, name));
+    if (!existsSync(join(ROOT, name)) && existsSync(join(source, name)) && name !== 'TETHER_VERSION')
+      await cp(join(source, name), join(ROOT, name));
   }
   if (!spec && !existsSync(specFile)) await writeFile(specFile, `${effective}\n`);
   await stat(join(ROOT, 'src', 'entry.js'));
@@ -117,7 +147,16 @@ async function main() {
   console.log(`updated=${target}`);
 }
 
-const real = (p) => { try { return realpathSync(p); } catch { return p; } };
+const real = (p) => {
+  try {
+    return realpathSync(p);
+  } catch {
+    return p;
+  }
+};
 if (process.argv[1] && real(resolve(process.argv[1])) === real(fileURLToPath(import.meta.url))) {
-  main().catch((err) => { console.error(err.message); process.exit(1); });
+  main().catch((err) => {
+    console.error(err.message);
+    process.exit(1);
+  });
 }

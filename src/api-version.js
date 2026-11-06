@@ -20,7 +20,8 @@ export function nextApiVersion(v, steps = 1) {
 
 /** Support window of a version, relative to `now`. */
 export function apiVersionStatus(version, now = new Date()) {
-  if (version === 'unstable') return { version, ok: false, note: '"unstable" changes without notice: pin a dated version such as 2026-07' };
+  if (version === 'unstable')
+    return { version, ok: false, note: '"unstable" changes without notice: pin a dated version such as 2026-07' };
   const p = parse(version);
   if (!p) return { version, ok: false, note: 'not a quarterly version (YYYY-01, -04, -07 or -10)' };
   const released = new Date(Date.UTC(p.y, p.m - 1, 1));
@@ -28,7 +29,14 @@ export function apiVersionStatus(version, now = new Date()) {
   const monthsLeft = (supportedUntil - now) / (30.44 * 24 * 3600 * 1000);
   let note = `supported until about ${supportedUntil.toISOString().slice(0, 7)}`;
   if (released > now) note = 'not released yet (release candidate at best)';
-  else if (monthsLeft <= 0) note = 'no longer supported: Shopify falls back to the oldest supported version. Upgrade (see README)';
+  else if (monthsLeft <= 0)
+    note = 'no longer supported: Shopify falls back to the oldest supported version. Upgrade (see README)';
   else if (monthsLeft < 3) note = `${note}: plan the upgrade to ${nextApiVersion(version)} or later (see README)`;
-  return { version, ok: released <= now && monthsLeft > 0, monthsLeft: Math.round(monthsLeft), next: nextApiVersion(version), note };
+  return {
+    version,
+    ok: released <= now && monthsLeft > 0,
+    monthsLeft: Math.round(monthsLeft),
+    next: nextApiVersion(version),
+    note,
+  };
 }

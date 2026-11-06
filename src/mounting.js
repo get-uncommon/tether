@@ -15,8 +15,12 @@ export const liveLists = new Set();
 const requestToken = new WeakMap(); // product root -> latest request, so a slow old response can't win
 
 export function pruneLive() {
-  liveProducts.forEach((el) => { if (!el.isConnected) liveProducts.delete(el); });
-  liveLists.forEach((l) => { if (!l.root.isConnected) liveLists.delete(l); });
+  liveProducts.forEach((el) => {
+    if (!el.isConnected) liveProducts.delete(el);
+  });
+  liveLists.forEach((l) => {
+    if (!l.root.isConnected) liveLists.delete(l);
+  });
 }
 export function within(root, selector) {
   return [...(root.matches?.(selector) ? [root] : []), ...qsa(root, selector)];
@@ -64,7 +68,8 @@ function mountProduct(el) {
       if (notFound) {
         emit('product-not-found', { key, source: raw }, el);
         // A typo in a URL isn't worth an alert; a CMS item pointing at a deleted product is.
-        if (fromUrl) log(`product not found: ${key}`); else reportError(err, `product ${key}`);
+        if (fromUrl) log(`product not found: ${key}`);
+        else reportError(err, `product ${key}`);
       } else {
         reportError(err, `product ${key}`);
         emit('error', { error: err, context: 'product', key }, el);
@@ -77,9 +82,11 @@ function mountProduct(el) {
 function applyPageTitle(el, p) {
   const tpl = get(el, 'page-title');
   if (!tpl || typeof document === 'undefined') return;
-  document.title = tpl.replace(/\{title\}/g, p.title).replace(/\{vendor\}/g, p.vendor || '').replace(/\{type\}/g, p.productType || '');
+  document.title = tpl
+    .replace(/\{title\}/g, p.title)
+    .replace(/\{vendor\}/g, p.vendor || '')
+    .replace(/\{type\}/g, p.productType || '');
 }
-
 
 /** Product scopes that failed on a network/API error: loaded again when the browser is back online. */
 export function retryFailed() {
@@ -100,15 +107,19 @@ function queueRefresh(key) {
 function flushRefresh() {
   const keys = [...refreshQueue];
   refreshQueue = new Set();
-  refreshProducts(keys).forEach((promise, i) => promise.then((fresh) => {
-    liveProducts.forEach((el) => {
-      const scope = scopes.get(el);
-      if (!scope || !el.isConnected) return;
-      const k = resolveProductKey(el).key;
-      if (k !== keys[i] && k !== fresh.handle && k !== fresh.id) return;
-      if (JSON.stringify(scope.product) !== JSON.stringify(fresh)) scope.update(fresh);
-    });
-  }).catch((err) => reportError(err, `refresh ${keys[i]}`)));
+  refreshProducts(keys).forEach((promise, i) =>
+    promise
+      .then((fresh) => {
+        liveProducts.forEach((el) => {
+          const scope = scopes.get(el);
+          if (!scope || !el.isConnected) return;
+          const k = resolveProductKey(el).key;
+          if (k !== keys[i] && k !== fresh.handle && k !== fresh.id) return;
+          if (JSON.stringify(scope.product) !== JSON.stringify(fresh)) scope.update(fresh);
+        });
+      })
+      .catch((err) => reportError(err, `refresh ${keys[i]}`)),
+  );
 }
 
 /**
@@ -119,7 +130,10 @@ const readScripts = new WeakSet();
 let marketPending = null; // product loads to wait for before html.tether-market-pending goes
 
 /** Lists (and anything else that loads prices) wait too. */
-export const trackMarket = (p) => { marketPending?.add(p); return p; };
+export const trackMarket = (p) => {
+  marketPending?.add(p);
+  return p;
+};
 
 /** After a mount: drop html.tether-market-pending once this page's products are live. */
 export function settleMarket() {
@@ -147,8 +161,13 @@ export function hydrateFromPage(root = document) {
         // The page was built for another market: its prices aren't this visitor's. Mark the page
         // (html.tether-market-pending) until the live ones are in, so CSS can hide prices meanwhile.
         log('hydration skipped: other market');
-        if (!marketPending) { marketPending = new Set(); document.documentElement.classList.add(`${cfg.prefix}-market-pending`); }
+        if (!marketPending) {
+          marketPending = new Set();
+          document.documentElement.classList.add(`${cfg.prefix}-market-pending`);
+        }
       }
-    } catch (err) { warn('bad data-tether-hydrate', err); }
+    } catch (err) {
+      warn('bad data-tether-hydrate', err);
+    }
   });
 }

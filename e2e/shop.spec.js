@@ -5,12 +5,16 @@ const shopify = (req) => /myshopify\.com\/api\/.*graphql/.test(req.url());
 
 test.beforeEach(async ({ page }) => {
   // Never leave for Shopify's checkout: answer it here instead.
-  await page.route(/checkout\.hydrogen\.shop|\/cart\/c\//, (route) => route.fulfill({ status: 200, contentType: 'text/html', body: '<h1>checkout</h1>' }));
+  await page.route(/checkout\.hydrogen\.shop|\/cart\/c\//, (route) =>
+    route.fulfill({ status: 200, contentType: 'text/html', body: '<h1>checkout</h1>' }),
+  );
 });
 
 test('home: server-rendered cards are live after one Shopify request', async ({ page }) => {
   const requests = [];
-  page.on('request', (r) => { if (shopify(r)) requests.push(r); });
+  page.on('request', (r) => {
+    if (shopify(r)) requests.push(r);
+  });
   await page.goto('/');
   await expect(page.locator('a.card').first()).toHaveAttribute('tether-state', 'ready');
   await expect(page.locator('a.card [tether-bind="price"]').first()).toContainText('€');

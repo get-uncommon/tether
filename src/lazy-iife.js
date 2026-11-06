@@ -19,9 +19,17 @@ const { cfg } = config;
 
 /** The modules a part may use, shared instead of bundled twice (scripts/build.mjs maps imports to these). */
 export const coreModules = {
-  'config.js': config, 'client.js': client, 'dom.js': dom, 'fragments.js': fragments, 'loader.js': loader,
-  'selling-plans.js': sellingPlans, 'status.js': status, 'cart.js': cart, 'product.js': product,
-  'collection.js': collection, 'mounting.js': mounting,
+  'config.js': config,
+  'client.js': client,
+  'dom.js': dom,
+  'fragments.js': fragments,
+  'loader.js': loader,
+  'selling-plans.js': sellingPlans,
+  'status.js': status,
+  'cart.js': cart,
+  'product.js': product,
+  'collection.js': collection,
+  'mounting.js': mounting,
 };
 
 const self = typeof document !== 'undefined' ? document.currentScript?.src || '' : '';
@@ -36,8 +44,14 @@ export function loadPart(name) {
     const s = document.createElement('script');
     s.src = url;
     s.async = true;
-    s.onload = () => (window.Tether?.__parts?.[name] ? resolve(window.Tether.__parts[name]) : reject(new Error(`${url} did not register`)));
-    s.onerror = () => { delete parts[name]; reject(new Error(`Could not load ${url}. Host it next to the Tether script, or set partsUrl.`)); };
+    s.onload = () =>
+      window.Tether?.__parts?.[name]
+        ? resolve(window.Tether.__parts[name])
+        : reject(new Error(`${url} did not register`));
+    s.onerror = () => {
+      delete parts[name];
+      reject(new Error(`Could not load ${url}. Host it next to the Tether script, or set partsUrl.`));
+    };
     document.head.appendChild(s);
   });
   return parts[name];

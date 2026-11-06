@@ -9,21 +9,21 @@ const MONEY = 'amount currencyCode';
 const IMAGE = 'url altText width height';
 
 function metafieldIdentifiers(o = cfg) {
-  return (o.metafields || []).map((m) => {
-    if (typeof m === 'string') {
-      const i = m.indexOf('.');
-      return { namespace: m.slice(0, i), key: m.slice(i + 1) };
-    }
-    return m;
-  }).filter((m) => m.namespace && m.key);
+  return (o.metafields || [])
+    .map((m) => {
+      if (typeof m === 'string') {
+        const i = m.indexOf('.');
+        return { namespace: m.slice(0, i), key: m.slice(i + 1) };
+      }
+      return m;
+    })
+    .filter((m) => m.namespace && m.key);
 }
 
 function metafieldsField(o = cfg) {
   const ids = metafieldIdentifiers(o);
   if (!ids.length) return '';
-  const list = ids
-    .map((m) => `{namespace: ${JSON.stringify(m.namespace)}, key: ${JSON.stringify(m.key)}}`)
-    .join(', ');
+  const list = ids.map((m) => `{namespace: ${JSON.stringify(m.namespace)}, key: ${JSON.stringify(m.key)}}`).join(', ');
   return `metafields(identifiers: [${list}]) {
     namespace key type value
     reference { ... on MediaImage { image { ${IMAGE} } } }

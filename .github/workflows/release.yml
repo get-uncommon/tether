@@ -7,8 +7,8 @@ on:
     tags: ['v*.*.*']
 
 permissions:
-  contents: write   # the GitHub Release
-  id-token: write   # npm trusted publishing + provenance
+  contents: write # the GitHub Release
+  id-token: write # npm trusted publishing + provenance
 
 jobs:
   release:

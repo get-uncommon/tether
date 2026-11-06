@@ -27,12 +27,18 @@ export async function addGroup(btn) {
       l.attributes = [...(l.attributes || []), ...groupAttrs];
       return l;
     });
-  if (!lines.length) { warn('group-add: nothing selected'); return null; }
+  if (!lines.length) {
+    warn('group-add: nothing selected');
+    return null;
+  }
   try {
     const cart = await Cart.add(lines);
     emit('group-added', { group: name, lines }, group);
     return cart;
-  } catch (err) { reportError(err, 'group add'); return null; }
+  } catch (err) {
+    reportError(err, 'group add');
+    return null;
+  }
 }
 
 /** Another tab changed the cart (reload it here) or the visitor's market (follow it). */
@@ -41,8 +47,13 @@ export function onStorage(e) {
   else if (e.key === `${cfg.prefix}:market:${cfg.domain}` && e.newValue) {
     try {
       const m = JSON.parse(e.newValue);
-      if (m?.country) window.Tether?.setCountry(m.country, { language: m.language ?? null, locale: m.locale, remember: false }).catch(() => {});
-    } catch { /* ignore */ }
+      if (m?.country)
+        window.Tether?.setCountry(m.country, { language: m.language ?? null, locale: m.locale, remember: false }).catch(
+          () => {},
+        );
+    } catch {
+      /* ignore */
+    }
   }
 }
 
@@ -58,7 +69,10 @@ export function writeVariantUrl(root, { variant, sellingPlanId }) {
   try {
     const u = new URL(window.location.href);
     u.searchParams.set('variant', variant.id.split('/').pop());
-    if (sellingPlanId) u.searchParams.set('selling_plan', sellingPlanId.split('/').pop()); else u.searchParams.delete('selling_plan');
+    if (sellingPlanId) u.searchParams.set('selling_plan', sellingPlanId.split('/').pop());
+    else u.searchParams.delete('selling_plan');
     window.history.replaceState(window.history.state, '', u);
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
 }

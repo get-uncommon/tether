@@ -23,7 +23,10 @@ import { sel } from './dom.js';
 import { Cart } from './cart.js';
 
 const num = (m) => (m ? parseFloat(m.amount) : 0);
-const id = (gid) => String(gid || '').split('/').pop();
+const id = (gid) =>
+  String(gid || '')
+    .split('/')
+    .pop();
 
 // ---------------------------------------------------------------- shapes
 
@@ -67,16 +70,31 @@ function shopifyBus(shopId) {
   const canTrack = () => {
     try {
       const p = privacy();
-      return p?.consentStatus === 'loaded' && p.currentVisitorConsent?.()?.analytics !== 'no' && Boolean(p.analyticsProcessingAllowed?.());
-    } catch { return false; }
+      return (
+        p?.consentStatus === 'loaded' &&
+        p.currentVisitorConsent?.()?.analytics !== 'no' &&
+        Boolean(p.analyticsProcessingAllowed?.())
+      );
+    } catch {
+      return false;
+    }
   };
-  const config = { shop: { shopId, channel: 'headless' }, consent: { mode: cfg.analytics.shopify?.consent || 'no-banner' } };
+  const config = {
+    shop: { shopId, channel: 'headless' },
+    consent: { mode: cfg.analytics.shopify?.consent || 'no-banner' },
+  };
   const deliver = () => {
     if (!canTrack()) return;
     destinations.forEach((d) => {
       while (d.next < buffer.length) {
         const { event, payload } = buffer[d.next++];
-        (d.subs.get(event) || []).forEach((cb) => { try { cb(payload, d.context); } catch (err) { reportError(err, `analytics ${d.name}`); } });
+        (d.subs.get(event) || []).forEach((cb) => {
+          try {
+            cb(payload, d.context);
+          } catch (err) {
+            reportError(err, `analytics ${d.name}`);
+          }
+        });
       }
     });
   };
@@ -84,17 +102,27 @@ function shopifyBus(shopId) {
     getConfig: () => config,
     publish(event, payload = {}) {
       buffer.push({ event, payload: { shop: config.shop, url: window.location.href, ...payload } });
-      if (buffer.length > 500) { buffer.shift(); destinations.forEach((d) => { d.next = Math.max(0, d.next - 1); }); }
+      if (buffer.length > 500) {
+        buffer.shift();
+        destinations.forEach((d) => {
+          d.next = Math.max(0, d.next - 1);
+        });
+      }
       deliver();
     },
     addDestination(dest) {
       const tag = `hydrogen:${dest.name}`;
       const d = {
-        name: dest.name, next: 0, subs: new Map(),
+        name: dest.name,
+        next: 0,
+        subs: new Map(),
         context: {
           getTrackingValues: () => {
             const i = canTrack() ? privacy()?.__internal : null;
-            return { uniqueToken: i?.uniqueToken?.({ generateFallback: true, tag }) ?? '', visitToken: i?.visitToken?.({ generateFallback: true, tag }) ?? '' };
+            return {
+              uniqueToken: i?.uniqueToken?.({ generateFallback: true, tag }) ?? '',
+              visitToken: i?.visitToken?.({ generateFallback: true, tag }) ?? '',
+            };
           },
         },
       };
@@ -103,9 +131,16 @@ function shopifyBus(shopId) {
         d.subs.get(event).add(cb);
         return () => d.subs.get(event)?.delete(cb);
       };
-      Promise.resolve(dest.setup?.({ subscribe, getConfig: api.getConfig })).then(() => { destinations.push(d); deliver(); })
+      Promise.resolve(dest.setup?.({ subscribe, getConfig: api.getConfig }))
+        .then(() => {
+          destinations.push(d);
+          deliver();
+        })
         .catch((err) => reportError(err, `analytics ${dest.name}`));
-      return () => { const i = destinations.indexOf(d); if (i >= 0) destinations.splice(i, 1); };
+      return () => {
+        const i = destinations.indexOf(d);
+        if (i >= 0) destinations.splice(i, 1);
+      };
     },
   };
   document.addEventListener('consentTrackingApiLoaded', deliver);
@@ -121,7 +156,10 @@ function loadScript(src) {
 }
 
 async function startShopify() {
-  if (window.Shopify?.analytics) { bus = window.Shopify.analytics; return; } // already set up (e.g. by the theme)
+  if (window.Shopify?.analytics) {
+    bus = window.Shopify.analytics;
+    return;
+  } // already set up (e.g. by the theme)
   const data = await gql('query TetherShopId { shop { id } }', {}, { context: false });
   const country = String(cfg.country || 'US').toUpperCase();
   const S = (window.Shopify = window.Shopify || {});
@@ -140,34 +178,64 @@ async function startShopify() {
   };
   bus = shopifyBus(data.shop.id);
   S.analytics = bus;
-  loadScript(cfg.analytics.shopify?.consent === 'default-banner'
-    ? 'https://cdn.shopify.com/shopifycloud/privacy-banner/storefront-banner.js'
-    : 'https://cdn.shopify.com/shopifycloud/consent-tracking-api/v0.2/consent-tracking-api.js');
+  loadScript(
+    cfg.analytics.shopify?.consent === 'default-banner'
+      ? 'https://cdn.shopify.com/shopifycloud/privacy-banner/storefront-banner.js'
+      : 'https://cdn.shopify.com/shopifycloud/consent-tracking-api/v0.2/consent-tracking-api.js',
+  );
   loadScript('https://cdn.shopify.com/storefront/analytics/shopify.js');
   log('shopify analytics ready', data.shop.id);
 }
 
 const productPayload = (p, v, quantity = 1) => ({
-  id: p.id, title: p.title, price: v.price, vendor: p.vendor || '', variantId: v.id, variantTitle: v.title,
-  quantity, sku: v.sku || undefined, productType: p.productType || undefined,
+  id: p.id,
+  title: p.title,
+  price: v.price,
+  vendor: p.vendor || '',
+  variantId: v.id,
+  variantTitle: v.title,
+  quantity,
+  sku: v.sku || undefined,
+  productType: p.productType || undefined,
 });
 
 function analyticsLine(l) {
   const m = l.merchandise || {};
-  return { id: l.id, quantity: l.quantity, merchandise: { id: m.id, title: m.title, price: m.price, sku: m.sku, product: { id: m.product?.id, title: m.product?.title, vendor: m.product?.vendor || '', handle: m.product?.handle } } };
+  return {
+    id: l.id,
+    quantity: l.quantity,
+    merchandise: {
+      id: m.id,
+      title: m.title,
+      price: m.price,
+      sku: m.sku,
+      product: {
+        id: m.product?.id,
+        title: m.product?.title,
+        vendor: m.product?.vendor || '',
+        handle: m.product?.handle,
+      },
+    },
+  };
 }
 
 // ---------------------------------------------------------------- what happened on the page
 
 function mainProduct() {
   const el = document.querySelector(sel('product'));
-  return el && !el.closest(`${sel('collection')},${sel('products')},${sel('recommendations')}`) ? window.Tether?.getScope(el) : null;
+  return el && !el.closest(`${sel('collection')},${sel('products')},${sel('recommendations')}`)
+    ? window.Tether?.getScope(el)
+    : null;
 }
 
 const send = (name, data, shopifyEvent, shopifyPayload) => {
   if (cfg.analytics.dataLayer) ga(name, data);
   if (bus && shopifyEvent) bus.publish(shopifyEvent, shopifyPayload);
-  try { cfg.analytics.onEvent?.(name, data); } catch (err) { reportError(err, 'analytics onEvent'); }
+  try {
+    cfg.analytics.onEvent?.(name, data);
+  } catch (err) {
+    reportError(err, 'analytics onEvent');
+  }
 };
 
 let lastLines = null; // variant id -> line, to turn cart changes into add/remove events
@@ -182,11 +250,21 @@ function handle(e) {
     viewed.add(scope.root);
     const v = scope.variant || d.product.variants.nodes[0];
     const items = [itemFromVariant(d.product, v)];
-    send('view_item', { currency: v?.price?.currencyCode, value: value(items), items }, 'product_viewed', { products: [productPayload(d.product, v)] });
+    send('view_item', { currency: v?.price?.currencyCode, value: value(items), items }, 'product_viewed', {
+      products: [productPayload(d.product, v)],
+    });
   } else if (name === 'list-ready') {
     const items = (d.products || []).slice(0, 200).map((p, i) => itemFromVariant(p, p.variants?.nodes?.[0], 1, i));
-    const list = { item_list_id: d.collection?.handle || 'products', item_list_name: d.collection?.title || 'Products' };
-    send('view_item_list', { ...list, items }, d.collection ? 'collection_viewed' : null, d.collection ? { collection: { id: d.collection.id, handle: d.collection.handle } } : null);
+    const list = {
+      item_list_id: d.collection?.handle || 'products',
+      item_list_name: d.collection?.title || 'Products',
+    };
+    send(
+      'view_item_list',
+      { ...list, items },
+      d.collection ? 'collection_viewed' : null,
+      d.collection ? { collection: { id: d.collection.id, handle: d.collection.handle } } : null,
+    );
   } else if (name === 'cart-updated') {
     const cart = d.cart;
     const now = new Map((cart?.lines?.nodes || []).map((l) => [l.merchandise?.id, l]));
@@ -197,13 +275,19 @@ function handle(e) {
         if (diff > 0) {
           const items = [itemFromLine(l, diff)];
           send('add_to_cart', { currency, value: value(items), items }, 'product_added_to_cart', {
-            cart, prevCart: lastCart, currentLine: analyticsLine(l), prevLine: lastLines.get(k) ? analyticsLine(lastLines.get(k)) : undefined,
+            cart,
+            prevCart: lastCart,
+            currentLine: analyticsLine(l),
+            prevLine: lastLines.get(k) ? analyticsLine(lastLines.get(k)) : undefined,
           });
         }
       });
       lastLines.forEach((l, k) => {
         const diff = l.quantity - (now.get(k)?.quantity || 0);
-        if (diff > 0) { const items = [itemFromLine(l, diff)]; send('remove_from_cart', { currency, value: value(items), items }); }
+        if (diff > 0) {
+          const items = [itemFromLine(l, diff)];
+          send('remove_from_cart', { currency, value: value(items), items });
+        }
       });
     }
     lastLines = now;
@@ -213,7 +297,11 @@ function handle(e) {
     send('view_cart', { currency: Cart.state?.cost?.totalAmount?.currencyCode, value: value(items), items });
   } else if (name === 'checkout') {
     const items = (d.cart?.lines?.nodes || []).map((l) => itemFromLine(l));
-    const coupon = (d.cart?.discountCodes || []).filter((c) => c.applicable).map((c) => c.code).join(',') || undefined;
+    const coupon =
+      (d.cart?.discountCodes || [])
+        .filter((c) => c.applicable)
+        .map((c) => c.code)
+        .join(',') || undefined;
     send('begin_checkout', { currency: d.cart?.cost?.totalAmount?.currencyCode, value: value(items), coupon, items });
   } else if (name === 'search' && d.term) {
     send('search', { search_term: d.term }, 'search_viewed', { searchTerm: d.term });
@@ -229,5 +317,8 @@ export async function startAnalytics(queue) {
   if (cfg.analytics.shopify) await startShopify().catch((err) => reportError(err, 'shopify analytics'));
   if (bus) bus.publish('page_viewed', {});
   queue.splice(0).forEach(handle);
-  queue.push = (e) => { handle(e); return 0; }; // from now on, handle events as they come
+  queue.push = (e) => {
+    handle(e);
+    return 0;
+  }; // from now on, handle events as they come
 }

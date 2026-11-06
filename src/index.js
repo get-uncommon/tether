@@ -14,13 +14,28 @@ import { Cart, focusables } from './cart.js';
 import { scopes } from './product.js';
 import { ListScope, listSelector } from './collection.js';
 import {
-  getProduct, getProducts, getRecommendations, clearProductCache, primeProduct, normalizeProductKey,
+  getProduct,
+  getProducts,
+  getRecommendations,
+  clearProductCache,
+  primeProduct,
+  normalizeProductKey,
 } from './loader.js';
 import * as plans from './selling-plans.js';
 import { resolveProductKey } from './status.js';
 import { attr, sel, get, qsa, emit, formatMoney, busy, parseJSONAttr, toAttributes, imageUrl } from './dom.js';
 import { loadPart, coreModules } from './lazy.js';
-import { mountedLists, liveLists, pruneLive, within, mountProduct, retryFailed, hydrateFromPage, settleMarket, trackMarket } from './mounting.js';
+import {
+  mountedLists,
+  liveLists,
+  pruneLive,
+  within,
+  mountProduct,
+  retryFailed,
+  hydrateFromPage,
+  settleMarket,
+  trackMarket,
+} from './mounting.js';
 
 export const VERSION = '0.6.7';
 
@@ -46,24 +61,50 @@ export function mount(root = document) {
     trackMarket(list.load());
   });
 
-  within(root, sel('product')).forEach((el) => { if (mountProduct(el)) count++; });
+  within(root, sel('product')).forEach((el) => {
+    if (mountProduct(el)) count++;
+  });
 
   // The country select lives in the optional markets part: load it only when the page uses it.
   if (within(root, `${sel('country-select')},${sel('country-bind')}`).length) {
-    loadPart('markets').then((m) => m.renderCountrySelects(root)).catch((err) => reportError(err, 'markets'));
+    loadPart('markets')
+      .then((m) => m.renderCountrySelects(root))
+      .catch((err) => reportError(err, 'markets'));
   }
 
   // Customer accounts: their own optional part, when configured and the page (or a login) needs it.
-  if ((cfg.account?.clientId || cfg.account?.server) && (within(root, ['account-login', 'account-bind', 'account-link', 'orders', 'order', 'addresses', 'subscriptions', 'profile-form', 'address-form'].map((n) => `[${attr(n)}]`).join(',') + `,[${attr('show')}^="logged-"]`).length
-    || /[?&]code=/.test(window.location.search) || hasAccountSession())) {
-    loadPart('account').then((m) => m.mountAccount(root)).catch((err) => reportError(err, 'account'));
+  if (
+    (cfg.account?.clientId || cfg.account?.server) &&
+    (within(
+      root,
+      [
+        'account-login',
+        'account-bind',
+        'account-link',
+        'orders',
+        'order',
+        'addresses',
+        'subscriptions',
+        'profile-form',
+        'address-form',
+      ]
+        .map((n) => `[${attr(n)}]`)
+        .join(',') + `,[${attr('show')}^="logged-"]`,
+    ).length ||
+      /[?&]code=/.test(window.location.search) ||
+      hasAccountSession())
+  ) {
+    loadPart('account')
+      .then((m) => m.mountAccount(root))
+      .catch((err) => reportError(err, 'account'));
   }
 
   // Search as you type: its own optional part, only for pages that have it.
   if (within(root, sel('search')).length) {
-    loadPart('search').then((m) => m.mountSearch(root)).catch((err) => reportError(err, 'search'));
+    loadPart('search')
+      .then((m) => m.mountSearch(root))
+      .catch((err) => reportError(err, 'search'));
   }
-
 
   settleMarket();
   Cart.render();
@@ -99,21 +140,43 @@ function bindControls() {
     const t = e.target;
     if (!t?.closest) return;
 
-    if (t.closest(sel('cart-open'))) { e.preventDefault(); Cart.toggle(); return; }
-    if (t.closest(sel('cart-close'))) { e.preventDefault(); Cart.close(); return; }
+    if (t.closest(sel('cart-open'))) {
+      e.preventDefault();
+      Cart.toggle();
+      return;
+    }
+    if (t.closest(sel('cart-close'))) {
+      e.preventDefault();
+      Cart.close();
+      return;
+    }
 
     const clear = t.closest(sel('cart-clear'));
-    if (clear) { e.preventDefault(); busy(clear, () => Cart.clear().catch((err) => reportError(err, 'cart clear'))); return; }
+    if (clear) {
+      e.preventDefault();
+      busy(clear, () => Cart.clear().catch((err) => reportError(err, 'cart clear')));
+      return;
+    }
 
     const checkout = t.closest(sel('checkout'));
-    if (checkout) { e.preventDefault(); busy(checkout, () => Cart.checkout()); return; }
+    if (checkout) {
+      e.preventDefault();
+      busy(checkout, () => Cart.checkout());
+      return;
+    }
 
     const line = t.closest(dataKeySel());
     if (line && line.closest(sel('cart-lines'))) {
       const id = line.getAttribute(`data-${cfg.prefix}-key`);
       const current = Cart.lines.find((l) => l.id === id);
-      const run = (fn) => { e.preventDefault(); fn().catch((err) => reportError(err, 'cart line')); };
-      if (t.closest(sel('line-remove'))) { line.classList.add('is-busy'); return run(() => Cart.removeLine(id)); }
+      const run = (fn) => {
+        e.preventDefault();
+        fn().catch((err) => reportError(err, 'cart line'));
+      };
+      if (t.closest(sel('line-remove'))) {
+        line.classList.add('is-busy');
+        return run(() => Cart.removeLine(id));
+      }
       if (current && t.closest(sel('line-plus'))) return run(() => Cart.changeQuantity(id, 1));
       if (current && t.closest(sel('line-minus'))) return run(() => Cart.changeQuantity(id, -1));
     }
@@ -127,7 +190,10 @@ function bindControls() {
     }
 
     const groupBtn = t.closest(sel('group-add'));
-    if (groupBtn) { e.preventDefault(); busy(groupBtn, () => addGroup(groupBtn)); }
+    if (groupBtn) {
+      e.preventDefault();
+      busy(groupBtn, () => addGroup(groupBtn));
+    }
   });
 
   document.addEventListener('change', (e) => {
@@ -136,7 +202,11 @@ function bindControls() {
     const lineEl = t.closest(dataKeySel());
     const id = lineEl?.getAttribute(`data-${cfg.prefix}-key`);
     // The line shows is-busy / aria-busy until Shopify has answered (removed by the next render).
-    const busyLine = (p, what) => { lineEl.classList.add('is-busy'); lineEl.setAttribute('aria-busy', 'true'); p.catch((err) => reportError(err, what)); };
+    const busyLine = (p, what) => {
+      lineEl.classList.add('is-busy');
+      lineEl.setAttribute('aria-busy', 'true');
+      p.catch((err) => reportError(err, what));
+    };
     if (id && t.matches(`input${sel('line', 'quantity')}`)) {
       busyLine(Cart.updateLine(id, parseInt(t.value, 10) || 0), 'cart line');
     } else if (id && t.matches(`select${sel('line-plan')}`)) {
@@ -148,73 +218,114 @@ function bindControls() {
     }
   });
 
-  document.addEventListener('submit', (e) => {
-    const form = e.target.closest?.(sel('discount-form'));
-    if (!form) return;
-    e.preventDefault();
-    const input = form.querySelector(sel('discount-input')) || form.querySelector('input');
-    const code = input?.value.trim();
-    if (!code) return;
-    busy(form, async () => {
-      const mark = (bad) => {
-        form.classList.toggle('is-invalid', bad);
-        if (input) { if (bad) input.setAttribute('aria-invalid', 'true'); else input.removeAttribute('aria-invalid'); }
-      };
-      try {
-        await Cart.applyDiscount(code);
-        mark(false);
-        emit('discount-applied', { code }, form);
-        if (input) input.value = '';
-      } catch (err) {
-        mark(true);
-        if (err?.code === 'INVALID_DISCOUNT') emit('discount-invalid', { code }, form); else reportError(err, 'discount');
-      }
-    });
-  }, true); // capture: before a router (Astro's ClientRouter) turns the submit into a navigation
+  document.addEventListener(
+    'submit',
+    (e) => {
+      const form = e.target.closest?.(sel('discount-form'));
+      if (!form) return;
+      e.preventDefault();
+      const input = form.querySelector(sel('discount-input')) || form.querySelector('input');
+      const code = input?.value.trim();
+      if (!code) return;
+      busy(form, async () => {
+        const mark = (bad) => {
+          form.classList.toggle('is-invalid', bad);
+          if (input) {
+            if (bad) input.setAttribute('aria-invalid', 'true');
+            else input.removeAttribute('aria-invalid');
+          }
+        };
+        try {
+          await Cart.applyDiscount(code);
+          mark(false);
+          emit('discount-applied', { code }, form);
+          if (input) input.value = '';
+        } catch (err) {
+          mark(true);
+          if (err?.code === 'INVALID_DISCOUNT') emit('discount-invalid', { code }, form);
+          else reportError(err, 'discount');
+        }
+      });
+    },
+    true,
+  ); // capture: before a router (Astro's ClientRouter) turns the submit into a navigation
   document.addEventListener('input', (e) => {
     const f = e.target.closest?.(sel('discount-form'));
-    if (f) { f.classList.remove('is-invalid'); e.target.removeAttribute?.('aria-invalid'); }
+    if (f) {
+      f.classList.remove('is-invalid');
+      e.target.removeAttribute?.('aria-invalid');
+    }
   });
 
   // Other tabs: the cart or the market changed there (handled by the extras part, loaded then).
   window.addEventListener('storage', (e) => {
-    if (cfg.domain && e.key?.startsWith(`${cfg.prefix}:`)) loadPart('extras').then((m) => m.onStorage(e)).catch(() => {});
+    if (cfg.domain && e.key?.startsWith(`${cfg.prefix}:`))
+      loadPart('extras')
+        .then((m) => m.onStorage(e))
+        .catch(() => {});
   });
   // Shareable variant links: only when turned on.
   document.addEventListener(`${cfg.prefix}:variant-changed`, (e) => {
     const root = e.target;
-    if (cfg.variantUrl || root.hasAttribute?.(attr('variant-url'))) loadPart('extras').then((m) => m.writeVariantUrl(root, e.detail)).catch(() => {});
+    if (cfg.variantUrl || root.hasAttribute?.(attr('variant-url')))
+      loadPart('extras')
+        .then((m) => m.writeVariantUrl(root, e.detail))
+        .catch(() => {});
   });
 
   // Astro View Transitions (<ClientRouter />): mount every new page, close the cart while leaving.
   if (cfg.astro !== false) {
     // Astro fires this on the first load too: wait for init (the visitor's saved market) first.
-    document.addEventListener('astro:page-load', () => (initPromise || Promise.resolve()).then(() => {
-      // Navigated to a page of another market (e.g. /de/): switch first, then mount in that market.
-      // Back on a normal page after one: the visitor's own choice, else the default market.
-      let target = pageMarket();
-      if (!target && onPageMarket) {
-        try { target = JSON.parse(localStorage.getItem(`${cfg.prefix}:market:${cfg.domain}`) || 'null'); } catch { target = null; }
-        target = target?.country ? target : baseMarket;
-      }
-      onPageMarket = Boolean(pageMarket());
-      const differs = target?.country && (String(target.country).toUpperCase() !== String(cfg.country || '').toUpperCase()
-        || String(target.language || '').toUpperCase() !== String(cfg.language || '').toUpperCase());
-      if (differs) setCountry(target.country, { language: target.language ?? null, locale: target.locale, remember: false }).then(() => mount(document), () => mount(document));
-      else if (mountedBody !== document.body) mount(document); // the first load is already mounted: no second round of requests
-    }));
-    document.addEventListener('astro:before-swap', () => { mountedBody = null; unmount(); });
+    document.addEventListener('astro:page-load', () =>
+      (initPromise || Promise.resolve()).then(() => {
+        // Navigated to a page of another market (e.g. /de/): switch first, then mount in that market.
+        // Back on a normal page after one: the visitor's own choice, else the default market.
+        let target = pageMarket();
+        if (!target && onPageMarket) {
+          try {
+            target = JSON.parse(localStorage.getItem(`${cfg.prefix}:market:${cfg.domain}`) || 'null');
+          } catch {
+            target = null;
+          }
+          target = target?.country ? target : baseMarket;
+        }
+        onPageMarket = Boolean(pageMarket());
+        const differs =
+          target?.country &&
+          (String(target.country).toUpperCase() !== String(cfg.country || '').toUpperCase() ||
+            String(target.language || '').toUpperCase() !== String(cfg.language || '').toUpperCase());
+        if (differs)
+          setCountry(target.country, {
+            language: target.language ?? null,
+            locale: target.locale,
+            remember: false,
+          }).then(
+            () => mount(document),
+            () => mount(document),
+          );
+        else if (mountedBody !== document.body) mount(document); // the first load is already mounted: no second round of requests
+      }),
+    );
+    document.addEventListener('astro:before-swap', () => {
+      mountedBody = null;
+      unmount();
+    });
   }
 
   // Back online after a failed load: try the failed products and lists again.
   window.addEventListener('online', () => {
     retryFailed();
-    liveLists.forEach((l) => { if (l.root.getAttribute(attr('state')) === 'error') l.load(); });
+    liveLists.forEach((l) => {
+      if (l.root.getAttribute(attr('state')) === 'error') l.load();
+    });
   });
 
   document.addEventListener('keydown', (e) => {
     if (!Cart.isOpen()) return;
-    if (e.key === 'Escape') { Cart.close(); return; }
+    if (e.key === 'Escape') {
+      Cart.close();
+      return;
+    }
     if (e.key !== 'Tab' || cfg.cartFocus === false) return;
     // Keep Tab inside the open cart.
     const d = Cart.drawers().find((x) => x.classList.contains(cfg.cartDrawerOpenClass));
@@ -222,14 +333,20 @@ function bindControls() {
     if (!f.length) return;
     const first = f[0];
     const last = f[f.length - 1];
-    if (!d.contains(document.activeElement) || (e.shiftKey && document.activeElement === first) || (!e.shiftKey && document.activeElement === last)) {
+    if (
+      !d.contains(document.activeElement) ||
+      (e.shiftKey && document.activeElement === first) ||
+      (!e.shiftKey && document.activeElement === last)
+    ) {
       e.preventDefault();
       (e.shiftKey ? last : first).focus();
     }
   });
 }
 
-function dataKeySel() { return `[data-${cfg.prefix}-key]`; }
+function dataKeySel() {
+  return `[data-${cfg.prefix}-key]`;
+}
 
 /**
  * [tether-group] + [tether-group-add]: adds every product scope inside the
@@ -259,20 +376,30 @@ export function init(overrides = {}) {
   // Analytics (optional part): buffer Tether's events until it has loaded, so none are missed.
   if (cfg.analytics && !analyticsQueue) {
     analyticsQueue = [];
-    ['product-ready', 'list-ready', 'cart-updated', 'cart-toggled', 'checkout', 'search'].forEach((n) => document.addEventListener(`${cfg.prefix}:${n}`, (e) => analyticsQueue.push(e)));
+    ['product-ready', 'list-ready', 'cart-updated', 'cart-toggled', 'checkout', 'search'].forEach((n) =>
+      document.addEventListener(`${cfg.prefix}:${n}`, (e) => analyticsQueue.push(e)),
+    );
     document.addEventListener('astro:page-load', () => analyticsQueue.push(new CustomEvent(`${cfg.prefix}:page`)));
-    loadPart('analytics').then((m) => m.startAnalytics(analyticsQueue)).catch((err) => reportError(err, 'analytics'));
+    loadPart('analytics')
+      .then((m) => m.startAnalytics(analyticsQueue))
+      .catch((err) => reportError(err, 'analytics'));
   }
 
-  initPromise = applyMarket(overrides).then(() => Cart.init()).then(async (cart) => {
-    // A saved cart from another market: move it to this one, so prices match the page.
-    const want = cfg.country ? String(cfg.country).toUpperCase() : null;
-    if (cart && want && cart.buyerIdentity?.countryCode && cart.buyerIdentity.countryCode !== want) {
-      try { cart = await Cart.setBuyerIdentity({ countryCode: want }, { create: false }); } catch (err) { reportError(err, 'cart country'); }
-    }
-    emit('ready', { cart });
-    return api;
-  });
+  initPromise = applyMarket(overrides)
+    .then(() => Cart.init())
+    .then(async (cart) => {
+      // A saved cart from another market: move it to this one, so prices match the page.
+      const want = cfg.country ? String(cfg.country).toUpperCase() : null;
+      if (cart && want && cart.buyerIdentity?.countryCode && cart.buyerIdentity.countryCode !== want) {
+        try {
+          cart = await Cart.setBuyerIdentity({ countryCode: want }, { create: false });
+        } catch (err) {
+          reportError(err, 'cart country');
+        }
+      }
+      emit('ready', { cart });
+      return api;
+    });
   return initPromise;
 }
 
@@ -308,9 +435,18 @@ async function applyMarket(overrides) {
   if (m.detect === false) return;
   let market = null;
   if (m.detect) {
-    try { market = (await loadPart('markets')).detectMarket(m); } catch (err) { reportError(err, 'markets'); return; }
+    try {
+      market = (await loadPart('markets')).detectMarket(m);
+    } catch (err) {
+      reportError(err, 'markets');
+      return;
+    }
   } else if (m.remember !== false) {
-    try { market = JSON.parse(localStorage.getItem(`${cfg.prefix}:market:${cfg.domain}`) || 'null'); } catch { /* none */ }
+    try {
+      market = JSON.parse(localStorage.getItem(`${cfg.prefix}:market:${cfg.domain}`) || 'null');
+    } catch {
+      /* none */
+    }
     if (market && !/^[A-Z]{2}$/.test(market.country || '')) market = null;
   }
   if (!market) return;
@@ -321,11 +457,27 @@ async function applyMarket(overrides) {
 }
 
 function hasAccountSession() {
-  try { return Boolean(sessionStorage[`${cfg.prefix}:account:${cfg.domain}`] || localStorage[`${cfg.prefix}:account:${cfg.domain}`] || localStorage[`${cfg.prefix}:account-hint:${cfg.domain}`]); } catch { return false; }
+  try {
+    return Boolean(
+      sessionStorage[`${cfg.prefix}:account:${cfg.domain}`] ||
+      localStorage[`${cfg.prefix}:account:${cfg.domain}`] ||
+      localStorage[`${cfg.prefix}:account-hint:${cfg.domain}`],
+    );
+  } catch {
+    return false;
+  }
 }
 
 /** Customer accounts (optional part, loaded on first use). See src/account.js. */
-const accountApi = new Proxy({}, { get: (_, n) => (...a) => loadPart('account').then((m) => m[n](...a)) });
+const accountApi = new Proxy(
+  {},
+  {
+    get:
+      (_, n) =>
+      (...a) =>
+        loadPart('account').then((m) => m[n](...a)),
+  },
+);
 
 /** Tether.setCountry('DE'): loads the markets part on first use. */
 export function setCountry(code, opts) {
@@ -337,9 +489,18 @@ function startObserver() {
   let t = null;
   const queued = new Set();
   observer = new MutationObserver((muts) => {
-    muts.forEach((m) => m.addedNodes.forEach((n) => { if (n.nodeType === 1) queued.add(n); }));
+    muts.forEach((m) =>
+      m.addedNodes.forEach((n) => {
+        if (n.nodeType === 1) queued.add(n);
+      }),
+    );
     clearTimeout(t);
-    t = setTimeout(() => { queued.forEach((n) => { if (n.isConnected) mount(n); }); queued.clear(); }, 50);
+    t = setTimeout(() => {
+      queued.forEach((n) => {
+        if (n.isConnected) mount(n);
+      });
+      queued.clear();
+    }, 50);
   });
   observer.observe(document.body, { childList: true, subtree: true });
 }
@@ -349,8 +510,12 @@ export const api = {
   init,
   mount,
   unmount,
-  get config() { return cfg; },
-  get ready() { return initPromise || Promise.resolve(null); },
+  get config() {
+    return cfg;
+  },
+  get ready() {
+    return initPromise || Promise.resolve(null);
+  },
   query: gql,
   withContext,
   cart: Cart,
