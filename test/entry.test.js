@@ -3,6 +3,7 @@ import { test, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
 import { captureTetherWarnings, find, jsonResponse } from './fixtures.js';
+import { waitFor } from '../server/test/mocks.js';
 
 // The failures these tests cause on purpose are checked through onError and states, not the console.
 captureTetherWarnings();
@@ -63,7 +64,7 @@ test('a failure in the extras part is reported, not swallowed', async () => {
   // A detail without a variant makes the part's writeVariantUrl throw.
   // @ts-expect-error -- the broken detail this test sends on purpose
   emit('variant-changed', {}, find('#p'));
-  await new Promise((resolve) => setTimeout(resolve, 30));
+  await waitFor(() => errors.length > 0, 'the extras part to report its failure');
   assert.equal(errors.length, 1);
   assert.equal(errors[0].context, 'extras');
 });

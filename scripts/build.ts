@@ -20,8 +20,7 @@ import { gzipSync, brotliCompressSync } from 'node:zlib';
 import { createHash } from 'node:crypto';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, join, basename, resolve } from 'node:path';
-
-type TemplatePart = { kind: 'text'; text: string } | { kind: 'expression'; source: string };
+import { minifyGraphqlTemplates } from './graphql-minify.ts';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const SRC = join(ROOT, 'src');
@@ -57,74 +56,11 @@ const CORE = [
   'lazy.ts',
 ];
 
-/**
- * @param start The index just after the `${` that opens the expression.
- * @returns The index just after the `}` that closes it.
- */
-function expressionEnd(body: string, start: number): number {
-  let depth = 1;
-  let index = start;
-  for (; index < body.length && depth; index++) {
-    if (body[index] === '{') depth++;
-    else if (body[index] === '}') depth--;
-  }
-  return index;
-}
-
-/**
- * @param body A template literal's text between the backticks.
- * @returns Its text parts and `${…}` expressions, in order.
- */
-function splitTemplate(body: string): TemplatePart[] {
-  const parts: TemplatePart[] = [];
-  let text = '';
-  for (let index = 0; index < body.length; index++) {
-    const char = body[index] ?? '';
-    if (char === '\\') {
-      text += char + (body[index + 1] ?? '');
-      index++;
-    } else if (char === '$' && body[index + 1] === '{') {
-      parts.push({ kind: 'text', text });
-      text = '';
-      const end = expressionEnd(body, index + 2);
-      parts.push({ kind: 'expression', source: body.slice(index, end) });
-      index = end - 1;
-    } else {
-      text += char;
-    }
-  }
-  parts.push({ kind: 'text', text });
-  return parts;
-}
-
-/** Text that looks like GraphQL: an operation, a fragment, an inline fragment or a selection of Tether's fields. */
-const GRAPHQL = /\b(query|mutation|fragment)\b|\.\.\. ?on |\{[^}]*\b(id|nodes|amount|cart)\b/;
-
-const minifyGraphqlText = (text: string): string =>
-  text
-    .replace(/\\n/g, ' ')
-    .replace(/\s+/g, ' ')
-    .replace(/ ?([{}():,!=@[\]]) ?/g, '$1');
-
-/**
- * Collapses whitespace and drops the spaces around punctuation in the template literals that look like GraphQL, only
- * in their text, never inside `${…}`.
- */
-export function minifyGraphqlTemplates(code: string): string {
-  return code.replace(/`((?:[^`\\]|\\.)*)`/gs, (whole, body: string) => {
-    const parts = splitTemplate(body);
-    const plain = parts.map((part) => (part.kind === 'text' ? part.text : '')).join(' ');
-    if (!GRAPHQL.test(plain)) return whole;
-    const minified = parts.map((part) => (part.kind === 'text' ? minifyGraphqlText(part.text) : part.source));
-    return `\`${minified.join('')}\``;
-  });
-}
-
 const graphqlPlugin: esbuild.Plugin = {
   name: 'tether-graphql',
   setup(build) {
     build.onLoad({ filter: /[/\\]src[/\\].*\.ts$/ }, async (args) => ({
-      contents: minifyGraphqlTemplates(await readFile(args.path, 'utf8')),
+      contents: minifyGraphqlTemplates(await readFile(args.path, 'utf8'), args.path),
       loader: 'ts',
     }));
   },
