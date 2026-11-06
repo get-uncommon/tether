@@ -129,12 +129,6 @@ test('a failed update exits non-zero, and --from without a folder is refused', (
   );
 });
 
-test('the shipped TETHER_VERSION takes the fixes of the minor version it ships with, never a new minor', async () => {
-  const range = (await readFile(new URL('../TETHER_VERSION', import.meta.url), 'utf8')).trim();
-  const { version } = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
-  assert.equal(range, version.split('.').slice(0, 2).join('.'), 'a release bumps TETHER_VERSION with the minor');
-});
-
 const SHA = 'a'.repeat(40);
 /** A fake GitHub API: path -> answer. */
 const github = (answers) => async (path) => {

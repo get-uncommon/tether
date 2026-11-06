@@ -246,3 +246,18 @@ export function checkStep(report, title) {
   assert.ok(step, `no "${title}" step`);
   return step;
 }
+
+/**
+ * Waits until `condition` holds, for work that finishes on its own schedule (a lazy import, a timed write), instead of
+ * sleeping a fixed time that a busy machine can overrun.
+ *
+ * @param {() => boolean} condition
+ * @param {string} what Named in the failure when it never holds.
+ */
+export async function waitFor(condition, what, timeoutMs = 5000) {
+  const deadline = Date.now() + timeoutMs;
+  while (!condition()) {
+    assert.ok(Date.now() < deadline, `timed out waiting for ${what}`);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+}

@@ -1,4 +1,5 @@
-# Local git hooks (https://lefthook.dev). These are the gate: GitHub Actions only run the smoke and e2e suites.
+# Local git hooks (https://lefthook.dev): Prettier and ESLint on staged files, the full gate (`npm run check`) before
+# each push. CI runs the same gate on pull requests and pushes to main (`.github/workflows/ci.yml`).
 pre-commit:
   parallel: true
   commands:

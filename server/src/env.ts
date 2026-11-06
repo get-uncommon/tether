@@ -37,8 +37,21 @@ interface EnvProblem {
 }
 
 const UNSET = new Set(['none', '-', 'null', 'undefined']);
-/** Example values from the docs and the example vars file: never real credentials. */
-const PLACEHOLDER = /^(your[-_]|choose[-_]|example|changeme|change[-_]me|placeholder|xxx+|todo|<.*>$)|\.\.\.|…/i;
+/**
+ * Example values from Tether's docs and from the example vars file of earlier releases, exactly as written there. Only
+ * an exact match is a placeholder, so a real value that resembles one (a field named `todo-notes`, a mapping with an
+ * ellipsis) is still used.
+ */
+const PLACEHOLDERS = new Set([
+  'your-store.myshopify.com',
+  'your-collection-id',
+  'your-webflow-site-token',
+  'your-app-client-id',
+  'your-app-client-secret',
+  'your-public-storefront-token',
+  'choose-a-long-random-string',
+  'shpat_…',
+]);
 
 /** Shortest SYNC_SECRET or ACCOUNT_SECRET accepted; a shorter one counts as unset. */
 export const MIN_SYNC_SECRET = 24;
@@ -50,7 +63,7 @@ const SECRETS = new Set(['SYNC_SECRET', 'ACCOUNT_SECRET']);
  * @param value Trimmed.
  */
 function valueProblem(key: string, value: string): EnvProblem['reason'] | null {
-  if (PLACEHOLDER.test(value)) return 'placeholder';
+  if (PLACEHOLDERS.has(value)) return 'placeholder';
   if (SECRETS.has(key) && value.length < MIN_SYNC_SECRET) return 'too-short';
   return null;
 }

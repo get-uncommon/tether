@@ -3,8 +3,9 @@
  * Updates this deployed copy of tether-sync to the newest Tether release that matches TETHER_VERSION (a file next to
  * package.json), the way jsDelivr version ranges work:
  *
- *   0.6      newest 0.6.x (patches only)          <- shipped in TETHER_VERSION, and the default without the file
- *   0.6.0    pinned: never changes
+ *   X.Y      newest X.Y.z (patches only)   <- a release ships its own minor version in TETHER_VERSION; without
+ *                                             the file, the copy's own minor version
+ *   X.Y.Z    pinned: never changes
  *   latest   newest release, including a new 0.x minor, which can break the copy
  *
  * It replaces the code (src/, bin/, scripts/, test/, docs/, package.json, README) and keeps what belongs to the copy:
@@ -12,7 +13,7 @@
  * doesn't let an Action's token change workflow files, so all update logic lives in this script, which updates
  * itself, and a copy whose workflow is older than the release's is told how to replace it (scripts/workflow-check.ts).
  *
- * Releases are the upstream repository's `v0.7.0` tags; a tag without the `v` is not a release. A release is
+ * Releases are the upstream repository's `vX.Y.Z` tags; a tag without the `v` is not a release. A release is
  * installed only when the commit its tag points at is part of the upstream default branch, and only from the signed
  * asset on its GitHub Release, after `gh attestation verify` confirms the upstream release workflow built it from that
  * commit (scripts/release-asset.ts). It is staged inside the copy first and then swapped in by renames, so a failure

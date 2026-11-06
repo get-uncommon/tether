@@ -24,7 +24,7 @@ const shipped = () => readFile(join(SERVER, WORKFLOW_PATH), 'utf8');
  * below). The hash makes a change to the workflow a deliberate one; a change that copies need also raises its
  * `# Tether workflow revision:` line, so the updater tells them to copy it in.
  */
-const WORKFLOW_HASH = '4041071f6dee';
+const WORKFLOW_HASH = 'dd116510efb1';
 
 test('the shipped workflow changes only on purpose', async () => {
   const hash = createHash('sha256').update(await shipped());
@@ -41,6 +41,20 @@ test('the workflow keeps to the contract: the script path, the updated= line, te
   ]) {
     assert.ok(workflow.includes(command), command);
   }
+});
+
+test("the release's tests can't change what publish pushes: uploaded and hashed before they run, checked before apply", async () => {
+  const workflow = await shipped();
+  const at = (text) => {
+    const index = workflow.indexOf(text);
+    assert.notEqual(index, -1, text);
+    return index;
+  };
+  const tests = at('node --test test/*.test.js');
+  assert.ok(at('sha256sum "$RUNNER_TEMP/update.patch"') < tests);
+  assert.ok(at('actions/upload-artifact@') < tests);
+  assert.ok(at('patch-sha256: ${{ steps.record.outputs.sha256 }}') < tests);
+  assert.ok(at('sha256sum --check --strict') < at('git apply --index'));
 });
 
 test('the updater knows the revision of the workflow it ships with', async () => {

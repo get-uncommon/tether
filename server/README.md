@@ -58,11 +58,22 @@ Your copy updates itself, like a jsDelivr version. The `TETHER_VERSION` file in 
 
 | `TETHER_VERSION` | Gets |
 |---|---|
-| `0.6` (default) | only 0.6.x fixes |
-| `0.6.0` | pinned: never changes |
+| `X.Y` | only fixes of that minor version (`X.Y.z`). A new copy starts on the minor version it was made from |
+| `X.Y.Z` | pinned: never changes |
 | `latest` | every release, including a new 0.x minor version, which can need changes in your copy |
 
-A new minor version (0.7) is never installed by itself: when you're ready for it, change the file to `0.7`.
+Under `X.Y` a new minor version is never installed by itself. When you're ready for one, do its
+one-time upgrade steps from the [CHANGELOG](../CHANGELOG.md), then change the file to its `X.Y`.
+Under `latest` it is installed on the next scheduled run after its release, so do those steps
+before then.
+
+**Copies made from 0.6.1 to 0.6.8** have `latest` in `TETHER_VERSION`, unless you changed it, so
+they install 0.7.0 by themselves. Do its one-time steps before 0.7.0 is released (with customer
+accounts: add the `ACCOUNT_SECRET` secret, see [Optional settings](#optional-settings)), or write
+`0.6` in the file to stay on 0.6 until you are ready. A copy that updated without `ACCOUNT_SECRET`
+keeps syncing, answering webhooks and starting deploys; only its account routes answer 503 with
+`accounts need the Worker secret ACCOUNT_SECRET`, and `/check` shows the same error, until you add
+the secret.
 
 It checks every Monday (want daily? change the `cron` line in your copy's `.github/workflows/update-tether.yml` to `'23 5 * * *'`), and only updates when the new version's tests pass. To update right away: your copy on GitHub → **Actions** → **Update Tether**
 → **Run workflow**. It tests the new version, then Cloudflare redeploys. Your settings stay as they are.
@@ -87,7 +98,8 @@ same file in your copy and commit it (keep your own `cron` line if you changed i
 
 An update replaces `src/`, `bin/`, `scripts/`, `test/`, `docs/`, `package.json` and this README with
 the release's, so keep your own code and tests outside those folders. The new release's code runs
-only in a job that can read your repository, not change it; a second job commits the tested change.
+only in a job that can read your repository, not change it; a second job commits the tested change,
+exactly as it was recorded before the tests ran.
 
 **Product descriptions.** The sync writes Shopify's description HTML into the Webflow field as it
 is. Anyone who can edit products in Shopify, apps included, writes that HTML, and the sync does not

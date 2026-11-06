@@ -775,13 +775,15 @@ test('settings: ACCOUNT_SECRET is required, with no fallback to SYNC_SECRET; /ch
   try {
     const r = await answer(req('/me'), syncOnly, { memory: new Map() });
     assert.equal(r.status, 503);
-    assert.doesNotMatch(JSON.stringify(await r.json()), /SECRET/, 'what is missing is not told to the public');
+    const { error } = await r.json();
+    assert.match(error, /Worker secret ACCOUNT_SECRET/, 'the one setting a Worker set up before 0.7.0 lacks is named');
+    assert.doesNotMatch(error, /SYNC_SECRET|shop\.example|myshopify/);
   } finally {
     console.error = realError;
   }
   assert.ok(logged.some((line) => /account setup ACCOUNT_SECRET is not set/.test(line)));
 
-  for (const unusable of ['your-random-secret-of-24-characters', 'a']) {
+  for (const unusable of ['choose-a-long-random-string', 'a']) {
     const settings = configured({ ...env, ACCOUNT_SECRET: unusable });
     assert.equal(settings.secret, null, `${unusable}: an example or a short value is no key`);
   }

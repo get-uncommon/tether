@@ -22,7 +22,7 @@ export const WORKFLOW_PATH = '.github/workflows/update-tether.yml';
  * The revision of the workflow this release ships: what a copy already on this release is compared with, since the
  * copy holds no other version of the file. A test holds it to the shipped file's own line.
  */
-export const SHIPPED_REVISION = 2;
+export const SHIPPED_REVISION = 3;
 
 const REVISION_LINE = /^# Tether workflow revision: (\d+)\s*$/m;
 const FIRST_REVISION = 1;
