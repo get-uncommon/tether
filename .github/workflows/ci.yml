@@ -34,8 +34,9 @@ jobs:
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: ${{ matrix.node }}
-      # test/upgrade-from-released.test.js installs this tree into copies made from these tags, one per updater.
-      - run: git fetch --depth=1 --no-tags origin tag v0.6.7 tag v0.6.8 tag v0.7.0
+      # test/upgrade-from-released.test.js installs this tree into copies made from release tags, and fails when a
+      # release's updater is not among them: every release tag, so a new one can't be left out here.
+      - run: git fetch --depth=1 --no-tags origin '+refs/tags/v*:refs/tags/v*'
       - run: npm ci
       - run: npm run check
 

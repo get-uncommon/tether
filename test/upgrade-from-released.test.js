@@ -1,7 +1,7 @@
-// The route every deployed copy takes to the next release: the updater it already has, from a released version,
-// installs this tree, and then its own workflow (the one it was made with) tests the result and imports src/entry.js.
-// It lives outside server/ because it reads the releases from this repository's git history, which a deployed copy
-// doesn't have.
+// The route every deployed copy takes to the next release: its own workflow (the one it was made with) runs the
+// updater it already has, from a released version, which installs this tree; the workflow then records the change,
+// tests it, imports src/entry.js, and commits and pushes what it recorded. It lives outside server/ because it reads
+// the releases from this repository's git history, which a deployed copy doesn't have.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile, execFileSync } from 'node:child_process';
@@ -9,22 +9,35 @@ import { existsSync } from 'node:fs';
 import { chmod, copyFile, cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
-import { delimiter, dirname, join } from 'node:path';
+import { dirname, join, posix } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import { releaseAssetName } from '../server/scripts/release-asset.ts';
+import { compareVersions, parseVersion } from '../server/src/release-range.ts';
 import { KEPT, MANAGED } from '../server/scripts/update-tether.ts';
-import { SHIPPED_REVISION, workflowRevisionAt } from '../server/scripts/workflow-check.ts';
+import { SHIPPED_REVISION, WORKFLOW_PATH, workflowRevisionAt } from '../server/scripts/workflow-check.ts';
 import { asRecord, fieldOf, numberAt, parseJson, stringAt } from '../server/test/mocks.js';
+import {
+  COPY_REPOSITORY,
+  NODE_OPTIONS,
+  runWorkflow,
+  TEST_STEP,
+  UPDATE_STEP_ID,
+  workflowPath,
+} from './update-workflow-runner.js';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 /** @param {string} folder A copy of server/. */
 const versionIn = async (folder) => fieldOf(parseJson(await readFile(join(folder, 'package.json'), 'utf8')), 'version');
 /**
- * One release for each updater a deployed copy can have:
- * - v0.6.7: 0.6.0 to 0.6.7 ship the same one, which downloads a release from codeload by its tag;
+ * One release for each updater a deployed copy can have, and the newest release:
+ * - v0.6.7: 0.3.6 to 0.6.7 ship the same one, which downloads a release from codeload by its tag;
  * - v0.6.8: downloads it from codeload by commit, after checking the commit is on the default branch;
- * - v0.7.0: installs only the release's signed asset, after `gh attestation verify` has checked it against GitHub.
+ * - v0.7.0: installs only the release's signed asset, after `gh attestation verify` has checked it against GitHub;
+ * - v0.7.1: skips a tag whose Release doesn't carry the asset yet, for the newest one that does;
+ * - v0.7.2: the v0.7.1 updater, in the newest release's copy.
+ *
+ * A test below fails when a release tag's updater or workflow is none of these.
  *
  * Each takes its real route, against a local stand-in for GitHub: `codeload` downloads the tarball codeload serves,
  * `asset` the Release's asset, which a stand-in for `gh` passes (`ghStub`), since nothing local can sign it.
@@ -35,7 +48,15 @@ const OLD_UPDATERS = [
   { tag: 'v0.6.7', route: 'codeload' },
   { tag: 'v0.6.8', route: 'codeload' },
   { tag: 'v0.7.0', route: 'asset' },
+  { tag: 'v0.7.1', route: 'asset' },
+  { tag: 'v0.7.2', route: 'asset' },
 ];
+/**
+ * The first release whose updater can update a copy: the ones before it replace `.github/`, which GitHub refuses.
+ *
+ * @type {import('../server/src/release-range.ts').Version}
+ */
+const FIRST_WORKING_UPDATER = [0, 3, 6];
 const [major, minor, patch] = stringAt(JSON.parse(await readFile(join(ROOT, 'package.json'), 'utf8')), 'version')
   .split('.')
   .map(Number);
@@ -52,6 +73,13 @@ const ASSET_PATH = `${UPSTREAM}/releases/download/v${RELEASE_VERSION}/${ASSET}`;
 const OUTDATED = /^::warning title=Tether workflow file outdated::/m;
 
 const run = promisify(execFile);
+
+/**
+ * @param {string[]} args
+ * @returns Git's answer in this checkout, trimmed.
+ */
+const gitHere = (args) =>
+  execFileSync('git', ['-C', ROOT, ...args], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }).trim();
 
 /**
  * @param {string} tag
@@ -90,6 +118,81 @@ test('every top-level entry of server/ is one the updater replaces or keeps, or 
     [...entries].filter((entry) => !known.includes(entry)),
     [],
     "an entry the updaters don't list is never installed in a copy",
+  );
+});
+
+/** A script's relative imports: `import … from './x.ts'`, `export … from '../y.ts'`, `import './z.ts'`. */
+const RELATIVE_IMPORT = /\b(?:from|import)\s*\(?\s*['"](\.\.?\/[^'"]+)['"]/g;
+/** @type {Map<string, string[]>} The relative imports of each script blob read. */
+const importsOfBlob = new Map();
+
+/**
+ * What decides how a copy made from `tag` updates: the update workflow it keeps, the updater script that workflow
+ * runs, and every file of the copy that script imports, directly or not.
+ *
+ * @param {string} tag
+ * @returns {string} Each of those files' path in `server/` and blob, one per line.
+ */
+function updaterOf(tag) {
+  /** @type {Map<string, string>} */
+  const blobs = new Map();
+  for (const line of gitHere(['ls-tree', '-r', tag, '--', 'server/']).split('\n')) {
+    const [info = '', path = ''] = line.split('\t');
+    blobs.set(path.slice('server/'.length), info.split(' ')[2] ?? '');
+  }
+  const files = new Set([WORKFLOW_PATH]);
+  const pending = ['scripts/update-tether.mjs'];
+  for (let path = pending.pop(); path !== undefined; path = pending.pop()) {
+    if (files.has(path)) continue;
+    files.add(path);
+    const blob = blobs.get(path);
+    assert.ok(blob, `${tag}: server/${path} is imported, but the tag doesn't have it`);
+    const imports =
+      importsOfBlob.get(blob) ??
+      [...gitHere(['cat-file', 'blob', blob]).matchAll(RELATIVE_IMPORT)].map(([, specifier = '']) => specifier);
+    importsOfBlob.set(blob, imports);
+    pending.push(...imports.map((specifier) => posix.join(posix.dirname(path), specifier)));
+  }
+  return [...files]
+    .sort()
+    .map((path) => `${path} ${blobs.get(path) ?? 'none'}`)
+    .join('\n');
+}
+
+/**
+ * The release tags in this checkout that a copy can update from, but for one on HEAD: that is the release being made
+ * (`npm run release` tags it before the gate its push runs, and release.yml runs on it), and its tree is the one
+ * these tests install.
+ *
+ * @returns {string[]} None in a checkout without tags, or outside a git checkout.
+ */
+function releasedTags() {
+  try {
+    const atHead = new Set(gitHere(['tag', '--points-at', 'HEAD']).split('\n'));
+    return gitHere(['tag', '--list', 'v*'])
+      .split('\n')
+      .filter((tag) => {
+        const version = parseVersion(tag.slice(1));
+        return version !== null && compareVersions(version, FIRST_WORKING_UPDATER) >= 0 && !atHead.has(tag);
+      });
+  } catch {
+    // Not a git checkout.
+    return [];
+  }
+}
+
+test('every release a copy can be made from has its updater and workflow tested, through OLD_UPDATERS', (t) => {
+  const tags = releasedTags();
+  if (!tags.length) {
+    if (process.env['CI']) assert.fail('no release tags in this checkout: fetch the tags');
+    t.skip('no release tags in this checkout (git fetch --tags runs it)');
+    return;
+  }
+  const tested = new Set(OLD_UPDATERS.filter(({ tag }) => hasTag(tag)).map(({ tag }) => updaterOf(tag)));
+  assert.deepEqual(
+    tags.filter((tag) => !tested.has(updaterOf(tag))),
+    [],
+    'add each to OLD_UPDATERS, with the route its updater takes',
   );
 });
 
@@ -155,7 +258,7 @@ async function releaseFolder(target) {
  */
 function node(copy, args, { summary, env: extra = {} } = {}) {
   /** @type {NodeJS.ProcessEnv} */
-  const env = { ...process.env, GITHUB_REPOSITORY: 'shop-owner/tether-sync', ...extra };
+  const env = { ...process.env, GITHUB_REPOSITORY: COPY_REPOSITORY, ...extra };
   delete env['NODE_TEST_CONTEXT'];
   delete env['GITHUB_STEP_SUMMARY'];
   if (summary !== undefined) env['GITHUB_STEP_SUMMARY'] = summary;
@@ -170,7 +273,7 @@ function node(copy, args, { summary, env: extra = {} } = {}) {
 /**
  * A local stand-in for GitHub as the released updaters call it: the tags, the default branch, how a tag's commit
  * compares with it, the GitHub Release, and the release's tarball by tag (0.6.0 to 0.6.7), by commit (0.6.8) or as
- * the Release's asset (0.7.0).
+ * the Release's asset (0.7.0 on).
  *
  * @param {Buffer} tarball
  */
@@ -225,35 +328,21 @@ async function fakeGitHub(tarball) {
 }
 
 /**
- * `PATH` for an updater, with `first` in front. On Windows, Windows' own tar comes next: the GNU tar that Git for
- * Windows puts on the `PATH` reads the `C:` of the absolute paths the 0.6 updaters pass it as a remote host. Deployed
- * copies run on Linux.
- *
- * @param {string[]} first
- * @returns {Record<string, string>}
- */
-function updaterPath(first) {
-  const name = Object.keys(process.env).find((key) => key.toUpperCase() === 'PATH') ?? 'PATH';
-  const system = process.platform === 'win32' ? [join(process.env['SystemRoot'] ?? 'C:\\Windows', 'System32')] : [];
-  return { [name]: [...first, ...system, process.env[name] ?? ''].join(delimiter) };
-}
-
-/**
- * Puts a `gh` first on the `PATH` that answers the one call the 0.7.0 updater makes, `gh attestation verify …`, as
- * `gh` does for an attestation that verifies, and writes its arguments to `log`, one per line. On Linux and macOS it
- * is a shell script. On Windows the updater's `spawnSync` finds only an .exe, so it is a copy of node.exe that
+ * Puts a `gh` first on the `PATH` that answers the one call the 0.7 updaters make, `gh attestation verify …`, as `gh`
+ * does for an attestation that verifies, and writes its arguments to `log`, one per line. On Linux and macOS it is a
+ * shell script. On Windows the updater's `spawnSync` finds only an .exe, so it is a copy of node.exe that
  * test/gh-stub.js, loaded through `NODE_OPTIONS`, turns into the stand-in.
  *
  * @param {string} dir An empty folder for it.
  * @param {string} log
- * @returns {Promise<Record<string, string>>} The environment that puts it first.
+ * @returns {Promise<{ env: Record<string, string>, nodeOptions: string[] }>} What puts it first.
  */
 async function ghStub(dir, log) {
   await mkdir(dir, { recursive: true });
-  const env = { ...updaterPath([dir]), TETHER_TEST_GH_LOG: log };
+  const env = { ...workflowPath([dir]), TETHER_TEST_GH_LOG: log };
   if (process.platform === 'win32') {
     await copyFile(process.execPath, join(dir, 'gh.exe'));
-    return { ...env, NODE_OPTIONS: `--import=${GH_STUB}` };
+    return { env, nodeOptions: [`--import=${GH_STUB}`] };
   }
   const script = join(dir, 'gh');
   await writeFile(
@@ -266,20 +355,19 @@ async function ghStub(dir, log) {
     ].join('\n'),
   );
   await chmod(script, 0o755);
-  return env;
+  return { env, nodeOptions: [] };
 }
 
 /**
- * Runs the copy's updater the way its workflow does, with GitHub answered by {@link fakeGitHub}: it lists the tags,
- * downloads the release (a top folder with `server/` in it: the repository in codeload's tarball, the folder alone in
- * the asset), has `gh` check the asset, and unpacks it.
+ * Puts the release on {@link fakeGitHub} the way `route` downloads it: a top folder with `server/` in it, the
+ * repository in codeload's tarball, the folder alone in the asset.
  *
- * @param {string} copy
  * @param {string} release This tree's `server/`, as {@link releaseFolder} wrote it.
- * @param {string} work An empty folder for the tarball.
+ * @param {string} work An empty folder for the tarball and the `gh` stand-in.
  * @param {'codeload' | 'asset'} route
+ * @returns The stand-in, the environment that sends the copy's updater to it, and a check of what the updater did.
  */
-async function updateThroughGitHub(copy, release, work, route) {
+async function publishRelease(release, work, route) {
   // The asset's layout is release.yml's `git archive --prefix="tether-server-$V/" … -- server`.
   const top = route === 'asset' ? `tether-server-${RELEASE_VERSION}` : `tether-${RELEASE_VERSION}`;
   await cp(release, join(work, 'archive', top, 'server'), { recursive: true });
@@ -287,39 +375,53 @@ async function updateThroughGitHub(copy, release, work, route) {
   execFileSync('tar', ['-czf', 'release.tgz', '-C', 'archive', top], { cwd: work });
   const github = await fakeGitHub(await readFile(join(work, 'release.tgz')));
   const ghLog = join(work, 'gh-arguments.txt');
-  try {
-    const path = route === 'asset' ? await ghStub(join(work, 'bin'), ghLog) : updaterPath([]);
-    const env = { ...path, TETHER_TEST_GITHUB: github.url, TETHER_UPSTREAM: UPSTREAM };
-    const update = await node(copy, ['--import', OFFLINE_GITHUB, 'scripts/update-tether.mjs'], { env });
+  const gh = route === 'asset' ? await ghStub(join(work, 'bin'), ghLog) : { env: workflowPath([]), nodeOptions: [] };
+  /** @type {Record<string, string>} */
+  const env = {
+    ...gh.env,
+    TETHER_TEST_GITHUB: github.url,
+    TETHER_UPSTREAM: UPSTREAM,
+    NODE_OPTIONS: [...NODE_OPTIONS, `--import=${OFFLINE_GITHUB}`, ...gh.nodeOptions].join(' '),
+  };
+  const checkDownload = async () => {
     const download = route === 'asset' ? `/web/${ASSET_PATH}` : `/codeload/${UPSTREAM}/tar.gz/`;
     assert.ok(
       github.requests.some((requested) => requested.startsWith(download)),
       'the release was downloaded',
     );
-    if (route === 'asset') {
-      const [command, verify, file, ...flags] = (await readFile(ghLog, 'utf8')).trimEnd().split('\n');
-      assert.deepEqual([command, verify], ['attestation', 'verify']);
-      assert.match(file ?? '', /release\.tgz$/, 'gh checks the downloaded asset');
-      assert.deepEqual(flags, [
-        '--repo',
-        UPSTREAM,
-        '--signer-workflow',
-        `${UPSTREAM}/.github/workflows/release.yml`,
-        '--source-ref',
-        `refs/tags/v${RELEASE_VERSION}`,
-        '--source-digest',
-        RELEASE_SHA,
-      ]);
-    }
-    return update;
-  } finally {
-    await github.close();
-  }
+    if (route === 'codeload') return;
+    const [command, verify, file, ...flags] = (await readFile(ghLog, 'utf8')).trimEnd().split('\n');
+    assert.deepEqual([command, verify], ['attestation', 'verify']);
+    assert.match(file ?? '', /release\.tgz$/, 'gh checks the downloaded asset');
+    assert.deepEqual(flags, [
+      '--repo',
+      UPSTREAM,
+      '--signer-workflow',
+      `${UPSTREAM}/.github/workflows/release.yml`,
+      '--source-ref',
+      `refs/tags/v${RELEASE_VERSION}`,
+      '--source-digest',
+      RELEASE_SHA,
+    ]);
+  };
+  return { github, env, checkDownload };
+}
+
+/**
+ * Checks that the workflow pushed the update to the copy's repository, holding what the update job staged: the patch
+ * its record step took before the tests ran, or, in revision 1, what it staged after them.
+ *
+ * @param {import('./update-workflow-runner.js').WorkflowRun} workflow
+ */
+function checkPushed({ git, origin, copy, summary }) {
+  assert.equal(git(origin, ['log', '-1', '--format=%s', 'main']), `Update Tether to v${RELEASE_VERSION}`);
+  assert.equal(git(origin, ['rev-parse', 'main^{tree}']), git(copy, ['write-tree']), 'the commit is what was tested');
+  assert.match(summary, new RegExp(`^### Updated to v${RELEASE_VERSION.replaceAll('.', '\\.')}$`, 'm'));
 }
 
 for (const { tag, route } of OLD_UPDATERS) {
   test(
-    `a copy made from ${tag} installs this tree with its own updater, and its workflow's steps pass; a later failed update shows on the run`,
+    `a copy made from ${tag} is updated to this tree by its own workflow and updater, which commits what it tested; a later failed update shows on the run`,
     {
       timeout: UPGRADE_TIMEOUT_MS,
     },
@@ -332,17 +434,23 @@ for (const { tag, route } of OLD_UPDATERS) {
       }
       const work = await mkdtemp(join(tmpdir(), 'tether-upgrade-'));
       try {
-        const copy = join(work, 'copy');
+        const deployed = join(work, 'deployed');
         const release = join(work, 'release');
-        await extractServer(tag, copy);
+        await extractServer(tag, deployed);
         await releaseFolder(release);
-        const ownConfig = await readFile(join(copy, 'tether-sync.config.js'), 'utf8');
-        const revision = await workflowRevisionAt(copy);
+        const ownConfig = await readFile(join(deployed, 'tether-sync.config.js'), 'utf8');
+        const revision = await workflowRevisionAt(deployed);
         assert.ok(revision !== null, `${tag} ships the update workflow`);
         const outdated = revision < SHIPPED_REVISION;
 
-        const update = await updateThroughGitHub(copy, release, join(work, 'download'), route);
-        assert.match(update.stdout, new RegExp(`^updated=${RELEASE_VERSION.replaceAll('.', '\\.')}$`, 'm'));
+        const published = await publishRelease(release, join(work, 'download'), route);
+        const workflow = await runWorkflow(deployed, join(work, 'actions'), published.env).finally(() =>
+          published.github.close(),
+        );
+        await published.checkDownload();
+        const { copy, logs } = workflow;
+        const update = logs.get(UPDATE_STEP_ID) ?? '';
+        assert.match(update, new RegExp(`^updated=${RELEASE_VERSION.replaceAll('.', '\\.')}$`, 'm'));
         assert.equal(await versionIn(copy), RELEASE_VERSION);
         assert.equal(
           await readFile(join(copy, 'tether-sync.config.js'), 'utf8'),
@@ -352,22 +460,15 @@ for (const { tag, route } of OLD_UPDATERS) {
         for (const name of await readdir(release)) {
           assert.ok(existsSync(join(copy, name)), `${tag}'s updater installs ${name}`);
         }
-        if (!outdated) assert.doesNotMatch(update.stdout, OUTDATED, 'the workflow the copy has is current');
+        if (!outdated) assert.doesNotMatch(update, OUTDATED, 'the workflow the copy has is current');
 
-        // The test steps every revision of the workflow runs. A step is judged by its exit code, which node() checks;
-        // the reporter is pinned only so the count below reads the same on every Node (24 defaults to the spec
-        // reporter, which has no TAP summary), and so a run of no tests can't pass as success.
-        const tests = await node(copy, ['--test', '--test-reporter=tap', 'test/*.test.js']).catch(
-          (/** @type {unknown} */ error) => {
-            assert.fail(
-              `the copy's tests failed:\n${String(fieldOf(error, 'stdout'))}${String(fieldOf(error, 'stderr'))}`,
-            );
-          },
-        );
-        assert.match(tests.stdout, /^# tests [1-9]\d*$/m, 'the copy ran its tests');
-        assert.match(tests.stdout, /^# fail 0$/m);
-        const entry = await node(copy, ['-e', "import('./src/entry.js').then(() => console.log('entry ok'))"]);
-        assert.equal(entry.stdout.trim(), 'entry ok');
+        // The test step every revision runs. It is judged by its exit code, which runWorkflow checks; the count shows
+        // tests ran, in the TAP reporter Node 22 uses without a terminal, or the spec reporter of Node 24.
+        const tests = logs.get(TEST_STEP) ?? '';
+        assert.match(tests, /^(?:# |ℹ )tests [1-9]\d*$/m, 'the copy ran its tests');
+        assert.match(tests, /^(?:# |ℹ )fail 0$/m);
+        assert.match(tests, /^entry ok$/m);
+        checkPushed(workflow);
 
         const cli = await node(copy, ['bin/tether-sync.js']);
         assert.match(cli.stdout, /^tether-sync </);

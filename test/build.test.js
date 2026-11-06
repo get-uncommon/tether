@@ -2,7 +2,7 @@
 import { test, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM, VirtualConsole } from 'jsdom';
-import { readFile } from 'node:fs/promises';
+import { readdir, readFile } from 'node:fs/promises';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { builtTether, find, graphqlRequest, jsonResponse, operationName, partsOf, product } from './fixtures.js';
@@ -225,6 +225,33 @@ test('the release creates the GitHub Release, which deployed copies wait for, be
   const jobs = workflowJobs(await readFile(new URL('../.github/workflows/release.yml', import.meta.url), 'utf8'));
   assert.match(jobs.get('github-release') ?? '', /needs: \[server-asset, channel\]/);
   assert.match(jobs.get('npm') ?? '', /needs: \[github-release, channel\]/);
+});
+
+test('the GitHub Release leaves out every script that imports a file beside it, which flat assets lose', async () => {
+  const job = workflowJobs(await readFile(new URL('../.github/workflows/release.yml', import.meta.url), 'utf8'));
+  const [, filters] = /find dist -maxdepth 1 -type f(.*?) \| sort/.exec(job.get('github-release') ?? '') ?? [];
+  assert.ok(filters !== undefined, 'the assets are the top-level files of dist/');
+  const excluded = [...filters.matchAll(/! -name (\S+)/g)].map((match) => match[1]);
+  /** @type {string[]} */
+  const importing = [];
+  for (const entry of await readdir(DIST, { withFileTypes: true })) {
+    if (!entry.isFile() || !entry.name.endsWith('.js')) continue;
+    if (/\bfrom\s*['"]\.\.?\//.test(await readFile(join(DIST, entry.name), 'utf8'))) importing.push(entry.name);
+  }
+  assert.ok(importing.includes('tether.esm.js'), 'the ESM entry imports dist/esm/');
+  assert.deepEqual(excluded.sort(), importing.sort());
+});
+
+test('the release refuses a tag outside main, or outside its release/X.Y branch, before it installs anything', async () => {
+  const check =
+    workflowJobs(await readFile(new URL('../.github/workflows/release.yml', import.meta.url), 'utf8')).get('check') ??
+    '';
+  assert.match(check, /persist-credentials: false\n {10}fetch-depth: 0\n/, 'with the branches to compare against');
+  const onBranch = check.indexOf('- name: Tag is on main, and on release/X.Y when that branch exists');
+  assert.ok(onBranch !== -1 && onBranch < check.indexOf('- run: npm ci'), 'checked first');
+  assert.match(check, /branches=\(main\)\n/);
+  assert.match(check, /refs\/remotes\/origin\/release\/\$\{V%\.\*\}"[^\n]*branches\+=\("release\/\$\{V%\.\*\}"\)/);
+  assert.match(check, /git merge-base --is-ancestor "\$GITHUB_SHA" "origin\/\$branch" \|\| \{[^}]*exit 1; \}/);
 });
 
 test("the smoke workflow's issue token is in a job that checks nothing out and runs no dependency", async () => {

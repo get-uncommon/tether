@@ -45,8 +45,9 @@ jobs:
         with:
           node-version: 22
           package-manager-cache: false
-      # test/upgrade-from-released.test.js installs this tree into copies made from these tags, one per updater.
-      - run: git fetch --depth=1 --no-tags origin tag v0.6.7 tag v0.6.8 tag v0.7.0
+      # test/upgrade-from-released.test.js installs this tree into copies made from release tags, and fails when a
+      # release's updater is not among them: every release tag, so a new one can't be left out here.
+      - run: git fetch --depth=1 --no-tags origin '+refs/tags/v*:refs/tags/v*'
       - run: npm ci
       - name: Unit tests
         run: npm test
