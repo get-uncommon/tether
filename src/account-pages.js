@@ -4,7 +4,8 @@
  * order detail with returns, profile, addresses, subscriptions. The operations and their input
  * checks are shared with the Worker (server/src/shared/account-ops.js), so both modes do the same.
  */
-import { cfg, reportError } from './config.js';
+import { reportError } from './config.js';
+import { isHttpsUrl, localDate } from './account-links.js';
 import { TetherError } from './client.js';
 import { attr, sel, get, qsa, setText, setImage, repeat, show, formatMoney, emit } from './dom.js';
 import { ops, InputError } from '../server/src/shared/account-ops.js';
@@ -15,20 +16,6 @@ export function setup(c) {
   ctx = c;
 }
 
-const https = (u) => {
-  try {
-    return new URL(u).protocol === 'https:';
-  } catch {
-    return false;
-  }
-};
-const date = (s) => {
-  try {
-    return new Date(s).toLocaleDateString(cfg.locale || undefined);
-  } catch {
-    return s;
-  }
-};
 // ---------------------------------------------------------------- order detail, profile, addresses, subscriptions, returns
 
 // The same fixed operations in both modes: the Worker's routes in server mode, the Customer
@@ -96,17 +83,6 @@ export const requestReturn = (orderId, lines) =>
     return r.return;
   });
 
-const nid = (g) =>
-  String(g || '')
-    .split('/')
-    .pop()
-    .split('?')[0];
-/** The order's page: your own (account.orderUrl: '/account/order?id={id}') or Shopify's status page. */
-function orderUrl(o) {
-  const t = cfg.account?.orderUrl;
-  if (t) return String(t).replace('{id}', encodeURIComponent(nid(o.id)));
-  return https(o.statusPageUrl) ? o.statusPageUrl : null;
-}
 const lower = (v) => (v ? String(v).toLowerCase().replace(/_/g, ' ') : '');
 const lines = (a) => (a?.formatted || []).join(', ');
 const showIn = (root, name, conds) =>
@@ -190,12 +166,12 @@ async function renderOrder(el) {
   qsa(el, sel('order-bind')).forEach((b) => {
     const k = get(b, 'order-bind');
     if (k === 'url') {
-      if (https(o.statusPageUrl)) b.setAttribute('href', o.statusPageUrl);
+      if (isHttpsUrl(o.statusPageUrl)) b.setAttribute('href', o.statusPageUrl);
       return;
     }
     const v = {
       name: o.name,
-      date: date(o.processedAt),
+      date: localDate(o.processedAt),
       total: formatMoney(o.totalPrice),
       subtotal: o.subtotal ? formatMoney(o.subtotal) : '',
       shipping: o.totalShipping ? formatMoney(o.totalShipping) : '',
@@ -205,7 +181,7 @@ async function renderOrder(el) {
       'shipping-address': lines(o.shippingAddress),
       'billing-address': lines(o.billingAddress),
       items: (o.lineItems?.nodes || []).map((l) => `${l.quantity}× ${l.title || l.name}`).join(', '),
-      cancelled: o.cancelledAt ? date(o.cancelledAt) : '',
+      cancelled: o.cancelledAt ? localDate(o.cancelledAt) : '',
     }[k];
     if (v != null) setText(b, v);
   });
@@ -218,15 +194,15 @@ async function renderOrder(el) {
         .forEach((b) => {
           const k = get(b, 'fulfillment-bind');
           if (k === 'url') {
-            const ok = https(t.url);
+            const ok = isHttpsUrl(t.url);
             if (ok) b.setAttribute('href', t.url);
             show(b, ok);
             return;
           } // no tracking link: hidden
           const v = {
             status: lower(f.latestShipmentStatus || f.status),
-            date: date(f.createdAt),
-            eta: f.estimatedDeliveryAt ? date(f.estimatedDeliveryAt) : '',
+            date: localDate(f.createdAt),
+            eta: f.estimatedDeliveryAt ? localDate(f.estimatedDeliveryAt) : '',
             company: t.company || '',
             number: t.number || '',
           }[k];
@@ -343,7 +319,7 @@ async function renderSubscriptions(root) {
         const k = get(b, 'subscription-bind');
         const v = {
           status: lower(c.status),
-          next: c.nextBillingDate ? date(c.nextBillingDate) : '',
+          next: c.nextBillingDate ? localDate(c.nextBillingDate) : '',
           interval: unit ? (n === 1 ? unit : `${n} ${unit}s`) : '',
           products: ls.map((l) => `${l.quantity}× ${l.title}`).join(', '),
           total: ls.length ? formatMoney({ amount: String(total), currencyCode: c.currencyCode }) : '',

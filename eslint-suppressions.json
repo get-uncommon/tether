@@ -290,13 +290,7 @@
       "count": 6
     },
     "@typescript-eslint/no-unnecessary-condition": {
-      "count": 3
-    },
-    "@typescript-eslint/no-unused-vars": {
-      "count": 1
-    },
-    "@typescript-eslint/prefer-nullish-coalescing": {
-      "count": 1
+      "count": 2
     },
     "@typescript-eslint/restrict-plus-operands": {
       "count": 1
@@ -328,13 +322,10 @@
       "count": 2
     },
     "@typescript-eslint/no-unnecessary-condition": {
-      "count": 7
-    },
-    "@typescript-eslint/no-unused-vars": {
-      "count": 1
+      "count": 6
     },
     "@typescript-eslint/prefer-nullish-coalescing": {
-      "count": 3
+      "count": 2
     },
     "@typescript-eslint/prefer-optional-chain": {
       "count": 1

@@ -21,8 +21,9 @@
  * registered in the Headless channel's Customer Account API settings (client type: Public).
  */
 import { cfg, log, reportError } from './config.js';
+import { localDate, orderUrl } from './account-links.js';
 import { TetherError } from './client.js';
-import { attr, sel, get, qsa, setText, setImage, repeat, show, formatMoney, emit } from './dom.js';
+import { sel, get, qsa, setText, setImage, repeat, show, formatMoney, emit } from './dom.js';
 import { Cart } from './cart.js';
 import { loadPart } from './lazy.js';
 import { randomToken, toBase64Url } from '../server/src/shared/base64url.js';
@@ -359,21 +360,6 @@ export async function logout({ returnTo = cfg.account?.logoutUrl || `${window.lo
 
 // ---------------------------------------------------------------- markup
 
-const https = (u) => {
-  try {
-    return new URL(u).protocol === 'https:';
-  } catch {
-    return false;
-  }
-}; // links from Shopify: https only
-const date = (s) => {
-  try {
-    return new Date(s).toLocaleDateString(cfg.locale || undefined);
-  } catch {
-    return s;
-  }
-};
-
 export async function render(root = document) {
   const logged = server()
     ? Boolean((await serverMe().catch(() => ({ loggedIn: false }))).loggedIn)
@@ -436,7 +422,7 @@ async function renderOrderList(root) {
           }
           const v = {
             name: o.name,
-            date: date(o.processedAt),
+            date: localDate(o.processedAt),
             total: formatMoney(o.totalPrice),
             status: o.financialStatus?.toLowerCase(),
             fulfillment: o.fulfillmentStatus?.toLowerCase(),
@@ -452,17 +438,6 @@ async function renderOrderList(root) {
   }
 }
 
-const nid = (g) =>
-  String(g || '')
-    .split('/')
-    .pop()
-    .split('?')[0];
-/** The order's page: your own (account.orderUrl: '/account/order?id={id}') or Shopify's status page. */
-function orderUrl(o) {
-  const t = cfg.account?.orderUrl;
-  if (t) return String(t).replace('{id}', encodeURIComponent(nid(o.id)));
-  return https(o.statusPageUrl) ? o.statusPageUrl : null;
-}
 function fillLines(box, items) {
   repeat(box, items, (row, l) => {
     qsa(row, sel('order-line'))
