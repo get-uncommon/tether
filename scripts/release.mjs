@@ -2,23 +2,24 @@
 /**
  * One-step release, run by the owner:
  *
- *   npm run release -- 0.4.0            bump everywhere, build, test, commit, tag
+ *   npm run release -- 0.4.0            set the version, build, test, commit, tag
  *   npm run release -- 0.4.0 --push     ...and push (GitHub Actions then publishes to npm
  *                                       with provenance and creates the GitHub Release)
  *
  * Needs a "## 0.4.0" section in CHANGELOG.md first (the release notes come from it), a clean
- * working tree and the main branch.
+ * working tree and the main branch. The version is set in package.json and written from there into every
+ * copy (`versions.mjs`).
  */
 import { readFile, writeFile } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { packageVersion, syncVersions } from './versions.mjs';
 
 /** @typedef {[major: number, minor: number, patch: number]} Version */
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const VERSION_PATTERN = /^\d+\.\d+\.\d+$/;
-const VERSION_CONSTANT = /export const VERSION = '[^']+';/;
 const PACKAGE_VERSION = /"version": "\d+\.\d+\.\d+"/;
 
 /**
@@ -110,9 +111,7 @@ async function checkReady(version) {
   if (!VERSION_PATTERN.test(version)) fail('usage: npm run release -- X.Y.Z [--push]');
   if (output('git', ['status', '--porcelain'])) fail('working tree not clean: commit or stash first');
   if (output('git', ['branch', '--show-current']) !== 'main') fail('not on main');
-  /** @type {unknown} */
-  const pkg = JSON.parse(await readFile(join(ROOT, 'package.json'), 'utf8'));
-  const current = String(/** @type {{ version: unknown }} The repository's own package.json. */ (pkg).version);
+  const current = await packageVersion(ROOT);
   if (!isNewer(parseVersion(version), parseVersion(current))) fail(`${version} is not newer than ${current}`);
   const changelog = await readFile(join(ROOT, 'CHANGELOG.md'), 'utf8');
   if (!new RegExp(`^## ${version.replace(/\./g, '\\.')}\\b`, 'm').test(changelog)) {
@@ -125,12 +124,8 @@ async function bump(version) {
   const [major, minor] = parseVersion(version);
   /** @param {string} text */
   const packageJson = (text) => text.replace(PACKAGE_VERSION, `"version": "${version}"`);
-  /** @param {string} text */
-  const versionConstant = (text) => text.replace(VERSION_CONSTANT, `export const VERSION = '${version}';`);
   await edit('package.json', packageJson);
-  await edit('server/package.json', packageJson);
-  await edit('src/index.js', versionConstant);
-  await edit('server/src/version.js', versionConstant);
+  await syncVersions(ROOT);
   // Pinned examples in the README; ranges like @0.3 follow the minor version.
   await edit(
     'README.md',
@@ -141,7 +136,6 @@ async function bump(version) {
         .replace(/`@\d+\.\d+` gets every \d+\.\d+\.x fix/, `\`@${major}.${minor}\` gets every ${major}.${minor}.x fix`),
     { optional: true },
   );
-  // server/TETHER_VERSION stays 'latest': deployed sync copies follow every release (weekly updater).
 }
 
 const [version = ''] = process.argv.slice(2).filter((arg) => !arg.startsWith('--'));

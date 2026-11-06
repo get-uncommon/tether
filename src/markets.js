@@ -19,7 +19,7 @@
  * working across pages; `detect: false` turns even that off. Tether never calls an IP lookup service: a country from
  * the visitor's IP only comes from the site's own server (see README).
  */
-import { cfg } from './config.js';
+import { MARKET_SOURCES, cfg, parseMarkets } from './config.js';
 import { gql } from './client.js';
 import { toCountry, toLanguage } from './market-codes.js';
 /** @import { MarketsConfig } from './config.js' */
@@ -64,8 +64,6 @@ import { toCountry, toLanguage } from './market-codes.js';
  * @property {(LocalizedCountry & { availableLanguages: NamedCode[] })[]} availableCountries
  */
 
-/** @type {readonly MarketSource[]} */
-const ALL_SOURCES = ['saved', 'server', 'webflow'];
 const DEFAULT_COOKIE = 'tether_country';
 
 /** @returns {string} The localStorage key of the visitor's market: `<prefix>:market:<domain>`. */
@@ -219,20 +217,12 @@ function readSource(source, markets, env) {
 }
 
 /**
- * @param {unknown} name
- * @returns {name is MarketSource}
- */
-const isMarketSource = (name) => ALL_SOURCES.some((source) => source === name);
-
-/**
- * @param {MarketsConfig['detect']} detect
+ * @param {MarketsConfig['detect']} detect Validated: a list holds only known sources.
  * @returns {readonly MarketSource[]} Without `detect`, only the visitor's own choice from a country select.
  */
 function sourcesFor(detect) {
   if (!detect) return ['saved'];
-  if (detect === true) return ALL_SOURCES;
-  // The config comes from the page unvalidated, so a single name or an unknown one can arrive here.
-  return /** @type {unknown[]} */ ([detect].flat()).filter(isMarketSource);
+  return detect === true ? MARKET_SOURCES : detect;
 }
 
 /**
@@ -243,7 +233,8 @@ function sourcesFor(detect) {
  * @returns {DetectedMarket} Only the fields found; `{}` with `detect: false`.
  */
 export function detectMarket(markets = cfg.markets, env = pageEnv()) {
-  const config = markets ?? {};
+  // The config's own `markets` was validated by `configure()`; one passed in by the site's code is validated here.
+  const config = (markets === cfg.markets ? markets : parseMarkets(markets)) ?? {};
   if (config.detect === false) return {};
   /** @type {MarketSources} */
   const sources = {};

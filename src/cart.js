@@ -144,9 +144,9 @@ export const Cart = {
   get state() {
     return currentCart();
   },
-  /** @returns {readonly ShopifyCartLine[]} */
+  /** @returns {ShopifyCartLine[]} The cart's lines, a copy: changing it changes nothing in the cart. */
   get lines() {
-    return currentLines();
+    return [...currentLines()];
   },
   /** @returns {number} */
   get count() {
@@ -156,17 +156,21 @@ export const Cart = {
   get loaded() {
     return cartStatus().kind !== 'unknown';
   },
-  /** @returns {unknown} The failure of the last load or change, until a change succeeds. */
+  /**
+   * @returns {Error | null} The failure of the last load or change, until a change succeeds. Requests fail with an
+   *   `Error`; anything else thrown is wrapped, so the public type holds.
+   */
   get lastError() {
     const current = cartStatus();
-    return current.kind === 'error' ? current.error : null;
+    if (current.kind !== 'error') return null;
+    return current.error instanceof Error ? current.error : new Error(String(current.error));
   },
   set lastError(error) {
     setFailure(error);
   },
-  /** @returns {readonly CartWarning[]} Shopify's notes on the last change. */
+  /** @returns {CartWarning[]} Shopify's notes on the last change, a copy. */
   get warnings() {
-    return currentWarnings();
+    return [...currentWarnings()];
   },
   /** @returns {ReadonlyMap<string, { quantity: number }>} Line id → the quantity quick clicks asked for. */
   get pendingQty() {
@@ -219,7 +223,8 @@ export const Cart = {
    * @param {string | number | LineSpec | (string | number | LineSpec)[]} input
    * @param {number} [quantity]
    * @param {Omit<LineSpec, 'variantId' | 'quantity'>} [options]
-   * @returns {Promise<ShopifyCart | null>}
+   * @returns {Promise<ShopifyCart>}
+   * @throws {TetherError} (rejected) When the add fails, or Shopify answers it without a cart.
    */
   add(input, quantity = 1, options = {}) {
     /** @type {CartLineInput[]} */
@@ -232,6 +237,8 @@ export const Cart = {
         variables: { lines },
         createInput: { lines },
       });
+      // A mutation answers without a cart only beside user errors, which reject above; an add always has one.
+      if (!cart) throw new TetherError('Shopify answered the add without a cart');
       commit(cart, 'add');
       emit('added', { cart, lines });
       if (cfg.openCartOnAdd) openCart();

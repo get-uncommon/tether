@@ -149,3 +149,39 @@ test('markets and analytics keep the values of the right kind', () => {
   assert.equal(resolveConfig({}).markets, null);
   assert.equal(resolveConfig({ analytics: { dataLayer: true } }).analytics?.dataLayer, true);
 });
+
+test('an unknown or misspelt option warns and never reaches the config', () => {
+  const { result, warned } = quietly(() => resolveConfig({ openCartOnAd: false, domain: 'shop.test' }));
+  assert.equal('openCartOnAd' in result, false);
+  assert.equal(result.openCartOnAdd, true);
+  assert.deepEqual(warned, ['[tether] unknown option "openCartOnAd": ignored']);
+});
+
+test('partsUrl must be https or on the site, checked when the config is resolved', () => {
+  const resolve = (partsUrl) => quietly(() => resolveConfig({ partsUrl }));
+  assert.equal(resolve('https://cdn.test/tether/').result.partsUrl, 'https://cdn.test/tether/');
+  assert.equal(resolve('/assets/tether/').result.partsUrl, '/assets/tether/');
+  const plain = resolve('http://cdn.test/tether/');
+  assert.equal(plain.result.partsUrl, null);
+  assert.equal(plain.warned.length, 1);
+  assert.equal(resolve('javascript:alert(1)').result.partsUrl, null);
+});
+
+test('Tether.config shows the live config and refuses writes, which would skip validation', async () => {
+  const { configView } = await import('../src/config.js');
+  quietly(() => configure({ domain: 'shop.test', markets: { detect: ['saved'] } }));
+  assert.equal(configView.domain, 'shop.test');
+  const { warned } = quietly(() => {
+    assert.throws(() => {
+      configView.prefix = 'x"] *';
+    }, TypeError);
+    assert.throws(() => {
+      configView.markets.detect.push('server');
+    }, TypeError);
+  });
+  assert.equal(cfg.prefix, 'tether');
+  assert.deepEqual(cfg.markets.detect, ['saved']);
+  assert.equal(warned.length, 2);
+  quietly(() => configure({ domain: 'other.test' }));
+  assert.equal(configView.domain, 'other.test', 'a view, not a copy');
+});

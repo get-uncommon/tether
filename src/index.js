@@ -7,7 +7,7 @@
  * With page transitions (Barba, Swup): set `autoMount: false`, call `Tether.init()` once and
  * `Tether.mount(container)` after every page enter.
  */
-import { cfg, configure, isConfigured, log, warn, reportError } from './config.js';
+import { cfg, configView, configure, isConfigured, log, warn, reportError } from './config.js';
 import { gql, TetherError, withContext } from './client.js';
 import { Cart } from './cart.js';
 import { scopes } from './product.js';
@@ -22,7 +22,7 @@ import {
 } from './loader.js';
 import * as plans from './selling-plans.js';
 import { resolveProductKey } from './status.js';
-import { sel, emit, formatMoney, imageUrl } from './dom.js';
+import { sel, emit, isOwnEvent, ownEvent, formatMoney, imageUrl } from './dom.js';
 import { loadPart, coreModules } from './lazy.js';
 import {
   mountedLists,
@@ -92,8 +92,9 @@ function mountLists(root) {
     const list = new ListScope(el);
     liveLists.add(list);
     el.addEventListener(`${cfg.prefix}:list-rendered`, (event) => {
-      // The list emits this CustomEvent once its products are in the page.
-      mount(/** @type {CustomEvent<{ container: ParentNode }>} */ (event).detail.container);
+      // The list emits this once its products are in the page, with the element they are in.
+      if (!isOwnEvent(event)) return;
+      mount(/** @type {CustomEvent<{ container: Element }>} */ (event).detail.container);
     });
     void trackMarket(list.load());
   });
@@ -126,9 +127,25 @@ function mountParts(root) {
 }
 
 /**
+ * Mounts the lists, product scopes and parts inside `root`, after its hydrate tags were read (products the server
+ * rendered into the page need no request), without the page-wide work that follows a mount.
+ *
+ * @param {Document | Element} root
+ * @returns {number} The scopes and lists newly mounted.
+ */
+function mountWithin(root) {
+  let count = mountLists(root);
+  within(root, sel('product')).forEach((el) => {
+    if (mountProduct(el)) count++;
+  });
+  mountParts(root);
+  return count;
+}
+
+/**
  * Mounts every product scope and product list inside `root`. Safe to call repeatedly.
  *
- * @param {ParentNode} [root]
+ * @param {Document | Element} [root]
  * @returns {number} The scopes and lists newly mounted.
  */
 export function mount(root = document) {
@@ -136,17 +153,35 @@ export function mount(root = document) {
   if (root === document) rememberDocumentMount();
   // Page transitions detach old roots: they aren't kept alive.
   pruneLive();
-  // Products the server rendered into the page need no request.
   hydrateFromPage(root.ownerDocument ?? document);
-  let count = mountLists(root);
-  within(root, sel('product')).forEach((el) => {
-    if (mountProduct(el)) count++;
-  });
-  mountParts(root);
+  const count = mountWithin(root);
   settleMarket();
   Cart.render();
   log(`mounted ${count} scope(s)`, root);
   return count;
+}
+
+/**
+ * `observe`: mounts a burst of added elements at once. Each root is scanned on its own (an element inside another
+ * added one is covered by it), and the page-wide work (market state, the cart's markup) runs once for the burst.
+ *
+ * @param {readonly Element[]} added
+ */
+function mountAdded(added) {
+  const roots = added.filter(
+    (root) => root.isConnected && !added.some((other) => other !== root && other.contains(root)),
+  );
+  if (!roots.length || !isConfigured()) return;
+  pruneLive();
+  // Only the added elements are read for hydrate tags: the rest of the page was read when it was mounted. A load-more
+  // fragment may bring its tag after the cards it is for, so every tag is read before any card mounts.
+  roots.forEach((root) => {
+    hydrateFromPage(root);
+  });
+  const count = roots.reduce((sum, root) => sum + mountWithin(root), 0);
+  settleMarket();
+  Cart.render();
+  log(`mounted ${count} scope(s) in ${roots.length} added element(s)`);
 }
 
 /** Call before a page transition removes the page: closes the cart drawer. */
@@ -180,7 +215,7 @@ function startAnalyticsQueue() {
   ANALYTICS_EVENTS.forEach((name) => {
     document.addEventListener(`${cfg.prefix}:${name}`, (event) => queue.push(event));
   });
-  document.addEventListener('astro:page-load', () => queue.push(new CustomEvent(`${cfg.prefix}:page`)));
+  document.addEventListener('astro:page-load', () => queue.push(ownEvent('page')));
   loadPart('analytics')
     .then((part) => part.startAnalytics(queue))
     .catch((/** @type {unknown} */ error) => {
@@ -249,10 +284,9 @@ function startObserver() {
     });
     clearTimeout(timer);
     timer = setTimeout(() => {
-      queued.forEach((node) => {
-        if (node.isConnected) mount(node);
-      });
+      const added = [...queued];
       queued.clear();
+      mountAdded(added);
     }, OBSERVE_DEBOUNCE_MS);
   });
   observer.observe(document.body, { childList: true, subtree: true });
@@ -271,14 +305,16 @@ const diagnose = (options) => loadPart('diagnose').then((part) => part.diagnose(
 /**
  * Listens to the Tether event `<prefix>:<name>`.
  *
+ * @template [Detail=unknown] The event's detail, as the public types list it per name (`TetherEvents`).
  * @param {string} name
- * @param {(detail: unknown, event: CustomEvent) => void} listener
+ * @param {(detail: Detail, event: CustomEvent<Detail>) => void} listener
  * @returns {() => void} Stops listening.
  */
 function on(name, listener) {
   /** @param {Event} event */
   const handler = (event) => {
-    const custom = /** @type {CustomEvent} Tether's events are CustomEvents. */ (event);
+    // Tether's events are CustomEvents whose detail `emit` wrote for this name; the site's listener states its type.
+    const custom = /** @type {CustomEvent<Detail>} */ (event);
     listener(custom.detail, custom);
   };
   document.addEventListener(`${cfg.prefix}:${name}`, handler);
@@ -292,9 +328,9 @@ export const api = {
   init,
   mount,
   unmount,
-  /** @returns {TetherConfig} */
+  /** @returns {Readonly<TetherConfig>} The live config, read-only. */
   get config() {
-    return cfg;
+    return configView;
   },
   /** @returns {Promise<TetherApi | null>} */
   get ready() {

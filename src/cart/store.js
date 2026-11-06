@@ -84,7 +84,7 @@ import { renderCart, quantityOf, showSavedCount } from './render.js';
  * @property {boolean} open
  * @property {number} count
  * @property {boolean} loaded
- * @property {readonly CartWarning[]} warnings
+ * @property {CartWarning[]} warnings A copy of Shopify's notes on the last change.
  */
 
 /** @type {CartStatus} */
@@ -300,7 +300,7 @@ const meta = () => ({
   open: isOpen(),
   count: currentCart()?.totalQuantity ?? 0,
   loaded: status.kind !== 'unknown',
-  warnings,
+  warnings: [...warnings],
 });
 
 /**

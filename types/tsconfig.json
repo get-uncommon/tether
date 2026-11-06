@@ -6,7 +6,9 @@
     "module": "nodenext",
     "moduleResolution": "nodenext",
     "lib": ["es2020", "dom"],
-    "skipLibCheck": false
+    "skipLibCheck": false,
+    "allowJs": true,
+    "checkJs": false
   },
-  "files": ["check.ts"]
+  "files": ["check.ts", "check-implementation.ts"]
 }

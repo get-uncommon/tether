@@ -13,12 +13,14 @@
  * Shopify's analytics are set up in analytics-shopify.js.
  */
 import { cfg, reportError } from './config.js';
-import { sel } from './dom.js';
+import { isOwnEvent, sel } from './dom.js';
 import { Cart } from './cart.js';
+import { scopes } from './product.js';
 import { startShopifyAnalytics } from './analytics-shopify.js';
 /** @import { Money } from './shopify-values.js' */
 /** @import { Product, ProductVariant } from './fragments.js' */
 /** @import { AnalyticsBus, EventPayload } from './analytics-shopify.js' */
+/** @import { ProductScope } from './product.js' */
 
 /**
  * cart.js has no types yet; these are the fields of its cart (`fragment TetherCart`) this module reads.
@@ -57,7 +59,7 @@ import { startShopifyAnalytics } from './analytics-shopify.js';
  * @property {number} [index]
  */
 /** @typedef {{ id: string, handle: string, title: string }} ListCollection */
-/** @typedef {{ product: Product, scope: { root: Element, variant: ProductVariant | null } | null }} ProductReadyDetail */
+/** @typedef {{ product: Product, scope: ProductScope | null }} ProductReadyDetail */
 /** @typedef {{ products: Product[] | undefined, collection: ListCollection | null }} ListReadyDetail */
 /** @typedef {{ cart: AnalyticsCart | null, reason: string }} CartUpdatedDetail */
 
@@ -202,14 +204,11 @@ function send(name, data, shopifyEvent, shopifyPayload) {
   }
 }
 
-/** @returns {unknown} The scope of the page's own product: a product root outside every list. */
+/** @returns {ProductScope | null} The scope of the page's own product: a product root outside every list. */
 function mainProduct() {
   const el = document.querySelector(sel('product'));
   if (!el || el.closest(`${sel('collection')},${sel('products')},${sel('recommendations')}`)) return null;
-  /** @type {unknown} */
-  const tether = Reflect.get(window, 'Tether');
-  // The core sets window.Tether before it loads this part.
-  return /** @type {{ getScope: (el: Element) => unknown }} */ (tether).getScope(el);
+  return scopes.get(el) ?? null;
 }
 
 /** @param {ProductReadyDetail} detail */
@@ -293,11 +292,14 @@ function onCheckout({ cart }) {
 }
 
 /**
- * Turns one Tether event into analytics events. The details are Tether's own (`emit`), typed per event here.
+ * Turns one Tether event into analytics events. Only events Tether created count (`isOwnEvent`): their detail is the
+ * one `emit` wrote for that name, the shape typed per event here. A look-alike event from another script, whatever
+ * its detail, sends nothing.
  *
  * @param {Event} event `<prefix>:<name>`.
  */
 function handle(event) {
+  if (!isOwnEvent(event)) return;
   const name = event.type.slice(cfg.prefix.length + 1);
   /** @type {unknown} */
   const detail = Reflect.get(event, 'detail');

@@ -36,7 +36,7 @@ export { apiVersionStatus, checkMarkup, didYouMean };
 /** @typedef {{ product: string, group: string, plan: string, id: string }} SellingPlanReport */
 /**
  * @typedef {object} DiagnoseReport
- * @property {string | undefined} version
+ * @property {string} version Tether's version, `''` when the caller didn't say.
  * @property {Record<string, unknown>} config The config, with the token masked.
  * @property {ApiVersionStatus} apiVersion
  * @property {MarketReport} market
@@ -233,7 +233,7 @@ async function checkProducts(root, report) {
  * @param {DiagnoseOptions} [options]
  * @returns {Promise<DiagnoseReport>} What's wrong on the page: config, token, API version, products, plans, markup.
  */
-export async function diagnose({ root = document, silent = false, version, now = new Date() } = {}) {
+export async function diagnose({ root = document, silent = false, version = '', now = new Date() } = {}) {
   const storefront = await checkStorefront();
   /** @type {DiagnoseReport} */
   const report = {

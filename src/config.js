@@ -6,7 +6,16 @@
  */
 import { STOREFRONT_API_VERSION } from '../server/src/shared/api-versions.js';
 import { isQuarterlyVersion } from './api-version.js';
-import { accountOption, analyticsOption, domainOption, marketsOption, metafieldsOption } from './config-sections.js';
+import {
+  accountOption,
+  analyticsOption,
+  domainOption,
+  marketsOption,
+  metafieldsOption,
+  partsUrlOption,
+} from './config-sections.js';
+
+export { MARKET_SOURCES } from './config-sections.js';
 import { toCountry, toLanguage } from './market-codes.js';
 /** @import { Money } from './shopify-values.js' */
 /** @import { CountryCode, LanguageCode } from './market-codes.js' */
@@ -102,10 +111,12 @@ import { toCountry, toLanguage } from './market-codes.js';
  */
 
 /**
- * What a site passes: any option, the market as the codes people write (`'de'`, `'pt-BR'`).
+ * What a site passes: any option, the market as the codes people write (`'de'`, `'pt-BR'`), and `null` for the
+ * default storage key.
  *
- * @typedef {{ [Key in Exclude<keyof TetherConfig, 'country' | 'language'>]?: TetherConfig[Key] }
- *   & { country?: string | undefined, language?: string | undefined }} TetherOptions
+ * @typedef {{ [Key in Exclude<keyof TetherConfig, 'country' | 'language' | 'storageKey'>]?: TetherConfig[Key] }
+ *   & { country?: string | undefined, language?: string | undefined, storageKey?: string | null | undefined }}
+ *   TetherOptions
  */
 
 /** @type {Readonly<TetherConfig>} */
@@ -158,6 +169,37 @@ export const DEFAULTS = {
 
 /** @type {TetherConfig} */
 export const cfg = { ...DEFAULTS };
+
+/**
+ * @template {object} T
+ * @param {T} target
+ * @returns {T} A view of `target` and the objects in it that reads the live values and refuses every change: a
+ *   write throws in strict-mode code (as on a frozen object) and warns in any code.
+ */
+function readOnlyView(target) {
+  /** @param {string | symbol} key */
+  const refuse = (key) => {
+    warn(`Tether.config is read-only (${String(key)}): pass options to Tether.init() instead`);
+    return false;
+  };
+  return new Proxy(target, {
+    get(object, key) {
+      /** @type {unknown} */
+      const value = Reflect.get(object, key);
+      // The config's objects are its own copies (`resolveConfig`), never frozen, so a view of each is allowed.
+      return typeof value === 'object' && value !== null ? readOnlyView(value) : value;
+    },
+    set: (_object, key) => refuse(key),
+    deleteProperty: (_object, key) => refuse(key),
+    defineProperty: (_object, key) => refuse(key),
+  });
+}
+
+/**
+ * `cfg` as `Tether.config` shows it. A value written there would skip the validation `configure()` does, so the view
+ * is read-only; `Tether.init(options)` is how a site changes the config.
+ */
+export const configView = readOnlyView(cfg);
 
 /** The prefix becomes part of attribute names, CSS selectors and event names, so it is kept to those characters. */
 const PREFIX = /^[a-z][a-z0-9-]*$/;
@@ -229,6 +271,46 @@ function invalidOption(name, value, fallback) {
 }
 
 /**
+ * Warns about an option without a default to fall back to, which is left out (`config-sections.js` too).
+ *
+ * @param {string} name
+ * @param {unknown} value
+ */
+function dropped(name, value) {
+  warn(`invalid ${name} ${JSON.stringify(value)}: ignored`);
+}
+
+/**
+ * @param {Readonly<Record<string, unknown>>} options
+ * @returns {void} Warns about each key that is no option, so a misspelt one (`openCartOnAd`) is seen; none of them
+ *   reaches `cfg`.
+ */
+function warnUnknownKeys(options) {
+  for (const key of Object.keys(options)) {
+    if (!(key in DEFAULTS)) warn(`unknown option ${JSON.stringify(key)}: ignored`);
+  }
+}
+
+/**
+ * @param {unknown} value
+ * @returns {((...args: never[]) => unknown) | null} A site's hook, `null` for anything that isn't a function.
+ */
+function hookOption(value) {
+  return typeof value === 'function' ? /** @type {(...args: never[]) => unknown} */ (value) : null;
+}
+
+/**
+ * @param {Readonly<Record<string, unknown>>} options
+ * @returns {Pick<TetherConfig, HookOption>}
+ */
+function hookOptions(options) {
+  const hooks = Object.fromEntries(HOOK_OPTIONS.map((name) => [name, hookOption(options[name])]));
+  // A function from the site can only be checked for being callable; how it is called is the documented signature
+  // of its option.
+  return /** @type {Pick<TetherConfig, HookOption>} */ (hooks);
+}
+
+/**
  * @param {CountOption} name
  * @param {unknown} value
  * @returns {number} `value` when it is a non-negative integer, else the default.
@@ -272,15 +354,6 @@ function localeOption(value) {
 }
 
 /**
- * @param {unknown} value
- * @returns {string | null} The folder of the optional parts as written; lazy-iife.js checks where it points.
- */
-function partsUrlOption(value) {
-  if (value === undefined || value === null || value === '') return null;
-  return typeof value === 'string' ? value : invalidOption('partsUrl', value, null);
-}
-
-/**
  * @template {string} Choice
  * @param {string} name
  * @param {unknown} value
@@ -290,16 +363,6 @@ function partsUrlOption(value) {
 function choiceOption(name, value, choices) {
   return choices.find((choice) => choice === value) ?? invalidOption(name, value, choices[0]);
 }
-
-/**
- * Warns about a nested option that was left out (`config-sections.js`).
- *
- * @param {string} name
- * @param {unknown} value
- */
-const dropped = (name, value) => {
-  warn(`invalid ${name} ${JSON.stringify(value)}: ignored`);
-};
 
 /**
  * @param {unknown} value
@@ -338,6 +401,7 @@ function codeOption(name, value, parse) {
  * @returns {TetherConfig}
  */
 export function resolveConfig(options) {
+  warnUnknownKeys(options);
   const domain = domainOption(options.domain, dropped);
   const prefix =
     typeof options.prefix === 'string' && PREFIX.test(options.prefix)
@@ -346,12 +410,12 @@ export function resolveConfig(options) {
   /** @type {TetherConfig} */
   const resolved = {
     ...DEFAULTS,
-    ...options,
+    ...hookOptions(options),
     domain,
     apiVersion: apiVersionOption(options.apiVersion),
     country: codeOption('country', options.country, toCountry),
     locale: localeOption(options.locale),
-    partsUrl: partsUrlOption(options.partsUrl),
+    partsUrl: partsUrlOption(options.partsUrl, dropped),
     language: codeOption('language', options.language, toLanguage),
     markets: marketsOption(options.markets, dropped),
     analytics: analyticsOption(options.analytics, dropped),
@@ -366,9 +430,14 @@ export function resolveConfig(options) {
   for (const name of COUNT_OPTIONS) resolved[name] = countOption(name, options[name]);
   for (const name of SWITCH_OPTIONS) resolved[name] = switchOption(name, options[name]);
   for (const name of TEXT_OPTIONS) resolved[name] = textOption(name, options[name]);
-  for (const name of HOOK_OPTIONS) if (typeof resolved[name] !== 'function') resolved[name] = null;
   return resolved;
 }
+
+/**
+ * @param {unknown} value A `markets` option from code other than the config (`Tether.detectMarket(markets)`).
+ * @returns {MarketsConfig | null} It validated as the config's own is, with the same warnings.
+ */
+export const parseMarkets = (value) => marketsOption(value, dropped);
 
 /**
  * Replaces the shared configuration with `options` over the defaults (see `resolveConfig`).

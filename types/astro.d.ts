@@ -2,8 +2,8 @@ import type { TetherConfig } from './index.js';
 
 type Serializable<T> = {
   [
-    K in keyof T as T[K] extends ((...args: any[]) => any) | null | undefined
-      ? Exclude<T[K], null | undefined> extends (...args: any[]) => any
+    K in keyof T as T[K] extends ((...args: never[]) => unknown) | null | undefined
+      ? Exclude<T[K], null | undefined> extends (...args: never[]) => unknown
         ? never
         : K
       : K
@@ -24,5 +24,6 @@ export interface TetherAstroOptions extends Partial<Serializable<TetherConfig>> 
  */
 export default function tether(options?: TetherAstroOptions): {
   name: string;
+  // Astro isn't a dependency, so its hook argument types aren't known here; `any` lets Astro pass them in.
   hooks: Record<string, (...args: any[]) => unknown>;
 };

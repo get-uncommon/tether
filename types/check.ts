@@ -14,7 +14,7 @@ async function server() {
   const one = await shop.getProduct(all[0].handle);
   const html: string = shop.hydrate(one ? [one] : []);
   const price: string = shop.formatMoney(all[0].priceRange.minVariantPrice);
-  const img: string = shop.imageUrl(all[0].featuredImage?.url, { width: 800 });
+  const img: string | undefined = shop.imageUrl(all[0].featuredImage?.url, { width: 800 });
   void img;
   return [html, price, shop.productUrl(all[0].handle)];
 }

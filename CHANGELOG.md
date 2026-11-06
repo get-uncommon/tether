@@ -2,6 +2,47 @@
 
 ## Unreleased
 
+- Security: descriptions lose `id` attributes (they could clobber `window.<id>` and the site's own
+  ids), inline style declarations that position content over the page or load from elsewhere
+  (`position`, `top`/`right`/`bottom`/`left`/`inset`, `z-index`, any value with `url(`,
+  `expression(` or `@import`), and iframes from the site's own origin; an iframe's `allow` keeps only
+  `autoplay`, `encrypted-media`, `picture-in-picture`, `fullscreen`, `clipboard-write`,
+  `accelerometer`, `gyroscope` and `web-share`. **Behaviour change:** inline styles are written back
+  as the browser parses them (`color:red` becomes `color: red;`); the look is the same.
+- Config: an unknown `TETHER_CONFIG` key (a typo) warns and is left out of the config. `partsUrl`
+  is checked when Tether starts: one that is neither https nor on the site warns and the parts load
+  beside the core. `markets.detect` takes a single source name too, and `Tether.detectMarket(markets)`
+  validates the `markets` it is given. **Behaviour change:** `Tether.config` is a read-only view of
+  the live config: a write throws in strict-mode code and warns (`Tether.init(options)` changes it).
+- Analytics: only events Tether itself sent become analytics events; a look-alike `tether:*` event
+  from another script sends nothing (and no longer throws inside the analytics part).
+- `observe`: each burst of added elements is mounted once, reading only their own hydrate tags and
+  rendering the cart once, instead of rescanning the document per element.
+- A `data-tether-hydrate` entry without the lists and prices a render walks is skipped, and the
+  product loads from Shopify.
+- A failed mount after `astro:page-load`, a failed render after add-to-cart and a failed refresh of
+  a server-rendered product are reported (or handled) instead of surfacing as unhandled rejections.
+- `@inContext` is added after reading the operation header with strings and comments blanked out:
+  a `)` in a variable's default value no longer misplaces it, and the word `@inContext` in a comment
+  or the selection set no longer stops it. An operation that names its own `@inContext` keeps it.
+- Script build: a part file that loads but doesn't register is tried again on next use. **Behaviour
+  change:** when the core was not loaded by a `<script src>` (so its folder is unknown) and there is
+  no `partsUrl`, loading a part fails with a message saying so, instead of fetching it from the site
+  root.
+- Cart: `Tether.cart.lines`, `Tether.cart.warnings` and the `subscribe` meta's `warnings` are copies;
+  `lastError` is always an `Error` or `null`; `add()` rejects if Shopify answers without a cart.
+- Astro integration: `createStorefront()`'s own options in a shared `shop.config.js` (`siteUrl`,
+  `pageSize`, `fetch`) are left out of the page; any other unknown option warns at build time.
+- Types: the `.d.ts` files are checked against the source's JSDoc types (`npm run test:types`).
+  Fixed drift: `TetherError.code` keeps its union (`TetherErrorCode | (string & {})`) and the
+  constructor takes typed `errors`/`userErrors`/`code`; `Tether.config` is `ResolvedTetherConfig`;
+  `query()` and `account.query()` default to `unknown` and `on(name: string)` passes `unknown`
+  instead of `any`; `onError` receives `unknown` (a handler may still type it narrower); cart
+  changes that can answer without a cart return `ShopifyCart | null` and `checkout()` the checkout
+  URL; `imageUrl()` returns `url` itself when it is empty; an `initialState` plan's price and an
+  image's `width`/`height` can be `null`; `__core` and `__parts` are declared.
+- Releases: the version is set in `package.json` only; the release script writes every copy from it
+  (`scripts/versions.mjs`), and a test checks they agree.
 - Security: descriptions (`tether-bind="description"`, `tether-collection-bind="description"`) go
   through an allow-list of content elements and attributes. **Behaviour change:** `<style>` blocks and
   form fields are removed, unknown elements are unwrapped (their text stays), iframes are kept only

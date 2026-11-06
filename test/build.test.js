@@ -108,11 +108,11 @@ test('the diagnose part loads on first call and shares the core (same config, sa
 test('parts are small and the core is under budget', async () => {
   const { gzipSync } = await import('node:zlib');
   const gz = async (f) => gzipSync(await readFile(join(DIST, f)), { level: 9 }).length;
-  // The README promises a core of about 28 KB gzipped. Each budget sits about half a KB above today's build, so growth
+  // The README promises a core of about 29 KB gzipped. Each budget sits about half a KB above today's build, so growth
   // is a decision; the build, not golfed source, keeps the files small.
-  assert.ok((await gz('tether.min.js')) < 28.25 * 1024, 'core gzip budget');
+  assert.ok((await gz('tether.min.js')) < 30 * 1024, 'core gzip budget');
   assert.ok((await gz('tether.search.min.js')) < 3 * 1024);
-  assert.ok((await gz('tether.account.min.js')) < 7.5 * 1024, 'account part budget');
+  assert.ok((await gz('tether.account.min.js')) < 8.25 * 1024, 'account part budget');
   assert.ok((await gz('tether.account-pages.min.js')) < 9 * 1024, 'account pages part budget');
   assert.ok((await gz('tether.extras.min.js')) < 1.5 * 1024);
   assert.ok((await gz('tether.markets.min.js')) < 3 * 1024);

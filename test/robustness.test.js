@@ -2,7 +2,10 @@
 import { test, before, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
-import { product } from './fixtures.js';
+import { product, captureTetherWarnings } from './fixtures.js';
+
+// The failures these tests cause on purpose are checked through onError, states and events, not the console.
+captureTetherWarnings();
 
 const dom = new JSDOM('<!doctype html><body></body>', { url: 'https://site.test/product?handle=coffee-box' });
 Object.assign(globalThis, {

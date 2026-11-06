@@ -15,16 +15,16 @@ const REFERRER = 'referrerpolicy="strict-origin-when-cross-origin"';
 
 test('markup, inline styles, images, links and video embeds are kept as written', () => {
   const html =
-    '<h2 style="color:red">Coffee</h2><p class="lead">Roasted <a href="https://shop.test/x">here</a></p>' +
+    '<h2 style="color: red;">Coffee</h2><p class="lead">Roasted <a href="https://shop.test/x">here</a></p>' +
     '<img src="https://cdn.shopify.com/a.jpg" alt="bag"><img src="data:image/png;base64,AAAA" alt="dot">' +
     '<iframe src="https://www.youtube.com/embed/abc" allowfullscreen=""></iframe>';
   const expected = html.replace('allowfullscreen="">', `allowfullscreen="" ${SANDBOX} ${REFERRER}>`);
   assert.equal(render(html).innerHTML, expected);
 });
 
-test('every content element is kept with its attributes', () => {
+test('every text, list, table and media element is kept with the attributes the fixture gives it', () => {
   const html =
-    '<h1>a</h1><h3 id="x" lang="de" dir="ltr" title="t" aria-label="l">b</h3><h4>c</h4><h5>d</h5><h6>e</h6>' +
+    '<h1>a</h1><h3 lang="de" dir="ltr" title="t" aria-label="l">b</h3><h4>c</h4><h5>d</h5><h6>e</h6>' +
     '<div align="center"><span>f</span><br><hr></div><blockquote cite="https://shop.test/q">g</blockquote>' +
     '<pre><code>h</code></pre><p><strong>i</strong><em>j</em><b>k</b><i>l</i><u>m</u><s>n</s><small>o</small>' +
     '<sub>p</sub><sup>q</sup></p><ul><li>r</li></ul><ol start="2" type="a" reversed=""><li value="3">s</li></ol>' +
@@ -50,7 +50,7 @@ test('a link that opens a new tab gets no handle on the page and keeps its own r
   );
 });
 
-test('embeds load only over https and always sandboxed, whatever sandbox they were written with', () => {
+test('embeds over http, relative or without a src are removed; the https one is sandboxed whatever it was written with', () => {
   const box = render(
     '<iframe src="http://video.test/e"></iframe><iframe src="/embed"></iframe><iframe></iframe>' +
       '<iframe src="https://player.vimeo.com/video/1" sandbox="allow-top-navigation allow-forms" allow="autoplay"></iframe>',
@@ -118,4 +118,50 @@ test('a background image URL cannot end the CSS string or use another scheme', a
   assert.doesNotMatch(el.getAttribute('style') ?? '', /background-color/);
   setImage(el, 'javascript:alert(1)');
   assert.doesNotMatch(el.getAttribute('style') ?? '', /javascript/);
+});
+
+test("an id is removed, so a description cannot clobber window.<id> or the site's own ids", () => {
+  assert.equal(
+    render('<div id="cart-drawer" class="x">a</div><a id="TETHER_CONFIG">b</a>').innerHTML,
+    '<div class="x">a</div><a>b</a>',
+  );
+});
+
+test('inline styles keep their look but cannot place content over the page or fetch anything', () => {
+  const box = render(
+    '<p style="color: red; position: fixed; inset: 0; top: 0; left: 0; z-index: 2147483647; font-weight: bold">a</p>' +
+      '<p style="background-image: url(https://evil.test/track.gif); margin: 4px">b</p>' +
+      '<p style="position: absolute; top: 0">c</p><p style="width: expression(alert(1))">d</p>',
+  );
+  const styles = [...box.querySelectorAll('p')].map((paragraph) => paragraph.getAttribute('style'));
+  assert.deepEqual(styles, ['color: red; font-weight: bold;', 'margin: 4px;', null, null]);
+});
+
+const site = new JSDOM('<!doctype html><body></body>', { url: 'https://shop.test/products/coffee' }).window.document;
+const renderOnSite = (html) => {
+  const box = site.createElement('div');
+  box.append(storeHtmlFragment(html, site));
+  return box;
+};
+
+test("an embed from the site's own origin is removed, however its src is written", () => {
+  const box = renderOnSite(
+    '<iframe src="https://shop.test/pages/x"></iframe><iframe src="/pages/x"></iframe><iframe src="//shop.test/x"></iframe>' +
+      '<iframe src="https://www.youtube.com/embed/abc"></iframe>',
+  );
+  assert.deepEqual(
+    [...box.querySelectorAll('iframe')].map((frame) => frame.getAttribute('src')),
+    ['https://www.youtube.com/embed/abc'],
+  );
+});
+
+test('an embed keeps only the player permissions it asks for: camera, microphone and the rest are dropped', () => {
+  const box = renderOnSite(
+    '<iframe src="https://www.youtube.com/embed/a" allow="camera; Autoplay *; microphone https://evil.test; fullscreen; ' +
+      'geolocation; payment; encrypted-media; picture-in-picture"></iframe>' +
+      '<iframe src="https://www.youtube.com/embed/b" allow="camera; microphone"></iframe>',
+  );
+  const [first, second] = box.querySelectorAll('iframe');
+  assert.equal(first.getAttribute('allow'), 'autoplay; fullscreen; encrypted-media; picture-in-picture');
+  assert.equal(second.hasAttribute('allow'), false);
 });

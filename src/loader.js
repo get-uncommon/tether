@@ -217,8 +217,16 @@ export function takeStale(rawKey) {
   void productCache.get(key)?.then((product) => {
     stale.delete(product.handle);
     stale.delete(product.id);
-  });
+  }, failureIsReportedByTheRender);
   return true;
+}
+
+/**
+ * The cached promise is the one the product's render awaits, and the render reports its failure: the stale cleanup
+ * above has nothing left to do for a product that did not load.
+ */
+function failureIsReportedByTheRender() {
+  // Nothing to clean: see above.
 }
 
 /**

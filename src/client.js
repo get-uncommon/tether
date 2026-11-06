@@ -26,13 +26,15 @@ import { field, isRecord } from '../server/src/shared/json.js';
  */
 
 export class TetherError extends Error {
+  /** @override @type {'TetherError'} */
+  name = 'TetherError';
+
   /**
    * @param {string} message
    * @param {TetherErrorDetails} [details]
    */
   constructor(message, { status, errors, userErrors, code } = {}) {
     super(message);
-    this.name = 'TetherError';
     /** @type {TetherErrorCode} */
     this.code = code ?? (status ? `HTTP_${status}` : 'ERROR');
     /** @type {number | undefined} */
@@ -67,9 +69,17 @@ export function endpoint(conf = cfg) {
   return `https://${conf.domain}/api/${conf.apiVersion}/graphql.json`;
 }
 
+/** GraphQL strings and `#` comments: text in them is never part of an operation's header. */
+const STRINGS_AND_COMMENTS = /"(?:\\.|[^"\\\n])*"|#[^\n]*/g;
+/** An operation's keyword, name and variable definitions: named (query Name($x: T)) and anonymous (query { … }). */
+const OPERATION_START = /^\s*(?:query|mutation)(?:\s+\w+)?\s*(?:\([^)]*\))?/;
+
 /**
  * Adds @inContext(country, language) to the first operation in the document, so prices, currency and translations
- * follow the market. Operations are always written first, fragments after, so the first match is the operation.
+ * follow the market. The header is found in a copy of the document whose strings and comments are blanked out, so a
+ * `)` in a default value or an `@inContext` in a comment or the selection set doesn't move or stop it; an operation
+ * that names its own `@inContext` keeps it. Tether's own documents start with their operation, and so do the ones
+ * `Tether.query()` is given in practice: a document that starts with a fragment is sent as written.
  *
  * @param {string} query
  * @param {{ country: CountryCode | undefined, language: LanguageCode | undefined }} market
@@ -79,12 +89,17 @@ function inContext(query, { country, language }) {
   const args = [];
   if (country) args.push(`country: ${country}`);
   if (language) args.push(`language: ${language}`);
-  if (!args.length || query.includes('@inContext')) return query;
-
+  if (!args.length) return query;
   const tag = `@inContext(${args.join(', ')})`;
-  // Named (query Name($x: T)), anonymous (query { … }) and shorthand ({ … }) queries.
-  if (/^\s*\{/.test(query)) return `query ${tag} ${query.trimStart()}`;
-  return query.replace(/^(\s*(?:query|mutation)(?:\s+\w+)?\s*(?:\([^)]*\))?)/, `$1 ${tag}`);
+  const blanked = query.replace(STRINGS_AND_COMMENTS, (text) => ' '.repeat(text.length));
+  const selectionStart = blanked.indexOf('{');
+  if (blanked.slice(0, selectionStart).includes('@inContext')) return query;
+  // Shorthand: a document that starts with its selection set is a query without a keyword.
+  if (blanked.trimStart().startsWith('{')) return `query ${tag} ${query.slice(selectionStart)}`;
+  const header = OPERATION_START.exec(blanked);
+  if (!header) return query;
+  const end = header[0].length;
+  return `${query.slice(0, end).trimEnd()} ${tag} ${query.slice(end).trimStart()}`;
 }
 
 /**
@@ -309,7 +324,9 @@ export async function request(conf, query, variables = {}, { context = true } = 
  * @param {RequestOptions} [options]
  * @returns {Promise<T>}
  */
-export const gql = (query, variables, options) => request(cfg, query, variables, options);
+export function gql(query, variables, options) {
+  return request(cfg, query, variables, options);
+}
 
 /**
  * @template {{ userErrors?: readonly UserError[] | null }} Payload

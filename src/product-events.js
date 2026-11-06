@@ -42,7 +42,7 @@ function closestOwn(scope, target, selector) {
 function onAddClick(scope, button) {
   const { label, original } = addButtonLabel(button);
   const addingText = get(button, 'adding-text');
-  void busy(button, async () => {
+  busy(button, async () => {
     if (addingText) setText(label, addingText);
     try {
       await scope.addToCart();
@@ -52,10 +52,14 @@ function onAddClick(scope, button) {
     } finally {
       if (addingText) setText(label, original);
     }
-  }).then(() => {
-    // The mode-dependent labels (tether-subscribe-text, tether-soldout-text) wait for aria-busy to clear.
-    scope.renderVariant();
-  });
+  })
+    .then(() => {
+      // The mode-dependent labels (tether-subscribe-text, tether-soldout-text) wait for aria-busy to clear.
+      scope.renderVariant();
+    })
+    .catch((/** @type {unknown} */ error) => {
+      reportError(error, 'add to cart render');
+    });
 }
 
 /**

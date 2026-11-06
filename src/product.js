@@ -32,6 +32,7 @@ import { writeProduct } from './product-render.js';
 import { writeVariant } from './variant-render.js';
 import { bindProductEvents } from './product-events.js';
 /** @import { Product, ProductVariant } from './fragments.js' */
+/** @import { ShopifyCart } from './cart/store.js' */
 /** @import { PlanInGroup } from './selling-plans.js' */
 /** @import { Purchase, Selection } from './product-state.js' */
 
@@ -297,7 +298,7 @@ export class ProductScope {
     this.renderVariant();
   }
 
-  /** @returns {Promise<unknown>} The cart after adding; `null` when the variant can't be added. */
+  /** @returns {Promise<ShopifyCart | null>} The cart after adding; `null` when the variant can't be added. */
   async addToCart() {
     if (!this.variant?.availableForSale) return null;
     const line = this.getLine();

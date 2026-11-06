@@ -23,9 +23,29 @@ import { PART_INTEGRITY } from './part-integrity.js';
 const { cfg } = config;
 
 /**
- * The modules a part may use, shared instead of bundled twice (scripts/build.mjs maps a part's imports to these).
+ * @typedef {{
+ *   'config.js': typeof config,
+ *   'client.js': typeof client,
+ *   'dom.js': typeof dom,
+ *   'fragments.js': typeof fragments,
+ *   'loader.js': typeof loader,
+ *   'selling-plans.js': typeof sellingPlans,
+ *   'status.js': typeof status,
+ *   'cart.js': typeof cart,
+ *   'product.js': typeof product,
+ *   'collection.js': typeof collection,
+ *   'mounting.js': typeof mounting,
+ *   'market-codes.js': typeof marketCodes,
+ *   'shopify-values.js': typeof shopifyValues,
+ *   'store-html.js': typeof storeHtml,
+ *   'lazy.js': { loadPart: typeof loadPart, coreModules: CoreModules },
+ * }} CoreModules The modules a part may use, by the file name scripts/build.mjs maps a part's imports to.
+ */
+
+/**
+ * The modules a part may use, shared instead of bundled twice.
  *
- * @type {Record<string, object>}
+ * @type {CoreModules}
  */
 export const coreModules = {
   'config.js': config,
@@ -42,6 +62,10 @@ export const coreModules = {
   'market-codes.js': marketCodes,
   'shopify-values.js': shopifyValues,
   'store-html.js': storeHtml,
+  // Parts that load other parts (account → account-pages) use this same loader.
+  get 'lazy.js'() {
+    return { loadPart, coreModules };
+  },
 };
 
 const MINIFIED_SCRIPT = /\.min\.js(\?|$)/;
@@ -51,36 +75,29 @@ const coreScriptUrl = coreScript ? new URL(coreScript, document.baseURI).href : 
 /**
  * Where parts load from. Beside the core they are the files it was built with, so each is checked against its hash
  * (`PART_INTEGRITY`): a page that pins the core with `integrity` runs only parts of that build. A `partsUrl` is the
- * site's own copy, possibly of another version, so its files load unchecked.
+ * site's own copy, possibly of another version, so its files load unchecked. When the core was not loaded by a
+ * `<script src>` (a module, a loader), its folder is unknown and only a `partsUrl` says where parts are.
  *
- * @typedef {{ kind: 'beside-core', folder: string } | { kind: 'parts-url', folder: string }} PartsSource
+ * @typedef {{ kind: 'beside-core', folder: string } | { kind: 'parts-url', folder: string } | { kind: 'unknown' }}
+ *   PartsSource
  */
 
 /** @type {Map<PartName, Promise<unknown>>} Parts loaded or loading. */
 const parts = new Map();
 
-/**
- * A `partsUrl` must be https or on this site. That keeps parts off plain http (mixed content, rewritable on the way);
- * it doesn't vouch for the host, which the site chose.
- *
- * @returns {PartsSource}
- * @throws {Error} For a `partsUrl` that is neither.
- */
+/** @returns {PartsSource} `partsUrl` was checked to be https or on this site when the config was resolved. */
 function partsSource() {
-  if (!cfg.partsUrl) return { kind: 'beside-core', folder: coreScriptUrl.replace(/[^/]*$/, '') };
-  const folder = new URL(cfg.partsUrl, document.baseURI);
-  if (folder.protocol !== 'https:' && folder.origin !== window.location.origin) {
-    throw new Error(`partsUrl must be https or on this site: ${folder.href}`);
-  }
-  return { kind: 'parts-url', folder: folder.href };
+  if (cfg.partsUrl) return { kind: 'parts-url', folder: new URL(cfg.partsUrl, document.baseURI).href };
+  if (!coreScriptUrl) return { kind: 'unknown' };
+  return { kind: 'beside-core', folder: coreScriptUrl.replace(/[^/]*$/, '') };
 }
 
 /**
  * @param {HTMLScriptElement} script
- * @param {PartsSource} source
+ * @param {Exclude<PartsSource, { kind: 'unknown' }>} source
  * @param {string} file The part's file name.
  */
-function checkIntegrity(script, source, file) {
+function applyIntegrity(script, source, file) {
   const integrity = source.kind === 'beside-core' ? PART_INTEGRITY[file] : undefined;
   if (!integrity) return;
   script.integrity = integrity;
@@ -89,8 +106,10 @@ function checkIntegrity(script, source, file) {
 }
 
 /**
+ * Loads a part's file. A failed load leaves the cache, so the next use tries again (the network may be back).
+ *
  * @param {PartName} name
- * @param {PartsSource} source
+ * @param {Exclude<PartsSource, { kind: 'unknown' }>} source
  * @param {string} file
  * @returns {Promise<unknown>}
  */
@@ -100,12 +119,16 @@ function loadScript(name, source, file) {
     const script = document.createElement('script');
     script.src = url;
     script.async = true;
-    checkIntegrity(script, source, file);
+    applyIntegrity(script, source, file);
     script.onload = () => {
       const { Tether } = /** @type {Window & { Tether?: { __parts?: Record<string, unknown> } }} */ (window);
       const part = Tether?.__parts?.[name];
-      if (part) resolve(part);
-      else reject(new Error(`${url} did not register`));
+      if (part) {
+        resolve(part);
+        return;
+      }
+      parts.delete(name);
+      reject(new Error(`${url} did not register`));
     };
     script.onerror = () => {
       parts.delete(name);
@@ -126,11 +149,11 @@ function loadScript(name, source, file) {
 export function loadPart(name) {
   let loading = parts.get(name);
   if (!loading) {
-    let source;
-    try {
-      source = partsSource();
-    } catch (error) {
-      return Promise.reject(error instanceof Error ? error : new Error(String(error)));
+    const source = partsSource();
+    if (source.kind === 'unknown') {
+      return Promise.reject(
+        new Error(`The Tether script's own location is unknown, so its ${name} part can't be found: set partsUrl.`),
+      );
     }
     const suffix = MINIFIED_SCRIPT.test(coreScriptUrl) || !coreScriptUrl ? '.min' : '';
     loading = loadScript(name, source, `tether.${name}${suffix}.js`);
@@ -139,6 +162,3 @@ export function loadPart(name) {
   // A part's file is built from the module `Parts[Name]` names (scripts/build.mjs), and registers that module.
   return /** @type {Promise<Parts[Name]>} */ (loading);
 }
-
-// Parts that load other parts (account → account-pages) use this same loader.
-coreModules['lazy.js'] = { loadPart, coreModules };

@@ -31,6 +31,9 @@ Items have `item_id` (variant SKU, or the variant's numeric id), `item_name`, `i
 `item_brand` (vendor), `item_category` (product type), `price` and `quantity`; events have
 `currency` and `value`.
 
+The events come from Tether's own `tether:*` events, and only from those Tether itself sent: a
+look-alike event another script dispatches (`tether:cart-updated` with any detail) sends nothing.
+
 In Tag Manager: a GA4 Event tag per event name (or one with `{{Event}}`), with "Send ecommerce
 data" on. Consent: Tag Manager's consent mode applies as usual.
 

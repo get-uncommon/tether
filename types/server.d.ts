@@ -65,7 +65,7 @@ export interface ProductQuery {
 
 export interface Storefront {
   readonly config: Required<Pick<StorefrontOptions, 'domain' | 'token'>> & StorefrontOptions;
-  query<T = any>(query: string, variables?: Record<string, unknown>, opts?: { context?: boolean }): Promise<T>;
+  query<T = unknown>(query: string, variables?: Record<string, unknown>, opts?: { context?: boolean }): Promise<T>;
   /** By handle, numeric id, gid or product URL. null when it doesn't exist. */
   getProduct(handleOrId: string | number | null | undefined): Promise<ShopifyProduct | null>;
   getProducts(opts?: ProductQuery): Promise<{
@@ -107,8 +107,11 @@ export interface Storefront {
   formatPercent(n: number | null | undefined, locale?: string): string;
   /** null when the path needs a handle or an id that is empty. */
   productUrl(handle: string, opts?: { productPath?: string; id?: string }): string | null;
-  /** Shopify CDN image at a size. Use the element's max-width value, so the browser keeps the image. */
-  imageUrl(url: string | null | undefined, size?: ImageSize): string;
+  /**
+   * Shopify CDN image at a size. Use the element's max-width value, so the browser keeps the image. Returns `url`
+   * itself when it is empty or not absolute.
+   */
+  imageUrl<Url extends string | null | undefined>(url: Url, size?: ImageSize): Url;
   /**
    * What Tether shows first for this product (variant, price, purchase mode, tether-show conditions),
    * so the server renders the same and nothing flashes. Pass Astro.url.searchParams.get('variant') in SSR.
@@ -130,7 +133,8 @@ export interface InitialState {
   selected: Record<string, string>;
   purchase: 'one-time' | 'subscription';
   plan: { id: string; name: string } | null;
-  plans: { id: string; name: string; price: Money; savings: number; selected: boolean; available: boolean }[];
+  /** A plan's price: null when Shopify sends no price for it on this variant. */
+  plans: { id: string; name: string; price: Money | null; savings: number; selected: boolean; available: boolean }[];
   savings: number;
   /** The price Tether shows first (the plan price for products that require a subscription). */
   price: Money;
@@ -178,7 +182,7 @@ export interface ImageSize {
   height?: number;
   crop?: 'center' | 'top' | 'bottom' | 'left' | 'right';
 }
-export declare function imageUrl(url: string | null | undefined, size?: ImageSize): string;
+export declare function imageUrl<Url extends string | null | undefined>(url: Url, size?: ImageSize): Url;
 export declare function createStorefront(options?: StorefrontOptions): Storefront;
 export declare function formatMoney(money: Money | null | undefined, locale?: string): string;
 export declare function formatPercent(n: number | null | undefined, locale?: string): string;

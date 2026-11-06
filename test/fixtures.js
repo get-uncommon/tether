@@ -208,3 +208,20 @@ export const apparel = {
     ],
   },
 };
+
+/**
+ * Keeps Tether's own console warnings (`[tether] …`, which every reported failure logs) out of the test output, for a
+ * file whose tests cause failures on purpose and check them through `onError`, states and events. Other warnings
+ * still print.
+ *
+ * @returns {unknown[][]} The captured warnings' arguments, for a test that checks one.
+ */
+export function captureTetherWarnings() {
+  const captured = [];
+  const { warn } = console;
+  console.warn = (...args) => {
+    if (typeof args[0] === 'string' && /^\[[a-z][a-z0-9-]*\]$/.test(args[0])) captured.push(args);
+    else warn(...args);
+  };
+  return captured;
+}

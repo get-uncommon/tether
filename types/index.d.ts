@@ -9,8 +9,8 @@ export interface Money {
 export interface ShopifyImage {
   url: string;
   altText?: string | null;
-  width?: number;
-  height?: number;
+  width?: number | null;
+  height?: number | null;
 }
 
 export interface ShopifySellingPlan {
@@ -199,10 +199,26 @@ export interface TetherConfig {
   onLineEnter?: ((node: HTMLElement) => void) | null;
   onLineLeave?: ((node: HTMLElement, done: () => void) => void) | null;
   onValueChange?: ((el: HTMLElement, previousText: string) => void) | null;
-  /** Every failure that reaches the visitor. Send it to Sentry or similar. */
-  onError?: ((error: TetherError | Error, context: string) => void) | null;
+  /**
+   * Every failure that reaches the visitor. Send it to Sentry or similar. `error` is usually a TetherError, but a
+   * throwing hook or a browser API can make it anything, so a handler may narrow it.
+   */
+  onError?: Handler<[error: unknown, context: string]> | null;
   debug?: boolean;
 }
+
+/**
+ * A hook Tether calls with `Args`. Declared as a method so a site's handler may type its parameters narrower than
+ * Tether's (`(error: Error) => …`).
+ */
+export type Handler<Args extends unknown[]> = { bivarianceHack(...args: Args): void }['bivarianceHack'];
+
+/** `Tether.config`: every option with its default filled in, read-only (pass options to `init()` to change them). */
+export type ResolvedTetherConfig = {
+  readonly [Key in Exclude<keyof TetherConfig, MarketOption>]-?: Exclude<TetherConfig[Key], undefined>;
+} & { readonly [Key in MarketOption]?: TetherConfig[Key] };
+/** The market options, unset until a market is configured or detected. */
+type MarketOption = 'country' | 'language' | 'locale';
 
 export type TetherErrorCode =
   | 'NOT_FOUND'
@@ -220,12 +236,29 @@ export type TetherErrorCode =
 
 export declare class TetherError extends Error {
   name: 'TetherError';
-  code: TetherErrorCode | string;
+  /** One of `TetherErrorCode`, or a code Shopify sent (an account mutation's user error). */
+  code: TetherErrorCode | (string & {});
   status?: number;
-  errors?: { message: string; extensions?: Record<string, unknown> }[];
+  errors?: GraphQLError[];
   /** A mutation's user errors (code INVALID for refused account input). */
-  userErrors?: readonly { field?: string[] | null; message: string; code?: string | null }[];
-  constructor(message: string, opts?: { status?: number; errors?: unknown[]; userErrors?: unknown[]; code?: string });
+  userErrors?: readonly UserError[];
+  constructor(
+    message: string,
+    opts?: { status?: number; errors?: GraphQLError[]; userErrors?: readonly UserError[]; code?: TetherErrorCode },
+  );
+}
+
+/** An error in a GraphQL response, as the GraphQL spec sets it. */
+export interface GraphQLError {
+  message: string;
+  extensions?: { code?: string };
+}
+
+/** A mutation's note on input it refused. */
+export interface UserError {
+  message: string;
+  field?: string[] | null;
+  code?: string | null;
 }
 
 export type Attributes = Record<string, string | number | boolean> | { key: string; value: string }[];
@@ -266,6 +299,7 @@ export interface CustomerLink {
 export interface Cart {
   readonly status: CartStatus;
   readonly state: ShopifyCart | null;
+  /** A copy of the lines: changing it changes nothing in the cart. */
   readonly lines: ShopifyCartLine[];
   readonly count: number;
   lastError: Error | null;
@@ -285,25 +319,28 @@ export interface Cart {
     quantity?: number,
     opts?: Omit<LineInput, 'variantId' | 'quantity'>,
   ): Promise<ShopifyCart>;
-  /** updateLine(id, 3) · updateLine(id, { sellingPlanId: null }) switches to one-time. */
-  updateLine(lineId: string, patch: number | (LineInput & { quantity?: number })): Promise<ShopifyCart>;
-  removeLine(lineIds: string | string[]): Promise<ShopifyCart>;
+  /** updateLine(id, 3) · updateLine(id, { sellingPlanId: null }) switches to one-time. null without a cart. */
+  updateLine(lineId: string, patch: number | (LineInput & { quantity?: number })): Promise<ShopifyCart | null>;
+  /** null without a cart. */
+  removeLine(lineIds: string | string[]): Promise<ShopifyCart | null>;
   /** +1 / -1 for a line; quick clicks add up and show at once (use it for your own +/- buttons). */
   changeQuantity(lineId: string, delta: number): Promise<ShopifyCart | null>;
   /** The quantity to show for a line: what the visitor asked for while an update is on its way. */
   quantityOf(line: ShopifyCartLine): number;
   clear(): Promise<ShopifyCart | null>;
-  setNote(note: string): Promise<ShopifyCart>;
-  setAttributes(attributes: Attributes): Promise<ShopifyCart>;
-  setDiscountCodes(codes: string[]): Promise<ShopifyCart>;
+  /** The changed cart; null without a cart (these never create one). */
+  setNote(note: string): Promise<ShopifyCart | null>;
+  setAttributes(attributes: Attributes): Promise<ShopifyCart | null>;
+  setDiscountCodes(codes: string[]): Promise<ShopifyCart | null>;
   /** Rejects with code INVALID_DISCOUNT (and doesn't keep the code) when Shopify doesn't accept it. */
-  applyDiscount(code: string): Promise<ShopifyCart>;
-  removeDiscount(code: string): Promise<ShopifyCart>;
+  applyDiscount(code: string): Promise<ShopifyCart | null>;
+  removeDiscount(code: string): Promise<ShopifyCart | null>;
   setBuyerIdentity(
     identity: { countryCode?: string; email?: string; phone?: string },
     opts?: { create?: boolean },
   ): Promise<ShopifyCart | null>;
-  checkout(target?: '_self' | '_blank'): Promise<void>;
+  /** Goes to Shopify's checkout: the checkout URL, null with nothing to check out or after a reported failure. */
+  checkout(target?: '_self' | '_blank'): Promise<string | null>;
   open(): void;
   close(): void;
   toggle(): void;
@@ -467,10 +504,11 @@ export interface Tether {
   mount(root?: ParentNode): number;
   /** Call before a page transition removes the page (closes the cart drawer). */
   unmount(): void;
-  readonly config: TetherConfig;
+  /** The live config, read-only: a write throws in strict-mode code. Change it with init(options). */
+  readonly config: ResolvedTetherConfig;
   readonly ready: Promise<Tether | null>;
   /** Any Storefront API query, with @inContext added for the current market. */
-  query<T = any>(query: string, variables?: Record<string, unknown>, opts?: { context?: boolean }): Promise<T>;
+  query<T = unknown>(query: string, variables?: Record<string, unknown>, opts?: { context?: boolean }): Promise<T>;
   withContext(query: string, ctx?: { country?: string; language?: string }): string;
   cart: Cart;
   /** By handle, numeric id, gid or product URL; rejects with NOT_FOUND when the store has no such product. */
@@ -499,7 +537,7 @@ export interface Tether {
     /** The customer's most recent orders, newest first; [] when nobody is logged in (both modes). */
     orders(opts?: { first?: number }): Promise<AccountOrder[]>;
     /** Browser mode only (NOT_ALLOWED in server mode). */
-    query<T = any>(query: string, variables?: Record<string, unknown>): Promise<T>;
+    query<T = unknown>(query: string, variables?: Record<string, unknown>): Promise<T>;
     getToken(): Promise<string | null>;
     /** True while a customer is logged in, as far as this page knows without asking. */
     isLoggedIn(): Promise<boolean>;
@@ -539,11 +577,11 @@ export interface Tether {
   normalizeProductKey(raw: string | number | null | undefined): string | null;
   clearProductCache(): void;
   formatMoney(money: Money | null | undefined): string;
-  /** Shopify CDN image at a size: imageUrl(line.merchandise.image?.url, { width: 160 }). */
-  imageUrl(
-    url: string | null | undefined,
+  /** Shopify CDN image at a size: imageUrl(line.merchandise.image?.url, { width: 160 }); `url` itself when empty. */
+  imageUrl<Url extends string | null | undefined>(
+    url: Url,
     size?: { width?: number | string | null; height?: number | string | null; crop?: string | null },
-  ): string;
+  ): Url;
   plans: SellingPlanHelpers;
   TetherError: typeof TetherError;
   resolveProductKey(
@@ -562,7 +600,11 @@ export interface Tether {
     name: K,
     fn: (detail: TetherEvents[K], event: CustomEvent<TetherEvents[K]>) => void,
   ): () => void;
-  on(name: string, fn: (detail: any, event: CustomEvent) => void): () => void;
+  on(name: string, fn: (detail: unknown, event: CustomEvent) => void): () => void;
+  /** Internal: the core modules the `<script>` build's optional parts share. Not an API. */
+  readonly __core: unknown;
+  /** Internal: where the `<script>` build's optional parts register. Not an API. */
+  readonly __parts: Record<string, unknown>;
 }
 
 export declare const VERSION: string;

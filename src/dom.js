@@ -10,7 +10,7 @@ import { isRecord } from '../server/src/shared/json.js';
 import { formatMoney as formatMoneyIn, productUrl as productUrlFor } from './shopify-values.js';
 /** @import { Money } from './shopify-values.js' */
 
-export { attr, sel, get, has, qsa, scoped, emit } from './markup.js';
+export { attr, sel, get, has, qsa, scoped, emit, ownEvent, isOwnEvent } from './markup.js';
 export { imageUrl, cdnUrl, sameImage, setImage } from './images.js';
 export { hasTemplate, repeat, repeatKeyed } from './repeaters.js';
 

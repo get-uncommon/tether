@@ -324,7 +324,7 @@ test('no request ever leaves for anything but the Storefront API (no IP lookups)
 });
 
 test('setCountry: the money format follows the country (option or markets.locales), and is remembered', async () => {
-  Tether.config.markets.locales = { de: { country: 'DE', language: 'DE', locale: 'de-DE' } };
+  (await import('../src/config.js')).cfg.markets.locales = { de: { country: 'DE', language: 'DE', locale: 'de-DE' } };
   await Tether.setCountry('DE', { language: null });
   assert.equal(Tether.config.locale, 'de-DE');
   assert.equal(JSON.parse(localStorage.getItem('tether:market:shop.test')).locale, 'de-DE');

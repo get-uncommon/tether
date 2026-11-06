@@ -9,7 +9,8 @@ import { getProduct, takeStale, refreshProducts, hydrateProducts } from './loade
 import { resolveProductKey, setScopeStatus, isNotFound } from './status.js';
 import { attr, get, qsa, emit } from './dom.js';
 import { toCountry, toLanguage } from './market-codes.js';
-import { field, isRecord } from '../server/src/shared/json.js';
+import { isRecord } from '../server/src/shared/json.js';
+import { isProductShape } from './product-shape.js';
 /** @import { Product } from './fragments.js' */
 /** @import { CountryCode, LanguageCode } from './market-codes.js' */
 
@@ -231,19 +232,6 @@ export function settleMarket() {
  */
 
 /**
- * The products are Tether's own fragment as the server fetched it, written into the site's own markup, so an entry
- * with an id and a handle is taken as one; anything else is skipped.
- *
- * @param {unknown} entry
- * @returns {entry is Product}
- */
-const isUsable = (entry) => {
-  const id = field(entry, 'id');
-  const handle = field(entry, 'handle');
-  return typeof id === 'string' && typeof handle === 'string' && id !== '' && handle !== '';
-};
-
-/**
  * @param {unknown} json A hydrate tag's JSON.
  * @returns {HydratePayload}
  */
@@ -253,22 +241,27 @@ function toHydratePayload(json) {
   return {
     country: toCountry(json['country']) ?? undefined,
     language: toLanguage(json['language']) ?? undefined,
-    products: Array.isArray(products) ? /** @type {unknown[]} */ (products).filter(isUsable) : [],
+    products: Array.isArray(products) ? /** @type {unknown[]} */ (products).filter(isProductShape) : [],
   };
 }
 
 /** @type {WeakSet<Element>} Hydrate tags already read. */
 const readScripts = new WeakSet();
-
 /**
  * Uses the products in the page's hydrate tags (`tether/server` `hydrate()`) without a request. A tag made for another
  * market is skipped, and marks the page (`html.tether-market-pending`) until the live prices are in, so CSS can hide
  * prices meanwhile.
  *
- * @param {Document | Element} [root]
+ * Trust: a hydrate tag is part of the page, written by the site's own build like the rest of its HTML and scripts, so
+ * its prices and products are shown until the background refresh replaces them. Whoever can write a tag into the page
+ * can already write a script there; the shape check (`isProductShape`) is for a truncated or hand-written tag, which
+ * is skipped instead of failing a render.
+ *
+ * @param {Document | Element} [root] Where to look: the document for a mount (a tag may sit in `<head>` or anywhere
+ *   else on the page), the added elements for `observe`.
  */
 export function hydrateFromPage(root = document) {
-  qsa(root.ownerDocument ?? root, HYDRATE_SELECTOR).forEach((script) => {
+  within(root, HYDRATE_SELECTOR).forEach((script) => {
     if (readScripts.has(script)) return;
     readScripts.add(script);
     /** @type {unknown} */

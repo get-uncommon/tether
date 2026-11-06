@@ -26,7 +26,11 @@ export function rememberDocumentMount() {
   mountedBody = document.body;
 }
 
-/** @param {PageHooks} hooks */
+/**
+ * Mounts the page Astro swapped in. It rejects when `init()` failed or the mount threw; the listener reports that.
+ *
+ * @param {PageHooks} hooks
+ */
 async function onPageLoad(hooks) {
   await hooks.ready();
   const target = marketForArrival();
@@ -45,7 +49,9 @@ async function onPageLoad(hooks) {
 /** @param {PageHooks} hooks */
 function bindAstroRouter(hooks) {
   document.addEventListener('astro:page-load', () => {
-    void onPageLoad(hooks);
+    onPageLoad(hooks).catch((/** @type {unknown} */ error) => {
+      reportError(error, 'page mount');
+    });
   });
   document.addEventListener('astro:before-swap', () => {
     mountedBody = null;

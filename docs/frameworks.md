@@ -28,7 +28,8 @@ Tether.unmount();
   element, so calling it on a container that stays in place (`<main>`) only picks up new products.
 - `@occluze/tether` is safe to import on the server (SSR): nothing runs until `init()` in the browser.
 - Pages that add products later (infinite scroll, your own components) call `Tether.mount(el)`
-  for the new part, or set `observe: true` to let Tether watch the page.
+  for the new part, or set `observe: true` to let Tether watch the page: each burst of added elements
+  is mounted on its own, without rescanning the rest of the page.
 - Server-rendered `shop.hydrate()` tags are read by `mount()`, also when they arrive with a
   client-side navigation.
 - A plain `<script>` tag with `window.TETHER_CONFIG` starts by itself (the [README](../README.md) setup);

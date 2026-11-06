@@ -206,9 +206,13 @@ Markup written for an older `wfs-*` prefix keeps working with `prefix: 'wfs'`.
 
 `tether-bind` values: `title`, `description` (the HTML written in Shopify, through an allow-list:
 text formatting, lists, tables, images, links, inline `style` and video embeds stay; scripts, event
-handlers, `javascript:` links, `<style>` blocks and form fields are removed; other elements are
-unwrapped, so their text stays; iframes must be https and run sandboxed; links that open a new tab
-get `rel="noopener noreferrer"`), `description-text`, `vendor`, `type`,
+handlers, `javascript:` links, `<style>` blocks, form fields and `id`s are removed; other elements are
+unwrapped, so their text stays; inline styles lose `position`, `top`/`right`/`bottom`/`left`/`inset`,
+`z-index` and any value with `url(`, so a description can't cover the page or load from elsewhere;
+iframes must be https from another origin than the site's, run sandboxed, and may only ask for
+`autoplay`, `encrypted-media`, `picture-in-picture`, `fullscreen`, `clipboard-write`,
+`accelerometer`, `gyroscope` and `web-share`; links that open a new tab get
+`rel="noopener noreferrer"`), `description-text`, `vendor`, `type`,
 `handle`, `published-at`, `price`, `total-price`, `compare-at-price`, `unit-price`, `min-price`,
 `max-price`, `discount-percentage`, `discount-amount`, `variant-title`, `variant-id`, `sku`,
 `barcode`, `stock`, `quantity`, `featured-image`, `variant-image`, `image:N` (nth image), `images` (repeater), `tags`
@@ -379,8 +383,8 @@ Tether.cart.setNote('…'); Tether.cart.setAttributes({ source: 'quiz' });
 await Tether.cart.applyDiscount('WELCOME10');    // rejects with code INVALID_DISCOUNT (and drops it)
 Tether.cart.removeDiscount('WELCOME10'); Tether.cart.setDiscountCodes(['A', 'B']);
 Tether.cart.setBuyerIdentity({ countryCode: 'DE' });
-Tether.cart.warnings;                             // [{ code, message, target }] from the last change
-Tether.cart.open(); Tether.cart.checkout();      // open/close also work without a drawer (state for subscribe)
+Tether.cart.warnings;                             // [{ code, message, target }] from the last change (a copy)
+Tether.cart.open(); Tether.cart.checkout();      // open/close also work without a drawer; checkout() answers the URL
 Tether.cart.subscribe((cart, { count, open, loaded, warnings }) => {});  // your own cart UI
 
 const p = await Tether.getProduct('coffee-box');  // batched + cached
@@ -393,6 +397,7 @@ Tether.plans.planSavings(variant, planId);        // selling plan helpers
 Tether.on('cart-updated', ({ cart }) => {});
 await Tether.diagnose();                          // what's wrong on this page (see Troubleshooting)
 await Tether.setCountry('DE');                    // switch market (see Markets)
+Tether.config.locale;                             // the live config, read-only: Tether.init(options) changes it
 Tether.cart.forgetSaved();                       // forget this device's cart: the page shows an empty one
 ```
 
@@ -413,12 +418,22 @@ translated by `code`), `prefix`, and the hooks `onLayoutChange`, `onCartOpen`,
 `onCartClose`, `onLineEnter`, `onLineLeave`, `onValueChange`, `onError`, `cartFocus` (keyboard focus
 in the cart drawer, on by default) and `partsUrl` (folder of the optional parts when self-hosting: https or on your own site).
 
-**Validation.** Every option is checked once, when Tether starts. A value it can't use logs a
+**Validation.** Every option is checked once, when Tether starts. An option Tether doesn't know (a
+typo such as `openCartOnAd`) logs a warning and is left out. A value it can't use logs a
 warning in the console and falls back to the default (or is left out): `apiVersion` must be a
 quarterly version (`2026-07`; `unstable` works, with a warning), `domain` a host name (`https://` and
 a path are stripped), `locale` a locale `Intl` accepts, `country` and `language` codes Shopify
 knows (written as you like: `'de'` becomes `DE`, `'pt-br'` becomes `PT_BR`), and the `account` URLs
-a path on your site or an https URL (http only on localhost).
+a path on your site or an https URL (http only on localhost). So is `partsUrl` (or an http URL on the
+page's own origin); one elsewhere is left out, and the parts load beside the core.
+
+**Server-rendered products.** The products in a `<script type="application/json" data-tether-hydrate>`
+tag (`shop.hydrate()`) are shown without a request, prices included, until the background refresh
+replaces them. The tag is trusted as part of the page, like its other HTML and scripts: it is written
+by the site's own build, and whoever can add one to a page can already add a script. An entry
+missing the lists and prices a render walks (a truncated or hand-written tag) is skipped, and that
+product loads from Shopify instead. `Tether.mount()` reads every tag in the document; with `observe`,
+the elements added later are read and mounted on their own, once per burst of additions.
 
 **Pinning a release.** `@0.6` takes every 0.6.x fix automatically, which is what most sites want.
 To pin exactly what runs, load a fixed release (`@v0.6.8`) and add the file's

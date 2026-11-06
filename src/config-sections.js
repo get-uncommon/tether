@@ -28,8 +28,8 @@ const GLOBAL_NAME = /^[A-Za-z_$][\w$]*$/;
 const SITE_ORIGIN = 'https://site.invalid';
 /** Hosts a developer's own machine answers on, where plain http is the norm (`wrangler dev`). */
 const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
-/** @type {readonly ('saved' | 'server' | 'webflow')[]} */
-const MARKET_SOURCES = ['saved', 'server', 'webflow'];
+/** @type {readonly ('saved' | 'server' | 'webflow')[]} Every source `markets.detect` reads. */
+export const MARKET_SOURCES = ['saved', 'server', 'webflow'];
 /** @type {readonly NonNullable<ShopifyAnalyticsOptions['consent']>[]} */
 const CONSENT_MODES = ['no-banner', 'default-banner', 'custom-banner'];
 
@@ -73,6 +73,35 @@ function isSiteOrHttpsUrl(value) {
     return url.protocol === 'https:' || (url.protocol === 'http:' && LOOPBACK_HOSTS.has(url.hostname));
   } catch {
     // Not a URL at all.
+    return false;
+  }
+}
+
+/**
+ * The folder of the optional parts. It must be https or on this site, which keeps parts off plain http (mixed content,
+ * rewritable on the way); it doesn't vouch for the host, which the site chose.
+ *
+ * @param {unknown} value
+ * @param {Invalid} invalid
+ * @returns {string | null} The folder as written, `null` for none or one elsewhere (the parts then load beside the core).
+ */
+export function partsUrlOption(value, invalid) {
+  if (value === undefined || value === null || value === '') return null;
+  if (typeof value === 'string' && (isSiteOrHttpsUrl(value) || isPageOrigin(value))) return value;
+  invalid('partsUrl', value);
+  return null;
+}
+
+/**
+ * @param {string} value
+ * @returns {boolean} True for an absolute URL on the page's own origin (a site served over plain http).
+ */
+function isPageOrigin(value) {
+  if (typeof location === 'undefined') return false;
+  try {
+    return new URL(value).origin === location.origin;
+  } catch {
+    // Not an absolute URL: `isSiteOrHttpsUrl` has judged it.
     return false;
   }
 }
@@ -206,10 +235,13 @@ const LOCALE_MARKET = { country: text, language: text, locale: text };
 
 /** @type {Schema<MarketsConfig>} */
 const MARKETS = {
+  // A single source name counts as a list of one.
   detect: (value) => {
     if (typeof value === 'boolean') return value;
-    if (!Array.isArray(value)) return undefined;
-    return MARKET_SOURCES.filter((source) => /** @type {unknown[]} */ (value).includes(source));
+    const names = Array.isArray(value) ? /** @type {unknown[]} */ (value) : [value];
+    return typeof value === 'string' || Array.isArray(value)
+      ? MARKET_SOURCES.filter((source) => names.includes(source))
+      : undefined;
   },
   locales: (value) => {
     if (!isRecord(value)) return undefined;

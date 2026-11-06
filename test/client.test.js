@@ -100,3 +100,21 @@ test('request errors are TetherErrors with a code', async () => {
   assert.equal(error.code, 'HTTP_401');
   assert.equal(error.status, 401);
 });
+
+test('@inContext goes into the operation header, whatever the rest of the document mentions', () => {
+  const market = { country: 'NL' };
+  assert.equal(
+    withContext('# uses @inContext below\nquery A($q: String = "a)b") { search(query: $q) { id } }', market),
+    '# uses @inContext below\nquery A($q: String = "a)b") @inContext(country: NL) { search(query: $q) { id } }',
+  );
+  assert.equal(
+    withContext('query A @cached { shop { name } }', market),
+    'query A @inContext(country: NL) @cached { shop { name } }',
+  );
+  assert.equal(withContext('  { shop { name } }', market), 'query @inContext(country: NL) { shop { name } }');
+  assert.equal(withContext('mutation M { x }', market), 'mutation M @inContext(country: NL) { x }');
+  const own = 'query A @inContext(country: DE) { shop { name } }';
+  assert.equal(withContext(own, market), own, 'its own market stays');
+  const fragmentFirst = 'fragment F on Shop { name } query A { shop { ...F } }';
+  assert.equal(withContext(fragmentFirst, market), fragmentFirst, 'no header first: left as written');
+});

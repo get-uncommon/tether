@@ -53,6 +53,33 @@ export const scoped = (root, selector, scopeSelector) =>
   qsa(root, selector).filter((el) => el.closest(scopeSelector) === root);
 
 /**
+ * The events Tether created. Any script can dispatch a `<prefix>:<name>` event with any detail; a listener that reads
+ * the detail's fields (analytics) checks the event is in here, so the detail is the one Tether wrote.
+ *
+ * @type {WeakSet<Event>}
+ */
+const ownEvents = new WeakSet();
+
+/**
+ * @param {string} name
+ * @param {unknown} [detail]
+ * @returns {CustomEvent} The bubbling event `<prefix>:<name>`, known to `isOwnEvent`.
+ */
+export function ownEvent(name, detail) {
+  const event = new CustomEvent(`${cfg.prefix}:${name}`, { detail, bubbles: true });
+  ownEvents.add(event);
+  return event;
+}
+
+/**
+ * @param {Event} event
+ * @returns {boolean} True for an event `ownEvent` created, false for one another script dispatched.
+ */
+export function isOwnEvent(event) {
+  return ownEvents.has(event);
+}
+
+/**
  * Dispatches the bubbling event `<prefix>:<name>`.
  *
  * @param {string} name
@@ -60,5 +87,5 @@ export const scoped = (root, selector, scopeSelector) =>
  * @param {EventTarget} [target]
  */
 export function emit(name, detail, target = document) {
-  target.dispatchEvent(new CustomEvent(`${cfg.prefix}:${name}`, { detail, bubbles: true }));
+  target.dispatchEvent(ownEvent(name, detail));
 }

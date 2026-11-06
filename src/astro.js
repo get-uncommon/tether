@@ -15,6 +15,7 @@
  * work without extra code. In dev, changes to src/shop.config.js restart the dev server (other files:
  * tether({ ..., watch: ['my/config.js'] })). Runs in Node, inside Astro's config step.
  */
+import { DEFAULTS } from './config.js';
 import { isSecretShopifyToken, STORE_ENV_NAMES } from './shopify-values.js';
 
 /**
@@ -40,6 +41,8 @@ import { isSecretShopifyToken, STORE_ENV_NAMES } from './shopify-values.js';
 /** @typedef {Record<string, string | undefined>} Env */
 
 const DEFAULT_WATCH = ['src/shop.config.js', 'src/shop.config.mjs', 'src/shop.config.ts'];
+/** `createStorefront()`'s own options, which a shared `shop.config.js` may hold: the browser has no use for them. */
+const SERVER_OPTIONS = new Set(['siteUrl', 'pageSize', 'fetch']);
 /**
  * Astro is an optional peer dependency. A variable specifier keeps both tsc and the bundler from resolving it.
  */
@@ -214,6 +217,18 @@ function dropFunctions(config, logger) {
 }
 
 /**
+ * @param {PageConfig} config Changed in place: only browser options are written into the page.
+ * @param {AstroLogger} logger
+ */
+function keepBrowserOptions(config, logger) {
+  for (const key of Object.keys(config)) {
+    if (key in DEFAULTS) continue;
+    Reflect.deleteProperty(config, key);
+    if (!SERVER_OPTIONS.has(key)) logger.warn(`${key} is not a Tether option: left out of the page.`);
+  }
+}
+
+/**
  * @param {AstroConfigSetup['injectScript']} injectScript
  * @param {PageConfig} config
  */
@@ -257,6 +272,7 @@ export default function tether(options = {}) {
         const config = { ...pageOptions };
         applyStoreEnv(config, await readEnv(command, root), logger);
         dropFunctions(config, logger);
+        keepBrowserOptions(config, logger);
         if (!config.domain || !config.token) {
           logger.warn(
             'No Shopify store configured: set PUBLIC_SHOPIFY_DOMAIN and PUBLIC_SHOPIFY_STOREFRONT_TOKEN in .env (the public Storefront API token).',
