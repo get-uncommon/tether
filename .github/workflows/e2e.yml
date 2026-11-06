@@ -9,7 +9,7 @@ on:
       - 'src/**'
       - 'server/src/shared/**'
       - 'scripts/build.ts'
-      - 'e2e/**'
+      - 'test/e2e/**'
       - 'examples/astro/**'
       - 'package.json'
       - 'package-lock.json'

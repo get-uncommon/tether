@@ -6,7 +6,7 @@ import prettier from 'eslint-config-prettier';
 import globals from 'globals';
 import tseslint from 'typescript-eslint';
 
-const TEST_FILES = ['test/**/*.js', 'server/test/**/*.js', 'e2e/**/*.{js,mjs}'];
+const TEST_FILES = ['test/**/*.js', 'server/test/**/*.js', 'test/e2e/**/*.{js,mjs}'];
 const TYPED_FILES = [
   'src/**/*.ts',
   'server/src/**/*.ts',
@@ -78,12 +78,12 @@ export default tseslint.config(
       'server/**/*.{js,mjs,ts}',
       'scripts/**/*.ts',
       'test/**/*.js',
-      'e2e/**/*.{js,mjs}',
+      'test/e2e/**/*.{js,mjs}',
     ],
     languageOptions: { globals: { ...globals.node, ...globals.serviceworker } },
   },
   {
-    files: ['test/**/*.js', 'e2e/**/*.{js,mjs}'],
+    files: ['test/**/*.js', 'test/e2e/**/*.{js,mjs}'],
     languageOptions: { globals: { ...globals.browser } },
   },
   {

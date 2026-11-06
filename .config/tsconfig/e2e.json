@@ -1,10 +1,10 @@
 {
   "$schema": "https://json.schemastore.org/tsconfig",
   // The Playwright specs: Node, and the browser inside `page.evaluate`. They import no source, so the page globals
-  // they declare (e2e/page-globals.d.ts) stay out of the source's programs.
+  // they declare (test/e2e/page-globals.d.ts) stay out of the source's programs.
   "extends": "./test.json",
   "compilerOptions": {
     "tsBuildInfoFile": "../../node_modules/.cache/tsc/e2e.tsbuildinfo"
   },
-  "include": ["../../e2e/*.js", "../../e2e/*.mjs", "../../e2e/*.d.ts"]
+  "include": ["../../test/e2e/*.js", "../../test/e2e/*.mjs", "../../test/e2e/*.d.ts"]
 }

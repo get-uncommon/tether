@@ -9,10 +9,10 @@ export default defineConfig({
   reporter: process.env['CI'] ? 'github' : 'list',
   use: { baseURL: 'http://127.0.0.1:4399', trace: 'retain-on-failure' },
   webServer: {
-    command: 'node e2e/serve.mjs',
+    command: 'node test/e2e/serve.mjs',
     url: 'http://127.0.0.1:4399/',
     reuseExistingServer: !process.env['CI'],
-    cwd: '..',
+    cwd: '../..',
   },
   projects: [
     { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
