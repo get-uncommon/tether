@@ -1,19 +1,20 @@
-/** Order links and dates, shared by the account part's order list and the account pages. */
+/** Order links and dates, shared by the account part's order list and the account pages part. */
 import { cfg } from './config.js';
 import { isHttpsUrl } from './shopify-values.js';
 
 export { isHttpsUrl };
 
 /**
- * An ISO date in the configured locale; the input itself when it can't be formatted.
+ * An ISO date in the configured locale; the input itself for a locale `Intl` doesn't know (a RangeError).
  *
  * @param {string} iso
  */
 export function localDate(iso) {
   try {
     return new Date(iso).toLocaleDateString(cfg.locale);
-  } catch {
-    return iso;
+  } catch (error) {
+    if (error instanceof RangeError) return iso;
+    throw error;
   }
 }
 

@@ -38,15 +38,6 @@ const ADDRESS =
   'id firstName lastName company address1 address2 city province zoneCode zip country countryCode phoneNumber formatted';
 const USER_ERRORS = 'userErrors { field message }';
 
-/** The customer's profile, as `customer()` and `/me` return it. */
-export const CUSTOMER_QUERY =
-  'query TetherCustomer { customer { id firstName lastName displayName emailAddress { emailAddress } defaultAddress { formatted } } }';
-
-/** The customer's recent orders, as `orders()` and `/orders` return them. */
-export const ORDERS_QUERY = `query TetherOrders($first: Int!) { customer { orders(first: $first, sortKey: PROCESSED_AT, reverse: true) {
-  nodes { id name processedAt financialStatus fulfillmentStatus statusPageUrl totalPrice { ${MONEY} }
-    lineItems(first: 20) { nodes { title variantTitle quantity image { url altText } } } } } } }`;
-
 const QUERIES = {
   order: `query TetherOrder($id: ID!) { order(id: $id) {
   id name number processedAt cancelledAt financialStatus fulfillmentStatus statusPageUrl requiresShipping

@@ -95,6 +95,11 @@ when a live site uses this mode.
 
 Shopify only allows `https` addresses, no `localhost`: test on a staging domain or a tunnel.
 
+`account.tokenUrl` sends the token requests to another address, for a browser that can't reach
+Shopify's token endpoint. It must be your shop's own first-party endpoint that passes the form body
+on to Shopify unchanged: the browser takes the id token in its answer as Shopify's without checking
+a signature, which is safe only because the answer comes from Shopify over TLS.
+
 ## Markup
 
 ```html

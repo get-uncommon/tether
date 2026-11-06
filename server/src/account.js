@@ -12,7 +12,8 @@
 /** @import { Fetch } from './account/shopify.js' */
 /** @import { Session } from './account/session.js' */
 
-import { CUSTOMER_QUERY, InputError, ops, ORDERS_QUERY, ROUTES as OPERATION_ROUTES } from './shared/account-ops.js';
+import { CUSTOMER_QUERY, ORDERS_QUERY } from './shared/account-documents.js';
+import { InputError, ops, ROUTES as OPERATION_ROUTES } from './shared/account-ops.js';
 import { randomToken, toBase64Url } from './shared/base64url.js';
 import { open, seal, sha256 } from './crypto.js';
 import { accountProblems, accountSettings } from './account/settings.js';

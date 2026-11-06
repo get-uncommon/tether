@@ -68,67 +68,6 @@
       "count": 1
     }
   },
-  "src/account-pages.js": {
-    "@typescript-eslint/no-confusing-void-expression": {
-      "count": 10
-    },
-    "@typescript-eslint/no-floating-promises": {
-      "count": 6
-    },
-    "@typescript-eslint/no-unnecessary-condition": {
-      "count": 2
-    },
-    "@typescript-eslint/restrict-plus-operands": {
-      "count": 1
-    },
-    "complexity": {
-      "count": 1
-    },
-    "max-lines": {
-      "count": 1
-    },
-    "max-lines-per-function": {
-      "count": 2
-    },
-    "no-nested-ternary": {
-      "count": 1
-    },
-    "no-useless-assignment": {
-      "count": 3
-    }
-  },
-  "src/account.js": {
-    "@typescript-eslint/no-confusing-void-expression": {
-      "count": 10
-    },
-    "@typescript-eslint/no-empty-function": {
-      "count": 1
-    },
-    "@typescript-eslint/no-floating-promises": {
-      "count": 2
-    },
-    "@typescript-eslint/no-unnecessary-condition": {
-      "count": 2
-    },
-    "@typescript-eslint/no-unnecessary-type-conversion": {
-      "count": 3
-    },
-    "@typescript-eslint/prefer-nullish-coalescing": {
-      "count": 1
-    },
-    "@typescript-eslint/prefer-optional-chain": {
-      "count": 1
-    },
-    "@typescript-eslint/use-unknown-in-catch-callback-variable": {
-      "count": 5
-    },
-    "max-lines": {
-      "count": 1
-    },
-    "no-restricted-syntax": {
-      "count": 1
-    }
-  },
   "src/index.js": {
     "@typescript-eslint/no-confusing-void-expression": {
       "count": 20
