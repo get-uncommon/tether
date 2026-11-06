@@ -73,6 +73,24 @@ test('a token without inventory access costs one extra request per store, then T
   );
 });
 
+test('a query written for the access that still asks for inventory is refused after one extra request', async () => {
+  let sent = 0;
+  const conf = {
+    ...storefront('ignores-access.test', async () => {
+      sent += 1;
+      assert.ok(sent <= 3, 'the refusal is not sent again and again');
+      return jsonResponse({ errors: [{ message: 'Access denied for quantityAvailable field.' }] });
+    }),
+    retries: 2,
+  };
+  const ignoresAccess = () => 'query { product(handle: "a") { variants(first: 1) { nodes { quantityAvailable } } } }';
+  await assert.rejects(request(conf, ignoresAccess, {}, hasData, { context: false }), {
+    name: 'TetherError',
+    message: 'Access denied for quantityAvailable field.',
+  });
+  assert.equal(sent, 2);
+});
+
 test('an answer that is not in the GraphQL shape is a TetherError, not a crash', async () => {
   /** @param {unknown} body */
   const answering = (body) => storefront('odd.test', async () => jsonResponse(body));
@@ -238,6 +256,36 @@ test('a query is sent again after a 5xx or a body that stopped arriving', async 
     assert.deepEqual(await request(conf, '{ shop { name } }', {}, hasData), { done: true });
     assert.equal(sent.count, 2);
   }
+});
+
+test("a 2xx with Shopify's INTERNAL_SERVER_ERROR is retried for a query, and leaves a mutation's outcome open", async () => {
+  const internalError = () =>
+    jsonResponse({ errors: [{ message: 'Internal error', extensions: { code: 'INTERNAL_SERVER_ERROR' } }] });
+  const query = answeringInTurn([internalError, answered]);
+  assert.deepEqual(await request(query.conf, '{ shop { name } }', {}, hasData), { done: true });
+  assert.equal(query.sent.count, 2);
+
+  const mutation = answeringInTurn([internalError, answered]);
+  await assert.rejects(request(mutation.conf, MUTATION, {}, hasData, { operation: 'mutation' }), {
+    code: 'SERVER_ERROR',
+    status: 200,
+    message: 'Internal error',
+  });
+  assert.equal(mutation.sent.count, 1, 'not sent again');
+
+  const noData = answeringInTurn([() => jsonResponse({ data: null, errors: [{ message: 'Oops' }] }), answered]);
+  await assert.rejects(request(noData.conf, MUTATION, {}, hasData, { operation: 'mutation' }), {
+    code: 'SERVER_ERROR',
+  });
+  assert.equal(noData.sent.count, 1);
+
+  const fieldError = { data: { cartLinesAdd: null }, errors: [{ message: 'The specified cart does not exist.' }] };
+  const withData = answeringInTurn([() => jsonResponse(fieldError)]);
+  await assert.rejects(request(withData.conf, MUTATION, {}, hasData, { operation: 'mutation' }), {
+    code: 'HTTP_200',
+  });
+  const queryNoData = answeringInTurn([() => jsonResponse({ errors: [{ message: 'Field missing' }] })]);
+  await assert.rejects(request(queryNoData.conf, '{ x }', {}, hasData), { code: 'HTTP_200' });
 });
 
 test("a document Tether didn't write is a mutation when it has the keyword outside strings and comments", async () => {

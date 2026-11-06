@@ -261,10 +261,13 @@ export const Cart = {
     return runChange(async () => commit(await removeLines(ids), 'remove'));
   },
 
+  /** Removes the lines the cart has when the change runs, so one queued just before it is cleared too. */
   clear(): Promise<ShopifyCart | null> {
-    const ids = currentLines().map((line) => line.id);
-    if (!ids.length) return Promise.resolve(currentCart());
-    return Cart.removeLine(ids);
+    return runChange(async () => {
+      const ids = currentLines().map((line) => line.id);
+      if (!ids.length) return currentCart();
+      return commit(await removeLines(ids), 'remove');
+    });
   },
 
   setNote(note: string | null | undefined): Promise<ShopifyCart | null> {
