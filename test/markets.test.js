@@ -357,3 +357,36 @@ test('page market: <meta name="tether-page-country"> pages switch on View Transi
   await tick(80);
   assert.notEqual(Tether.config.language, 'DE', 'left the German page');
 });
+
+test('readSavedMarket: a valid saved market, normalized; junk and other scripts’ values are rejected', () => {
+  const storageWith = (text) => ({ getItem: (key) => (key === 'tether:market:shop.test' ? text : null) });
+  assert.deepEqual(markets.readSavedMarket(storageWith('{"country":"de","language":"de-DE","locale":"de-DE"}')), {
+    country: 'DE',
+    language: 'DE',
+    locale: 'de-DE',
+  });
+  assert.deepEqual(markets.readSavedMarket(storageWith('{"country":"BE","language":"Flemish!","locale":""}')), {
+    country: 'BE',
+    language: undefined,
+    locale: undefined,
+  });
+  for (const junk of [
+    'not json',
+    'null',
+    '"DE"',
+    '[]',
+    '{"country":"Germany"}',
+    '{"country":"XX"}',
+    '{"language":"FR"}',
+  ]) {
+    assert.equal(markets.readSavedMarket(storageWith(junk)), null, junk);
+  }
+  assert.equal(markets.readSavedMarket(storageWith(null)), null, 'nothing saved');
+  assert.equal(markets.readSavedMarket(null), null, 'storage blocked');
+  assert.equal(detectOnly(null, env({ saved: { country: 'Germany', language: 'DE' } })).country, undefined);
+});
+
+test('detect: a single source name or an unknown one in detect is tolerated', () => {
+  assert.equal(detectOnly({ detect: 'server' }, env({ meta: 'US' })).country, 'US');
+  assert.deepEqual(detectOnly({ detect: ['nope'] }, env({ meta: 'US' })), { sources: {} });
+});

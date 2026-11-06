@@ -1,7 +1,5 @@
-// @ts-nocheck
 /**
- * Search as you type (Shopify predictive search). Optional part: loaded only on pages with
- * [tether-search].
+ * Search as you type (Shopify predictive search). Optional part: loaded only on pages with [tether-search].
  *
  *   <form tether-search action="/search">            <!-- Enter: your full results page -->
  *     <input tether-search-input name="q" type="search" placeholder="Search">
@@ -13,13 +11,31 @@
  *     </div>
  *   </form>
  *
- * Each list's first child is the template. The root gets is-open while there are results (or none)
- * to show, and tether-search-state="loading|ready|empty|error". Arrow keys move through the results,
- * Escape closes. tether-search-limit (default 6), tether-search-min (characters, default 2).
+ * Each list's first child is the template. The root gets is-open while there are results (or none) to show, and
+ * tether-search-state="idle|loading|ready|empty|error". Arrow keys move through the results, Escape closes.
+ * tether-search-limit (default 6), tether-search-min (characters, default 2).
  */
-import { cfg, reportError } from './config.js';
+import { cfg, log, reportError } from './config.js';
 import { gql } from './client.js';
 import { attr, sel, get, qsa, setText, setImage, repeat, show, formatMoney, productUrl, emit } from './dom.js';
+import { within } from './mounting.js';
+/** @import { Money } from './shopify-values.js' */
+
+/** @typedef {{ url: string, altText: string | null }} SearchImage */
+/**
+ * @typedef {object} SearchProduct
+ * @property {string} id
+ * @property {string} handle
+ * @property {string} title
+ * @property {boolean} availableForSale
+ * @property {SearchImage | null} featuredImage
+ * @property {{ minVariantPrice: Money }} priceRange
+ */
+/** @typedef {{ handle: string, title: string, image: SearchImage | null }} SearchCollection */
+/** @typedef {{ text: string }} SearchQuery */
+/** @typedef {{ products: SearchProduct[], collections: SearchCollection[], queries: SearchQuery[] }} SearchResults */
+/** @typedef {'idle' | 'loading' | 'ready' | 'empty' | 'error'} SearchState */
+/** @typedef {{ title?: string, price?: string, text?: string, image?: SearchImage | null }} BindValues */
 
 const QUERY = `query TetherPredictive($q: String!, $limit: Int!) {
   predictiveSearch(query: $q, limit: $limit, limitScope: EACH, types: [PRODUCT, COLLECTION, QUERY]) {
@@ -29,162 +45,279 @@ const QUERY = `query TetherPredictive($q: String!, $limit: Int!) {
   }
 }`;
 
-const mounted = new WeakSet();
-let uid = 0;
+const DEFAULT_LIMIT = 6;
+const DEFAULT_MIN_CHARACTERS = 2;
+const DEFAULT_ACTION = '/search';
 
-export function mountSearch(root = document) {
-  const roots = [...(root.matches?.(sel('search')) ? [root] : []), ...qsa(root, sel('search'))];
-  roots.forEach((el) => {
-    if (!mounted.has(el)) {
-      mounted.add(el);
-      setup(el);
+/** @type {WeakSet<Element>} */
+const mounted = new WeakSet();
+let searchBoxCount = 0;
+
+/**
+ * @param {Element} el
+ * @param {string} name
+ * @param {number} fallback
+ * @returns {number} The attribute as an integer; `fallback` when it is missing, zero or not a number.
+ */
+function integerAttribute(el, name, fallback) {
+  return parseInt(get(el, name) || '', 10) || fallback;
+}
+
+/**
+ * @param {Element} node
+ * @returns {Element | null} `node` when it is a link, else its first link.
+ */
+const linkIn = (node) => (node.tagName === 'A' ? node : node.querySelector('a'));
+
+/**
+ * @param {HTMLElement} node
+ * @param {BindValues} values
+ */
+function bindValues(node, values) {
+  qsa(node, sel('search-bind')).forEach((el) => {
+    const field = get(el, 'search-bind');
+    if (field === 'image') setImage(el, values.image?.url, values.image?.altText || values.title);
+    else if (field === 'title' || field === 'price' || field === 'text') {
+      if (values[field] != null) setText(el, values[field]);
     }
   });
 }
 
-function setup(rootEl) {
-  const input = rootEl.querySelector(sel('search-input')) || rootEl.querySelector('input');
-  const results = rootEl.querySelector(sel('search-results'));
-  if (!input || !results) return;
-  const limit = parseInt(get(rootEl, 'search-limit') || '6', 10) || 6;
-  const min = parseInt(get(rootEl, 'search-min') || '2', 10) || 2;
-  const id = results.id || (results.id = `${cfg.prefix}-search-${++uid}`);
-  input.setAttribute('role', 'combobox');
-  input.setAttribute('aria-autocomplete', 'list');
-  input.setAttribute('aria-controls', id);
-  input.setAttribute('aria-expanded', 'false');
-  input.setAttribute('autocomplete', 'off');
-  if (!results.hasAttribute('role')) results.setAttribute('role', 'listbox');
-  results.hidden = true;
+/**
+ * @param {Element} node
+ * @param {string} href
+ */
+function linkOption(node, href) {
+  const link = linkIn(node);
+  if (!link) return;
+  link.setAttribute('href', href);
+  link.setAttribute('role', 'option');
+}
 
-  let token = 0;
-  let timer = null;
-  let last = '';
-  const cache = new Map(); // term -> results, for typing back and forth
+/** One `[tether-search]` root: its input, its results and the search in flight. */
+class SearchBox {
+  /**
+   * @param {HTMLElement} root
+   * @param {HTMLInputElement} input
+   * @param {HTMLElement} results
+   */
+  constructor(root, input, results) {
+    this.root = root;
+    this.input = input;
+    this.results = results;
+    this.limit = integerAttribute(root, 'search-limit', DEFAULT_LIMIT);
+    this.minCharacters = integerAttribute(root, 'search-min', DEFAULT_MIN_CHARACTERS);
+    if (!results.id) {
+      searchBoxCount += 1;
+      results.id = `${cfg.prefix}-search-${searchBoxCount}`;
+    }
+    this.resultsId = results.id;
+    /** Counts searches, so only the latest one renders. */
+    this.searchNumber = 0;
+    /** @type {ReturnType<typeof setTimeout> | undefined} */
+    this.timer = undefined;
+    this.lastTerm = '';
+    /** @type {Map<string, SearchResults | null>} Results per term, for typing back and forth. */
+    this.cache = new Map();
+    this.setUpAria();
+    this.listen();
+  }
 
-  const setState = (state) => rootEl.setAttribute(attr('search-state'), state);
-  const open = (yes) => {
-    rootEl.classList.toggle('is-open', yes);
-    results.hidden = !yes;
-    input.setAttribute('aria-expanded', String(yes));
-    if (!yes) input.removeAttribute('aria-activedescendant');
-  };
-  const items = () => qsa(results, '[role="option"]');
+  setUpAria() {
+    this.input.setAttribute('role', 'combobox');
+    this.input.setAttribute('aria-autocomplete', 'list');
+    this.input.setAttribute('aria-controls', this.resultsId);
+    this.input.setAttribute('aria-expanded', 'false');
+    this.input.setAttribute('autocomplete', 'off');
+    if (!this.results.hasAttribute('role')) this.results.setAttribute('role', 'listbox');
+    this.results.hidden = true;
+  }
 
-  async function run(term) {
-    const t = ++token;
-    if (term.length < min) {
-      open(false);
-      setState('idle');
+  listen() {
+    this.input.addEventListener('input', () => {
+      const term = this.input.value.trim();
+      if (term === this.lastTerm) return;
+      this.lastTerm = term;
+      clearTimeout(this.timer);
+      this.timer = setTimeout(() => void this.search(term), cfg.searchDelay);
+    });
+    this.input.addEventListener('focus', () => {
+      if (this.input.value.trim().length >= this.minCharacters && this.options().length) this.open(true);
+    });
+    this.input.addEventListener('keydown', (event) => {
+      this.onKeydown(event);
+    });
+    document.addEventListener('click', (event) => {
+      // A click event's target is always a node.
+      if (!this.root.contains(/** @type {Node | null} */ (event.target))) this.open(false);
+    });
+  }
+
+  /** @param {SearchState} state */
+  setState(state) {
+    this.root.setAttribute(attr('search-state'), state);
+  }
+
+  /** @param {boolean} open */
+  open(open) {
+    this.root.classList.toggle('is-open', open);
+    this.results.hidden = !open;
+    this.input.setAttribute('aria-expanded', String(open));
+    if (!open) this.input.removeAttribute('aria-activedescendant');
+  }
+
+  options() {
+    return qsa(this.results, '[role="option"]');
+  }
+
+  /**
+   * @param {string} term
+   * @returns {Promise<SearchResults | null>}
+   */
+  async fetchResults(term) {
+    const cached = this.cache.get(term);
+    if (cached) return cached;
+    /** @type {{ predictiveSearch: SearchResults | null }} */
+    const data = await gql(QUERY, { q: term, limit: this.limit });
+    this.cache.set(term, data.predictiveSearch);
+    return data.predictiveSearch;
+  }
+
+  /** @param {string} term */
+  async search(term) {
+    this.searchNumber += 1;
+    const searchNumber = this.searchNumber;
+    if (term.length < this.minCharacters) {
+      this.open(false);
+      this.setState('idle');
       return;
     }
-    setState('loading');
+    this.setState('loading');
     try {
-      const data = cache.get(term) || (await gql(QUERY, { q: term, limit })).predictiveSearch;
-      cache.set(term, data);
-      if (t !== token) return; // a newer search is on its way
-      render(data, term);
-    } catch (err) {
-      if (t !== token) return;
-      setState('error');
-      reportError(err, 'search');
+      const results = await this.fetchResults(term);
+      if (searchNumber === this.searchNumber) this.render(results, term);
+    } catch (error) {
+      // A newer search owns the state and reports its own failure.
+      if (searchNumber !== this.searchNumber) {
+        log('a superseded search failed', error);
+        return;
+      }
+      this.setState('error');
+      reportError(error, 'search');
     }
   }
 
-  function render(data, term) {
-    const products = data?.products || [];
-    const collections = data?.collections || [];
-    const queries = (data?.queries || []).filter((q) => q.text.toLowerCase() !== term.toLowerCase());
-    const fill = (name, list, each) =>
-      qsa(results, sel(name)).forEach((c) => {
-        repeat(c, list, each);
-        show(c, list.length > 0);
-      });
-    fill('search-products', products, (node, p) => {
-      binds(node, { title: p.title, price: formatMoney(p.priceRange?.minVariantPrice), image: p.featuredImage });
-      link(node, productUrl(p.handle, p.id));
-      node.classList.toggle('is-sold-out', !p.availableForSale);
+  /**
+   * @template Item
+   * @param {string} name The list attribute, e.g. `search-products`.
+   * @param {readonly Item[]} items
+   * @param {(node: HTMLElement, item: Item) => void} render
+   */
+  fillList(name, items, render) {
+    qsa(this.results, sel(name)).forEach((list) => {
+      repeat(list, items, render);
+      show(list, items.length > 0);
     });
-    fill('search-collections', collections, (node, c) => {
-      binds(node, { title: c.title, image: c.image });
-      link(node, `${(cfg.collectionPath || '/collection').replace(/\/$/, '')}/${c.handle}`);
+  }
+
+  /** @param {string} text */
+  queryUrl(text) {
+    const action = this.root.getAttribute('action') || DEFAULT_ACTION;
+    const separator = action.includes('?') ? '&' : '?';
+    return `${action}${separator}${this.input.name || 'q'}=${encodeURIComponent(text)}`;
+  }
+
+  /**
+   * @param {SearchResults | null} results
+   * @param {string} term
+   */
+  render(results, term) {
+    const products = results?.products ?? [];
+    const collections = results?.collections ?? [];
+    const queries = (results?.queries ?? []).filter((query) => query.text.toLowerCase() !== term.toLowerCase());
+    this.fillList('search-products', products, (node, product) => {
+      const price = formatMoney(product.priceRange.minVariantPrice);
+      bindValues(node, { title: product.title, price, image: product.featuredImage });
+      linkOption(node, productUrl(product.handle, product.id));
+      node.classList.toggle('is-sold-out', !product.availableForSale);
     });
-    fill('search-queries', queries, (node, q) => {
-      binds(node, { text: q.text });
-      const a = node.tagName === 'A' ? node : node.querySelector('a');
-      const action = rootEl.getAttribute('action') || '/search';
-      if (a)
-        a.setAttribute(
-          'href',
-          `${action}${action.includes('?') ? '&' : '?'}${input.name || 'q'}=${encodeURIComponent(q.text)}`,
-        );
+    this.fillList('search-collections', collections, (node, collection) => {
+      bindValues(node, { title: collection.title, image: collection.image });
+      linkOption(node, `${(cfg.collectionPath || '/collection').replace(/\/$/, '')}/${collection.handle}`);
+    });
+    this.fillList('search-queries', queries, (node, query) => {
+      bindValues(node, { text: query.text });
+      linkIn(node)?.setAttribute('href', this.queryUrl(query.text));
     });
     const count = products.length + collections.length + queries.length;
-    qsa(rootEl, sel('show')).forEach((el) => {
-      const k = get(el, 'show');
-      if (k === 'search-empty') show(el, count === 0);
-      if (k === 'search-results') show(el, count > 0);
-    });
-    items().forEach((el, i) => {
-      el.id ||= `${id}-${i}`;
-      el.setAttribute('aria-selected', 'false');
-    });
-    setState(count ? 'ready' : 'empty');
-    open(true);
-    emit('search', { term, products, collections, queries }, rootEl);
+    this.showCount(count);
+    this.setState(count ? 'ready' : 'empty');
+    this.open(true);
+    emit('search', { term, products, collections, queries }, this.root);
   }
 
-  function binds(node, values) {
-    qsa(node, sel('search-bind')).forEach((el) => {
-      const k = get(el, 'search-bind');
-      if (k === 'image') setImage(el, values.image?.url, values.image?.altText || values.title);
-      else if (values[k] != null) setText(el, values[k]);
+  /** @param {number} count */
+  showCount(count) {
+    qsa(this.root, sel('show')).forEach((el) => {
+      const condition = get(el, 'show');
+      if (condition === 'search-empty') show(el, count === 0);
+      if (condition === 'search-results') show(el, count > 0);
+    });
+    this.options().forEach((option, index) => {
+      option.id ||= `${this.resultsId}-${index}`;
+      option.setAttribute('aria-selected', 'false');
     });
   }
 
-  function link(node, href) {
-    const a = node.tagName === 'A' ? node : node.querySelector('a');
-    if (a) {
-      a.setAttribute('href', href);
-      a.setAttribute('role', 'option');
+  /**
+   * @param {HTMLElement[]} options
+   * @param {number} index
+   */
+  highlight(options, index) {
+    options.forEach((option, optionIndex) => {
+      option.setAttribute('aria-selected', String(optionIndex === index));
+    });
+    const option = options[index];
+    if (!option) return;
+    this.input.setAttribute('aria-activedescendant', option.id);
+    // jsdom has no scrollIntoView.
+    /** @type {Partial<Pick<HTMLElement, 'scrollIntoView'>>} */ (option).scrollIntoView?.({ block: 'nearest' });
+  }
+
+  /** @param {KeyboardEvent} event */
+  onKeydown(event) {
+    const options = this.options();
+    const current = options.findIndex((option) => option.getAttribute('aria-selected') === 'true');
+    if (event.key === 'ArrowDown' && options.length) {
+      event.preventDefault();
+      this.open(true);
+      this.highlight(options, (current + 1) % options.length);
+    } else if (event.key === 'ArrowUp' && options.length) {
+      event.preventDefault();
+      this.highlight(options, current <= 0 ? options.length - 1 : current - 1);
+    } else if (event.key === 'Enter' && current >= 0) {
+      event.preventDefault();
+      options[current]?.click();
+    } else if (event.key === 'Escape') {
+      this.open(false);
     }
   }
+}
 
-  input.addEventListener('input', () => {
-    const term = input.value.trim();
-    if (term === last) return;
-    last = term;
-    clearTimeout(timer);
-    timer = setTimeout(() => run(term), cfg.searchDelay ?? 150);
-  });
-  input.addEventListener('focus', () => {
-    if (input.value.trim().length >= min && items().length) open(true);
-  });
-  input.addEventListener('keydown', (e) => {
-    const list = items();
-    const cur = list.findIndex((el) => el.getAttribute('aria-selected') === 'true');
-    const move = (i) => {
-      list.forEach((el, j) => el.setAttribute('aria-selected', String(j === i)));
-      if (list[i]) {
-        input.setAttribute('aria-activedescendant', list[i].id);
-        list[i].scrollIntoView?.({ block: 'nearest' });
-      }
-    };
-    if (e.key === 'ArrowDown' && list.length) {
-      e.preventDefault();
-      open(true);
-      move((cur + 1) % list.length);
-    } else if (e.key === 'ArrowUp' && list.length) {
-      e.preventDefault();
-      move(cur <= 0 ? list.length - 1 : cur - 1);
-    } else if (e.key === 'Enter' && cur >= 0) {
-      e.preventDefault();
-      list[cur].click();
-    } else if (e.key === 'Escape') {
-      open(false);
-    }
-  });
-  document.addEventListener('click', (e) => {
-    if (!rootEl.contains(e.target)) open(false);
-  });
+/**
+ * Sets up every `[tether-search]` in `root` (and `root` itself) once.
+ *
+ * @param {ParentNode & Partial<Pick<Element, 'matches'>>} [root]
+ */
+export function mountSearch(root = document) {
+  for (const el of within(root, sel('search'))) {
+    if (mounted.has(el)) continue;
+    mounted.add(el);
+    // The markup names an input element; a site without one gets the first input.
+    const input = /** @type {HTMLInputElement | null} */ (
+      el.querySelector(sel('search-input')) ?? el.querySelector('input')
+    );
+    const results = /** @type {HTMLElement | null} */ (el.querySelector(sel('search-results')));
+    if (input && results) new SearchBox(el, input, results);
+  }
 }
