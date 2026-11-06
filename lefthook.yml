@@ -7,7 +7,7 @@ pre-commit:
       run: npx prettier --check {staged_files}
     lint:
       glob: '*.{js,mjs,cjs,ts}'
-      run: npx eslint {staged_files}
+      run: npx eslint --no-warn-ignored {staged_files}
 pre-push:
   commands:
     check:
