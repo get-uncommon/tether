@@ -46,6 +46,8 @@ export default tseslint.config(
       '@typescript-eslint/switch-exhaustiveness-check': 'error',
       '@typescript-eslint/no-floating-promises': 'error',
       '@typescript-eslint/restrict-template-expressions': ['error', { allowNumber: true }],
+      // An empty attribute or config string means "not set" throughout, so `||` on strings is deliberate.
+      '@typescript-eslint/prefer-nullish-coalescing': ['error', { ignorePrimitives: { string: true } }],
       // `// @ts-nocheck` marks a file whose JSDoc types are still missing (AGENTS.md); the count only goes down.
       '@typescript-eslint/ban-ts-comment': ['error', { 'ts-nocheck': false }],
     },

@@ -18,9 +18,6 @@
     }
   },
   "scripts/release.mjs": {
-    "@typescript-eslint/prefer-nullish-coalescing": {
-      "count": 1
-    },
     "@typescript-eslint/restrict-plus-operands": {
       "count": 2
     }
@@ -37,9 +34,6 @@
     "@typescript-eslint/no-misused-promises": {
       "count": 1
     },
-    "@typescript-eslint/prefer-nullish-coalescing": {
-      "count": 4
-    },
     "@typescript-eslint/prefer-string-starts-ends-with": {
       "count": 1
     },
@@ -54,9 +48,6 @@
     }
   },
   "server/scripts/update-tether.mjs": {
-    "@typescript-eslint/prefer-nullish-coalescing": {
-      "count": 4
-    },
     "@typescript-eslint/use-unknown-in-catch-callback-variable": {
       "count": 1
     }
@@ -64,9 +55,6 @@
   "server/src/account-ops.js": {
     "@typescript-eslint/no-unnecessary-condition": {
       "count": 1
-    },
-    "@typescript-eslint/prefer-nullish-coalescing": {
-      "count": 7
     },
     "no-control-regex": {
       "count": 1
@@ -83,7 +71,7 @@
       "count": 1
     },
     "@typescript-eslint/prefer-nullish-coalescing": {
-      "count": 32
+      "count": 1
     },
     "@typescript-eslint/prefer-optional-chain": {
       "count": 1
@@ -108,9 +96,6 @@
     }
   },
   "server/src/app.js": {
-    "@typescript-eslint/prefer-nullish-coalescing": {
-      "count": 1
-    },
     "complexity": {
       "count": 1
     },
@@ -126,7 +111,7 @@
       "count": 1
     },
     "@typescript-eslint/prefer-nullish-coalescing": {
-      "count": 13
+      "count": 1
     },
     "@typescript-eslint/prefer-string-starts-ends-with": {
       "count": 1
@@ -145,9 +130,6 @@
     }
   },
   "server/src/deploy.js": {
-    "@typescript-eslint/prefer-nullish-coalescing": {
-      "count": 3
-    },
     "@typescript-eslint/require-await": {
       "count": 8
     },
@@ -158,9 +140,6 @@
   "server/src/mapping.js": {
     "@typescript-eslint/no-dynamic-delete": {
       "count": 2
-    },
-    "@typescript-eslint/prefer-nullish-coalescing": {
-      "count": 17
     }
   },
   "server/src/node.js": {
@@ -175,9 +154,6 @@
     },
     "@typescript-eslint/no-misused-promises": {
       "count": 1
-    },
-    "@typescript-eslint/prefer-nullish-coalescing": {
-      "count": 4
     },
     "@typescript-eslint/restrict-plus-operands": {
       "count": 1
@@ -197,7 +173,7 @@
       "count": 2
     },
     "@typescript-eslint/prefer-nullish-coalescing": {
-      "count": 22
+      "count": 1
     },
     "@typescript-eslint/prefer-optional-chain": {
       "count": 1
@@ -226,9 +202,6 @@
     },
     "@typescript-eslint/no-unnecessary-condition": {
       "count": 2
-    },
-    "@typescript-eslint/prefer-nullish-coalescing": {
-      "count": 19
     },
     "@typescript-eslint/restrict-plus-operands": {
       "count": 2
@@ -263,15 +236,9 @@
   "server/src/util.js": {
     "@typescript-eslint/no-empty-function": {
       "count": 4
-    },
-    "@typescript-eslint/prefer-nullish-coalescing": {
-      "count": 1
     }
   },
   "server/src/webflow.js": {
-    "@typescript-eslint/prefer-nullish-coalescing": {
-      "count": 5
-    },
     "complexity": {
       "count": 1
     },
@@ -280,9 +247,6 @@
     }
   },
   "server/src/webhook.js": {
-    "@typescript-eslint/prefer-nullish-coalescing": {
-      "count": 1
-    },
     "@typescript-eslint/prefer-optional-chain": {
       "count": 1
     }
@@ -293,9 +257,6 @@
     },
     "@typescript-eslint/no-empty-function": {
       "count": 1
-    },
-    "@typescript-eslint/prefer-nullish-coalescing": {
-      "count": 4
     },
     "max-lines-per-function": {
       "count": 1
@@ -340,7 +301,7 @@
       "count": 1
     },
     "@typescript-eslint/prefer-nullish-coalescing": {
-      "count": 43
+      "count": 1
     },
     "@typescript-eslint/restrict-plus-operands": {
       "count": 1
@@ -378,7 +339,7 @@
       "count": 1
     },
     "@typescript-eslint/prefer-nullish-coalescing": {
-      "count": 40
+      "count": 3
     },
     "@typescript-eslint/prefer-optional-chain": {
       "count": 1
@@ -404,7 +365,7 @@
       "count": 1
     },
     "@typescript-eslint/prefer-nullish-coalescing": {
-      "count": 34
+      "count": 3
     },
     "@typescript-eslint/restrict-plus-operands": {
       "count": 1
@@ -419,17 +380,9 @@
       "count": 1
     }
   },
-  "src/api-version.js": {
-    "@typescript-eslint/prefer-nullish-coalescing": {
-      "count": 1
-    }
-  },
   "src/astro.js": {
     "@typescript-eslint/no-dynamic-delete": {
       "count": 1
-    },
-    "@typescript-eslint/prefer-nullish-coalescing": {
-      "count": 2
     },
     "@typescript-eslint/unbound-method": {
       "count": 2
@@ -447,9 +400,6 @@
     },
     "@typescript-eslint/no-unnecessary-condition": {
       "count": 10
-    },
-    "@typescript-eslint/prefer-nullish-coalescing": {
-      "count": 37
     },
     "@typescript-eslint/prefer-optional-chain": {
       "count": 1
@@ -471,9 +421,6 @@
     }
   },
   "src/client.js": {
-    "@typescript-eslint/prefer-nullish-coalescing": {
-      "count": 6
-    },
     "@typescript-eslint/prefer-string-starts-ends-with": {
       "count": 1
     },
@@ -494,9 +441,6 @@
     "@typescript-eslint/no-floating-promises": {
       "count": 1
     },
-    "@typescript-eslint/prefer-nullish-coalescing": {
-      "count": 9
-    },
     "@typescript-eslint/restrict-plus-operands": {
       "count": 1
     },
@@ -515,7 +459,7 @@
       "count": 1
     },
     "@typescript-eslint/prefer-nullish-coalescing": {
-      "count": 2
+      "count": 1
     }
   },
   "src/diagnose.js": {
@@ -526,7 +470,7 @@
       "count": 10
     },
     "@typescript-eslint/prefer-nullish-coalescing": {
-      "count": 16
+      "count": 4
     },
     "@typescript-eslint/restrict-plus-operands": {
       "count": 4
@@ -543,10 +487,10 @@
       "count": 1
     },
     "@typescript-eslint/no-unnecessary-condition": {
-      "count": 3
+      "count": 2
     },
     "@typescript-eslint/prefer-nullish-coalescing": {
-      "count": 6
+      "count": 2
     }
   },
   "src/extras.js": {
@@ -558,9 +502,6 @@
     },
     "@typescript-eslint/no-floating-promises": {
       "count": 1
-    },
-    "@typescript-eslint/prefer-nullish-coalescing": {
-      "count": 2
     },
     "@typescript-eslint/prefer-optional-chain": {
       "count": 1
@@ -600,7 +541,7 @@
       "count": 4
     },
     "@typescript-eslint/prefer-nullish-coalescing": {
-      "count": 16
+      "count": 3
     },
     "@typescript-eslint/prefer-optional-chain": {
       "count": 1
@@ -619,9 +560,6 @@
     }
   },
   "src/initial.js": {
-    "@typescript-eslint/prefer-nullish-coalescing": {
-      "count": 11
-    },
     "complexity": {
       "count": 1
     }
@@ -637,7 +575,7 @@
       "count": 1
     },
     "@typescript-eslint/prefer-nullish-coalescing": {
-      "count": 2
+      "count": 1
     }
   },
   "src/loader.js": {
@@ -645,12 +583,6 @@
       "count": 2
     },
     "@typescript-eslint/no-misused-promises": {
-      "count": 1
-    },
-    "@typescript-eslint/prefer-nullish-coalescing": {
-      "count": 8
-    },
-    "@typescript-eslint/prefer-regexp-exec": {
       "count": 1
     },
     "prefer-const": {
@@ -668,7 +600,7 @@
       "count": 1
     },
     "@typescript-eslint/prefer-nullish-coalescing": {
-      "count": 16
+      "count": 3
     },
     "@typescript-eslint/use-unknown-in-catch-callback-variable": {
       "count": 1
@@ -682,7 +614,7 @@
       "count": 1
     },
     "@typescript-eslint/prefer-nullish-coalescing": {
-      "count": 13
+      "count": 1
     },
     "@typescript-eslint/prefer-optional-chain": {
       "count": 1
@@ -711,7 +643,7 @@
       "count": 1
     },
     "@typescript-eslint/prefer-nullish-coalescing": {
-      "count": 5
+      "count": 1
     }
   },
   "src/product.js": {
@@ -723,9 +655,6 @@
     },
     "@typescript-eslint/no-unnecessary-condition": {
       "count": 1
-    },
-    "@typescript-eslint/prefer-nullish-coalescing": {
-      "count": 32
     },
     "@typescript-eslint/restrict-plus-operands": {
       "count": 1
@@ -750,19 +679,11 @@
     "@typescript-eslint/no-misused-promises": {
       "count": 1
     },
-    "@typescript-eslint/prefer-nullish-coalescing": {
-      "count": 12
-    },
     "@typescript-eslint/restrict-plus-operands": {
       "count": 4
     },
     "max-lines-per-function": {
       "count": 1
-    }
-  },
-  "src/selling-plans.js": {
-    "@typescript-eslint/prefer-nullish-coalescing": {
-      "count": 14
     }
   },
   "src/server.js": {
@@ -773,12 +694,9 @@
       "count": 1
     },
     "@typescript-eslint/prefer-nullish-coalescing": {
-      "count": 25
+      "count": 2
     },
     "@typescript-eslint/prefer-optional-chain": {
-      "count": 1
-    },
-    "@typescript-eslint/prefer-regexp-exec": {
       "count": 1
     },
     "max-lines-per-function": {
@@ -789,9 +707,6 @@
     }
   },
   "src/status.js": {
-    "@typescript-eslint/prefer-nullish-coalescing": {
-      "count": 4
-    },
     "@typescript-eslint/prefer-optional-chain": {
       "count": 1
     },
