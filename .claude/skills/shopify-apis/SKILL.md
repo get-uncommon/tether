@@ -1,6 +1,6 @@
 ---
 name: shopify-apis
-description: Rules for writing or changing a Storefront API or Customer Account API query or mutation in Tether (src/fragments.js, src/cart.js, src/loader.js, src/shared/account-ops.js). Use before adding a field, a mutation or an API version.
+description: Rules for writing or changing a Storefront API or Customer Account API query or mutation in Tether (src/fragments.js, src/cart.js, src/loader.js, server/src/shared/account-ops.js). Use before adding a field, a mutation or an API version.
 ---
 
 # Shopify APIs in Tether
@@ -15,4 +15,4 @@ Tether's own rules on top of Shopify's:
 - **Values go in variables, never in the query text.** The one exception is `@inContext`. Its country and language are checked with `toCountry` / `toLanguage` before they are written.
 - **The API version is pinned** in `DEFAULTS.apiVersion` and `server/src/shopify.js`. A new version must pass `npm run smoke` on both the pinned version and the next one.
 - **Every new query or mutation passes `npm run smoke`.** If it touches subscriptions, run it against a dev store that has selling plans.
-- **Customer Account operations are fixed documents** in `src/shared/account-ops.js`, and each input is checked there. Server mode has no query passthrough.
+- **Customer Account operations are fixed documents** in `server/src/shared/account-ops.js`, and each input is checked there. Server mode has no query passthrough.

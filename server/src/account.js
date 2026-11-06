@@ -22,8 +22,9 @@
  * ACCOUNT_SECRET if you set one).
  */
 
-import { ops, ROUTES, InputError } from './account-ops.js';
-import { fromBase64Url, open, randomToken, seal, sha256, toBase64Url, toHex } from './crypto.js';
+import { ops, ROUTES, InputError } from './shared/account-ops.js';
+import { fromBase64Url, randomToken, toBase64Url } from './shared/base64url.js';
+import { open, seal, sha256, toHex } from './crypto.js';
 
 export const BASE = '/_tether/account';
 const COOKIE = '__Host-tether-account';

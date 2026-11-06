@@ -588,7 +588,7 @@ test('account operations: fixed routes, own data only, CSRF and origin rules, va
 });
 
 test('address update: fields sent empty are cleared; a new address leaves them out', async () => {
-  const { addressInput } = await import('../src/account-ops.js');
+  const { addressInput } = await import('../src/shared/account-ops.js');
   const form = { address1: 'Main 1', address2: '', phoneNumber: '', city: 'Utrecht' };
   assert.deepEqual(addressInput(form, { clear: true }), {
     address1: 'Main 1',

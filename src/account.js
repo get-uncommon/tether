@@ -25,17 +25,12 @@ import { TetherError } from './client.js';
 import { attr, sel, get, qsa, setText, setImage, repeat, show, formatMoney, emit } from './dom.js';
 import { Cart } from './cart.js';
 import { loadPart } from './lazy.js';
+import { randomToken, toBase64Url } from '../server/src/shared/base64url.js';
 
 const KEY = () => `${cfg.prefix}:account:${cfg.domain}`;
 const PENDING = () => `${cfg.prefix}:account-login:${cfg.domain}`;
 const store = () => (cfg.account?.remember ? window.localStorage : window.sessionStorage);
-const b64url = (bytes) =>
-  btoa(String.fromCharCode(...new Uint8Array(bytes)))
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=+$/, '');
-const random = () => b64url(crypto.getRandomValues(new Uint8Array(32)));
-const sha256 = async (s) => b64url(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s)));
+const sha256 = async (s) => toBase64Url(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s)));
 const go = (url) => (cfg.account?.navigate || ((u) => window.location.assign(u)))(url); // overridable (popup, tests)
 const read = (s, k) => {
   try {
@@ -127,9 +122,9 @@ export async function login({ returnTo = window.location.href, locale } = {}) {
   if (!cfg.account?.clientId)
     throw new TetherError('Customer accounts: set account.clientId', { code: 'NOT_CONFIGURED' });
   const d = await discover();
-  const state = random();
-  const nonce = random();
-  const verifier = random();
+  const state = randomToken();
+  const nonce = randomToken();
+  const verifier = randomToken();
   const redirect = callbackUrl();
   write(window.sessionStorage, PENDING(), { state, nonce, verifier, redirect, returnTo, at: Date.now() });
   const u = new URL(d.authorization_endpoint);

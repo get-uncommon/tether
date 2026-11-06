@@ -1,5 +1,6 @@
 // Tether's layers: src/ runs in the browser (and, for server.js and astro.js, in Node at build time); server/src/ is
-// the user's own Worker, run from source. Neither imports the other's code; what both need lives in src/shared/.
+// the user's own Worker, run from source. A deployed Worker copy holds only server/, so what both need lives in
+// server/src/shared/, which imports nothing outside itself.
 /** @type {import('dependency-cruiser').IConfiguration} */
 module.exports = {
   forbidden: [
@@ -17,14 +18,35 @@ module.exports = {
       from: {
         orphan: true,
         pathNot: [
-          '^src/(index|server|astro|lazy-iife)\.js$',
+          '^src/(index|server|astro|lazy-iife)[.]js$',
           '^src/(parts|presets)/',
-          '^server/src/(entry|index)\.js$',
+          '^server/src/(entry|index)[.]js$',
           '^server/(bin|scripts)/',
           '^scripts/',
         ],
       },
       to: {},
+    },
+    {
+      name: 'browser-only-uses-shared-server-code',
+      severity: 'error',
+      comment: 'The browser script may use the shared modules in server/src/shared/, not the Worker itself.',
+      from: { path: '^src/' },
+      to: { path: '^server/', pathNot: '^server/src/shared/' },
+    },
+    {
+      name: 'worker-not-browser',
+      severity: 'error',
+      comment: 'A deployed Worker copy has no src/ folder next to it.',
+      from: { path: '^server/' },
+      to: { path: '^src/' },
+    },
+    {
+      name: 'shared-stands-alone',
+      severity: 'error',
+      comment: 'server/src/shared/ runs in the browser and the Worker, so it imports only itself.',
+      from: { path: '^server/src/shared/' },
+      to: { pathNot: '^server/src/shared/' },
     },
     {
       name: 'no-dev-deps-in-shipped-code',

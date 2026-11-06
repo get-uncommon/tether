@@ -4,33 +4,13 @@
  * so it runs in Workers and Node 20+.
  */
 
+import { fromBase64Url, toBase64Url } from './shared/base64url.js';
+
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
 /** Fixed HKDF salt. Changing it makes every stored session and cached token unreadable. */
 const KEY_SALT = encoder.encode('tether-account-v1');
-
-/** @param {ArrayBuffer | Uint8Array} bytes */
-export function toBase64Url(bytes) {
-  return btoa(String.fromCharCode(...new Uint8Array(bytes)))
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=+$/, '');
-}
-
-/** @param {string} text */
-export function fromBase64Url(text) {
-  const base64 = text
-    .replace(/-/g, '+')
-    .replace(/_/g, '/')
-    .padEnd(Math.ceil(text.length / 4) * 4, '=');
-  return Uint8Array.from(atob(base64), (char) => char.charCodeAt(0));
-}
-
-/** A random URL-safe token of `bytes` random bytes. */
-export function randomToken(bytes = 32) {
-  return toBase64Url(crypto.getRandomValues(new Uint8Array(bytes)));
-}
 
 /** @param {string} text */
 export async function sha256(text) {

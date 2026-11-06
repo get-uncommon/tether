@@ -2,12 +2,12 @@
 /**
  * Customer account pages (optional part, loaded by the account part on pages that use them):
  * order detail with returns, profile, addresses, subscriptions. The operations and their input
- * checks are shared with the Worker (server/src/account-ops.js), so both modes do the same.
+ * checks are shared with the Worker (server/src/shared/account-ops.js), so both modes do the same.
  */
 import { cfg, reportError } from './config.js';
 import { TetherError } from './client.js';
 import { attr, sel, get, qsa, setText, setImage, repeat, show, formatMoney, emit } from './dom.js';
-import { ops, InputError } from '../server/src/account-ops.js';
+import { ops, InputError } from '../server/src/shared/account-ops.js';
 
 let ctx = null; // the account part's server(), serverFetch(), query(), customer(), reset()
 let bound = false;

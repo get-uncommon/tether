@@ -1,9 +1,4 @@
 {
-  ".dependency-cruiser.cjs": {
-    "no-useless-escape": {
-      "count": 2
-    }
-  },
   "e2e/serve.mjs": {
     "no-nested-ternary": {
       "count": 1
@@ -49,14 +44,6 @@
   },
   "server/scripts/update-tether.mjs": {
     "@typescript-eslint/use-unknown-in-catch-callback-variable": {
-      "count": 1
-    }
-  },
-  "server/src/account-ops.js": {
-    "@typescript-eslint/no-unnecessary-condition": {
-      "count": 1
-    },
-    "no-control-regex": {
       "count": 1
     }
   },
@@ -166,6 +153,14 @@
     },
     "no-restricted-syntax": {
       "count": 2
+    }
+  },
+  "server/src/shared/account-ops.js": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    },
+    "no-control-regex": {
+      "count": 1
     }
   },
   "server/src/shopify.js": {
