@@ -4,7 +4,10 @@
  *   <form tether-search action="/search">            <!-- Enter: your full results page -->
  *     <input tether-search-input name="q" type="search" placeholder="Search">
  *     <div tether-search-results>
- *       <div tether-search-products><a><img tether-search-bind="image" max-width="120"><span tether-search-bind="title"></span> <span tether-search-bind="price"></span></a></div>
+ *       <div tether-search-products>
+ *         <a><img tether-search-bind="image" max-width="120"><span tether-search-bind="title"></span>
+ *           <span tether-search-bind="price"></span></a>
+ *       </div>
  *       <div tether-search-queries><a><span tether-search-bind="text"></span></a></div>
  *       <div tether-search-collections><a><span tether-search-bind="title"></span></a></div>
  *       <p tether-show="search-empty">No results</p>

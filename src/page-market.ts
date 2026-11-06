@@ -23,7 +23,9 @@ interface ConfiguredMarket {
 
 let configuredMarket: ConfiguredMarket = { country: undefined, language: undefined, locale: undefined };
 
-/** Whether the page arrived at last was built for its own market, which the next page without one switches back from. */
+/**
+ * Whether the page arrived at last was built for its own market, which the next page without one switches back from.
+ */
 let lastPageHadOwnMarket = false;
 
 /**

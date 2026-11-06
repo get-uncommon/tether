@@ -129,7 +129,9 @@ export interface Profile {
   firstName: string | null;
   lastName: string | null;
 }
-/** What a subscription action changed: the contract (pause, resume, cancel) or its next billing cycle (skip, unskip). */
+/**
+ * What a subscription action changed: the contract (pause, resume, cancel) or its next billing cycle (skip, unskip).
+ */
 export type SubscriptionChange =
   | { contract: { id: string | null; status: string | null } }
   | { billingCycle: { cycleIndex: number | null; skipped: boolean } };

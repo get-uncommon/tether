@@ -245,7 +245,9 @@ export function productView(product: Product, choice: ProductChoice, lowStock: n
   };
 }
 
-/** The `tether-bind` values that follow the variant and purchase. Thunks, so only the binds on the page are computed. */
+/**
+ * The `tether-bind` values that follow the variant and purchase. Thunks, so only the binds on the page are computed.
+ */
 export function variantBindTexts(view: ProductView, format: Formatters): Map<string, () => BindText> {
   const { variant, plan, price, compareAtPrice, quantity } = view;
   const planId = purchasePlanId(view.purchase);
