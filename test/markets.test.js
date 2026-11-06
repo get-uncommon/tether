@@ -358,6 +358,21 @@ test('page market: <meta name="tether-page-country"> pages switch on View Transi
   assert.notEqual(Tether.config.language, 'DE', 'left the German page');
 });
 
+test('page market: leaving a market page, a saved market that is not valid falls back to the configured one', async () => {
+  await Tether.setCountry('NL', { language: null, remember: false });
+  document.head.innerHTML = '<meta name="tether-page-country" content="DE">';
+  document.body.innerHTML = '';
+  document.dispatchEvent(new window.Event('astro:page-load'));
+  await tick(80);
+  assert.equal(Tether.config.country, 'DE');
+  localStorage.setItem('tether:market:shop.test', JSON.stringify({ country: 'not a country' }));
+  document.head.innerHTML = '';
+  document.dispatchEvent(new window.Event('astro:page-load'));
+  await tick(80);
+  assert.equal(Tether.config.country, 'NL', 'the configured market');
+  localStorage.removeItem('tether:market:shop.test');
+});
+
 test('readSavedMarket: a valid saved market, normalized; junk and other scripts’ values are rejected', () => {
   const storageWith = (text) => ({ getItem: (key) => (key === 'tether:market:shop.test' ? text : null) });
   assert.deepEqual(markets.readSavedMarket(storageWith('{"country":"de","language":"de-DE","locale":"de-DE"}')), {

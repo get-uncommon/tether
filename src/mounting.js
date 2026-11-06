@@ -3,18 +3,14 @@
  * the products the server rendered into the page. Shared by `index.js` and the optional markets part.
  */
 import { cfg, log, warn, reportError } from './config.js';
-import { ProductScope, scopes as untypedScopes, rememberOptionNames } from './product.js';
+import { ProductScope, scopes, rememberOptionNames } from './product.js';
 import { listSelector } from './collection.js';
 import { getProduct, takeStale, refreshProducts, hydrateProducts } from './loader.js';
 import { resolveProductKey, setScopeStatus, isNotFound } from './status.js';
 import { attr, get, qsa, emit } from './dom.js';
 /** @import { Product } from './fragments.js' */
 
-/** @typedef {{ product: Product, update: (product: Product) => void }} RenderedProduct A mounted `ProductScope`. */
 /** @typedef {{ root: Element, load: (more?: boolean) => Promise<unknown> }} MountedList A mounted `ListScope`. */
-
-// product.js has no types yet; these are the members of its scopes this module uses.
-const scopes = /** @type {WeakMap<Element, RenderedProduct>} */ (untypedScopes);
 
 /**
  * The marker on the `<script type="application/json">` tags `tether/server`'s `hydrate()` writes. It is fixed, not

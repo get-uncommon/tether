@@ -1,5 +1,5 @@
 // Compile-only check of the public types (npm run test:types). Not shipped.
-import Tether, { init, type TetherConfig, type ShopifyCart, TetherError } from '@occluze/tether';
+import Tether, { init, type TetherConfig, type ShopifyCart, type CartStatus, TetherError } from '@occluze/tether';
 import { barbaPreset } from '@occluze/tether/presets/barba';
 import { createStorefront } from '@occluze/tether/server';
 import tetherAstro from '@occluze/tether/astro';
@@ -47,6 +47,8 @@ const config: TetherConfig = {
   token: 't',
   country: 'NL',
   markets: { detect: true, locales: { de: { country: 'DE' } } },
+  searchDelay: 200,
+  account: { server: '/_tether/account', navigate: (url) => console.log(url) },
   onError: (e, ctx) => console.log((e as TetherError).code, ctx),
 };
 init({ ...config, ...barbaPreset({ lenis: () => null }) });
@@ -83,3 +85,31 @@ const im: string = Tether.imageUrl('https://cdn.shopify.com/a.jpg', { width: 160
 void im;
 void Tether.cart.changeQuantity('gid://shopify/CartLine/1', 1);
 void Tether.setCountry('DE', { locale: 'de-DE', language: null });
+
+// The cart's status is a union: each state carries what it has.
+function cartSummary(status: CartStatus): string {
+  switch (status.kind) {
+    case 'unknown':
+      return 'loading';
+    case 'empty':
+      return 'empty';
+    case 'ready':
+      return status.cart.id;
+    case 'error':
+      return status.cart?.id ?? String(status.error);
+  }
+}
+void cartSummary(Tether.cart.status);
+Tether.cart.setCustomer({ accessToken: null });
+Tether.cart.setCustomer({ beforeCheckout: async () => null });
+async function accountAndMarkets() {
+  const loggedIn: boolean = await Tether.account.isLoggedIn();
+  const finished: boolean = await Tether.account.handleCallback();
+  await Tether.account.render(document);
+  const report = await Tether.diagnose({ silent: true });
+  const inUse: string | null = report.market.country;
+  const source = report.market.detected?.sources?.country;
+  const detected = await Tether.detectMarket();
+  void [loggedIn, finished, inUse, source, detected.country];
+}
+void accountAndMarkets;

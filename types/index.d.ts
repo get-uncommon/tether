@@ -165,9 +165,13 @@ export interface TetherConfig {
     /** The *.myshopify.com domain, if domain is something else. */
     shopDomain?: string;
     locale?: string;
+    /** Replaces location.assign for the login redirect (popups, tests). */
+    navigate?: (url: string) => void;
   } | null;
   /** tether-show="low-stock" at this many or fewer (default 5). */
   lowStock?: number;
+  /** Milliseconds the search part waits after the last keystroke (default 150). */
+  searchDelay?: number;
   /** true: ?variant= (and selling_plan=) follow the visitor's choice on the page's main product. */
   variantUrl?: boolean;
   /** Your text for Shopify's cart warnings (stock, codes), e.g. translated by code. Return nothing to keep Shopify's. */
@@ -228,7 +232,26 @@ export interface CartWarning {
   target?: string;
 }
 
+/**
+ * What the cart is known to be: `unknown` until the saved cart has loaded, `empty` without a cart, `error` after a
+ * failed load or change (with the cart as Shopify last sent it).
+ */
+export type CartStatus =
+  | { kind: 'unknown' }
+  | { kind: 'empty' }
+  | { kind: 'ready'; cart: ShopifyCart }
+  | { kind: 'error'; error: unknown; cart: ShopifyCart | null };
+
+/** The logged-in customer the cart belongs to (set by the account part). */
+export interface CustomerLink {
+  /** The Customer Account API token: carts created from now on belong to the customer. */
+  accessToken: string | null;
+  /** The account's own checkout URL; null from it, or no function, uses the cart's. */
+  beforeCheckout: (() => Promise<string | null>) | null;
+}
+
 export interface Cart {
+  readonly status: CartStatus;
   readonly state: ShopifyCart | null;
   readonly lines: ShopifyCartLine[];
   readonly count: number;
@@ -237,6 +260,8 @@ export interface Cart {
   readonly warnings: CartWarning[];
   /** true once the saved cart (or the absence of one) is known. */
   readonly loaded: boolean;
+  /** Links the cart to a logged-in customer, or unlinks it with nulls. Fields left out keep their value. */
+  setCustomer(link: Partial<CustomerLink>): void;
   id(): string | null;
   init(): Promise<ShopifyCart | null>;
   /** add(variantId, qty) · add({ variantId, quantity, sellingPlanId, attributes }) · add([line, line]) */
@@ -338,15 +363,33 @@ export interface Localization {
   }[];
 }
 
+export type MarketSource = 'saved' | 'server' | 'webflow';
+
+/** The market fields detection found, and the source each came from (no sources with detect: false). */
+export interface DetectedMarket {
+  country?: string;
+  language?: string;
+  locale?: string;
+  sources?: Partial<Record<'country' | 'language' | 'locale', MarketSource>>;
+}
+
 export interface DiagnoseReport {
   version: string;
   config: Record<string, unknown>;
   apiVersion: { version: string; ok: boolean; monthsLeft?: number; next?: string; note: string };
-  market: { country?: string; language?: string; locale?: string; sources: Record<string, string> } | null;
+  /** The market in use (a visitor's choice included), and what detection would pick (null without markets.detect). */
+  market: { country: string | null; language: string | null; locale: string | null; detected: DetectedMarket | null };
   reachable: boolean;
   shop: { name?: string; url?: string; currency?: string } | null;
   latencyMs: number | null;
-  products: { key: string; handle?: string; title?: string; plans?: number; error?: string }[];
+  products: {
+    key: string;
+    handle?: string;
+    title?: string;
+    plans?: number;
+    requiresSellingPlan?: boolean;
+    error?: string;
+  }[];
   sellingPlans: { product: string; group?: string; plan: string; id: string }[];
   problems: { level: 'error' | 'warn'; message: string; element?: string }[];
 }
@@ -434,6 +477,14 @@ export interface Tether {
     >;
     query<T = any>(query: string, variables?: Record<string, unknown>): Promise<T>;
     getToken(): Promise<string | null>;
+    /** True while a customer is logged in, as far as this page knows without asking. */
+    isLoggedIn(): Promise<boolean>;
+    /** Finishes a login coming back from Shopify (browser mode); true when there was one. */
+    handleCallback(): Promise<boolean>;
+    /** Fills the account markup in root: logged-in/out content, the customer, orders and the account pages. */
+    render(root?: ParentNode): Promise<void>;
+    /** What mount() runs: finishes a login coming back on the first call, then renders root. */
+    mountAccount(root?: ParentNode): Promise<void>;
     /** One order in full (lines, totals, addresses, fulfillments with tracking, returnable lines); null if not the customer's. */
     order(id: string | number): Promise<Record<string, any> | null>;
     updateProfile(fields: {
@@ -467,9 +518,7 @@ export interface Tether {
   resolveProductKey(el: Element, location?: Location | URL): { key: string | null; fromUrl: boolean; raw: string };
   /** Switch market: prices, currency, cart and every product on the page follow. */
   setCountry(code: string, opts?: SetCountryOptions): Promise<ShopifyCart | null>;
-  detectMarket(
-    markets?: MarketsConfig,
-  ): Promise<{ country?: string; language?: string; locale?: string; sources: Record<string, string> }>;
+  detectMarket(markets?: MarketsConfig | null): Promise<DetectedMarket>;
   getLocalization(): Promise<Localization>;
   /** Logs and returns what's wrong on this page (config, token, API version, plans, markup). */
   diagnose(opts?: { root?: ParentNode; silent?: boolean }): Promise<DiagnoseReport>;

@@ -1,7 +1,6 @@
 #!/usr/bin/env node
-// @ts-nocheck
 /**
- * One-step release:
+ * One-step release, run by the owner:
  *
  *   npm run release -- 0.4.0            bump everywhere, build, test, commit, tag
  *   npm run release -- 0.4.0 --push     ...and push (GitHub Actions then publishes to npm
@@ -15,54 +14,121 @@ import { execFileSync } from 'node:child_process';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+/** @typedef {[major: number, minor: number, patch: number]} Version */
+
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const [version] = process.argv.slice(2).filter((a) => !a.startsWith('--'));
-const push = process.argv.includes('--push');
-const run = (cmd, args, opts = {}) => execFileSync(cmd, args, { cwd: ROOT, stdio: 'inherit', ...opts });
-const out = (cmd, args) => execFileSync(cmd, args, { cwd: ROOT, encoding: 'utf8' }).trim();
-const fail = (msg) => {
-  console.error(`release: ${msg}`);
-  process.exit(1);
-};
+const VERSION_PATTERN = /^\d+\.\d+\.\d+$/;
+const VERSION_CONSTANT = /export const VERSION = '[^']+';/;
+const PACKAGE_VERSION = /"version": "\d+\.\d+\.\d+"/;
 
-if (!/^\d+\.\d+\.\d+$/.test(version || '')) fail('usage: npm run release -- X.Y.Z [--push]');
-if (out('git', ['status', '--porcelain'])) fail('working tree not clean: commit or stash first');
-if (out('git', ['branch', '--show-current']) !== 'main') fail('not on main');
-const pkg = JSON.parse(await readFile(join(ROOT, 'package.json'), 'utf8'));
-const [a, b, c] = pkg.version.split('.').map(Number);
-const [x, y, z] = version.split('.').map(Number);
-if (x * 1e6 + y * 1e3 + z <= a * 1e6 + b * 1e3 + c) fail(`${version} is not newer than ${pkg.version}`);
-const changelog = await readFile(join(ROOT, 'CHANGELOG.md'), 'utf8');
-if (!new RegExp(`^## ${version.replace(/\./g, '\\.')}\\b`, 'm').test(changelog))
-  fail(`add a "## ${version}" section to CHANGELOG.md first`);
-
-async function edit(file, fn, { optional = false } = {}) {
-  const p = join(ROOT, file);
-  const before = await readFile(p, 'utf8');
-  const after = fn(before);
-  if (after === before && !optional) fail(`${file}: nothing to change (pattern not found?)`);
-  await writeFile(p, after);
+/**
+ * @param {string} command
+ * @param {string[]} args
+ */
+function run(command, args) {
+  execFileSync(command, args, { cwd: ROOT, stdio: 'inherit' });
 }
-const json = (s) => s.replace(/"version": "\d+\.\d+\.\d+"/, `"version": "${version}"`);
 
-await edit('package.json', json);
-await edit('server/package.json', json);
-await edit('src/index.js', (s) => s.replace(/export const VERSION = '[^']+';/, `export const VERSION = '${version}';`));
-await edit('server/src/version.js', (s) =>
-  s.replace(/export const VERSION = '[^']+';/, `export const VERSION = '${version}';`),
-);
-// Pinned examples in the README (ranges like @0.3 follow the minor version).
-await edit(
-  'README.md',
-  (s) =>
-    s
-      .replace(/@v\d+\.\d+\.\d+/g, `@v${version}`)
-      .replace(/@\d+\.\d+\/dist/g, `@${x}.${y}/dist`)
-      .replace(/`@\d+\.\d+` gets every \d+\.\d+\.x fix/, `\`@${x}.${y}\` gets every ${x}.${y}.x fix`),
-  { optional: true },
-);
-// server/TETHER_VERSION stays 'latest': deployed sync copies follow every release (weekly updater).
+/**
+ * @param {string} command
+ * @param {string[]} args
+ * @returns {string} The command's output, trimmed.
+ */
+function output(command, args) {
+  return execFileSync(command, args, { cwd: ROOT, encoding: 'utf8' }).trim();
+}
 
+/**
+ * @param {string} message
+ * @returns {never}
+ */
+function fail(message) {
+  console.error(`release: ${message}`);
+  process.exit(1);
+}
+
+/**
+ * @param {string} text `X.Y.Z`
+ * @returns {Version}
+ */
+function parseVersion(text) {
+  const [major = 0, minor = 0, patch = 0] = text.split('.').map(Number);
+  return [major, minor, patch];
+}
+
+/**
+ * @param {Version} a
+ * @param {Version} b
+ * @returns {boolean} True when `a` comes after `b`.
+ */
+function isNewer(a, b) {
+  const index = a.findIndex((part, position) => part !== b[position]);
+  return index !== -1 && (a[index] ?? 0) > (b[index] ?? 0);
+}
+
+/**
+ * Rewrites `file` with `change`; fails when nothing changed, unless `optional`.
+ *
+ * @param {string} file
+ * @param {(text: string) => string} change
+ * @param {{ optional?: boolean }} [options]
+ */
+async function edit(file, change, { optional = false } = {}) {
+  const path = join(ROOT, file);
+  const before = await readFile(path, 'utf8');
+  const after = change(before);
+  if (after === before && !optional) fail(`${file}: nothing to change (pattern not found?)`);
+  await writeFile(path, after);
+}
+
+/**
+ * @param {string} version
+ * @returns {Promise<void>}
+ * @throws Exits when the version, the working tree, the branch or CHANGELOG.md isn't ready for it.
+ */
+async function checkReady(version) {
+  if (!VERSION_PATTERN.test(version)) fail('usage: npm run release -- X.Y.Z [--push]');
+  if (output('git', ['status', '--porcelain'])) fail('working tree not clean: commit or stash first');
+  if (output('git', ['branch', '--show-current']) !== 'main') fail('not on main');
+  /** @type {unknown} */
+  const pkg = JSON.parse(await readFile(join(ROOT, 'package.json'), 'utf8'));
+  const current = String(/** @type {{ version: unknown }} The repository's own package.json. */ (pkg).version);
+  if (!isNewer(parseVersion(version), parseVersion(current))) fail(`${version} is not newer than ${current}`);
+  const changelog = await readFile(join(ROOT, 'CHANGELOG.md'), 'utf8');
+  if (!new RegExp(`^## ${version.replace(/\./g, '\\.')}\\b`, 'm').test(changelog)) {
+    fail(`add a "## ${version}" section to CHANGELOG.md first`);
+  }
+}
+
+/** @param {string} version */
+async function bump(version) {
+  const [major, minor] = parseVersion(version);
+  /** @param {string} text */
+  const packageJson = (text) => text.replace(PACKAGE_VERSION, `"version": "${version}"`);
+  /** @param {string} text */
+  const versionConstant = (text) => text.replace(VERSION_CONSTANT, `export const VERSION = '${version}';`);
+  await edit('package.json', packageJson);
+  await edit('server/package.json', packageJson);
+  await edit('src/index.js', versionConstant);
+  await edit('server/src/version.js', versionConstant);
+  // Pinned examples in the README; ranges like @0.3 follow the minor version.
+  await edit(
+    'README.md',
+    (text) =>
+      text
+        .replace(/@v\d+\.\d+\.\d+/g, `@v${version}`)
+        .replace(/@\d+\.\d+\/dist/g, `@${major}.${minor}/dist`)
+        .replace(/`@\d+\.\d+` gets every \d+\.\d+\.x fix/, `\`@${major}.${minor}\` gets every ${major}.${minor}.x fix`),
+    { optional: true },
+  );
+  // server/TETHER_VERSION stays 'latest': deployed sync copies follow every release (weekly updater).
+}
+
+const [version = ''] = process.argv.slice(2).filter((arg) => !arg.startsWith('--'));
+const push = process.argv.includes('--push');
+
+await checkReady(version);
+await bump(version);
 run('npm', ['install', '--package-lock-only', '--no-audit', '--no-fund', '--silent']);
 run('npm', ['test']);
 run('npm', ['run', 'smoke']);

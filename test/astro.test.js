@@ -114,6 +114,12 @@ test('server: createStorefront(import.meta.env) maps the PUBLIC_SHOPIFY_* names 
   assert.throws(() => server.createStorefront({}), /needs domain and token/);
 });
 
+test('server: the config is resolved as the browser’s: an invalid count falls back to its default', () => {
+  const shop = server.createStorefront({ domain: 'shop.test', token: 't', imagesFirst: -1, variantsFirst: 'many' });
+  assert.equal(shop.config.imagesFirst, 25);
+  assert.equal(shop.config.variantsFirst, 100);
+});
+
 test('server: same product query as the browser, so hydrated data has the same shape', async () => {
   const { productFragment } = await import('../src/fragments.js');
   const shop = server.createStorefront({ domain: 'shop.test', token: 't', fetch: globalThis.fetch });
