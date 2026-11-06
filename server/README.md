@@ -40,6 +40,12 @@ curl -X POST -H "Authorization: Bearer YOUR_SYNC_SECRET" "https://tether-sync.YO
 
 This imports your products and registers the Shopify webhooks. From now on it runs by itself.
 
+The webhooks go to the address you called `/reconcile` on. Shopify sometimes sends a webhook twice.
+On `workers.dev`, a repeat that reaches another copy of the Worker is synced again. That costs one
+Shopify read and one KV read, and nothing is written. When the webhooks were registered on your
+own domain (a route or custom domain, as customer accounts need), Cloudflare's cache drops those
+repeats too.
+
 **5. Check.** Any time, to see that everything works:
 
 ```bash
@@ -127,7 +133,7 @@ Add these later as secrets, only if you need them: Cloudflare → your Worker �
 | `SHOPIFY_ADMIN_TOKEN` | Stores with an old admin-created custom app (`shpat_…`) instead of a Dev Dashboard app |
 | `SHOPIFY_WEBHOOK_SECRET` | Webhooks you created yourself under Shopify → Settings → Notifications |
 | `ACCOUNT_CLIENT_ID`, `ACCOUNT_ORIGINS`, `STOREFRONT_TOKEN` (+ `ACCOUNT_CLIENT_SECRET`) | Customer accounts through this Worker: the browser never holds a Shopify token. Needs the `TETHER_SYNC` KV binding, which the deploy creates, and `ACCOUNT_SECRET` ([setup](../docs/accounts.md#setup)) |
-| `ACCOUNT_SECRET` | Required with customer accounts: 24+ random characters, not the same as `SYNC_SECRET`, the sessions' own encryption key. Without it the account routes answer 503 and `/check` says what to set. Changing it logs every customer out once |
+| `ACCOUNT_SECRET` | Required with customer accounts: 24+ random characters, not the same as `SYNC_SECRET`, the sessions' own encryption key. Without it, or with the value of `SYNC_SECRET`, the account routes answer 503 and `/check` says what to set. Changing it logs every customer out once |
 | `DEPLOY_HOOK_URL` | A statically built site (Astro, …): start a build when product content changes ([how](../docs/astro.md#7-rebuild-when-products-change)). Without Webflow, set the Webflow fields to `none` |
 | `DEPLOY_HOOK_MIN_SECONDS` | At most one build per this many seconds (default 60) |
 | `MAX_SUBREQUESTS` | A paid Workers plan, to let each run do more (default 45) |

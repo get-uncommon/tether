@@ -120,6 +120,14 @@ test('/check: a missing namespace is a warning for the sync and an error once ac
   assert.equal(noSecret.ok, false);
   const secretStep = noSecret.steps.find((step) => step.level === 'error' && /ACCOUNT_SECRET/.test(step.message));
   assert.match(secretStep?.fix ?? '', /Add the Worker secret ACCOUNT_SECRET, a random string of at least 24/);
+
+  const sharedSecret = await check({ ...accounts, ACCOUNT_SECRET: SECRET, TETHER_SYNC: kv() });
+  assert.equal(sharedSecret.ok, false);
+  assert.ok(
+    sharedSecret.steps.some(
+      (step) => step.level === 'error' && /ACCOUNT_SECRET is the same as SYNC_SECRET/.test(step.message),
+    ),
+  );
 });
 
 test('with customer accounts but no ACCOUNT_SECRET only the account routes stop; sync, webhooks and deploys run', async () => {

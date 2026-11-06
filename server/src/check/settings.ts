@@ -3,7 +3,7 @@
  * opens /check, and its result says whether the connection tests have what they need.
  */
 import { accountProblems, accountSettings } from '../account/settings.ts';
-import { envProblems, kvBinding, MIN_SYNC_SECRET } from '../env.ts';
+import { envProblems, kvBinding, MIN_SECRET_LENGTH } from '../env.ts';
 import { deployHookMinSeconds } from '../settings.ts';
 import type { Steps } from './steps.ts';
 import type { CleanEnv } from '../env.ts';
@@ -48,8 +48,8 @@ export function reportIgnoredValues(steps: Steps, rawEnv: Record<string, unknown
       steps.add(
         'error',
         key,
-        `is shorter than ${String(MIN_SYNC_SECRET)} characters, so it counts as not set.`,
-        `Use a random string of at least ${String(MIN_SYNC_SECRET)} characters, e.g. from a password manager.`,
+        `is shorter than ${String(MIN_SECRET_LENGTH)} characters, so it counts as not set.`,
+        `Use a random string of at least ${String(MIN_SECRET_LENGTH)} characters, e.g. from a password manager.`,
       );
   }
 }
@@ -232,7 +232,7 @@ function checkSecrets(steps: Steps, { env, rawEnv, worker }: SettingsContext): v
       'warn',
       'SYNC_SECRET',
       'not set: /check can only show what is configured, and POST /reconcile is off.',
-      `Set a random string of at least ${String(MIN_SYNC_SECRET)} characters to test the APIs from /check.`,
+      `Set a random string of at least ${String(MIN_SECRET_LENGTH)} characters to test the APIs from /check.`,
     );
   }
 }

@@ -51,3 +51,22 @@ test('config file: a value of the wrong type is named when the config loads', as
   await writeFile(path, JSON.stringify({ shopify: { domain: 'shop.myshopify.com' }, fields: { name: 'title' } }));
   assert.equal((await loadConfig(path)).config.shopify?.domain, 'shop.myshopify.com');
 });
+
+test('file store: batched writes, merged with another process, survives a failed write', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'tether-sync-'));
+  const path = join(dir, 'state.json');
+  const a = fileStore(path, { delayMs: 10_000 });
+  const b = fileStore(path, { delayMs: 10_000 });
+  for (let i = 0; i < 100; i++) await a.put(`p:${i}`, { i });
+  await b.put('reconcile:since', 'x');
+  await b.flush();
+  await a.flush();
+  const disk = JSON.parse(await readFile(path, 'utf8'));
+  assert.equal(Object.keys(disk).length, 101, "both processes' keys are kept");
+  assert.deepEqual(await b.get('p:5'), { i: 5 }, "b sees a's writes");
+
+  const bad = fileStore(join(dir, 'missing-dir', 'state.json'), { delayMs: 10_000 });
+  await bad.put('k', 1);
+  await assert.rejects(bad.flush());
+  await assert.rejects(bad.flush(), 'still dirty, retried');
+});

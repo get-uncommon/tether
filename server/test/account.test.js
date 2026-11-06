@@ -474,6 +474,74 @@ test('a returnTo on another site lands on the shop instead (no open redirect)', 
   assert.match(location(landed), /^https:\/\/shop\.example\//);
 });
 
+/**
+ * A login from `returnTo` to its landing page, with what it logged as a warning.
+ *
+ * @param {string} returnTo
+ */
+async function loginFrom(returnTo) {
+  const sh = shopify();
+  const run = (r) => answer(r, env, { fetch: sh.fetch, memory: new Map() });
+  const warned = [];
+  const realWarn = console.warn;
+  console.warn = (...args) => warned.push(args.join(' '));
+  try {
+    const start = await run(req(`/login?returnTo=${encodeURIComponent(returnTo)}`));
+    const loginCookie = pick(start, '__Host-tether-login');
+    const authorize = new URL(location(start));
+    sh.setNonce(authorize.searchParams.get('nonce'));
+    const back = await run(
+      req(`/callback?code=c&state=${authorize.searchParams.get('state')}`, { cookie: loginCookie }),
+    );
+    return { loginCookie, landed: location(back), warned };
+  } finally {
+    console.warn = realWarn;
+  }
+}
+
+test('a login from the longest address returnTo accepts fits in its cookie and comes back there', async () => {
+  const returnTo = `${SITE}/collections/all?filter=${'a'.repeat(2047 - `${SITE}/collections/all?filter=`.length)}`;
+  assert.equal(returnTo.length, 2047);
+  const { loginCookie, landed, warned } = await loginFrom(returnTo);
+  assert.ok(loginCookie.length < 4096, 'browsers keep the cookie');
+  assert.equal(landed, `${returnTo}&account=in`);
+  assert.deepEqual(warned, []);
+});
+
+test('a login from an address too long for its cookie comes back to the home page, and says why', async () => {
+  // A backslash stays as it is in a URL's query, and doubles when the pending login is written as JSON.
+  const { loginCookie, landed, warned } = await loginFrom(`${SITE}/search?q=${'\\'.repeat(2000)}`);
+  assert.ok(loginCookie.length < 4096, 'browsers keep the cookie');
+  assert.equal(landed, `${SITE}/?account=in`);
+  assert.ok(warned.some((line) => /account login: the page's address .* too long to keep in a cookie/.test(line)));
+});
+
+test('a cookie longer than any the Worker sets reads as absent, not as its first part', async () => {
+  const { loginCookie, callbackPath } = await loginFlow();
+  const overLong = `${loginCookie}${'A'.repeat(4000)}`;
+  const landed = await answer(req(callbackPath, { cookie: overLong }), env, { memory: new Map() });
+  assert.equal(new URL(location(landed)).searchParams.get('account'), 'expired');
+});
+
+test('a logout from an address too long for the ticket cookie still logs out of Shopify, back to the home page', async () => {
+  const { run, cookie } = await loginFlow();
+  const returnTo = `${SITE}/search?q=${'\\'.repeat(2000)}`;
+  const realWarn = console.warn;
+  console.warn = () => {};
+  let res;
+  try {
+    res = await run(req('/logout', { method: 'POST', origin: SITE, cookie, body: { returnTo } }));
+  } finally {
+    console.warn = realWarn;
+  }
+  const { logoutUrl } = await res.json();
+  assert.equal(logoutUrl, `${WORKER}${BASE}/logout/go`);
+  const ticketCookie = pick(res, '__Host-tether-logout');
+  assert.ok(ticketCookie.length < 4096, 'browsers keep the cookie');
+  const go = await run(req('/logout/go', { cookie: ticketCookie }));
+  assert.equal(new URL(location(go)).searchParams.get('post_logout_redirect_uri'), `${SITE}/`);
+});
+
 test("one session's sealed blob copied under another session's key does not open", async () => {
   const memory = new Map();
   const first = await loginFlow({ memory });
@@ -762,7 +830,7 @@ test('settings: ACCOUNT_SECRET is required, with no fallback to SYNC_SECRET; /ch
   const { accountProblems } = await import('../src/account.ts');
   const { ACCOUNT_SECRET, ...withoutSecret } = env;
   const syncOnly = { ...withoutSecret, SYNC_SECRET: 'a-long-sync-secret-of-24-plus-chars' };
-  assert.equal(configured(syncOnly).secret, null, 'SYNC_SECRET is never a session key');
+  assert.deepEqual(configured(syncOnly).secret, { kind: 'missing' }, 'SYNC_SECRET is never a session key');
   const [problem] = accountProblems(configured(syncOnly));
   assert.equal(problem.severity, 'error');
   assert.match(problem.message, /ACCOUNT_SECRET is not set/);
@@ -785,10 +853,31 @@ test('settings: ACCOUNT_SECRET is required, with no fallback to SYNC_SECRET; /ch
 
   for (const unusable of ['choose-a-long-random-string', 'a']) {
     const settings = configured({ ...env, ACCOUNT_SECRET: unusable });
-    assert.equal(settings.secret, null, `${unusable}: an example or a short value is no key`);
+    assert.deepEqual(settings.secret, { kind: 'missing' }, `${unusable}: an example or a short value is no key`);
   }
-  assert.equal(configured(env).secret, ACCOUNT_SECRET);
+  assert.deepEqual(configured(env).secret, { kind: 'set', value: ACCOUNT_SECRET });
   assert.deepEqual(accountProblems(configured(env)), []);
+});
+
+test('settings: an ACCOUNT_SECRET equal to SYNC_SECRET is refused, so the /check password opens no session', async () => {
+  const { accountProblems } = await import('../src/account.ts');
+  const shared = { ...env, SYNC_SECRET: env.ACCOUNT_SECRET };
+  assert.deepEqual(configured(shared).secret, { kind: 'same-as-sync-secret' });
+  const [problem, ...others] = accountProblems(configured(shared));
+  assert.deepEqual(others, []);
+  assert.equal(problem.severity, 'error');
+  assert.match(problem.message, /ACCOUNT_SECRET is the same as SYNC_SECRET/);
+  assert.match(problem.fix ?? '', /different from SYNC_SECRET/);
+
+  const realError = console.error;
+  console.error = () => {};
+  try {
+    const r = await answer(req('/me'), shared, { memory: new Map() });
+    assert.equal(r.status, 503);
+    assert.deepEqual(await r.json(), { error: 'accounts are not set up (see /check)' });
+  } finally {
+    console.error = realError;
+  }
 });
 
 test('settings: unusable ACCOUNT_SESSION_DAYS and SHOPIFY_DOMAIN are reported, not silently replaced', async () => {

@@ -38,17 +38,10 @@ gets 0.7.0 at once. The breaking changes below list each one's upgrade step.
   the new updater. **Upgrade:** none for the updater itself: a copy's own 0.6 updater installs
   0.7.0 by commit, and from then on every update is verified (`gh` comes with every GitHub runner).
   Which copies take 0.7.0 is decided by their `TETHER_VERSION` (next item).
-- **Breaking (sync Worker), act before 0.7.0 is released:** copies made from 0.6.1 to 0.6.8 have
-  `latest` in `TETHER_VERSION` unless it was changed, so they install 0.7.0 by themselves on the
-  first scheduled update run after its release (Mondays by default), and Cloudflare deploys it.
-  **Upgrade, before 0.7.0 is released, in each such copy:** do the one-time steps below that apply
-  to it (customer accounts: add `ACCOUNT_SECRET`; a host that runs the Node CLI itself: Node 22.18
-  or newer), or write `0.6` in `TETHER_VERSION` to stay on 0.6 and change it to `0.7` when ready.
-  Copies whose `TETHER_VERSION` says `0.6` (made from 0.6.0, or changed) get 0.7.0 only when it is
-  changed to `0.7`. A copy that installs 0.7.0 without `ACCOUNT_SECRET` keeps syncing, answering
-  webhooks and starting deploys; only its account routes answer 503 with
-  `accounts need the Worker secret ACCOUNT_SECRET (see /check)`, and `/check` shows the error,
-  until the secret is added.
+- **Breaking (sync Worker updates):** copies made from 0.6.1 to 0.6.8 have `latest` in
+  `TETHER_VERSION` unless it was changed, so they install 0.7.0 by themselves; copies on `0.6` (made
+  from 0.6.0, or changed) wait until it says `0.7`. **Upgrade:** the step at the top of this
+  section.
 - **Breaking (customer accounts):** accounts run only through the Worker (`account.server`), so no
   customer token is ever kept in the browser. Browser mode is removed: the `account.clientId`,
   `callbackUrl`, `tokenUrl`, `shopDomain` and `remember` options, and `Tether.account.query()`,
@@ -89,6 +82,15 @@ gets 0.7.0 at once. The breaking changes below list each one's upgrade step.
   site's CSS through the element Tether fills (`[tether-bind="description"] h2 { … }`), not with
   classes inside the description.
 - Fix: the analytics part no longer throws on a `checkout` event without a cart.
+- Security (descriptions): an outline, shadow, filter, border-image or mask-border outset,
+  reflection, text decoration or text stroke is kept only when every length it gives is in px and
+  at most 40px, so a description can't paint over the page with one (`outline: 5000px solid #fff`
+  around a link); values in other units or built with `var()` or `calc()` are removed. Ordinary
+  shadows and outlines look as before.
+- Fix: `tether:layout-changed` is always dispatched. A page `ScrollTrigger` whose `refresh` isn't a
+  function is skipped, and an `onLayoutChange` hook or refresh that throws is reported to `onError`.
+- Types: the published `Tether` type no longer includes the `<script>` build's internal `__core`
+  and `__parts`, which it described wrongly.
 - **Breaking (descriptions):** iframes are kept only from YouTube (`www.youtube.com`,
   `www.youtube-nocookie.com`), Vimeo's player, Loom and Wistia, so store content can't frame a
   look-alike login page; an iframe from any other origin is removed. Kept embeds look as before.
@@ -128,8 +130,8 @@ gets 0.7.0 at once. The breaking changes below list each one's upgrade step.
   by `tsc` at build time, in `dist/types/`, so they can't drift from the code. Where the
   hand-written ones differed, they now say what the code does: `TetherError` is a type export of
   `@occluze/tether` (the class is `Tether.TetherError`, and a value export of
-  `@occluze/tether/server`), `Tether.on(name, fn)` types the detail of each event Tether dispatches
-  (`TetherEvents`) and hands another name's detail as `unknown`, `scope.setPurchase()` takes
+  `@occluze/tether/server`), `Tether.on(name, fn)` takes the names of the events Tether dispatches
+  (`TetherEvents`) and types each one's detail, `scope.setPurchase()` takes
   `'one-time' | 'subscription'`, `Tether.mount()` takes a `Document` or an `Element`, and
   `createStorefront()` names the `.env` keys it reads instead of taking any key. The types a site
   imports keep their names (`TetherConfig`, `Tether`, `ShopifyProduct`, `ShopifyCart`, `Storefront`,
@@ -151,21 +153,25 @@ gets 0.7.0 at once. The breaking changes below list each one's upgrade step.
   so a full-scope refresh token doesn't stay behind. This cleanup is removed again in 0.8.0.
 - Sync Worker: a repeated webhook delivery is also dropped across the Worker's isolates in a data
   centre, through Cloudflare's Cache API (`caches.open('tether-webhook-deliveries')`, kept six
-  hours, free and without KV writes). Node keeps the in-process check only.
+  hours, without KV writes). This works only when the webhooks are registered on the shop's own
+  domain (a route or custom domain): on `workers.dev` a repeat that reaches another isolate is
+  synced again, which costs one Shopify read and one KV read and writes nothing. Node keeps the
+  in-process check only.
+- Fix (sync Worker): a login or logout started from a very long page address no longer fails as
+  `?account=error` with a misleading login-CSRF log line. The pending login fits in its cookie for
+  any address the Worker accepts; one that wouldn't comes back to the site's home, with a warning in
+  the log. A cookie longer than any the Worker sets reads as absent.
 - Sync CLI: the `Webflow requests` count is right with Webflow and `DEPLOY_HOOK_URL` together (it
   stayed at 0).
 - **Breaking (sync Worker):** customer accounts need `ACCOUNT_SECRET` (24+ random characters); the
   session key no longer falls back to `SYNC_SECRET`, the `/reconcile` and `/check` password.
   Without it the account routes answer 503 `accounts need the Worker secret ACCOUNT_SECRET (see
-  /check)` and log `account setup ACCOUNT_SECRET is not set` (the sync, webhooks and deploys are
-  unaffected), and `/check` shows an error step that says what to set. **Upgrade, once, before a Worker with
-  customer accounts runs 0.7.0:** if it has no `ACCOUNT_SECRET` yet, add one in Cloudflare → your
-  Worker → Settings → Variables and Secrets (`openssl rand -hex 24`, not the value of
-  `SYNC_SECRET`). 0.6 already uses it, so it can be set before the update. Changing the key logs
-  every customer out once. A copy whose `TETHER_VERSION` says `latest`, which is every copy
-  made from 0.6.1 to 0.6.8 unless changed, installs 0.7.0 by itself: set the secret before 0.7.0 is
-  released. A copy on `0.6` gets 0.7.0 only when the file says `0.7`: set the secret first. Workers without customer
-  accounts, or with `ACCOUNT_SECRET` already set, need nothing.
+  /check)` and log `account setup ACCOUNT_SECRET is not set`; the sync, webhooks and deploys are
+  unaffected, and `/check` shows an error step that says what to set. An `ACCOUNT_SECRET` equal to
+  `SYNC_SECRET` is refused the same way (the routes answer 503 `accounts are not set up (see
+  /check)`), since anyone with the `/check` password could otherwise open customer sessions.
+  **Upgrade:** the step at the top of this section; a Worker that copied `SYNC_SECRET` into
+  `ACCOUNT_SECRET` sets one of its own (customers are logged out once).
 - Sync Worker updates: when a release ships a newer `.github/workflows/update-tether.yml` than the
   copy's (its `# Tether workflow revision:` line), the update run prints a GitHub Actions warning
   and adds the one-time manual step to the job summary. **Upgrade notes, for any later release that
@@ -197,6 +203,8 @@ gets 0.7.0 at once. The breaking changes below list each one's upgrade step.
 - Releases: the signing job installs an exact npm (11.21.1); esbuild, jsdom and Playwright are
   pinned exactly. The build finds GraphQL template literals with TypeScript's parser instead of by
   pairing backticks, which a backtick in a regular expression could throw off.
+- Repository: CI also lints the workflows with actionlint and zizmor, each downloaded at a pinned
+  version and checked against its published hash.
 - Repository: CI runs `npm run check` on pull requests and pushes to `main`, on Node 22.18 and 24.
 - Repository: browser, Node-side, Worker and test code are type-checked as separate programs
   (`tsc -b`), so browser code can't use Node globals and the Worker can't use the DOM; the tests are
@@ -235,8 +243,7 @@ gets 0.7.0 at once. The breaking changes below list each one's upgrade step.
 - Astro integration: `createStorefront()`'s own options in a shared `shop.config.js` (`siteUrl`,
   `pageSize`, `fetch`) are left out of the page; any other unknown option warns at build time.
 - Types (also covered by the generated declarations above): the `TetherError` constructor takes typed `errors`/`userErrors`/`code`; `Tether.config` is `ResolvedTetherConfig`;
-  `query()` defaults to `unknown` and `on(name: string)` passes `unknown`
-  instead of `any`; `onError` receives `unknown` (a handler may still type it narrower); cart
+  `query()` defaults to `unknown` instead of `any`; `onError` receives `unknown` (a handler may still type it narrower); cart
   changes that can answer without a cart return `ShopifyCart | null` and `checkout()` the checkout
   URL; `imageUrl()` returns `url` itself when it is empty; an `initialState` plan's price and an
   image's `width`/`height` can be `null`; `__core` and `__parts` are declared.
@@ -253,7 +260,7 @@ gets 0.7.0 at once. The breaking changes below list each one's upgrade step.
   change:** a core on another origin loads its parts with CORS (jsDelivr sends the headers; a
   self-hosted copy on another domain must too).
 - Security (sync Worker): a repeated webhook delivery (same `X-Shopify-Webhook-Id`) is dropped
-  within the Worker instance and across the data centre (see above), after the signature and shop
+  within the Worker instance, and across the data centre on the shop's own domain (see above), after the signature and shop
   checks.
 - Security (sync Worker): a new login ends the session the browser already had. A failed login,
   callback or logout step sends the visitor back to the site with `?account=error` (and clears the

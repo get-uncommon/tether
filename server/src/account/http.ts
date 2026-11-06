@@ -19,10 +19,17 @@ export const NO_STORE = {
 };
 
 /**
- * A cookie's value, when it is present and looks like one of ours (base64url and dots, 20 to `maxLength` long).
+ * Longest cookie value the Worker sets or reads. Browsers drop, without telling the page, a cookie whose name and
+ * value pass 4096 bytes, so a longer one would never come back.
+ */
+export const MAX_COOKIE_VALUE = 4000;
+
+/**
+ * A cookie's value, when it is present and looks like one of ours (base64url and dots, 20 to `maxLength` long). A
+ * longer value reads as absent, not as its first `maxLength` characters.
  */
 export function readCookie(request: Request, name: string, maxLength: number): string | null {
-  const pattern = new RegExp(`(?:^|;\\s*)${name}=([A-Za-z0-9_.-]{20,${maxLength}})`);
+  const pattern = new RegExp(`(?:^|;\\s*)${name}=([A-Za-z0-9_.-]{20,${maxLength}})(?=;|$)`);
   return pattern.exec(request.headers.get('cookie') ?? '')?.[1] ?? null;
 }
 

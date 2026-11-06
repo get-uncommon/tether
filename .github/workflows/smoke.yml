@@ -52,7 +52,9 @@ jobs:
       - name: Smoke (next ${{ steps.versions.outputs.next }})
         id: next
         if: always() && steps.versions.outcome == 'success'
-        run: TETHER_API_VERSION=${{ steps.versions.outputs.next }} npm run smoke
+        env:
+          TETHER_API_VERSION: ${{ steps.versions.outputs.next }}
+        run: npm run smoke
 
       - name: Open or update an issue
         if: failure()

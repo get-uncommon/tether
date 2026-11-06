@@ -31,6 +31,7 @@ import {
   jsonResponse,
   LOGIN_COOKIE,
   LOGOUT_COOKIE,
+  MAX_COOKIE_VALUE,
   NO_STORE,
   readCookie,
   readJsonObject,
@@ -97,6 +98,28 @@ export interface AccountRequest {
   callbackUrl: string;
 }
 
+/**
+ * `value` sealed for the cookie `name`. A cookie past {@link MAX_COOKIE_VALUE} would be dropped by the browser and the
+ * login or logout would fail later for no visible reason, so when the page's address makes it too long, the customer
+ * comes back to the site's home instead, and the log says so.
+ *
+ * @returns `null` when it is too long even with the site's home.
+ */
+async function sealForCookie(
+  settings: ReadyAccountSettings,
+  purpose: 'login' | 'logout',
+  name: string,
+  value: { returnTo: string },
+): Promise<string | null> {
+  const sealed = await seal(settings.secret, purpose, name, value);
+  if (sealed.length <= MAX_COOKIE_VALUE) return sealed;
+  console.warn(
+    `account ${purpose}: the page's address (${String(value.returnTo.length)} characters) is too long to keep in a cookie, so the customer comes back to the site's home`,
+  );
+  const home = await seal(settings.secret, purpose, name, { ...value, returnTo: `${settings.origins[0]}/` });
+  return home.length <= MAX_COOKIE_VALUE ? home : null;
+}
+
 async function login({ request, url, settings, fetch: fetchImpl, callbackUrl }: AccountRequest): Promise<Response> {
   const discovery = await discover(settings, fetchImpl);
   const pending: PendingLogin = {
@@ -123,7 +146,9 @@ async function login({ request, url, settings, fetch: fetchImpl, callbackUrl }: 
   });
   // Nothing is stored before the customer comes back: the pending login is sealed into a cookie in this browser,
   // which also stops another browser from completing it (login CSRF).
-  const sealed = await seal(settings.secret, 'login', LOGIN_COOKIE, pending);
+  const sealed = await sealForCookie(settings, 'login', LOGIN_COOKIE, pending);
+  // Without the page's address, the pending login is a few hundred characters.
+  if (sealed === null) throw new Error('the pending login is too long for a cookie');
   return redirectResponse(authorize, {
     'Set-Cookie': setCookie(LOGIN_COOKIE, sealed, PENDING_LOGIN_SECONDS),
   });
@@ -138,7 +163,7 @@ type PendingLoginCheck =
   { kind: 'pending'; pending: PendingLogin } | { kind: 'expired'; returnTo: string | null } | { kind: 'mismatch' };
 
 async function pendingLoginOf({ request, url, settings }: AccountRequest): Promise<PendingLoginCheck> {
-  const cookie = readCookie(request, LOGIN_COOKIE, 2000);
+  const cookie = readCookie(request, LOGIN_COOKIE, MAX_COOKIE_VALUE);
   if (cookie === null) return { kind: 'expired', returnTo: null };
   const pending = await open(settings.secret, 'login', LOGIN_COOKIE, cookie);
   const state = url.searchParams.get('state') ?? '';
@@ -197,7 +222,12 @@ async function callback(context: AccountRequest): Promise<Response> {
  * cookie that step 1 set.
  */
 async function logoutRedirect({ request, settings, fetch: fetchImpl, siteOrigin }: AccountRequest): Promise<Response> {
-  const ticket = await open(settings.secret, 'logout', LOGOUT_COOKIE, readCookie(request, LOGOUT_COOKIE, 6000));
+  const ticket = await open(
+    settings.secret,
+    'logout',
+    LOGOUT_COOKIE,
+    readCookie(request, LOGOUT_COOKIE, MAX_COOKIE_VALUE),
+  );
   const clear = { 'Set-Cookie': setCookie(LOGOUT_COOKIE, '', 0) };
   if (!isLogoutTicket(ticket) || Date.now() - ticket.at > LOGOUT_TICKET_SECONDS * 1000) {
     return redirectResponse(`${siteOrigin}/`, clear);
@@ -247,9 +277,13 @@ async function logout(
   let logoutUrl: string | null = null;
   if (session?.idToken) {
     const ticket: LogoutTicket = { idToken: session.idToken, returnTo, at: Date.now() };
-    const sealed = await seal(settings.secret, 'logout', LOGOUT_COOKIE, ticket);
-    headers.append('Set-Cookie', setCookie(LOGOUT_COOKIE, sealed, LOGOUT_TICKET_SECONDS));
-    logoutUrl = `${url.origin}${BASE}/logout/go`;
+    const sealed = await sealForCookie(settings, 'logout', LOGOUT_COOKIE, ticket);
+    if (sealed === null) {
+      console.error('account logout: the id token is too long for a cookie, so Shopify is not logged out');
+    } else {
+      headers.append('Set-Cookie', setCookie(LOGOUT_COOKIE, sealed, LOGOUT_TICKET_SECONDS));
+      logoutUrl = `${url.origin}${BASE}/logout/go`;
+    }
   }
   return new Response(JSON.stringify({ loggedOut: true, logoutUrl }), { status: 200, headers });
 }
@@ -294,7 +328,7 @@ const NO_ACCOUNT_SECRET = { error: 'accounts need the Worker secret ACCOUNT_SECR
 /** Logs what stops accounts and answers 503. */
 function notSetUp(settings: AccountSettings, errors: AccountProblem[]): Response {
   console.error('account setup', errors.map((problem) => problem.message).join('; '));
-  const onlySecretMissing = settings.secret === null && errors.length === 1;
+  const onlySecretMissing = settings.secret.kind === 'missing' && errors.length === 1;
   return jsonResponse(onlySecretMissing ? NO_ACCOUNT_SECRET : NOT_SET_UP, 503);
 }
 

@@ -59,7 +59,7 @@ Then the Worker's secrets (Settings → Variables and Secrets):
 | `ACCOUNT_CLIENT_SECRET` | the client secret (Confidential client only) |
 | `ACCOUNT_ORIGINS` | your site, e.g. `https://your-shop.com` (more with commas) |
 | `STOREFRONT_TOKEN` | the public Storefront token (to link carts, so checkout knows the customer) |
-| `ACCOUNT_SECRET` | required, 24+ random characters (`openssl rand -hex 24`), not the same as `SYNC_SECRET`: the sessions' encryption keys come from it. Without it the account routes answer 503. Changing it logs every customer out once |
+| `ACCOUNT_SECRET` | required, 24+ random characters (`openssl rand -hex 24`), not the same as `SYNC_SECRET`: the sessions' encryption keys come from it. Without it, or with the value of `SYNC_SECRET`, the account routes answer 503. Changing it logs every customer out once |
 | `ACCOUNT_SESSION_DAYS` | optional, how long a login lasts at most (default 14) |
 
 `SHOPIFY_DOMAIN` is already set. The Worker's `/check` (e.g. `https://tether-sync.your-name.workers.dev/check`,
