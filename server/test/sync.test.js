@@ -295,7 +295,7 @@ test('client credentials grant: token fetched once and sent to the Admin API', a
   assert.match(tokenCalls[0].body, /grant_type=client_credentials/);
   const admin = apis.calls.find((c) => c.path.startsWith('/admin/api/2026-07/'));
   assert.equal(admin.headers['X-Shopify-Access-Token'], 'shpat_fresh');
-  assert.equal(app.webhookSecret, 'csecret', 'app webhooks are signed with the client secret');
+  assert.deepEqual(app.webhookSecrets, ['csecret'], 'app webhooks are signed with the client secret');
 });
 
 // ---- webhooks + worker --------------------------------------------------------
@@ -309,7 +309,7 @@ async function webhook(topic, payload, { secret = 'whsec', shop = 'shop.myshopif
 
 test('webhook: verifies HMAC and shop, syncs update, archives on delete', async () => {
   const { app, wf, shop } = setup({ products: [shopifyProduct(1)] });
-  const opts = { sync: app.sync, secret: app.webhookSecret, shopDomain: 'shop.myshopify.com', sleep: instantSleep };
+  const opts = { sync: app.sync, secrets: app.webhookSecrets, shopDomain: 'shop.myshopify.com', sleep: instantSleep };
 
   let r = await handleShopifyWebhook(await webhook('products/update', { id: 1 }, { secret: 'wrong' }), opts);
   assert.equal(r.response.status, 401);
@@ -343,7 +343,7 @@ test('webhook: verifies HMAC and shop, syncs update, archives on delete', async 
 
 test('webhook: an unsigned topic header cannot delete a live product (Shopify is asked)', async () => {
   const { app, wf } = setup({ products: [shopifyProduct(1)] });
-  const opts = { sync: app.sync, secret: app.webhookSecret, shopDomain: 'shop.myshopify.com', sleep: instantSleep };
+  const opts = { sync: app.sync, secrets: app.webhookSecrets, shopDomain: 'shop.myshopify.com', sleep: instantSleep };
   let r = await handleShopifyWebhook(
     await webhook('products/update', { id: 1, admin_graphql_api_id: 'gid://shopify/Product/1' }),
     opts,
@@ -362,7 +362,13 @@ test('webhook: an unsigned topic header cannot delete a live product (Shopify is
 
 test('concurrent create + update webhooks for a new product make one item', async () => {
   const { app, wf } = setup({ products: [shopifyProduct(9)] });
-  const opts = { sync: app.sync, secret: app.webhookSecret, sleep: instantSleep, createDelayMs: 0 };
+  const opts = {
+    sync: app.sync,
+    secrets: app.webhookSecrets,
+    shopDomain: 'shop.myshopify.com',
+    sleep: instantSleep,
+    createDelayMs: 0,
+  };
   const [a, b] = await Promise.all([
     handleShopifyWebhook(await webhook('products/create', { id: 9 }), opts),
     handleShopifyWebhook(await webhook('products/update', { id: 9 }), opts),

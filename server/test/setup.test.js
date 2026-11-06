@@ -40,7 +40,7 @@ test('cleanEnv treats none/-/empty as unset; applyEnv merges FIELD_MAP and WEBFL
 test('default config + env (what the Deploy button provides) syncs a standard collection', async () => {
   const apis = createMockApis({ products: [shopifyProduct(1)] });
   const app = createApp(defaultConfig, deployEnv, { store: memoryStore(), fetch: apis.fetch, sleep: instantSleep });
-  assert.equal(app.webhookSecret, 'csecret');
+  assert.deepEqual(app.webhookSecrets, ['csecret']);
   const r = await app.sync.importAll();
   assert.equal(r.stats.created, 1);
   const item = [...apis.wf.items.values()][0];
@@ -115,6 +115,10 @@ test('worker GET /check: config presence for anyone, API tests only with SYNC_SE
   let body = await res.json();
   assert.equal(res.status, 200);
   assert.ok(!body.config, 'no field config without the secret');
+  assert.ok(
+    body.steps.every((step) => !('message' in step) && !('fix' in step)),
+    'only titles and levels for the public: messages name the store and the site',
+  );
   assert.ok(!body.steps.some((s) => s.title === 'Shopify API'));
   assert.equal(apis.calls.length, 0);
 

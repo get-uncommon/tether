@@ -7,8 +7,7 @@ import { serve } from '../src/node.js';
 const quiet = { info() {}, warn() {}, error() {} };
 const app = {
   sync: {},
-  webhookSecret: 'x'.repeat(32),
-  webhookSecrets: [],
+  webhookSecrets: ['x'.repeat(32)],
   config: { shopify: { domain: 'shop.myshopify.com' } },
   store: null,
 };

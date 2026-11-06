@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * Shopify Admin GraphQL client (read-only: products).
  *
@@ -9,193 +8,212 @@
  * Scope needed: read_products (add read_inventory if you map inventory).
  */
 import { SyncError, sleep as realSleep } from './util.js';
-import { open, seal } from './crypto.js';
+import { asList, asRecord, responseJsonOrNull, stringOrNull } from './json.js';
+import { tokenSource } from './shopify-token.js';
+import { normalizeProduct } from './product.js';
+
+export { normalizeProduct };
+
+/** @typedef {import('./product.js').Product} Product */
+/** @typedef {import('./store.js').Store} Store */
+/** @typedef {typeof fetch} Fetch */
 
 export const DEFAULT_API_VERSION = '2026-07';
+
+const DEFAULT_VARIANTS_FIRST = 25;
+const DEFAULT_MEDIA_FIRST = 10;
+/** Shopify's limit is 1,000 cost points a query; the rest is headroom for the connection and page info. */
+const PAGE_COST_BUDGET = 800;
+/** A product node's cost on top of its variants, media and metafields. */
+const PRODUCT_BASE_COST = 6;
+const MAX_PAGE_SIZE = 50;
+const RETRY_BASE_MS = 1000;
 
 /**
  * Shopify rejects a query above 1,000 cost points. A product node costs roughly
  * 1 + variantsFirst + mediaFirst + its other fields, so a page holds ~800 / that.
+ *
+ * @param {{ variantsFirst?: number, mediaFirst?: number, metafields?: string[] }} [options]
  */
-export function pageSizeFor({ variantsFirst = 25, mediaFirst = 10, metafields = [] } = {}) {
-  const perProduct = 6 + variantsFirst + mediaFirst + metafields.length;
-  return Math.max(1, Math.min(50, Math.floor(800 / perProduct)));
+export function pageSizeFor({
+  variantsFirst = DEFAULT_VARIANTS_FIRST,
+  mediaFirst = DEFAULT_MEDIA_FIRST,
+  metafields = [],
+} = {}) {
+  const perProduct = PRODUCT_BASE_COST + variantsFirst + mediaFirst + metafields.length;
+  return Math.max(1, Math.min(MAX_PAGE_SIZE, Math.floor(PAGE_COST_BUDGET / perProduct)));
 }
 
-export function productFragment({ metafields = [], inventory = false, mediaFirst = 10, variantsFirst = 25 } = {}) {
-  const mf = metafields
-    .map((ref, i) => {
-      const [namespace, ...rest] = ref.split('.');
-      return `mf${i}: metafield(namespace: ${JSON.stringify(namespace)}, key: ${JSON.stringify(rest.join('.'))}) { value type }`;
+/**
+ * The `TetherSyncProduct` fragment {@link normalizeProduct} parses. Metafields are aliased `mf0`, `mf1`... in the
+ * order of `metafields`.
+ *
+ * @param {{ metafields?: string[], inventory?: boolean, mediaFirst?: number, variantsFirst?: number }} [options]
+ */
+export function productFragment({
+  metafields = [],
+  inventory = false,
+  mediaFirst = DEFAULT_MEDIA_FIRST,
+  variantsFirst = DEFAULT_VARIANTS_FIRST,
+} = {}) {
+  const metafieldSelections = metafields
+    .map((ref, index) => {
+      const [namespace = '', ...rest] = ref.split('.');
+      return `mf${String(index)}: metafield(namespace: ${JSON.stringify(namespace)}, key: ${JSON.stringify(rest.join('.'))}) { value type }`;
     })
     .join('\n  ');
+  const totalInventory = inventory ? ' totalInventory' : '';
+  const inventoryQuantity = inventory ? ' inventoryQuantity' : '';
   return `fragment TetherSyncProduct on Product {
   id legacyResourceId handle title description descriptionHtml vendor productType tags status
-  createdAt updatedAt publishedAt onlineStoreUrl${inventory ? ' totalInventory' : ''}
+  createdAt updatedAt publishedAt onlineStoreUrl${totalInventory}
   seo { title description }
   priceRangeV2 { minVariantPrice { amount currencyCode } maxVariantPrice { amount currencyCode } }
   compareAtPriceRange { minVariantCompareAtPrice { amount currencyCode } maxVariantCompareAtPrice { amount currencyCode } }
   featuredMedia { preview { image { url altText } } }
-  media(first: ${mediaFirst}) { nodes { mediaContentType preview { image { url altText } } } }
+  media(first: ${String(mediaFirst)}) { nodes { mediaContentType preview { image { url altText } } } }
   options { name optionValues { name } }
-  variants(first: ${variantsFirst}) { nodes { id legacyResourceId title sku price compareAtPrice availableForSale${inventory ? ' inventoryQuantity' : ''} } }
-  ${mf}
+  variants(first: ${String(variantsFirst)}) { nodes { id legacyResourceId title sku price compareAtPrice availableForSale${inventoryQuantity} } }
+  ${metafieldSelections}
 }`;
 }
 
-// The client-credentials token is cached sealed with the client secret, which only Worker secrets hold: KV values
-// can be read in Cloudflare's dashboard, secrets can't.
-const TOKEN_KEY = 'shopify:token';
-const TOKEN_PURPOSE = 'shopify-token';
+/**
+ * @typedef {object} ShopifyOptions
+ * @property {string | undefined} domain The `.myshopify.com` domain; a scheme or path is stripped.
+ * @property {string | undefined} [adminToken]
+ * @property {string | undefined} [clientId]
+ * @property {string | undefined} [clientSecret]
+ * @property {string | undefined} [apiVersion]
+ * @property {string[] | undefined} [metafields] `namespace.key` refs fetched with every product.
+ * @property {boolean | undefined} [inventory]
+ * @property {Fetch | undefined} [fetch]
+ * @property {((ms: number) => Promise<void>) | undefined} [sleep]
+ * @property {(() => number) | undefined} [now]
+ * @property {number | undefined} [retries] Retries after a 429, a 5xx or a THROTTLED error.
+ * @property {number | undefined} [variantsFirst]
+ * @property {number | undefined} [mediaFirst]
+ * @property {Store | null | undefined} [tokenStore] Caches the client-credentials token: one token request a day
+ *   instead of one per run.
+ */
 
-export function createShopify({
-  domain,
-  adminToken,
-  clientId,
-  clientSecret,
-  apiVersion = DEFAULT_API_VERSION,
-  metafields = [],
-  inventory = false,
-  fetch: fetchImpl = globalThis.fetch,
-  sleep = realSleep,
-  now = () => Date.now(),
-  retries = 3,
-  variantsFirst = 25,
-  mediaFirst = 10,
-  tokenStore = null, // { get, put }: caches the client-credentials token (one request a day instead of one per run)
-}) {
+/** @typedef {{ hasNextPage: boolean, endCursor: string | null }} PageInfo */
+/** @typedef {{ id: string, topic: string, uri: string }} WebhookSubscription */
+
+/** @typedef {{ message: string, code: string | undefined }} GraphqlError */
+
+/**
+ * @param {unknown} errors The `errors` field of a GraphQL answer.
+ * @returns {GraphqlError[]}
+ */
+function parseGraphqlErrors(errors) {
+  return asList(errors).map((error) => {
+    const { message, extensions } = asRecord(error);
+    const code = stringOrNull(asRecord(extensions)['code']) ?? undefined;
+    return { message: stringOrNull(message) ?? 'unknown error', code };
+  });
+}
+
+/** @typedef {(query: string, variables?: Record<string, unknown>) => Promise<Record<string, unknown>>} Gql */
+
+/** @param {ShopifyOptions} options */
+export function createShopify(options) {
+  const {
+    domain,
+    apiVersion = DEFAULT_API_VERSION,
+    metafields = [],
+    inventory = false,
+    fetch: fetchImpl = globalThis.fetch,
+    sleep = realSleep,
+    now = () => Date.now(),
+    retries = 3,
+    variantsFirst = DEFAULT_VARIANTS_FIRST,
+    mediaFirst = DEFAULT_MEDIA_FIRST,
+    tokenStore = null,
+  } = options;
   if (!domain) throw new SyncError('shopify.domain is required');
-  if (!adminToken && !(clientId && clientSecret)) {
-    throw new SyncError('Shopify auth missing: set SHOPIFY_ADMIN_TOKEN, or SHOPIFY_CLIENT_ID + SHOPIFY_CLIENT_SECRET');
-  }
-  const shop = String(domain)
-    .replace(/^https?:\/\//, '')
-    .replace(/\/.*$/, '');
-  let cached = adminToken ? { token: adminToken, expires: Infinity } : null;
+  const shop = domain.replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+  const tokens = tokenSource(options, { shop, fetchImpl, now, tokenStore });
 
-  async function token() {
-    if (cached && cached.expires > now() + 60000) return cached.token;
-    if (!cached && tokenStore) {
-      const saved = await open(clientSecret, TOKEN_PURPOSE, TOKEN_KEY, await tokenStore.get(TOKEN_KEY));
-      if (saved?.token && saved.expires > now() + 60000) {
-        cached = saved;
-        return saved.token;
-      }
-    }
-    const res = await fetchImpl(`https://${shop}/admin/oauth/access_token`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        grant_type: 'client_credentials',
-        client_id: clientId,
-        client_secret: clientSecret,
-      }).toString(),
-    });
-    if (!res.ok)
-      throw new SyncError(`Shopify token request failed (${res.status})`, {
-        status: res.status,
-        body: await res.text().catch(() => ''),
-      });
-    const json = await res.json();
-    cached = { token: json.access_token, expires: now() + (json.expires_in || 86399) * 1000 };
-    if (tokenStore) await tokenStore.put(TOKEN_KEY, await seal(clientSecret, TOKEN_PURPOSE, TOKEN_KEY, cached));
-    return cached.token;
-  }
+  /** @param {number} attempt */
+  const backOff = (attempt) => sleep(RETRY_BASE_MS * 2 ** attempt);
 
+  /** @type {Gql} */
   async function gql(query, variables = {}) {
     for (let attempt = 0; ; attempt++) {
       const res = await fetchImpl(`https://${shop}/admin/api/${apiVersion}/graphql.json`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': await token() },
+        headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': await tokens.current() },
         body: JSON.stringify({ query, variables }),
       });
-      if (res.status === 401 && !adminToken && attempt < 1) {
-        cached = null;
-        tokenStore = null;
+      if (res.status === 401 && tokens.replace && attempt < 1) {
+        await tokens.replace();
         continue;
       }
       if ((res.status === 429 || res.status >= 500) && attempt < retries) {
-        await sleep(1000 * 2 ** attempt);
+        await backOff(attempt);
         continue;
       }
-      const json = await res.json().catch(() => null);
-      if (!res.ok) throw new SyncError(`Shopify Admin API ${res.status}`, { status: res.status, body: json });
-      if (json?.errors?.length) {
-        if (json.errors.some((e) => e.extensions?.code === 'THROTTLED') && attempt < retries) {
-          await sleep(1000 * 2 ** attempt);
+      const json = asRecord(await responseJsonOrNull(res));
+      if (!res.ok) throw new SyncError(`Shopify Admin API ${String(res.status)}`, { status: res.status, body: json });
+      const errors = parseGraphqlErrors(json['errors']);
+      if (errors.length) {
+        if (errors.some((error) => error.code === 'THROTTLED') && attempt < retries) {
+          await backOff(attempt);
           continue;
         }
-        const code = json.errors.find((e) => e.extensions?.code)?.extensions.code;
-        throw new SyncError(`Shopify Admin API: ${json.errors.map((e) => e.message).join(' | ')}`, {
+        throw new SyncError(`Shopify Admin API: ${errors.map((error) => error.message).join(' | ')}`, {
           body: json,
-          code,
+          code: errors.find((error) => error.code)?.code,
         });
       }
-      return json.data;
+      return asRecord(json['data']);
     }
   }
 
+  return shopifyClient(gql, { shop, apiVersion, metafields, inventory, variantsFirst, mediaFirst });
+}
+
+/**
+ * @param {unknown} raw
+ * @returns {WebhookSubscription}
+ */
+function parseWebhook(raw) {
+  const { id, topic, uri } = asRecord(raw);
+  return { id: stringOrNull(id) ?? '', topic: stringOrNull(topic) ?? '', uri: stringOrNull(uri) ?? '' };
+}
+
+/**
+ * @param {unknown} raw
+ * @returns {PageInfo}
+ */
+function parsePageInfo(raw) {
+  const { hasNextPage, endCursor } = asRecord(raw);
+  return { hasNextPage: hasNextPage === true, endCursor: stringOrNull(endCursor) };
+}
+
+/** @param {unknown} error */
+function costTooHigh(error) {
+  return error instanceof SyncError && error.code === 'MAX_COST_EXCEEDED';
+}
+
+/**
+ * The queries the sync and the setup check send, on top of `gql`.
+ *
+ * @param {Gql} gql
+ * @param {{ shop: string, apiVersion: string, metafields: string[], inventory: boolean, variantsFirst: number,
+ *   mediaFirst: number }} settings
+ */
+function shopifyClient(gql, { shop, apiVersion, metafields, inventory, variantsFirst, mediaFirst }) {
   const fragment = productFragment({ metafields, inventory, variantsFirst, mediaFirst });
   let pageSize = pageSizeFor({ variantsFirst, mediaFirst, metafields });
 
-  return {
-    shop,
-    apiVersion,
-    gql,
-
-    async getProduct(gid) {
-      const data = await gql(
-        `query TetherSyncGetProduct($id: ID!) { product(id: $id) { ...TetherSyncProduct } }\n${fragment}`,
-        { id: gid },
-      );
-      return data.product ? normalizeProduct(data.product, metafields) : null;
-    },
-
-    get pageSize() {
-      return pageSize;
-    },
-
-    /** One page of products, oldest update first. Shrinks the page if Shopify says it costs too much. */
-    async listProducts({ first, after = null, query = null } = {}) {
-      let size = first || pageSize;
-      for (;;) {
-        try {
-          return await listPage(size, after, query);
-        } catch (err) {
-          if (err.code !== 'MAX_COST_EXCEEDED' || size <= 1) throw err;
-          size = Math.max(1, Math.floor(size / 2));
-          if (!first) pageSize = size;
-        }
-      }
-    },
-
-    async shopName() {
-      const data = await gql('query TetherSyncShop { shop { name myshopifyDomain } }');
-      return data.shop;
-    },
-
-    /** This app's webhook subscriptions: [{ id, topic, uri }]. */
-    async listWebhooks() {
-      const data = await gql(
-        'query TetherSyncWebhooks { webhookSubscriptions(first: 100) { nodes { id topic uri } } }',
-      );
-      return data.webhookSubscriptions.nodes;
-    },
-
-    async createWebhook(topic, uri) {
-      const data = await gql(
-        `mutation TetherSyncWebhookCreate($topic: WebhookSubscriptionTopic!, $sub: WebhookSubscriptionInput!) {
-  webhookSubscriptionCreate(topic: $topic, webhookSubscription: $sub) { webhookSubscription { id topic uri } userErrors { field message } }
-}`,
-        { topic, sub: { uri } },
-      );
-      const res = data.webhookSubscriptionCreate;
-      if (res.userErrors?.length)
-        throw new SyncError(`webhook ${topic}: ${res.userErrors.map((e) => e.message).join(' | ')}`);
-      return res.webhookSubscription;
-    },
-  };
-
+  /**
+   * @param {number} first
+   * @param {string | null} after
+   * @param {string | null} query
+   * @returns {Promise<{ products: Product[], pageInfo: PageInfo }>}
+   */
   async function listPage(first, after, query) {
     const data = await gql(
       `query TetherSyncProducts($first: Int!, $after: String, $query: String) {
@@ -207,72 +225,88 @@ export function createShopify({
 ${fragment}`,
       { first, after, query },
     );
+    const products = asRecord(data['products']);
     return {
-      products: data.products.nodes.map((p) => normalizeProduct(p, metafields)),
-      pageInfo: data.products.pageInfo,
+      products: asList(products['nodes']).map((node) => normalizeProduct(node, metafields)),
+      pageInfo: parsePageInfo(products['pageInfo']),
     };
   }
-}
-
-const num = (m) => (m && m.amount != null ? Number(m.amount) : null);
-const image = (img) => (img?.url ? { url: img.url, alt: img.altText || null } : null);
-
-/**
- * Flat, mapping-friendly shape. Every key here can be used as a source in
- * the field mapping, e.g. fields: { price: 'price', 'main-image': 'image' }.
- */
-export function normalizeProduct(p, metafieldRefs = []) {
-  const images = (p.media?.nodes || [])
-    .filter((m) => m.mediaContentType === 'IMAGE' || m.preview?.image)
-    .map((m) => image(m.preview?.image))
-    .filter(Boolean);
-  const variants = (p.variants?.nodes || []).map((v) => ({
-    id: v.id,
-    legacyId: String(v.legacyResourceId ?? ''),
-    title: v.title,
-    sku: v.sku || null,
-    price: v.price != null ? Number(v.price) : null,
-    compareAtPrice: v.compareAtPrice != null ? Number(v.compareAtPrice) : null,
-    available: Boolean(v.availableForSale),
-    inventory: v.inventoryQuantity ?? null,
-  }));
-  const metafields = {};
-  metafieldRefs.forEach((ref, i) => {
-    metafields[ref] = p[`mf${i}`]?.value ?? null;
-  });
-  const compareAt = num(p.compareAtPriceRange?.minVariantCompareAtPrice);
-  const price = num(p.priceRangeV2?.minVariantPrice);
 
   return {
-    id: p.id,
-    legacyId: String(p.legacyResourceId ?? p.id.split('/').pop()),
-    handle: p.handle,
-    title: p.title,
-    description: p.description || '',
-    descriptionHtml: p.descriptionHtml || '',
-    vendor: p.vendor || '',
-    productType: p.productType || '',
-    tags: p.tags || [],
-    tagsText: (p.tags || []).join(', '),
-    status: p.status,
-    createdAt: p.createdAt,
-    updatedAt: p.updatedAt,
-    publishedAt: p.publishedAt || null,
-    onlineStoreUrl: p.onlineStoreUrl || null,
-    seoTitle: p.seo?.title || null,
-    seoDescription: p.seo?.description || null,
-    price,
-    maxPrice: num(p.priceRangeV2?.maxVariantPrice),
-    compareAtPrice: compareAt && price != null && compareAt > price ? compareAt : null,
-    currency: p.priceRangeV2?.minVariantPrice?.currencyCode || null,
-    image: image(p.featuredMedia?.preview?.image) || images[0] || null,
-    images,
-    available: variants.some((v) => v.available),
-    totalInventory: p.totalInventory ?? null,
-    variantCount: variants.length,
-    sku: variants[0]?.sku || null,
-    options: (p.options || []).map((o) => ({ name: o.name, values: (o.optionValues || []).map((v) => v.name) })),
-    variants,
-    metafields,
+    shop,
+    apiVersion,
+    gql,
+
+    /**
+     * @param {string} gid
+     * @returns {Promise<Product | null>} `null` when the store has no such product.
+     */
+    async getProduct(gid) {
+      const data = await gql(
+        `query TetherSyncGetProduct($id: ID!) { product(id: $id) { ...TetherSyncProduct } }\n${fragment}`,
+        { id: gid },
+      );
+      return data['product'] ? normalizeProduct(data['product'], metafields) : null;
+    },
+
+    get pageSize() {
+      return pageSize;
+    },
+
+    /**
+     * One page of products, oldest update first. Shrinks the page if Shopify says it costs too much.
+     *
+     * @param {{ first?: number | undefined, after?: string | null | undefined, query?: string | null | undefined }} [options]
+     */
+    async listProducts({ first, after = null, query = null } = {}) {
+      let size = first ?? pageSize;
+      for (;;) {
+        try {
+          return await listPage(size, after, query);
+        } catch (err) {
+          if (!costTooHigh(err) || size <= 1) throw err;
+          size = Math.max(1, Math.floor(size / 2));
+          if (!first) pageSize = size;
+        }
+      }
+    },
+
+    /** @returns {Promise<{ name: string, myshopifyDomain: string }>} */
+    async shopName() {
+      const data = await gql('query TetherSyncShop { shop { name myshopifyDomain } }');
+      const { name, myshopifyDomain } = asRecord(data['shop']);
+      return { name: stringOrNull(name) ?? '', myshopifyDomain: stringOrNull(myshopifyDomain) ?? '' };
+    },
+
+    /**
+     * This app's webhook subscriptions.
+     *
+     * @returns {Promise<WebhookSubscription[]>}
+     */
+    async listWebhooks() {
+      const data = await gql(
+        'query TetherSyncWebhooks { webhookSubscriptions(first: 100) { nodes { id topic uri } } }',
+      );
+      return asList(asRecord(data['webhookSubscriptions'])['nodes']).map(parseWebhook);
+    },
+
+    /**
+     * @param {string} topic A `WebhookSubscriptionTopic`, e.g. `PRODUCTS_UPDATE`.
+     * @param {string} uri
+     * @returns {Promise<WebhookSubscription>}
+     * @throws {SyncError} When Shopify answers with user errors.
+     */
+    async createWebhook(topic, uri) {
+      const data = await gql(
+        `mutation TetherSyncWebhookCreate($topic: WebhookSubscriptionTopic!, $sub: WebhookSubscriptionInput!) {
+  webhookSubscriptionCreate(topic: $topic, webhookSubscription: $sub) { webhookSubscription { id topic uri } userErrors { field message } }
+}`,
+        { topic, sub: { uri } },
+      );
+      const result = asRecord(data['webhookSubscriptionCreate']);
+      const userErrors = asList(result['userErrors']).map((error) => stringOrNull(asRecord(error)['message']) ?? '');
+      if (userErrors.length) throw new SyncError(`webhook ${topic}: ${userErrors.join(' | ')}`);
+      return parseWebhook(result['webhookSubscription']);
+    },
   };
 }

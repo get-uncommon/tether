@@ -1,17 +1,26 @@
-// @ts-nocheck
 /**
- * Rebuild-on-change for statically built sites (Astro, Eleventy, ...): when a product's content
- * changes in Shopify, call the site's deploy hook (Cloudflare Pages, Netlify, Vercel, any URL
- * that starts a build). At most one build per DEPLOY_HOOK_MIN_SECONDS (default 60); changes in
- * between wait for the next webhook or cron run, so a bulk edit gives one build.
+ * Rebuild-on-change for statically built sites: when a product's content changes in Shopify, call the site's deploy
+ * hook (any URL that starts a build when POSTed to). At most one build per DEPLOY_HOOK_MIN_SECONDS (default 60);
+ * changes in between wait for the next webhook or cron run, so a bulk edit gives one build.
  *
- * It plugs into the normal sync engine as a "Webflow" that stores nothing: the engine's change
- * detection (hash per product), cursor, retries and budgets all apply. Next to Webflow it wraps
- * the real Webflow client and also triggers a build after each Webflow change.
+ * Without Webflow it plugs into the sync engine as a CMS target that stores nothing, so the engine's change
+ * detection (hash per product), cursor, retries and budgets all apply. Next to Webflow it wraps the real Webflow
+ * client and also triggers a build after each Webflow change.
  */
+import { isRecord, noopLogger } from './util.js';
 
-// What a statically built product page shows. Stock and availability are left out on purpose:
-// Tether updates them live in the browser, a rebuild for every sale would be wasteful.
+/** @typedef {import('./mapping.js').FieldSource} FieldSource */
+/** @typedef {import('./store.js').Store} Store */
+/** @typedef {import('./util.js').Logger} Logger */
+/** @typedef {import('./webflow.js').CmsTarget} CmsTarget */
+/** @typedef {import('./webflow.js').WebflowClient} WebflowClient */
+
+/**
+ * What a statically built product page shows. Stock and availability are left out on purpose: Tether updates them
+ * live in the browser, and a rebuild for every sale would be wasteful.
+ *
+ * @type {Record<string, FieldSource>}
+ */
 export const DEPLOY_FIELDS = {
   name: 'title',
   slug: 'handle',
@@ -28,44 +37,91 @@ export const DEPLOY_FIELDS = {
   'seo-title': 'seoTitle',
   'seo-description': 'seoDescription',
   options: 'options',
-  variants: (p) =>
-    p.variants.map((v) => ({ id: v.id, title: v.title, price: v.price, compareAtPrice: v.compareAtPrice, sku: v.sku })),
+  variants: (product) =>
+    product.variants.map((variant) => ({
+      id: variant.id,
+      title: variant.title,
+      price: variant.price,
+      compareAtPrice: variant.compareAtPrice,
+      sku: variant.sku,
+    })),
   metafields: 'metafields',
 };
 
-const KEY = 'deploy:state'; // { dirty, lastAt }
+/** The collection id a deploy-only target reports, in `app.config` and `app.webflow`: there is no collection. */
+export const DEPLOY_ONLY_COLLECTION_ID = 'deploy-hook';
 
+/** A build that is still owed survives in the store between runs. */
+const KEY = 'deploy:state';
+const DEFAULT_MIN_INTERVAL_SECONDS = 60;
+
+/** @typedef {{ dirty: boolean, lastAt: number }} DeployState */
+
+/**
+ * @typedef {{ triggered: true }
+ *   | { triggered: false }
+ *   | { triggered: false, pending: true, waitMs: number }} DeployOutcome
+ */
+
+/**
+ * @typedef {object} DeployHook
+ * @property {() => void} markDirty Notes a change in this run; {@link DeployHook.maybeTrigger} acts on it.
+ * @property {(options?: { force?: boolean }) => Promise<DeployOutcome>} maybeTrigger Starts a build if something
+ *   changed, in this run or an earlier one, and the interval has passed. Rejects when the hook fails; the build
+ *   stays owed for the next run.
+ * @property {string} url
+ */
+
+/** @param {unknown} value @returns {DeployState} */
+function parseDeployState(value) {
+  if (!isRecord(value)) return { dirty: false, lastAt: 0 };
+  const { dirty, lastAt } = value;
+  return { dirty: Boolean(dirty), lastAt: typeof lastAt === 'number' ? lastAt : 0 };
+}
+
+/**
+ * @param {object} options
+ * @param {string} options.url
+ * @param {number} [options.minIntervalSeconds]
+ * @param {Store} options.store
+ * @param {typeof globalThis.fetch} [options.fetch]
+ * @param {() => number} [options.now]
+ * @param {Logger} [options.log]
+ * @returns {DeployHook}
+ */
 export function createDeployHook({
   url,
-  minIntervalSeconds = 60,
+  minIntervalSeconds = DEFAULT_MIN_INTERVAL_SECONDS,
   store,
   fetch: fetchImpl = globalThis.fetch,
   now = () => Date.now(),
-  log,
+  log = noopLogger,
 }) {
-  let dirty = false; // changed during this run (written to the store once, in maybeTrigger)
+  // Changed during this run. Written to the store once, in maybeTrigger, to save KV writes.
+  let dirty = false;
 
   const markDirty = () => {
     dirty = true;
   };
 
-  /** Trigger a build if something changed (now or in an earlier run) and the interval passed. */
+  /** @type {DeployHook['maybeTrigger']} */
   async function maybeTrigger({ force = false } = {}) {
-    const state = (await store.get(KEY)) || { dirty: false, lastAt: 0 };
+    const state = parseDeployState(await store.get(KEY));
     const pending = dirty || state.dirty || force;
     dirty = false;
     if (!pending) return { triggered: false };
-    const wait = state.lastAt + minIntervalSeconds * 1000 - now();
-    if (wait > 0 && !force) {
+    const waitMs = state.lastAt + minIntervalSeconds * 1000 - now();
+    if (waitMs > 0 && !force) {
       if (!state.dirty) await store.put(KEY, { ...state, dirty: true });
-      log?.info?.(`deploy hook: change noted, next build in ${Math.ceil(wait / 1000)}s or later`);
-      return { triggered: false, pending: true, waitMs: wait };
+      log.info(`deploy hook: change noted, next build in ${Math.ceil(waitMs / 1000)}s or later`);
+      return { triggered: false, pending: true, waitMs };
     }
     let res;
     try {
       res = await fetchImpl(url, { method: 'POST' });
     } catch (err) {
-      await store.put(KEY, { ...state, dirty: true }); // network error: keep the build pending for the next run
+      // A network error: the build stays owed for the next run.
+      await store.put(KEY, { ...state, dirty: true });
       throw err;
     }
     if (!res.ok) {
@@ -73,55 +129,74 @@ export function createDeployHook({
       throw new Error(`deploy hook answered ${res.status}`);
     }
     await store.put(KEY, { dirty: false, lastAt: now() });
-    log?.info?.('deploy hook: build started');
+    log.info('deploy hook: build started');
     return { triggered: true };
   }
 
   return { markDirty, maybeTrigger, url };
 }
 
-/** A Webflow client stand-in: stores nothing, marks a build as needed on every change. */
+/**
+ * @typedef {CmsTarget & {
+ *   collectionId: string,
+ *   requests: number,
+ *   getItem: () => Promise<null>,
+ * }} DeployOnlyTarget
+ */
+
+/**
+ * A CMS target that stores nothing and marks a build as needed on every change.
+ *
+ * @param {DeployHook} hook
+ * @returns {DeployOnlyTarget}
+ */
 export function deployOnlyTarget(hook) {
+  /** @template T @param {T} result */
+  const afterChange = (result) => {
+    hook.markDirty();
+    return Promise.resolve(result);
+  };
   return {
-    collectionId: 'deploy-hook',
+    collectionId: DEPLOY_ONLY_COLLECTION_ID,
     requests: 0,
-    getCollection: async () => ({ displayName: 'deploy hook', fields: [] }),
-    listAllItems: async () => [],
-    getItem: async () => null,
-    createItem: async (fieldData) => {
-      hook.markDirty();
-      return { id: `site:${fieldData['shopify-id'] || fieldData.slug}`, fieldData };
-    },
-    updateItem: async (id, fieldData) => {
-      hook.markDirty();
-      return { id, fieldData };
-    },
-    deleteItem: async () => {
-      hook.markDirty();
-      return null;
-    },
-    publish: async (ids) => [{ publishedItemIds: ids, errors: [] }],
-    unpublish: async () => {
-      hook.markDirty();
-      return null;
-    },
+    getCollection: () => Promise.resolve({ displayName: 'deploy hook', fields: [] }),
+    listAllItems: () => Promise.resolve([]),
+    getItem: () => Promise.resolve(null),
+    createItem: (fieldData) =>
+      afterChange({ id: `site:${String(fieldData['shopify-id'] || fieldData['slug'])}`, fieldData }),
+    updateItem: (id, fieldData) => afterChange({ id, fieldData }),
+    deleteItem: () => afterChange(null),
+    publish: (ids) => Promise.resolve([{ publishedItemIds: ids, errors: [] }]),
+    unpublish: () => afterChange(null),
   };
 }
 
-/** Real Webflow client + a build after each Webflow change (Webflow and a static site together). */
+/**
+ * The Webflow client, with a build after each Webflow change: Webflow and a static site together.
+ *
+ * @param {WebflowClient} webflow
+ * @param {DeployHook} hook
+ * @returns {WebflowClient}
+ */
 export function withDeployHook(webflow, hook) {
-  const wrap =
-    (fn) =>
+  /**
+   * @template {unknown[]} A
+   * @template R
+   * @param {(...args: A) => Promise<R>} operation
+   * @returns {(...args: A) => Promise<R>}
+   */
+  const marking =
+    (operation) =>
     async (...args) => {
-      const r = await fn(...args);
+      const result = await operation(...args);
       hook.markDirty();
-      return r;
+      return result;
     };
   return {
     ...webflow,
-    createItem: wrap(webflow.createItem),
-    updateItem: wrap(webflow.updateItem),
-    deleteItem: wrap(webflow.deleteItem),
-    unpublish: wrap(webflow.unpublish),
+    createItem: marking(webflow.createItem),
+    updateItem: marking(webflow.updateItem),
+    deleteItem: marking(webflow.deleteItem),
+    unpublish: marking(webflow.unpublish),
   };
 }
