@@ -135,17 +135,18 @@ const graphqlPlugin = {
 };
 
 /**
- * The core's map of part file to Subresource Integrity hash (src/part-integrity.js), from the part files just built.
+ * The core's map of part file to Subresource Integrity hash (src/part-integrity.js), read from the part files on disk
+ * each time the core builds, so a core always carries the hashes of the parts built before it.
  *
- * @param {Record<string, string>} integrity
+ * @param {boolean} minified Which parts: a core loads the parts of its own kind (tether.min.js the .min ones).
  * @returns {esbuild.Plugin}
  */
-function partIntegrityPlugin(integrity) {
+function partIntegrityPlugin(minified) {
   return {
     name: 'tether-part-integrity',
     setup(build) {
-      build.onLoad({ filter: /[/\\]src[/\\]part-integrity\.js$/ }, () => ({
-        contents: `export const PART_INTEGRITY = ${JSON.stringify(integrity)};\n`,
+      build.onLoad({ filter: /[/\\]src[/\\]part-integrity\.js$/ }, async () => ({
+        contents: `export const PART_INTEGRITY = ${JSON.stringify(await partHashes(minified))};\n`,
         loader: 'js',
       }));
     },
@@ -153,7 +154,7 @@ function partIntegrityPlugin(integrity) {
 }
 
 /**
- * @param {boolean} minified Which files: a core loads the parts of its own kind (tether.min.js the .min ones).
+ * @param {boolean} minified
  * @returns {Promise<Record<string, string>>} The `sha384-…` hash of each built part file, by file name.
  */
 async function partHashes(minified) {
@@ -235,27 +236,29 @@ async function partBuilds() {
   return PARTS.flatMap((name) => [partBuild(exportsByFile, name, false), partBuild(exportsByFile, name, true)]);
 }
 
-/**
- * @param {{ plain: Record<string, string>, minified: Record<string, string> }} integrity The parts' hashes for each
- *   `<script>` build; `{}` leaves them unchecked.
- * @returns {esbuild.BuildOptions[]}
- */
-function coreBuilds(integrity) {
+/** @returns {esbuild.BuildOptions[]} The `<script>` cores, which carry the hashes of the parts built before them. */
+function scriptCoreBuilds() {
   /** @type {esbuild.BuildOptions} */
   const iife = { ...common, entryPoints: [join(SRC, 'index.js')], format: 'iife' };
   return [
     {
       ...iife,
       outfile: join(OUT, 'tether.js'),
-      plugins: [iifeLazyPlugin, partIntegrityPlugin(integrity.plain), graphqlPlugin],
+      plugins: [iifeLazyPlugin, partIntegrityPlugin(false), graphqlPlugin],
     },
     {
       ...iife,
       outfile: join(OUT, 'tether.min.js'),
       minify: true,
       sourcemap: true,
-      plugins: [iifeLazyPlugin, partIntegrityPlugin(integrity.minified), graphqlPlugin],
+      plugins: [iifeLazyPlugin, partIntegrityPlugin(true), graphqlPlugin],
     },
+  ];
+}
+
+/** @returns {esbuild.BuildOptions[]} The ES modules for bundlers and the Barba preset. */
+function moduleBuilds() {
+  return [
     {
       ...common,
       entryPoints: [join(SRC, 'index.js'), join(SRC, 'server.js'), join(SRC, 'astro.js')],
@@ -300,15 +303,36 @@ await writeFile(
   join(OUT, 'tether.esm.js'),
   "export * from './esm/index.js';\nexport { default } from './esm/index.js';\n",
 );
-const parts = await partBuilds();
-if (watch) {
-  // Parts rebuild on their own while watching, so the core can't carry their hashes: they load unchecked.
-  for (const options of [...parts, ...coreBuilds({ plain: {}, minified: {} })]) {
-    await (await esbuild.context(options)).watch();
+/**
+ * Watches the sources. A part that rebuilds rebuilds the `<script>` cores too, so they carry its new hash.
+ *
+ * @param {esbuild.BuildOptions[]} parts
+ */
+async function watchAll(parts) {
+  for (const options of moduleBuilds()) await (await esbuild.context(options)).watch();
+  const cores = await Promise.all(scriptCoreBuilds().map((options) => esbuild.context(options)));
+  for (const core of cores) await core.watch();
+  /** @type {esbuild.Plugin} */
+  const rebuildCores = {
+    name: 'tether-rebuild-cores',
+    setup(build) {
+      build.onEnd(async (result) => {
+        if (!result.errors.length) await Promise.all(cores.map((core) => core.rebuild()));
+      });
+    },
+  };
+  for (const options of parts) {
+    const context = await esbuild.context({ ...options, plugins: [...(options.plugins ?? []), rebuildCores] });
+    await context.watch();
   }
+}
+
+const parts = await partBuilds();
+// The parts first: the cores read their hashes from the built files.
+await Promise.all(parts.map((options) => esbuild.build(options)));
+if (watch) {
+  await watchAll(parts);
 } else {
-  await Promise.all(parts.map((options) => esbuild.build(options)));
-  const integrity = { plain: await partHashes(false), minified: await partHashes(true) };
-  await Promise.all(coreBuilds(integrity).map((options) => esbuild.build(options)));
+  await Promise.all([...scriptCoreBuilds(), ...moduleBuilds()].map((options) => esbuild.build(options)));
   await report();
 }

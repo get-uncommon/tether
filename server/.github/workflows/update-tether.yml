@@ -7,6 +7,10 @@
 # The new release's code runs (its tests) only in the `update` job, whose token can read this repository and nothing
 # more. The `publish` job runs none of that code: it applies the tested change and pushes it.
 # Actions are pinned by commit, so a moved tag can't change what runs here.
+#
+# An update never replaces this file (GitHub doesn't let the workflow's token change it). A release that needs a new
+# version of it raises the revision below, and the updater then warns that it has to be copied in once, by hand.
+# Tether workflow revision: 1
 name: Update Tether
 
 on:

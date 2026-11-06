@@ -1,5 +1,9 @@
 # Publishes a release when a version tag is pushed (made by `npm run release -- X.Y.Z`):
 # tests, npm publish with provenance (trusted publishing: no token in the repo), GitHub Release.
+# The Release carries tether-server-X.Y.Z.tar.gz, the sync Worker's server/ folder with a GitHub artifact
+# attestation from this workflow: deployed copies install an update only from that file, after
+# `gh attestation verify --signer-workflow <repo>/.github/workflows/release.yml` (server/scripts/release-asset.mjs).
+# Renaming this file or the asset stops every copy's updates.
 name: release
 
 on:
@@ -8,7 +12,8 @@ on:
 
 permissions:
   contents: write # the GitHub Release
-  id-token: write # npm trusted publishing + provenance
+  id-token: write # npm trusted publishing + provenance, and the attestation's signing certificate
+  attestations: write # the server asset's attestation
 
 jobs:
   release:
@@ -40,6 +45,18 @@ jobs:
           fi
       - run: npm test
       - run: npm run smoke
+      # git archive of the tagged commit: the same bytes on every run (file times are the commit's), and only what
+      # is committed. The top folder is stripped by the updater, which reads server/ inside it.
+      - name: Server asset for the sync Worker's updates
+        shell: bash
+        run: |
+          V="${GITHUB_REF_NAME#v}"
+          git archive --format=tar.gz --prefix="tether-server-$V/" -o "tether-server-$V.tar.gz" HEAD -- server
+          echo "SERVER_ASSET=tether-server-$V.tar.gz" >> "$GITHUB_ENV"
+      - name: Attest the server asset
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: ${{ env.SERVER_ASSET }}
       - name: Publish to npm
         run: npm publish --provenance --access public
       - name: GitHub Release
@@ -57,4 +74,4 @@ jobs:
           # Every script next to the core, so a site can self-host the folder: the core loads its parts from beside it.
           # dist/esm/ is left out: its chunks import each other by path, which flat Release assets don't keep.
           mapfile -t assets < <(find dist -maxdepth 1 -type f | sort)
-          gh release create "$GITHUB_REF_NAME" --title "Tether $V" --notes-file notes.md --latest "${assets[@]}"
+          gh release create "$GITHUB_REF_NAME" --title "Tether $V" --notes-file notes.md --latest "${assets[@]}" "$SERVER_ASSET"

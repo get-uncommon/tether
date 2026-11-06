@@ -159,3 +159,15 @@ test('e2e static server: stays inside its folders and listens on loopback only',
     child.kill();
   }
 });
+
+test('the release attests the server asset the sync Worker updater installs, by the same name', async () => {
+  const { releaseAssetName } = await import('../server/scripts/release-asset.mjs');
+  const workflow = await readFile(new URL('../.github/workflows/release.yml', import.meta.url), 'utf8');
+  assert.equal(releaseAssetName('$V'), 'tether-server-$V.tar.gz');
+  assert.ok(workflow.includes('-o "tether-server-$V.tar.gz" HEAD -- server'), 'the archive of the tagged server/');
+  assert.match(workflow, /uses: actions\/attest-build-provenance@[0-9a-f]{40} #/, 'attested, pinned by commit');
+  assert.match(workflow, /subject-path: \$\{\{ env\.SERVER_ASSET \}\}/);
+  assert.match(workflow, /^ {2}id-token: write/m);
+  assert.match(workflow, /^ {2}attestations: write/m);
+  assert.match(workflow, /--latest "\$\{assets\[@\]\}" "\$SERVER_ASSET"/, 'uploaded to the GitHub Release');
+});

@@ -9,13 +9,14 @@
  *
  * It replaces the code (src/, bin/, scripts/, test/, docs/, package.json, README) and keeps what belongs to the copy:
  * tether-sync.config.js (mapping), wrangler.jsonc (Cloudflare ids), TETHER_VERSION. .github/ is never touched: GitHub
- * doesn't let an Action's token change workflow files, so the workflow stays as it is and all update logic lives in
- * this script, which updates itself.
+ * doesn't let an Action's token change workflow files, so all update logic lives in this script, which updates
+ * itself, and a copy whose workflow is older than the release's is told how to replace it (scripts/workflow-check.mjs).
  *
- * Releases are the upstream repository's `v0.3.3` tags; a tag without the `v` is not a release. A release is
- * downloaded by the commit its tag points at, and only when that commit is part of the upstream repository's default
- * branch: a tag moved to a commit outside it is refused. It is staged inside the copy first and then swapped in by
- * renames, so a failure part-way leaves the copy as it was.
+ * Releases are the upstream repository's `v0.7.0` tags; a tag without the `v` is not a release. A release is
+ * installed only when the commit its tag points at is part of the upstream default branch, and only from the signed
+ * asset on its GitHub Release, after `gh attestation verify` confirms the upstream release workflow built it from that
+ * commit (scripts/release-asset.mjs). It is staged inside the copy first and then swapped in by renames, so a failure
+ * part-way leaves the copy as it was.
  *
  * The version rules live in `src/release-range.js`, which every copy has next to this script.
  *
@@ -23,6 +24,7 @@
  *
  *   node scripts/update-tether.mjs            # check and update the working tree
  *   node scripts/update-tether.mjs --dry-run  # only say what it would do
+ *   node scripts/update-tether.mjs --allow-unverified   # without the GitHub CLI: install without the signature check
  *   node scripts/update-tether.mjs --from ../tether/server   # use a local release (testing)
  *
  * Prints `updated=<version>` (or `updated=` when nothing changed) and exits non-zero on any failure. Every copy keeps
@@ -30,15 +32,16 @@
  */
 import { readFile, writeFile, rm, cp, mkdir, mkdtemp, rename, stat } from 'node:fs/promises';
 import { existsSync, realpathSync } from 'node:fs';
-import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { compareVersions, newestInRange, parseVersion } from '../src/release-range.js';
 import { field } from '../src/shared/json.js';
+import { downloadAsset, fetchSignedRelease, runCommand } from './release-asset.mjs';
+import { reportWorkflow, workflowState } from './workflow-check.mjs';
+/** @import { GitHubGet, VerifyPolicy } from './release-asset.mjs' */
 
 /** @typedef {{ name: string, sha: string }} Tag */
-/** @typedef {(path: string) => Promise<unknown>} GitHubGet */
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 /** The repository releases come from. TETHER_UPSTREAM points a test copy at a fork. */
@@ -138,25 +141,6 @@ export async function releaseCommit(get, upstream, tags, version) {
     );
   }
   return tag.sha;
-}
-
-/**
- * Downloads and unpacks the release's `server/` folder into `dir`.
- *
- * @param {string} upstream
- * @param {string} sha
- * @param {string} dir An empty folder, which the caller removes.
- * @returns {Promise<string>} The unpacked `server/` folder.
- */
-async function fetchRelease(upstream, sha, dir) {
-  const response = await fetch(`https://codeload.github.com/${upstream}/tar.gz/${sha}`);
-  if (!response.ok) throw new Error(`download ${sha}: ${response.status}`);
-  const archive = join(dir, 'release.tgz');
-  await writeFile(archive, Buffer.from(await response.arrayBuffer()));
-  execFileSync('tar', ['-xzf', archive, '-C', dir, '--strip-components=1']);
-  const server = join(dir, 'server');
-  if (!existsSync(join(server, 'package.json'))) throw new Error(`${sha} has no server/ folder`);
-  return server;
 }
 
 /** @param {string} path @returns {Promise<string>} */
@@ -264,16 +248,33 @@ async function newestRelease(effective) {
 }
 
 /**
- * Downloads the release and installs it, removing the download afterwards.
+ * Installs a release's `server/` folder, then warns when the copy's workflow is older than the release's.
+ *
+ * @param {string} source The release's `server/` folder.
+ * @param {string} version
+ * @param {string} where Where the release's workflow file can be read, for the warning.
+ */
+async function installRelease(source, version, where) {
+  const found = await packageVersion(source);
+  if (found !== version) throw new Error(`the release says it is ${version}, its package.json says ${found}`);
+  await install(source);
+  await reportWorkflow(await workflowState(ROOT, source), version, where);
+}
+
+/**
+ * Downloads the release's signed asset, verifies it and installs it, removing the download afterwards.
  *
  * @param {string} version
  * @param {Tag[]} tags
+ * @param {VerifyPolicy} policy
  */
-async function installFromGitHub(version, tags) {
+async function installFromGitHub(version, tags, policy) {
   const sha = await releaseCommit(githubJson, UPSTREAM, tags, version);
   const dir = await mkdtemp(join(tmpdir(), 'tether-release-'));
   try {
-    await install(await fetchRelease(UPSTREAM, sha, dir));
+    const source = { get: githubJson, run: runCommand, download: downloadAsset };
+    const server = await fetchSignedRelease(source, { upstream: UPSTREAM, version, sha }, dir, policy);
+    await installRelease(server, version, `https://github.com/${UPSTREAM}/tree/v${version}/server`);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -295,6 +296,8 @@ function fromFolder(args) {
 /** @param {string[]} args */
 async function main(args) {
   const dryRun = args.includes('--dry-run');
+  /** @type {VerifyPolicy} */
+  const policy = args.includes('--allow-unverified') ? 'allow-unverified' : 'require';
   const fromDir = fromFolder(args);
 
   const specFile = join(ROOT, 'TETHER_VERSION');
@@ -326,8 +329,8 @@ async function main(args) {
     console.log('updated=');
     return;
   }
-  if (fromDir) await install(fromDir);
-  else await installFromGitHub(release.version, release.tags);
+  if (fromDir) await installRelease(fromDir, release.version, fromDir);
+  else await installFromGitHub(release.version, release.tags, policy);
   if (!spec && !existsSync(specFile)) await writeFile(specFile, `${effective}\n`);
   await stat(join(ROOT, 'src', 'entry.js'));
   console.log(`updated to ${release.version}`);
