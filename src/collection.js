@@ -15,7 +15,7 @@ import {
   scoped,
   emit,
   setText,
-  setTrustedHtml,
+  setStoreHtml,
   setImage,
   repeat,
   notifyLayoutChanged,
@@ -104,7 +104,7 @@ export class ListScope {
         case 'title':
           return setText(el, c?.title || '');
         case 'description':
-          setTrustedHtml(el, c?.descriptionHtml);
+          setStoreHtml(el, c?.descriptionHtml);
           return undefined;
         case 'image':
           return setImage(el, c?.image?.url, c?.image?.altText || c?.title);

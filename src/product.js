@@ -18,7 +18,7 @@ import {
   setImage,
   show,
   setSelected,
-  setTrustedHtml,
+  setStoreHtml,
   repeat,
   productUrl,
   notifyLayoutChanged,
@@ -391,7 +391,7 @@ export class ProductScope {
       if (txt !== undefined) return setText(el, txt);
       switch (key) {
         case 'description':
-          setTrustedHtml(el, p.descriptionHtml);
+          setStoreHtml(el, p.descriptionHtml);
           return undefined;
         case 'published-at':
           return setText(el, formatDate(p.publishedAt));

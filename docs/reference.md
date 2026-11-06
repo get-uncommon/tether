@@ -204,8 +204,8 @@ Markup written for an older `wfs-*` prefix keeps working with `prefix: 'wfs'`.
 | `tether-variant-url` | | On a scope: `?variant=` follows the choice (shareable links). Global: `variantUrl: true` for the page's main product |
 | `tether-show` | condition | Shows/hides, see conditions |
 
-`tether-bind` values: `title`, `description` (HTML as written in Shopify, inserted as is: anyone who can edit
-products in Shopify can put script on your site, as in a Shopify theme), `description-text`, `vendor`, `type`,
+`tether-bind` values: `title`, `description` (the HTML written in Shopify, with
+scripts, event handlers and script links removed), `description-text`, `vendor`, `type`,
 `handle`, `published-at`, `price`, `total-price`, `compare-at-price`, `unit-price`, `min-price`,
 `max-price`, `discount-percentage`, `discount-amount`, `variant-title`, `variant-id`, `sku`,
 `barcode`, `stock`, `quantity`, `featured-image`, `variant-image`, `image:N` (nth image), `images` (repeater), `tags`

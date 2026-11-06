@@ -4,6 +4,7 @@
  * (e.g. prefix: 'wfs' for markup that uses wfs-* attributes).
  */
 import { cfg, warn } from './config.js';
+import { storeHtmlFragment } from './store-html.js';
 import { formatMoney as formatMoneyIn, productUrl as productUrlFor } from './shopify-values.js';
 
 export const attr = (name) => `${cfg.prefix}-${name}`;
@@ -106,13 +107,11 @@ export function setImage(el, url, alt) {
 }
 
 /**
- * Writes HTML that the configured Shopify store authored (product and collection descriptions) into `el`. Store staff
- * who can edit products can therefore run script on this site, as in any Shopify theme. This is the only place
- * Tether writes HTML; everything else from Shopify is text (`setText`).
+ * Writes HTML from the Shopify admin (product and collection descriptions) into `el`, with script removed
+ * (`store-html.js`). Everything else from Shopify is written as text (`setText`).
  */
-export function setTrustedHtml(el, html) {
-  // eslint-disable-next-line no-restricted-syntax -- the one sanctioned HTML sink, documented above
-  el.innerHTML = html ?? '';
+export function setStoreHtml(el, html) {
+  el.replaceChildren(storeHtmlFragment(html, el.ownerDocument));
 }
 
 export function setText(el, v) {

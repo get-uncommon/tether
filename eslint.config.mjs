@@ -98,7 +98,8 @@ export default tseslint.config(
         {
           selector:
             "AssignmentExpression > MemberExpression.left[property.name=/^(innerHTML|outerHTML)$/], CallExpression > MemberExpression.callee[property.name='insertAdjacentHTML']",
-          message: 'HTML from Shopify goes through setTrustedHtml() in src/dom.js; everything else is text.',
+          message:
+            'HTML from Shopify goes through setStoreHtml() in src/dom.js, which removes script; everything else is text.',
         },
       ],
     },
