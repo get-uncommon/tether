@@ -452,7 +452,7 @@
     if (typeof shape === "function") return shape(value);
     if (typeof shape === "string") return shape === "object" ? isRecord(value) : typeof value === shape;
     if (isShapeList(shape)) return Array.isArray(value) && value.every((item) => matches(item, shape[0]));
-    return isRecord(value) && Object.entries(shape).every(([key, inner]) => matches(value[key], inner));
+    return isRecord(value) && Object.entries(shape).every(([key, inner]) => inner === void 0 || matches(value[key], inner));
   }
   var isShapeList = (shape) => Array.isArray(shape);
   var orNull = (shape) => (value) => value === null || matches(value, shape);
@@ -462,6 +462,9 @@
   }
   var STRINGS_AND_COMMENTS = /"(?:\\.|[^"\\\n])*"|#[^\n]*/g;
   var OPERATION_START = /^\s*(?:query|mutation)(?:\s+\w+)?\s*(?:\([^)]*\))?/;
+  function operationOf(document2) {
+    return /\bmutation\b/.test(document2.replace(STRINGS_AND_COMMENTS, "")) ? "mutation" : "query";
+  }
   function inContext(query2, { country, language }) {
     const args = [];
     if (country) args.push(`country: ${country}`);
@@ -489,10 +492,10 @@
   var INVENTORY_FIELD = "quantityAvailable";
   var storesWithoutInventory = /* @__PURE__ */ new Set();
   var storeOf = (conf) => `${conf.domain} ${conf.apiVersion} ${conf.token}`;
-  function queryText(conf, query2, access, context) {
+  function queryText(conf, query2, access, { context, operation }) {
     const written = typeof query2 === "string" ? query2 : query2(access);
     const text2 = context ? inContext(written, conf) : written;
-    if (conf.maxAge <= 0 || /^\s*mutation\b/.test(text2)) return text2;
+    if (conf.maxAge <= 0 || operation === "mutation") return text2;
     return `${text2} #${Math.floor(Date.now() / (conf.maxAge * MS_PER_SECOND))}`;
   }
   var sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -520,8 +523,7 @@
     return { data, errors: errors.map(toGraphQLError) };
   }
   function invalidResponse(res, conf) {
-    const text2 = res.ok ? `Invalid response (${res.status})` : statusText(res.status, conf);
-    return new TetherError(text2, { status: res.status });
+    return res.ok ? new TetherError(`Invalid response (${res.status})`, { code: "INVALID_RESPONSE", status: res.status }) : new TetherError(statusText(res.status, conf), { status: res.status });
   }
   function graphQLFailure(res, errors, conf) {
     const message = errors.map((error) => error.message).filter(Boolean).join(" | ");
@@ -529,7 +531,11 @@
     if (!res.ok) text2 = res.status === 401 || res.status === 403 || !message ? statusText(res.status, conf) : message;
     return new TetherError(text2, { status: res.status, errors });
   }
-  async function attempt(conf, query2, variables, isData, canRetry) {
+  function networkFailure(error, retry) {
+    if (retry === "any") return { kind: "retry", backoffMs: RETRY_BACKOFF_MS };
+    throw new TetherError(`Network error: ${messageOf(error)}`, { code: "NETWORK" });
+  }
+  async function attempt(conf, query2, variables, isData, retry) {
     let res;
     try {
       res = await (conf.fetch ?? fetch)(endpoint(conf), {
@@ -538,22 +544,20 @@
         body: JSON.stringify({ query: query2, variables })
       });
     } catch (error) {
-      if (canRetry) return { kind: "retry", backoffMs: RETRY_BACKOFF_MS };
-      throw new TetherError(`Network error: ${messageOf(error)}`, {
-        code: "NETWORK"
-      });
+      return networkFailure(error, retry);
     }
     if (res.status === SECURITY_REJECTION) {
       throw new TetherError("Shopify security rejection (430)", { status: SECURITY_REJECTION });
     }
-    if (canRetry && (res.status === 429 || res.status >= 500)) {
+    if (retry !== "none" && res.status === 429 || retry === "any" && res.status >= 500) {
       return { kind: "retry", backoffMs: RETRY_BACKOFF_MS };
     }
     let json;
     try {
       json = await res.json();
-    } catch {
-      throw invalidResponse(res, conf);
+    } catch (error) {
+      if (error instanceof SyntaxError) throw invalidResponse(res, conf);
+      return networkFailure(error, retry);
     }
     const body = toGraphQLResponse(json);
     if (!body) throw invalidResponse(res, conf);
@@ -562,7 +566,7 @@
       if (query2.includes(INVENTORY_FIELD) && errors.some((error) => error.message.includes(INVENTORY_FIELD))) {
         return { kind: "inventory-refused", error: graphQLFailure(res, errors, conf) };
       }
-      if (canRetry && errors.some((error) => error.extensions?.code === "THROTTLED")) {
+      if (retry !== "none" && errors.some((error) => error.extensions?.code === "THROTTLED")) {
         return { kind: "retry", backoffMs: THROTTLE_BACKOFF_MS };
       }
       throw graphQLFailure(res, errors, conf);
@@ -571,15 +575,17 @@
     if (!isData(data)) throw invalidResponse(res, conf);
     return { kind: "data", data };
   }
-  async function request(conf, query2, variables, isData, { context = true } = {}) {
+  async function request(conf, query2, variables, isData, { context = true, operation = "query" } = {}) {
     if (!conf.domain || !conf.token) {
       throw new TetherError("Tether is not configured: domain and token are required", { code: "NOT_CONFIGURED" });
     }
     const store = storeOf(conf);
+    const retryWhileLeft = operation === "mutation" ? "not-run" : "any";
     let retries = 0;
     for (; ; ) {
-      const sent = queryText(conf, query2, { inventory: !storesWithoutInventory.has(store) }, context);
-      const outcome = await attempt(conf, sent, variables, isData, retries < conf.retries);
+      const sent = queryText(conf, query2, { inventory: !storesWithoutInventory.has(store) }, { context, operation });
+      const retry = retries < conf.retries ? retryWhileLeft : "none";
+      const outcome = await attempt(conf, sent, variables, isData, retry);
       switch (outcome.kind) {
         case "data":
           return outcome.data;
@@ -601,7 +607,8 @@
   }
   var hasData = (data) => typeof data === "object" && data !== null;
   function query(text2, variables = {}, options) {
-    return gql(text2, variables, hasData, options);
+    const operation = operationOf(typeof text2 === "string" ? text2 : text2({ inventory: true }));
+    return gql(text2, variables, hasData, { ...options, operation });
   }
   function unwrap(payload, name) {
     if (!payload) throw new TetherError(`${name}: empty response`);
@@ -1354,7 +1361,10 @@
     priceRange: { minVariantPrice: MONEY2, maxVariantPrice: MONEY2 },
     variants: { nodes: [{ id: "string", price: MONEY2, selectedOptions: ["object"] }] }
   };
-  var PRODUCT_CONNECTION = { nodes: [PRODUCT], pageInfo: { hasNextPage: "boolean" } };
+  var PRODUCT_CONNECTION = {
+    nodes: [PRODUCT],
+    pageInfo: { hasNextPage: "boolean" }
+  };
   var isProductShape = (value) => field(value, "id") !== "" && field(value, "handle") !== "" && matches(value, PRODUCT);
   var PRODUCT_NODE = (node) => isRecord(node) && (node["id"] === void 0 || matches(node, PRODUCT));
 
@@ -1876,6 +1886,9 @@
     }
   }
 
+  // server/src/shared/cart-id.ts
+  var CART_ID = /^gid:\/\/shopify\/Cart\/[\w-]+(\?key=[\w-]+)?$/;
+
   // src/cart/store.ts
   var status = { kind: "unknown" };
   var warnings = [];
@@ -1894,7 +1907,13 @@
   var currentWarnings = () => warnings;
   var statusOf = (cart) => cart ? { kind: "ready", cart } : { kind: "empty" };
   var seenKey = () => `${cfg.storageKey}:seen`;
-  var savedCartId = () => getStored(cfg.storageKey) || null;
+  function savedCartId() {
+    const stored = getStored(cfg.storageKey);
+    if (!stored) return null;
+    if (CART_ID.test(stored)) return stored;
+    forgetSavedCart();
+    return null;
+  }
   function forgetSavedCart() {
     removeStored(cfg.storageKey);
   }
@@ -1996,6 +2015,9 @@
     if (error.userErrors?.some((userError) => userError.field?.[0] === "cartId")) return true;
     return (error.errors ?? []).some((graphQLError) => UNKNOWN_CART_MESSAGE.test(graphQLError.message));
   }
+  function isUnclearFailure(error) {
+    return error instanceof TetherError && (error.code === "NETWORK" || error.code === "INVALID_RESPONSE" || (error.status ?? 0) >= 500);
+  }
   function toLineInput(input, quantity = 1, options = {}) {
     const spec = typeof input === "object" && input !== null ? input : { ...options, quantity, ...input === null || input === void 0 ? {} : { variantId: input } };
     const merchandiseId = GID.variant(spec.merchandiseId || spec.variantId || spec.id);
@@ -2012,7 +2034,7 @@
     return (access) => `mutation Tether_${name}(${args}){${name}(${inner}){cart{...TetherCart}userErrors{field message}warnings{code message target}}}${cartFragment(access)}`;
   }
   async function send(name, args, inner, variables) {
-    const data = await gql(mutationText(name, args, inner), variables, isPayloadOf(name));
+    const data = await gql(mutationText(name, args, inner), variables, isPayloadOf(name), { operation: "mutation" });
     const payload = unwrap(data[name], name);
     setWarnings(payload.warnings ?? []);
     return payload.cart;
@@ -2139,6 +2161,25 @@
 
   // src/cart.ts
   var currentLines = () => currentCart()?.lines.nodes ?? [];
+  async function reloadAfterUnclearFailure() {
+    const id = savedCartId();
+    if (!id) return;
+    try {
+      const cart = await fetchCart(id);
+      if (!cart) forgetSavedCart();
+      commit(cart, "load");
+    } catch (error) {
+      reportError(error, "cart reload after a failed change");
+    }
+  }
+  function runChange(task) {
+    return enqueue(
+      () => task().catch(async (error) => {
+        if (isUnclearFailure(error)) await reloadAfterUnclearFailure();
+        throw error;
+      })
+    );
+  }
   function changeQuantity(lineId, delta) {
     const line = currentLines().find((candidate) => candidate.id === lineId);
     if (!line) return Promise.resolve(currentCart());
@@ -2147,7 +2188,7 @@
     pendingQuantities.set(lineId, job);
     announce("pending");
     const isLatest = () => pendingQuantities.get(lineId) === job;
-    const sent = enqueue(async () => {
+    const sent = runChange(async () => {
       if (!isLatest()) return currentCart();
       const now = currentLines().find((candidate) => candidate.id === lineId);
       if (now?.quantity === target) return currentCart();
@@ -2255,7 +2296,7 @@
       const lines = (Array.isArray(input) ? input : [input]).map(
         (line) => toLineInput(line, quantity, options)
       );
-      return enqueue(async () => {
+      return runChange(async () => {
         const cart = await mutateCart({
           name: "cartLinesAdd",
           args: "$lines: [CartLineInput!]!",
@@ -2279,14 +2320,14 @@
       const quantity = typeof patch === "number" ? patch : patch.quantity;
       if (quantity !== void 0 && quantity <= 0) return Cart.removeLine(lineId);
       const line = toLineUpdate(lineId, patch);
-      return enqueue(async () => commit(await updateLines([line]), "update"));
+      return runChange(async () => commit(await updateLines([line]), "update"));
     },
     changeQuantity,
     /** The quantity to show: the one asked for while an update is on its way. */
     quantityOf: pendingQuantityOf,
     removeLine(lineIds) {
       const ids = Array.isArray(lineIds) ? lineIds : [lineIds];
-      return enqueue(async () => commit(await removeLines(ids), "remove"));
+      return runChange(async () => commit(await removeLines(ids), "remove"));
     },
     clear() {
       const ids = currentLines().map((line) => line.id);
@@ -2295,7 +2336,7 @@
     },
     setNote(note) {
       const variables = { note: note ?? "" };
-      return enqueue(
+      return runChange(
         async () => commit(
           await mutateCart({
             name: "cartNoteUpdate",
@@ -2314,7 +2355,7 @@
      * @param attributes The value `''` removes a key.
      */
     setAttributes(attributes) {
-      return enqueue(async () => {
+      return runChange(async () => {
         const variables = { attributes: mergedAttributes(attributes) };
         const cart = await mutateCart({
           name: "cartAttributesUpdate",
@@ -2328,7 +2369,7 @@
     },
     /** Replaces the discount codes; `[]` removes them all. */
     setDiscountCodes(codes) {
-      return enqueue(async () => {
+      return runChange(async () => {
         const variables = { discountCodes: discountCodesFrom(codes) };
         const cart = await mutateCart({
           name: "cartDiscountCodesUpdate",
@@ -2367,7 +2408,7 @@
      * @param options `create: false` forgets an expired cart instead of creating an empty one.
      */
     setBuyerIdentity(buyerIdentity, { create = true } = {}) {
-      return enqueue(async () => {
+      return runChange(async () => {
         const cart = await mutateCart({
           name: "cartBuyerIdentityUpdate",
           args: "$buyerIdentity: CartBuyerIdentityInput!",
@@ -3447,133 +3488,6 @@
     });
   }
 
-  // src/part-integrity.ts
-  var PART_INTEGRITY = { "tether.diagnose.js": "sha384-OKLlZJrSZ5IF9SOjKnEe485fi5xZlb4oLLvSfGjAssABzqd3h9JH1yA/hDczhkjJ", "tether.markets.js": "sha384-QVvTGiZJKx2hOPIpQPrGycWnKVTfDMEJ8z9heHIYSqib+6WyUoTmzKf2oBiFE3le", "tether.search.js": "sha384-P63pnKFjWTIVS8kEbBr4sfZZI91u1tImDTe+y50l2pdOM+W/KQsMymB6YRH801Dc", "tether.extras.js": "sha384-DJwYPZWf7o63ooQuDRvvhLrl5quZwhWO1YQ9RpySNQKjlDIS3uCwxDpDfZYiEjla", "tether.account.js": "sha384-q3UfPH5vDMbKm05wkvEPTDoA/aaIPmRQBDrqmXA4cNF4VFZAo4dgt61TmrNM69mi", "tether.account-pages.js": "sha384-YiSgDwM6qeHXJBcbWLRuk50h2ntAamNadS0MrZByc3cl5PKXZO297l38zYWm0lLe", "tether.analytics.js": "sha384-I93erLFdRG9uy3t+mnaDk/MgECoYOSG3q+9TfIQ39NROWZLvFjYrpHOAnBfsXaJc" };
-
-  // src/lazy-iife.ts
-  var coreModules = {
-    get "config.ts"() {
-      return [cfg, isConfigured, log, MARKET_SOURCES, parseMarkets, reportError, warn];
-    },
-    get "client.ts"() {
-      return [endpoint, gql, orNull, shaped, TetherError];
-    },
-    get "dom.ts"() {
-      return [
-        ANALYTICS_EVENTS,
-        attr,
-        attributesFromJson,
-        emit,
-        formatDate,
-        formatMoney2,
-        get,
-        has,
-        hasTemplate,
-        isOwnEvent,
-        parseJSONAttr,
-        productUrl2,
-        qsa,
-        repeat,
-        sel,
-        setImage,
-        setText,
-        show
-      ];
-    },
-    get "loader.ts"() {
-      return [clearProductCache, getProduct];
-    },
-    get "selling-plans.ts"() {
-      return [allPlans];
-    },
-    get "status.ts"() {
-      return [boundary, resolveProductKey];
-    },
-    get "cart.ts"() {
-      return [Cart];
-    },
-    get "product.ts"() {
-      return [scopes];
-    },
-    get "collection.ts"() {
-      return [listSelector];
-    },
-    get "mounting.ts"() {
-      return [liveLists, liveProducts, mountedProducts, mountProduct, pruneLive, within];
-    },
-    get "market-codes.ts"() {
-      return [toCountry, toLanguage];
-    },
-    get "shopify-values.ts"() {
-      return [isHttpsUrl];
-    },
-    // Parts that load other parts (account → account-pages) use this same loader.
-    get "lazy.ts"() {
-      return [loadPart];
-    }
-  };
-  var MINIFIED_SCRIPT = /\.min\.js(\?|$)/;
-  var coreScript = typeof document === "undefined" ? "" : document.currentScript?.getAttribute("src") ?? "";
-  var coreScriptUrl = coreScript ? new URL(coreScript, document.baseURI).href : "";
-  var parts = /* @__PURE__ */ new Map();
-  function partsFolder() {
-    if (cfg.partsUrl) return new URL(cfg.partsUrl, document.baseURI).href;
-    if (!coreScriptUrl) return null;
-    return coreScriptUrl.replace(/[^/]*$/, "");
-  }
-  function applyIntegrity(script, integrity) {
-    script.integrity = integrity;
-    if (new URL(script.src).origin !== window.location.origin) script.crossOrigin = "anonymous";
-  }
-  function loadScript(name, folder, file, integrity) {
-    return new Promise((resolve, reject) => {
-      const url2 = `${folder.replace(/\/?$/, "/")}${file}`;
-      const script = document.createElement("script");
-      script.src = url2;
-      script.async = true;
-      applyIntegrity(script, integrity);
-      script.onload = () => {
-        const { Tether } = window;
-        const part = Tether?.__parts[name];
-        if (part) {
-          resolve(part);
-          return;
-        }
-        parts.delete(name);
-        reject(new Error(`${url2} did not register`));
-      };
-      script.onerror = () => {
-        parts.delete(name);
-        reject(
-          new Error(
-            `Could not load ${url2}, or it is not the file built with this Tether script. Host the same release's files next to the Tether script or at partsUrl.`
-          )
-        );
-      };
-      document.head.appendChild(script);
-    });
-  }
-  function loadPart(name) {
-    let loading = parts.get(name);
-    if (!loading) {
-      const folder = partsFolder();
-      if (folder === null) {
-        return Promise.reject(
-          new Error(`The Tether script's own location is unknown, so its ${name} part can't be found: set partsUrl.`)
-        );
-      }
-      const suffix = MINIFIED_SCRIPT.test(coreScriptUrl) || !coreScriptUrl ? ".min" : "";
-      const file = `tether.${name}${suffix}.js`;
-      const integrity = PART_INTEGRITY[file];
-      if (integrity === void 0) {
-        return Promise.reject(new Error(`This Tether script was built without ${file}, so it can't load that part.`));
-      }
-      loading = loadScript(name, folder, file, integrity);
-      parts.set(name, loading);
-    }
-    return loading;
-  }
-
   // src/markets.ts
   var storageKey = () => `${cfg.prefix}:market:${cfg.domain}`;
   var pageStorage = { getItem: (key) => getStored(key) };
@@ -3650,6 +3564,142 @@
   }
   function setCountry(code, options) {
     return loadPart("markets").then((part) => part.setCountry(code, options));
+  }
+
+  // src/part-integrity.ts
+  var PART_INTEGRITY = { "tether.diagnose.js": "sha384-My35ltXsPvspuBHm0xCTu7wl6C4ORwigmKQMCaTKI6VP9ELMCCLYCETpAYW3Fus+", "tether.markets.js": "sha384-m9u+yVeYzqljJYufGt6C6E2xCgqgBSJstvmjU5a2lXZLK3q2saH19EYgP/EC5ox3", "tether.search.js": "sha384-ZrByfRsWNOHbbWOocY4WOD2RWe4QI2qQRZ4Eb+fM5v/UHIQ8mlWxbSwrxJt8yLbc", "tether.extras.js": "sha384-sE3c2fclN/3LKtuYUtC4CjVk76Zu0Mv/jR3p8YYLisAvyDvqJxpx4nj8PbJ3KzXH", "tether.account.js": "sha384-UF36poTg1vnXE7Pg+FYFGMJ4qjKhx9mbOug9bqTYhzgqRppOKS9M/1uY5D/cz9KF", "tether.account-pages.js": "sha384-jJYvZswrRw+pGDYrk0FswWcYqGpZkbR6ooxJGFu0lTYkUlVOcsCXuLLLU6M5kO54", "tether.analytics.js": "sha384-10v5pBMzgfF7BuLGQBg3cdbgMk701Uto5rGjhByiRD2jI9+/WF8DFcSWplIcdRNg" };
+
+  // src/part-registry.ts
+  function isTetherInternals(value) {
+    return isRecord(value) && isRecord(value["__core"]) && isRecord(value["__parts"]);
+  }
+
+  // src/lazy-iife.ts
+  var coreModules = {
+    get "config.ts"() {
+      return [cfg, isConfigured, log, MARKET_SOURCES, parseMarkets, reportError, warn];
+    },
+    get "client.ts"() {
+      return [endpoint, gql, orNull, shaped, TetherError];
+    },
+    get "dom.ts"() {
+      return [
+        ANALYTICS_EVENTS,
+        attr,
+        attributesFromJson,
+        emit,
+        formatDate,
+        formatMoney2,
+        get,
+        has,
+        hasTemplate,
+        isOwnEvent,
+        parseJSONAttr,
+        productUrl2,
+        qsa,
+        repeat,
+        sel,
+        setImage,
+        setText,
+        show
+      ];
+    },
+    get "loader.ts"() {
+      return [clearProductCache, getProduct];
+    },
+    get "selling-plans.ts"() {
+      return [allPlans];
+    },
+    get "status.ts"() {
+      return [boundary, resolveProductKey];
+    },
+    get "cart.ts"() {
+      return [Cart];
+    },
+    get "product.ts"() {
+      return [scopes];
+    },
+    get "collection.ts"() {
+      return [listSelector];
+    },
+    get "mounting.ts"() {
+      return [liveLists, liveProducts, mountedProducts, mountProduct, pruneLive, within];
+    },
+    get "market-codes.ts"() {
+      return [toCountry, toLanguage];
+    },
+    get "page-market.ts"() {
+      return [setCountry];
+    },
+    get "shopify-values.ts"() {
+      return [isHttpsUrl];
+    },
+    // Parts that load other parts (account → account-pages) use this same loader.
+    get "lazy.ts"() {
+      return [loadPart];
+    }
+  };
+  var MINIFIED_SCRIPT = /\.min\.js(\?|$)/;
+  var coreScript = typeof document === "undefined" ? "" : document.currentScript?.getAttribute("src") ?? "";
+  var coreScriptUrl = coreScript ? new URL(coreScript, document.baseURI).href : "";
+  var parts = /* @__PURE__ */ new Map();
+  function partsFolder() {
+    if (cfg.partsUrl) return new URL(cfg.partsUrl, document.baseURI).href;
+    if (!coreScriptUrl) return null;
+    return coreScriptUrl.replace(/[^/]*$/, "");
+  }
+  function applyIntegrity(script, integrity) {
+    script.integrity = integrity;
+    if (new URL(script.src).origin !== window.location.origin) script.crossOrigin = "anonymous";
+  }
+  function loadScript(name, folder, file, integrity) {
+    return new Promise((resolve, reject) => {
+      const url2 = `${folder.replace(/\/?$/, "/")}${file}`;
+      const script = document.createElement("script");
+      script.src = url2;
+      script.async = true;
+      applyIntegrity(script, integrity);
+      script.onload = () => {
+        const tether = Reflect.get(window, "Tether");
+        const part = isTetherInternals(tether) ? tether.__parts[name] : void 0;
+        if (part) {
+          resolve(part);
+          return;
+        }
+        parts.delete(name);
+        const problem = isTetherInternals(tether) ? "did not register" : "can't register: window.Tether is no longer this Tether script's, another script replaced it";
+        reject(new Error(`${url2} ${problem}`));
+      };
+      script.onerror = () => {
+        parts.delete(name);
+        reject(
+          new Error(
+            `Could not load ${url2}, or it is not the file built with this Tether script. Host the same release's files next to the Tether script or at partsUrl.`
+          )
+        );
+      };
+      document.head.appendChild(script);
+    });
+  }
+  function loadPart(name) {
+    let loading = parts.get(name);
+    if (!loading) {
+      const folder = partsFolder();
+      if (folder === null) {
+        return Promise.reject(
+          new Error(`The Tether script's own location is unknown, so its ${name} part can't be found: set partsUrl.`)
+        );
+      }
+      const suffix = MINIFIED_SCRIPT.test(coreScriptUrl) || !coreScriptUrl ? ".min" : "";
+      const file = `tether.${name}${suffix}.js`;
+      const integrity = PART_INTEGRITY[file];
+      if (integrity === void 0) {
+        return Promise.reject(new Error(`This Tether script was built without ${file}, so it can't load that part.`));
+      }
+      loading = loadScript(name, folder, file, integrity);
+      parts.set(name, loading);
+    }
+    return loading;
   }
 
   // src/account-marks.ts
@@ -3951,7 +4001,7 @@
   }
 
   // src/index.ts
-  var VERSION = "0.7.0";
+  var VERSION = "0.7.1";
   var OBSERVE_DEBOUNCE_MS = 50;
   function pageConfig() {
     const config = pageGlobal("TETHER_CONFIG");

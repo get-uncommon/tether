@@ -85,4 +85,6 @@ export declare const isProductShape: (value: unknown) => value is Product;
  * A node a lookup by gid answers: a product, or a node of another type, for which `... on Product` selects no field
  * (no `id`).
  */
-export declare const PRODUCT_NODE: (node: unknown) => boolean;
+export declare const PRODUCT_NODE: (node: unknown) => node is Product | {
+    id?: undefined;
+};

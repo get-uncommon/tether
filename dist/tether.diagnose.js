@@ -522,8 +522,23 @@
     console.groupEnd();
   }
 
+  // server/src/shared/json.ts
+  function isRecord(value) {
+    return value !== null && typeof value === "object" && !Array.isArray(value);
+  }
+
+  // src/part-registry.ts
+  function isTetherInternals(value) {
+    return isRecord(value) && isRecord(value["__core"]) && isRecord(value["__parts"]);
+  }
+  function registerPart(name, part) {
+    const tether = Reflect.get(window, "Tether");
+    if (!isTetherInternals(tether)) {
+      throw new Error(`tether.${name}.js runs after the Tether script, which loads it, and needs its window.Tether`);
+    }
+    tether.__parts[name] = part;
+  }
+
   // src/parts/diagnose.ts
-  var { Tether } = window;
-  if (!Tether) throw new Error("tether.diagnose.js runs after the Tether script, which loads it");
-  Tether.__parts.diagnose = diagnose_exports;
+  registerPart("diagnose", diagnose_exports);
 })();

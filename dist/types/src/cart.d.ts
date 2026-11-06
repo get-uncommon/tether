@@ -1,6 +1,6 @@
 import { checkout, setCheckoutResolver } from './cart/checkout.js';
 import { isOpen, openCart, closeCart, toggleCart, trapFocus } from './cart/drawer.js';
-import { render, subscribe } from './cart/store.js';
+import { render, savedCartId, subscribe } from './cart/store.js';
 import type { CartWarning } from './config.js';
 import type { Attributes, LineSpec, LinePatch } from './cart/mutations.js';
 import type { ShopifyCart, ShopifyCartLine, CartStatus } from './cart/store.js';
@@ -20,7 +20,7 @@ declare function init(): Promise<ShopifyCart | null>;
 export declare const Cart: {
     init: typeof init;
     /** The saved cart's id. */
-    id: () => string | null;
+    id: typeof savedCartId;
     readonly status: CartStatus;
     readonly state: ShopifyCart | null;
     /** The cart's lines, a copy: changing it changes nothing in the cart. */

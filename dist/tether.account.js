@@ -533,8 +533,18 @@
     log("account", isLoggedIn() ? "logged in" : "logged out");
   }
 
+  // src/part-registry.ts
+  function isTetherInternals(value) {
+    return isRecord(value) && isRecord(value["__core"]) && isRecord(value["__parts"]);
+  }
+  function registerPart(name, part) {
+    const tether = Reflect.get(window, "Tether");
+    if (!isTetherInternals(tether)) {
+      throw new Error(`tether.${name}.js runs after the Tether script, which loads it, and needs its window.Tether`);
+    }
+    tether.__parts[name] = part;
+  }
+
   // src/parts/account.ts
-  var { Tether } = window;
-  if (!Tether) throw new Error("tether.account.js runs after the Tether script, which loads it");
-  Tether.__parts.account = account_exports;
+  registerPart("account", account_exports);
 })();

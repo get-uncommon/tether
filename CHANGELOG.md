@@ -19,7 +19,7 @@
 - Astro starter: new projects depend on `^0.7.0`, not `^0.6.0`, so they get the 0.7 line, and the
   starter comes with a `package-lock.json`. Each release keeps the range at its minor version.
 
-## 0.7.1 (unreleased)
+## 0.7.1 (2026-11-06)
 
 - Fix: when a cart change fails without a clear answer (a network error, a connection that drops
   while Shopify's answer arrives, a 2xx answer that isn't valid, or a 5xx, when Shopify may or may
