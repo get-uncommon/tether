@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.7.1 (unreleased)
+## 0.7.1 (2026-11-06)
 
 - Fix: when a cart change fails without a clear answer (a network error, a connection that drops
   while Shopify's answer arrives, a 2xx answer that isn't valid, or a 5xx, when Shopify may or may

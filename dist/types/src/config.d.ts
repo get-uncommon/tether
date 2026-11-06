@@ -91,7 +91,12 @@ export interface TetherConfig {
     sellingPlanGroupsFirst: number;
     sellingPlansFirst: number;
     collectionFirst: number;
-    /** Retries of a request that failed on the network, a 429/5xx or Shopify's throttling. */
+    /**
+     * How many times a failed request is sent again. A query is retried after a network error (no answer, or a body that
+     * stopped arriving), a 429, a 5xx or Shopify's `THROTTLED`. A mutation, a cart change included, is retried only
+     * after a 429 or `THROTTLED`, which Shopify sends without running it: after a network error or a 5xx it may
+     * already have applied the change.
+     */
     retries: number;
     /** Refresh server-rendered products once in the background. */
     revalidate: boolean;

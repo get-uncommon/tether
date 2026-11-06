@@ -33,7 +33,7 @@ export type { AddressFields as CustomerAddressInput } from './account/operations
 export type { CustomerAddress, Fulfillment, MailingAddress, OrderDetail, OrderDetailLine, SubscriptionContract, SubscriptionLine, } from './account/page-answers.js';
 /** The helpers for selling plans, `Tether.plans`. */
 export type SellingPlanHelpers = typeof plans;
-export declare const VERSION = "0.7.0";
+export declare const VERSION = "0.7.1";
 /**
  * Mounts every product scope and product list inside `root`. Safe to call repeatedly.
  *
@@ -70,7 +70,7 @@ declare const publicApi: {
     withContext: typeof withContext;
     cart: {
         init: () => Promise<ShopifyCart | null>;
-        id: () => string | null;
+        id: typeof import("./cart/store.js").savedCartId;
         readonly status: import("./cart/store.js").CartStatus;
         readonly state: ShopifyCart | null;
         readonly lines: import("./cart/store.js").ShopifyCartLine[];

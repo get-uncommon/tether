@@ -136,8 +136,11 @@ export declare const cartStatus: () => CartStatus;
 /** The cart as Shopify last sent it. */
 export declare function currentCart(): ShopifyCart | null;
 export declare const currentWarnings: () => readonly CartWarning[];
-/** The id of the visitor's cart, kept across pages. */
-export declare const savedCartId: () => string | null;
+/**
+ * The id of the visitor's cart, kept across pages. A stored value that isn't a cart id (written by another script,
+ * or edited by hand) is forgotten, so it is never sent to Shopify or the Worker and the next change starts a new cart.
+ */
+export declare function savedCartId(): string | null;
 /** Forgets the saved cart, which Shopify no longer has. */
 export declare function forgetSavedCart(): void;
 /** Keeps a cart Shopify sent without showing it, for an answer a newer change will replace. */

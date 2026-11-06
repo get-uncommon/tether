@@ -29,6 +29,10 @@
   var m4 = window.Tether.__core["cart.ts"];
   var [Cart] = m4;
 
+  // tether-core:page-market.ts
+  var m5 = window.Tether.__core["page-market.ts"];
+  var [setCountry] = m5;
+
   // server/src/shared/json.ts
   function isRecord(value) {
     return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -88,10 +92,9 @@
     }
     if (event.key !== `${cfg.prefix}:market:${cfg.domain}` || !event.newValue) return;
     const market = parseStoredMarket(event.newValue);
-    const tether = Reflect.get(window, "Tether");
-    if (!market || !tether) return;
+    if (!market) return;
     const options = { language: market.language, locale: market.locale, remember: false };
-    tether.setCountry(market.country, options).catch((error) => {
+    setCountry(market.country, options).catch((error) => {
       reportError(error, "market from another tab");
     });
   }
@@ -117,8 +120,18 @@
     replaceUrlIfAllowed(url);
   }
 
+  // src/part-registry.ts
+  function isTetherInternals(value) {
+    return isRecord(value) && isRecord(value["__core"]) && isRecord(value["__parts"]);
+  }
+  function registerPart(name, part) {
+    const tether = Reflect.get(window, "Tether");
+    if (!isTetherInternals(tether)) {
+      throw new Error(`tether.${name}.js runs after the Tether script, which loads it, and needs its window.Tether`);
+    }
+    tether.__parts[name] = part;
+  }
+
   // src/parts/extras.ts
-  var { Tether } = window;
-  if (!Tether) throw new Error("tether.extras.js runs after the Tether script, which loads it");
-  Tether.__parts.extras = extras_exports;
+  registerPart("extras", extras_exports);
 })();
