@@ -85,7 +85,8 @@ function cartToCheckOut(): string | null {
  * the click (Safari blocks `window.open` after an await) and gets its URL once there is one, so a queued change that
  * empties the cart closes the tab again.
  *
- * @returns The checkout URL, `null` with nothing to check out or after a reported failure.
+ * @returns The checkout URL; `null` with nothing to check out, when the visitor closed the checkout tab first, or after
+ *   a reported failure.
  */
 export async function checkout(target: CheckoutTarget = cfg.checkoutTarget): Promise<string | null> {
   if (!cartToCheckOut() && !mayFill()) return null;
@@ -102,9 +103,10 @@ export async function checkout(target: CheckoutTarget = cfg.checkoutTarget): Pro
       return null;
     }
     if (!isHttpsUrl(url)) throw new TetherError('The checkout URL is not https: not opened');
+    // The visitor closed the checkout tab before its URL came, so this page stays.
+    if (tab?.closed) return null;
     emit('checkout', { url, cart: currentCart() });
-    if (tab && !tab.closed) tab.location.href = url;
-    else window.location.href = url;
+    (tab ?? window).location.href = url;
     return url;
   } catch (error) {
     tab?.close();

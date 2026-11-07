@@ -233,6 +233,20 @@ test('an open drawer taken off the page is announced closed; a manual drawer the
   assert.deepEqual(toggles, [true, false, true]);
 });
 
+test('an open drawer taken off the page with focus inside gives focus back to the button that opened it', async () => {
+  document.body.innerHTML = `<button id="opener" tether-cart-open>Cart</button>
+    <div id="drawer" tether-cart-drawer><button id="inside">x</button></div>`;
+  Cart.render();
+  find('#opener').focus();
+  find('#opener').click();
+  await waitFor(() => document.activeElement?.id === 'inside', 'focus to move into the drawer');
+  find('#drawer').remove();
+  assert.equal(document.activeElement, document.body, 'the browser moved focus to the body');
+  await classChangeSeen();
+  assert.equal(Cart.isOpen(), false);
+  assert.equal(document.activeElement.id, 'opener');
+});
+
 test('a manual drawer the site takes off the page and puts back later is followed each time', async () => {
   document.body.innerHTML = '<main id="page"><div id="m" tether-cart-drawer="manual"><button>y</button></div></main>';
   Cart.render();

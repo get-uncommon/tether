@@ -150,9 +150,15 @@ test('a note file with CRLF line ends, as core.autocrlf checks it out, is writte
   assert.match(await text(folder, 'CHANGELOG.md'), /^- Fix: the cart,\n {2}on two lines\.\n- New\.$/m);
 });
 
-test('the rewrite refuses a CHANGELOG that already has the version', async (t) => {
+test('the rewrite refuses a CHANGELOG that already has the version, before it changes anything', async (t) => {
   const folder = await scratchTree(t);
-  await assert.rejects(applyReleaseVersion(folder, '41.8.0', '2026-12-01'), /CHANGELOG\.md: nothing to change/);
+  const before = await text(folder, 'package.json');
+  await assert.rejects(
+    applyReleaseVersion(folder, '41.8.0', '2026-12-01'),
+    /CHANGELOG\.md already has a "## 41\.8\.0" section/,
+  );
+  assert.equal(await text(folder, 'package.json'), before);
+  assert.deepEqual((await readdir(join(folder, NOTES_FOLDER))).sort(), Object.keys(NOTES).sort());
 });
 
 test('a release commit may delete note files, and change only the release files besides', () => {

@@ -17,6 +17,8 @@ import {
   watchImages,
   parseJSONAttr,
   attributesFromJson,
+  isField,
+  isInput,
 } from './dom.ts';
 import { Cart } from './cart.ts';
 import { allPlans, allocationFor, findPlan, GID } from './selling-plans.ts';
@@ -64,11 +66,6 @@ export function rememberOptionNames(products: readonly Pick<Product, 'handle' | 
     }
   });
 }
-
-const isInput = (el: Element): el is HTMLInputElement => el.tagName === 'INPUT';
-
-const isField = (el: Element): el is HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement =>
-  el.tagName === 'INPUT' || el.tagName === 'SELECT' || el.tagName === 'TEXTAREA';
 
 /**
  * @param el A `tether-line-attribute` field.

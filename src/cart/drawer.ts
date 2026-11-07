@@ -60,7 +60,8 @@ function announceChange(): void {
   if (open === announcedOpen) return;
   const all = drawers();
   if (open) announceOpen(all.filter(isOpenDrawer));
-  else announceClosed(all, hasFocusInside(all));
+  // When the site takes the drawer holding focus off the page, the browser has already moved focus to the body.
+  else announceClosed(all, document.activeElement === document.body || hasFocusInside(all));
 }
 
 /**
@@ -113,7 +114,10 @@ function announceOpen(opened: HTMLElement[]): void {
   emit('cart-toggled', { open: true });
 }
 
-/** @param hadFocus Whether focus was inside a drawer as it closed, so it goes back to where it was before. */
+/**
+ * @param hadFocus Whether focus was inside a drawer as it closed, or fell to the body with it, so it goes back to where
+ *   it was before.
+ */
 function announceClosed(all: HTMLElement[], hadFocus: boolean): void {
   announcedOpen = false;
   openWithoutDrawer = false;

@@ -7,7 +7,7 @@ import { existsSync } from 'node:fs';
 import { readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { parseVersion } from '../server/src/release-range.ts';
-import { NOTES_FOLDER, noteProblems, releaseSection, withSection } from './changelog.ts';
+import { NOTES_FOLDER, noteProblems, releaseSection, sectionOf, withSection } from './changelog.ts';
 import type { Note } from './changelog.ts';
 import { VERSION_COPIES, syncVersions } from './versions.ts';
 
@@ -103,13 +103,16 @@ export function localDate(now = new Date()): string {
  *
  * @param version `X.Y.Z`.
  * @param date The release's day, `YYYY-MM-DD`.
- * @throws When `version` is not X.Y.Z, a note file isn't one (`noteProblems`), package.json or a copy has nothing to
- *   replace, or CHANGELOG.md already has the version's section.
+ * @throws When `version` is not X.Y.Z, CHANGELOG.md already has the version's section or a note file isn't one
+ *   (`noteProblems`), before any file changes, or when package.json or a copy has nothing to replace.
  */
 export async function applyReleaseVersion(root: string, version: string, date = localDate()): Promise<void> {
   const parsed = parseVersion(version);
   if (parsed?.join('.') !== version) throw new Error(`"${version}" is not X.Y.Z`);
   const [major, minor] = parsed;
+  if (sectionOf(await readFile(join(root, 'CHANGELOG.md'), 'utf8'), version) !== null) {
+    throw new Error(`CHANGELOG.md already has a "## ${version}" section: ${version} was released`);
+  }
   const notes = await readNotes(root);
   const problems = notes.flatMap(noteProblems);
   if (problems.length) throw new Error(`${NOTES_FOLDER}/: ${problems.join('; ')}`);

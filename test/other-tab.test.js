@@ -166,3 +166,78 @@ test('init() after a reload for another tab and another add were queued answers 
     localStorage.clear();
   }
 });
+
+test('a reload for another tab that fails keeps the cart, so the next change builds on its attributes', async () => {
+  const { fetch } = globalThis;
+  const variant = product.variants.nodes[0]?.id ?? '';
+  const cart = {
+    ...cartFrom([{ merchandiseId: variant, quantity: 2 }]),
+    attributes: [{ key: 'gift', value: 'yes' }],
+  };
+  let loadFails = false;
+  /** @type {unknown[]} */
+  const sentAttributes = [];
+  /** @type {typeof fetch} */
+  globalThis.fetch = async (_url, init) => {
+    const { query, variables } = graphqlRequest(init);
+    if (operationName(query) === 'TetherCart') {
+      return loadFails ? jsonResponse({ errors: [{ message: 'Bad request' }] }, 400) : jsonResponse({ data: { cart } });
+    }
+    sentAttributes.push(variables['attributes']);
+    return jsonResponse({ data: { cartAttributesUpdate: { cart, userErrors: [], warnings: [] } } });
+  };
+  document.body.innerHTML = '<span id="count" tether-cart-count></span>';
+  localStorage.setItem('tether:cart:shop.test', cart.id);
+  try {
+    await Tether.cart.init();
+    loadFails = true;
+    window.dispatchEvent(new window.StorageEvent('storage', { key: 'tether:cart:shop.test:seen' }));
+    await waitFor(() => reported.includes('cart load failed'), 'the failed reload');
+    assert.equal(Tether.cart.count, 2);
+    assert.equal(Tether.cart.state?.id, cart.id);
+    assert.equal(document.getElementById('count')?.textContent, '2');
+    await Tether.cart.setAttributes({ note: 'ring the bell' });
+    assert.deepEqual(sentAttributes, [
+      [
+        { key: 'gift', value: 'yes' },
+        { key: 'note', value: 'ring the bell' },
+      ],
+    ]);
+  } finally {
+    globalThis.fetch = fetch;
+    localStorage.clear();
+    document.body.innerHTML = '';
+    reported.length = 0;
+  }
+});
+
+test('checkout without a saved cart while a reload for another tab is queued opens no tab', async () => {
+  const { fetch } = globalThis;
+  const open = window.open.bind(window);
+  const empty = cartFrom([]);
+  /** @type {typeof fetch} */
+  globalThis.fetch = async () => {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    return jsonResponse({ data: { cartCreate: { cart: empty, userErrors: [], warnings: [] } } });
+  };
+  let opened = 0;
+  window.open = () => {
+    opened++;
+    return null;
+  };
+  try {
+    Tether.cart.forgetSaved();
+    // The note keeps the queue busy, so the reload another tab's write asks for is still queued at the click.
+    const note = Tether.cart.setNote('');
+    window.dispatchEvent(new window.StorageEvent('storage', { key: 'tether:cart:shop.test' }));
+    // The extras part, loaded by now, queues the reload once its import settles.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(await Tether.cart.checkout('_blank'), null);
+    assert.equal(opened, 0, 'no blank tab');
+    await note;
+  } finally {
+    globalThis.fetch = fetch;
+    window.open = open;
+    localStorage.clear();
+  }
+});

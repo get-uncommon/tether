@@ -195,11 +195,15 @@ export function commit(cart: ShopifyCart | null, reason: CartUpdateReason): Shop
   return cart;
 }
 
-/** The outcome of loading the saved cart: the cart, `null` when there is none, or the failure. */
+/**
+ * The outcome of loading the saved cart: the cart, `null` when there is none, or the failure. A failed load keeps the
+ * cart as Shopify last sent it, so the next change builds on its attributes and discount codes.
+ */
 export function settleLoad(
   outcome: { kind: 'loaded'; cart: ShopifyCart | null } | { kind: 'failed'; error: unknown },
 ): void {
-  status = outcome.kind === 'loaded' ? statusOf(outcome.cart) : { kind: 'error', error: outcome.error, cart: null };
+  status =
+    outcome.kind === 'loaded' ? statusOf(outcome.cart) : { kind: 'error', error: outcome.error, cart: currentCart() };
   announce('load');
 }
 
@@ -240,18 +244,22 @@ export function setWarnings(notes: readonly CartWarning[]): void {
 /** The one queue every cart change runs through; checkout waits for the changes in it. */
 export const runInOrder = createSerialQueue();
 
-/** The queued tasks that can leave the cart with lines when it has none: adds and loads. */
+/** The queued tasks that can leave the cart with lines when it has none: adds, and loads of a saved cart. */
 let fillingTasks = 0;
 
-/** Queues a task that can leave the cart with lines when it has none (`mayFill`). */
-export function queueFilling<T>(queue: () => Promise<T>): Promise<T> {
+/**
+ * Counts a task that can leave the cart with lines when it has none (`mayFill`) while it is queued.
+ *
+ * @param enqueueTask Queues the task and returns its promise.
+ */
+export function queueFilling<T>(enqueueTask: () => Promise<T>): Promise<T> {
   fillingTasks++;
-  return queue().finally(() => {
+  return enqueueTask().finally(() => {
     fillingTasks--;
   });
 }
 
-/** @returns True while a queued add or load can still give an empty cart, or none, lines. */
+/** @returns True while a queued add, or load of a saved cart, can still give an empty cart, or none, lines. */
 export const mayFill = (): boolean => fillingTasks > 0;
 
 /**

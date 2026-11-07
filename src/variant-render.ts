@@ -14,6 +14,7 @@ import {
   setSelected,
   setUnavailable,
   show,
+  isInput,
 } from './dom.ts';
 import { STATUS_KEYS, ownedBy } from './status.ts';
 import { allocationFor } from './selling-plans.ts';
@@ -23,8 +24,6 @@ import type { Formatters, ProductView } from './product-state.ts';
 import type { RenderScope } from './product-render.ts';
 
 const FORMAT: Formatters = { money: formatMoney, percent: formatPercent };
-
-const isInput = (el: Element): el is HTMLInputElement => el.tagName === 'INPUT';
 
 /**
  * The element of an add-to-cart button that holds its label, with the label as written kept in

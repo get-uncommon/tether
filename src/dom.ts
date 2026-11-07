@@ -78,10 +78,14 @@ export function setStoreHtml(el: Element, html: string | null | undefined): void
   el.replaceChildren(storeHtmlFragment(html, el.ownerDocument, cfg.embedOrigins));
 }
 
-const isTextField = (el: Element): el is HTMLInputElement | HTMLTextAreaElement =>
-  el.tagName === 'INPUT' || el.tagName === 'TEXTAREA';
+export const isInput = (el: Element): el is HTMLInputElement => el.tagName === 'INPUT';
 
-const isInput = (el: Element): el is HTMLInputElement => el.tagName === 'INPUT';
+const isTextField = (el: Element): el is HTMLInputElement | HTMLTextAreaElement =>
+  isInput(el) || el.tagName === 'TEXTAREA';
+
+/** A form field, which has a `value`. */
+export const isField = (el: Element): el is HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement =>
+  isTextField(el) || el.tagName === 'SELECT';
 
 /**
  * Sets the text of `el`, or its value when it is a form field.
@@ -100,8 +104,9 @@ const readText = (el: Element) => (isTextField(el) ? el.value : el.textContent);
 export function setTextTracked(el: HTMLElement, value: string | number | boolean | null | undefined): void {
   const before = readText(el);
   setText(el, value);
-  if (before !== readText(el) && el.hasAttribute(SEEN))
+  if (before !== readText(el) && el.hasAttribute(SEEN)) {
     callHook('onValueChange', () => cfg.onValueChange?.(el, before));
+  }
   el.setAttribute(SEEN, '1');
 }
 

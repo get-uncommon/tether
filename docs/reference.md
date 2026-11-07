@@ -524,7 +524,7 @@ server helpers (`createStorefront()`, and `shop.config.js` with [Astro](astro.md
 | `onLineEnter`              | `null`                     | `(node) => {}` for a new cart line, to animate it in; an error it throws goes to `onError`                                                                                                                                |
 | `onLineLeave`              | `null`                     | `(node, done) => {}` for a removed cart line: animate it out, then call `done()`; an error it throws goes to `onError`, and the line is removed                                                                           |
 | `onValueChange`            | `null`                     | `(element, previousText) => {}` when a bound value's text changes, to animate it; an error it throws goes to `onError`                                                                                                    |
-| `onError`                  | `null`                     | `(error, context) => {}` for every failure that reaches the visitor; an `Error` one of the hooks above throws is reported once per page load for each message, anything else it throws every time                         |
+| `onError`                  | `null`                     | `(error, context) => {}` for every failure that reaches the visitor; an `Error` one of the hooks above throws is reported once per page load for each message (up to 100 messages), anything else it throws every time    |
 | `debug`                    | `false`                    | Logs Tether's steps, such as retries, in the console                                                                                                                                                                      |
 | `markets.detect`           | the saved choice only      | `true` reads every source, a list (`['saved', 'server', 'webflow']`) only those, `false` none                                                                                                                             |
 | `markets.locales`          | none                       | Webflow locale (subdirectory or `<html lang>`) to `{ country, language, locale }`                                                                                                                                         |
@@ -760,14 +760,26 @@ says the release is done and prints the command that does that step alone:
 
 **Maintenance releases:** a fix for an older minor line X.Y is released from its branch
 `release/X.Y`, made once from that line's last tag (`git push origin vX.Y.Z:refs/heads/release/X.Y`)
-and given `scripts/release.ts`, `scripts/release-version.ts`, `scripts/changelog.ts`, `scripts/github-runs.ts`,
-`.github/workflows/release.yml`, `.github/workflows/ci.yml` and
-`.github/workflows/release-rehearsal.yml` from main, since a tag runs the workflow at its own commit and a push to
-the branch runs its own `ci.yml`, whose passing run the release needs. Check out
-`origin/release/X.Y`, put the notes in its `.changes/` (and remove the `## Unreleased` heading that a
-branch made from an older tag has) and run the same command. The script also
-records the release commit in main's history, by a merge commit that changes only main's
-`CHANGELOG.md`, and pushes the branch, main and the tag together. The release isn't GitHub's latest
+and given these files from main, since a tag runs the workflow at its own commit and a push to the
+branch runs its own `ci.yml`, whose passing run the release needs:
+
+- `scripts/release.ts` and the scripts it imports: `scripts/changelog.ts`,
+  `scripts/github-runs.ts`, `scripts/installed-packages.ts`, `scripts/main-history.ts`,
+  `scripts/release-starter.ts`, `scripts/release-steps.ts`, `scripts/release-tooling.ts`,
+  `scripts/release-version.ts` and `scripts/versions.ts`;
+- `.github/workflows/release.yml`, `.github/workflows/ci.yml` and
+  `.github/workflows/release-rehearsal.yml`;
+- the scripts those workflows run, and what they import: `scripts/dist-guard.ts`,
+  `scripts/dist-commits.ts`, `scripts/lint-workflows.ts` and `.config/workflow-linters.json`.
+
+`npm run release` checks for these first, and for the packages and npm scripts they need, and names
+every one the branch lacks, with the `git checkout origin/main -- …` that copies the files. Check
+out `origin/release/X.Y`, copy them, put the notes in its `.changes/` (and remove the
+`## Unreleased` heading that a branch made from an older tag has) and run the same command. The
+script also records the release commit in main's history, by a merge commit that changes only
+main's `CHANGELOG.md`, which gets the release's section, and `.changes/`, which loses the note files
+the release commit deleted, so a fix picked from main isn't released again by main's next release.
+It pushes the branch, main and the tag together. The release isn't GitHub's latest
 release, and goes to npm under the `latest-X.Y` dist-tag instead of `latest`.
 
 ## Subscriptions after checkout

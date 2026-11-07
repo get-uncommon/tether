@@ -4,38 +4,15 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readdir, readFile } from 'node:fs/promises';
-import { builtinModules } from 'node:module';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { importsOf, treeReader } from '../scripts/release-tooling.ts';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const IMPORT = /^\s*(?:import|export)\b[^'"]*?\bfrom\s+['"]([^'"]+)['"]|^\s*import\s+['"]([^'"]+)['"]/gm;
 const SCRIPT_RUN = /node\b[^\n]*?\b(scripts\/[\w./-]+\.ts)\b/g;
 
-/**
- * The packages a module reaches through its static imports, following this repository's own files.
- *
- * @param {string} file An absolute path.
- * @param {Set<string>} [seen]
- * @returns {Promise<Set<string>>}
- */
-async function packagesReachedFrom(file, seen = new Set()) {
-  /** @type {Set<string>} */
-  const packages = new Set();
-  if (seen.has(file)) return packages;
-  seen.add(file);
-  const source = await readFile(file, 'utf8');
-  for (const match of source.matchAll(IMPORT)) {
-    const specifier = match[1] ?? match[2] ?? '';
-    if (specifier.startsWith('.')) {
-      if (!/\.[cm]?[jt]s$/.test(specifier)) continue; // JSON and other data files import no code
-      for (const name of await packagesReachedFrom(resolve(dirname(file), specifier), seen)) packages.add(name);
-    } else if (!specifier.startsWith('node:') && !builtinModules.includes(specifier)) {
-      packages.add(specifier);
-    }
-  }
-  return packages;
-}
+/** @param {string} file Relative to the root. */
+const packagesReachedFrom = async (file) => (await importsOf(treeReader(ROOT), [file])).packages;
 
 /**
  * Each job of a workflow, as its text.
@@ -63,7 +40,7 @@ test("a workflow step runs a repository script that imports packages only after 
       for (const match of text.matchAll(SCRIPT_RUN)) {
         if (text.lastIndexOf('#', match.index) > text.lastIndexOf('\n', match.index)) continue; // a comment
         checked++;
-        const packages = [...(await packagesReachedFrom(join(ROOT, match[1] ?? '')))];
+        const packages = await packagesReachedFrom(match[1] ?? '');
         if (packages.length > 0 && (install === -1 || install > match.index)) {
           problems.push(`${name} ${job}: ${match[1] ?? ''} needs ${packages.join(', ')} before npm ci`);
         }
@@ -75,7 +52,9 @@ test("a workflow step runs a repository script that imports packages only after 
 });
 
 test('the import walk finds a package reached through another of our files', async () => {
-  const packages = await packagesReachedFrom(join(ROOT, 'scripts/release.ts'));
-  assert.ok(packages.has('yaml'), 'release.ts reaches yaml through github-runs.ts');
-  assert.deepEqual([...(await packagesReachedFrom(join(ROOT, 'scripts/lint-workflows.ts')))], []);
+  assert.ok(
+    (await packagesReachedFrom('scripts/release.ts')).includes('yaml'),
+    'release.ts reaches yaml through the steps it imports and github-runs.ts',
+  );
+  assert.deepEqual(await packagesReachedFrom('scripts/lint-workflows.ts'), []);
 });

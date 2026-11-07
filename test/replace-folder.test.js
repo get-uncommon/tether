@@ -71,6 +71,31 @@ test('a rename of the new folder into place that fails puts the old folder back 
   assert.equal(moves, 3, 'aside, in (refused), back');
 });
 
+test('a rename back that fails too names the folder the old one is left in, with both errors', async (t) => {
+  const { parent, out, before } = await oldOutput(t);
+  /** @type {(from: string, to: string) => Promise<void>} */
+  const move = async (from, to) => {
+    if (to === out && !from.endsWith('-previous')) throw new Error('EBUSY: resource busy or locked');
+    if (to === out) throw new Error('EPERM: operation not permitted');
+    await rename(from, to);
+  };
+  const error = await replaceFolder(out, writeNew, move).then(
+    () => assert.fail('the swap succeeded'),
+    (/** @type {unknown} */ thrown) => thrown,
+  );
+  assert.ok(error instanceof AggregateError);
+  assert.deepEqual(
+    error.errors.map((/** @type {unknown} */ cause) => (cause instanceof Error ? cause.message : cause)),
+    ['EBUSY: resource busy or locked', 'EPERM: operation not permitted'],
+  );
+  const left = await readdir(parent);
+  assert.equal(left.length, 1, 'only the old folder, renamed aside');
+  const [previous = ''] = left;
+  assert.match(previous, /^\.dist-building-.+-previous$/);
+  assert.ok(error.message.includes(join(parent, previous)), error.message);
+  assert.deepEqual(await contents(join(parent, previous)), before);
+});
+
 test('a rename of the old folder aside that fails leaves it as it was', async (t) => {
   const { parent, out, before } = await oldOutput(t);
   /** @type {(from: string, to: string) => Promise<void>} */

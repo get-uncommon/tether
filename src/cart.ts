@@ -153,7 +153,10 @@ async function load(): Promise<ShopifyCart | null> {
     settleLoad({ kind: 'loaded', cart });
   } catch (error) {
     reportError(error, 'cart load failed');
-    if (isCartGone(error)) forgetSavedCart();
+    if (isCartGone(error)) {
+      forgetSavedCart();
+      keepQuietly(null);
+    }
     settleLoad({ kind: 'failed', error });
   }
   return currentCart();
@@ -165,12 +168,13 @@ async function load(): Promise<ShopifyCart | null> {
  * it.
  */
 function reload(): Promise<ShopifyCart | null> {
-  queuedLoad ??= queueFilling(() =>
+  const queueLoad = () =>
     runInOrder(() => {
       queuedLoad = null;
       return load();
-    }),
-  );
+    });
+  // Without a saved cart a load can only find none, so checkout doesn't wait for it.
+  queuedLoad ??= savedCartId() ? queueFilling(queueLoad) : queueLoad();
   return queuedLoad;
 }
 
