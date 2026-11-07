@@ -103,8 +103,9 @@ Free on Cloudflare's free plan. It updates itself, and setup takes about 10 minu
 ## Good to know
 
 - **Errors:** send them to Sentry or any other tool with `onError` ([how](reference.md#troubleshooting-and-handover)).
-- **Subscriptions after checkout** (skip, pause, cancel) are handled by your subscription app and
-  Shopify customer accounts, not by Tether.
+- **Subscriptions after checkout:** with [customer accounts](accounts.md) through your Worker, customers skip,
+  pause, resume and cancel on your own pages ([how](accounts.md#on-your-own-site-order-pages-profile-addresses-subscriptions-returns));
+  otherwise your subscription app's portal in Shopify customer accounts handles them. Changing the card always stays with Shopify.
 - **Page transitions** (Barba, Swup) and Lenis/GSAP are supported ([how](reference.md#with-page-transitions-barba-swup-)).
 - **Different markets and languages:** [Markets](reference.md#markets-and-localization).
 - **Testing in a dev store:** checkout sits behind the store password, and payments need test mode.

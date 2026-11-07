@@ -4,7 +4,14 @@
  *
  *   npm run release -- 0.4.0            set the version, build, run the gate, commit, tag
  *   npm run release -- 0.4.0 --push     ...and push (GitHub Actions then creates the GitHub Release and publishes
- *                                       to npm with provenance)
+ *                                       to npm with provenance), wait for npm to have it, then lock the Astro starter
+ *                                       on it and push that too
+ *   npm run release -- 0.4.0 --starter  only lock the Astro starter on 0.4.0, which npm must have, and commit
+ *                                       (with --push, push)
+ *
+ * The starter's package.json and lockfile change together, by npm, and only to a version npm has: a release commit
+ * leaves them on the previous release, so `npm ci` in the starter, and in every project `npm create astro` makes from
+ * it, works at every commit. A release on an older minor line leaves main's starter alone.
  *
  * Needs a "## 0.4.0" or "## 0.4.0 (unreleased)" section in CHANGELOG.md first (the release notes come from it; the
  * heading is dated), a clean working tree, and HEAD at the branch the release goes on (a detached checkout works, so a
@@ -22,6 +29,7 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 import { join, dirname } from 'node:path';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { compareVersions, parseVersion } from '../server/src/release-range.ts';
 import { field } from '../server/src/shared/json.ts';
@@ -32,6 +40,12 @@ import type { Version } from '../server/src/release-range.ts';
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const PACKAGE_VERSION = /"version": "\d+\.\d+\.\d+"/;
 const MAIN = 'main';
+const NPM_PACKAGE = '@occluze/tether';
+const STARTER = 'examples/astro';
+const STARTER_RANGE = /"@occluze\/tether": "[^"]*"/;
+/** How long `--push` waits for the release workflow to publish to npm before leaving the starter to `--starter`. */
+const NPM_PUBLISH_WAIT_MS = 20 * 60_000;
+const NPM_POLL_MS = 30_000;
 
 /** The branch a release goes on, and whether it is main. */
 type Line = { kind: 'main' } | { kind: 'maintenance'; branch: string };
@@ -99,6 +113,20 @@ function lineOf(version: Version, mainVersion: Version): Line {
   return { kind: 'maintenance', branch: `release/${String(major)}.${String(minor)}` };
 }
 
+function checkClean(): void {
+  if (output('git', ['status', '--porcelain'])) fail('working tree not clean: commit or stash first');
+}
+
+/**
+ * Exits unless HEAD is exactly `branch` as fetched from GitHub. A release's commits go on top of what the branch is on
+ * GitHub now, from any checkout (a worktree can't check out a branch another one holds).
+ */
+function checkHeadIs(branch: string): void {
+  if (output('git', ['rev-parse', 'HEAD']) !== output('git', ['rev-parse', `origin/${branch}`])) {
+    fail(`HEAD is not origin/${branch}: check it out (git switch --detach origin/${branch})`);
+  }
+}
+
 /**
  * Exits when the version, the working tree, the branch or CHANGELOG.md isn't ready for `version`.
  *
@@ -107,18 +135,14 @@ function lineOf(version: Version, mainVersion: Version): Line {
 async function checkReady(text: string): Promise<Line> {
   if (!text) fail('usage: npm run release -- X.Y.Z [--push]');
   const version = versionOrFail(text, 'the version');
-  if (output('git', ['status', '--porcelain'])) fail('working tree not clean: commit or stash first');
+  checkClean();
   run('git', ['fetch', '--quiet', 'origin', MAIN]);
   const mainPackage: unknown = JSON.parse(output('git', ['show', `origin/${MAIN}:package.json`]));
   const mainVersion = versionOrFail(String(field(mainPackage, 'version')), "main's version");
   const line = lineOf(version, mainVersion);
   const branch = branchOf(line);
   if (line.kind === 'maintenance') run('git', ['fetch', '--quiet', 'origin', branch]);
-  // The release commit goes on top of what the branch is on GitHub now, from any checkout (a worktree can't check out
-  // a branch another one holds), so HEAD must be exactly that branch.
-  if (output('git', ['rev-parse', 'HEAD']) !== output('git', ['rev-parse', `origin/${branch}`])) {
-    fail(`HEAD is not origin/${branch}: check it out (git switch --detach origin/${branch})`);
-  }
+  checkHeadIs(branch);
   const current = versionOrFail(await packageVersion(ROOT), `${branch}'s version`);
   if (compareVersions(version, current) <= 0) fail(`${text} is not newer than ${current.join('.')}`);
   if (line.kind === 'maintenance' && (current[0] !== version[0] || current[1] !== version[1])) {
@@ -207,32 +231,102 @@ function pushOf(line: Line, version: string): string[] {
   return ['push', '--atomic', 'origin', `HEAD:${line.branch}`, `${mainHistoryCommit(version)}:${MAIN}`, tag];
 }
 
-const [version = ''] = process.argv.slice(2).filter((arg) => !arg.startsWith('--'));
-const push = process.argv.includes('--push');
+function isOnNpm(version: string): boolean {
+  // npm prints a package's only version as a string, and more than one as an array.
+  const published: unknown = JSON.parse(output('npm', ['view', NPM_PACKAGE, 'versions', '--json']));
+  return [published].flat().includes(version);
+}
 
-const line = await checkReady(version);
-await bump(version);
-run('npm', ['install', '--package-lock-only', '--no-audit', '--no-fund', '--silent']);
-// npm and the Release ship the committed dist/, which carries the version: release.yml refuses a tag whose dist/
-// differs from a fresh build.
-run('npm', ['run', 'build']);
-// The whole gate, as release.yml runs it on the tag: a tag the workflow refuses would stay without its Release.
-run('npm', ['run', 'check']);
-run('npm', ['run', 'smoke']);
-run('git', ['add', '-A']);
-run('git', ['commit', '-q', '-m', `Tether ${version}`]);
-run('git', ['tag', `v${version}`]);
-console.log(`\nTagged v${version} on ${branchOf(line)}.`);
-const retry = `git tag -d v${version} && git reset --hard origin/${branchOf(line)}, then run the release again`;
-const command = pushOf(line, version);
-if (push) {
+/** @returns Whether npm had `version` within `NPM_PUBLISH_WAIT_MS`. */
+async function waitForNpm(version: string): Promise<boolean> {
+  const deadline = Date.now() + NPM_PUBLISH_WAIT_MS;
+  while (!isOnNpm(version)) {
+    if (Date.now() > deadline) return false;
+    await sleep(NPM_POLL_MS);
+  }
+  return true;
+}
+
+/**
+ * Locks the Astro starter on `text`: its range becomes `^X.Y.0`, every patch of that minor version, and npm locks the
+ * newest release in it, writing the lockfile's copy of the range too. Commits that on main, and pushes it with `push`.
+ * Exits when the working tree isn't clean, HEAD isn't origin/main, `text` isn't on main's minor line or npm doesn't
+ * have it.
+ */
+async function lockStarter(text: string, push: boolean): Promise<void> {
+  const [major, minor] = versionOrFail(text, 'the version');
+  checkClean();
+  run('git', ['fetch', '--quiet', 'origin', MAIN]);
+  checkHeadIs(MAIN);
+  const mainVersion = versionOrFail(await packageVersion(ROOT), "main's version");
+  if (mainVersion[0] !== major || mainVersion[1] !== minor) {
+    fail(`main is on ${mainVersion.join('.')}, so its starter stays on that minor version`);
+  }
+  if (!isOnNpm(text)) fail(`npm has no ${text} yet: run this again once the release workflow has published it`);
+  const range = `^${String(major)}.${String(minor)}.0`;
+  await edit(`${STARTER}/package.json`, (json) => json.replace(STARTER_RANGE, `"${NPM_PACKAGE}": "${range}"`), {
+    optional: true,
+  });
+  run('npm', [
+    'update',
+    NPM_PACKAGE,
+    '--prefix',
+    STARTER,
+    '--package-lock-only',
+    '--ignore-scripts',
+    '--no-audit',
+    '--no-fund',
+    '--silent',
+  ]);
+  if (!output('git', ['status', '--porcelain'])) {
+    console.log(`The Astro starter already locks the newest Tether ${range}.`);
+    return;
+  }
+  run('git', ['commit', '-q', '-a', '-m', `Lock Tether ${text} in the Astro starter`]);
+  if (push) {
+    run('git', ['push', 'origin', `HEAD:${MAIN}`]);
+    console.log(`Pushed the Astro starter on Tether ${text}.`);
+  } else {
+    console.log(`Committed the Astro starter on Tether ${text}. Push when ready: git push origin HEAD:${MAIN}`);
+  }
+}
+
+async function release(version: string, push: boolean): Promise<void> {
+  const line = await checkReady(version);
+  await bump(version);
+  run('npm', ['install', '--package-lock-only', '--no-audit', '--no-fund', '--silent']);
+  // npm and the Release ship the committed dist/, which carries the version: release.yml refuses a tag whose dist/
+  // differs from a fresh build.
+  run('npm', ['run', 'build']);
+  // The whole gate, as release.yml runs it on the tag: a tag the workflow refuses would stay without its Release.
+  run('npm', ['run', 'check']);
+  run('npm', ['run', 'smoke']);
+  run('git', ['add', '-A']);
+  run('git', ['commit', '-q', '-m', `Tether ${version}`]);
+  run('git', ['tag', `v${version}`]);
+  console.log(`\nTagged v${version} on ${branchOf(line)}.`);
+  const retry = `git tag -d v${version} && git reset --hard origin/${branchOf(line)}, then run the release again`;
+  const command = pushOf(line, version);
+  const lockLater = `Once npm has ${version}: npm run release -- ${version} --starter --push`;
+  if (!push) {
+    console.log(`Push when ready: git ${command.join(' ')}`);
+    console.log(`If GitHub refuses it, nothing was pushed. To start over: ${retry}`);
+    if (line.kind === 'main') console.log(lockLater);
+    return;
+  }
   try {
     run('git', command);
   } catch {
     fail(`the push was refused, so nothing was pushed (a branch moved?). To start over: ${retry}`);
   }
   console.log('Pushed. GitHub Actions creates the release and publishes to npm.');
-} else {
-  console.log(`Push when ready: git ${command.join(' ')}`);
-  console.log(`If GitHub refuses it, nothing was pushed. To start over: ${retry}`);
+  if (line.kind === 'maintenance') return;
+  console.log(`Waiting for npm to have ${version}, to lock the Astro starter on it...`);
+  if (await waitForNpm(version)) await lockStarter(version, true);
+  else console.log(`npm doesn't have ${version} yet. ${lockLater}`);
 }
+
+const [version = ''] = process.argv.slice(2).filter((arg) => !arg.startsWith('--'));
+const push = process.argv.includes('--push');
+if (process.argv.includes('--starter')) await lockStarter(version, push);
+else await release(version, push);
