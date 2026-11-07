@@ -1,5 +1,43 @@
 # Changelog
 
+## 0.9.0 (unreleased)
+
+A minor release: the package exports fewer paths, and self-hosted script tags need one more file.
+
+- **Breaking (self-hosted script):** product lists (collections, search results, recommendations,
+  `Tether.getProducts()` and `Tether.getRecommendations()`) load as their own part,
+  `tether.lists.min.js`, which keeps the core about 1 KB smaller. jsDelivr and npm users need
+  nothing. **Upgrade:** a site that hosts the script files itself puts `tether.lists.min.js` next to
+  the core, as it does the other parts. A list shows its loading state at once, as before; the part
+  loads before the page's first list query.
+- **Breaking (npm):** the package exports only its entry points (`.`, `/server`, `/astro`,
+  `/presets/barba`) and the `dist/tether.*` script files. **Upgrade:** code that imported internal
+  paths (`@occluze/tether/dist/esm/…`, `/dist/types/…`, `/dist/presets/…`) imports the documented
+  entry points instead.
+- Storefront requests time out after `requestTimeout` milliseconds (default 15000, `0` for none) and
+  fail as `NETWORK`: a query retries, a cart change isn't sent again and the cart is loaded again,
+  so a stalled connection no longer holds every later cart change. It uses `AbortSignal.timeout`
+  (Safari 16 and newer). A `fetch` passed to the server helpers must honour `init.signal`.
+- Fix: the retry waits start at 300 ms (500 ms after `THROTTLED`) and double, as documented; the
+  first retry used to wait twice that.
+- Docs: the reference documents every `TETHER_CONFIG` option and every `markets`, `analytics` and
+  `account` field with its default, and describes subscription self-service (skip, unskip, pause,
+  resume, cancel with accounts) the same way as the accounts guide and the Webflow guide.
+- Fix (sync Worker): the Worker README links to the changelog, the customer-accounts setup and the
+  rebuild guide by their GitHub URLs, so they work in a deployed copy, which holds only `server/`.
+- Fix (Node sync): when several processes find a dead process's state-file lock, only one takes it
+  over.
+- Fix: the Astro starter's lockfile always agrees with its `package.json`, so `npm ci` works in it
+  and in projects made from it; the starter moves to a release once npm has it.
+- Releases: pull requests that change code rehearse the release at the next minor and patch versions
+  in CI, and `npm run release` checks that CI passed instead of running the whole suite again; it
+  then locks the new release in the Astro starter. The smoke test retries a transient Shopify
+  failure (a 5xx, a network error, `INTERNAL_SERVER_ERROR`) and still stops on anything else. CI
+  also runs on `release/X.Y` branches.
+- Repository: every wait in the test suite is bounded, and `npm test` fails a stalled test instead
+  of hanging (the 0.8.0 release run hung on a test server whose random port was one Windows services
+  hold).
+
 ## 0.8.1 (2026-11-07)
 
 - Fix (script tag): a core loaded through a jsDelivr version alias (`@0.8`, `@0`, `@latest` or no
