@@ -1,7 +1,7 @@
 /**
- * Keeps a `<script>` core's part hashes current while the build watches the sources (`watchAll` in build.ts). A core
- * embeds the hash of each part file of its kind, read from disk when it builds (`partIntegrityPlugin`), so a core that
- * built before a part rewrote its file carries a hash the browser refuses.
+ * Keeps a `<script>` core's part hashes current while the build watches the sources (`watchKind` in script-build.ts).
+ * A core embeds the hash of each part file of its kind, read from disk when it builds (`partIntegrityPlugin` there),
+ * so a core that built before a part rewrote its file carries a hash the browser refuses.
  */
 
 /** A `sha384-…` Subresource Integrity hash by part file name. */

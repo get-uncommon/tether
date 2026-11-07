@@ -3,10 +3,12 @@
  * group add buttons, the cart or market changing in another tab, and shareable variant links. A part that can't load
  * (a self-hosted site without `tether.extras.min.js`) is reported, so the missing file shows.
  */
-import { cfg, reportError } from '../config.ts';
-import { attr, sel, busy, isOwnEvent } from '../dom.ts';
+import { cfg, reportFailure } from '../config.ts';
+import { attr, sel, busy, isElement, isOwnEvent } from '../dom.ts';
 import { loadPart } from '../lazy.ts';
 import { withPart } from '../part-use.ts';
+import { storageKey as marketStorageKey } from '../markets.ts';
+import { seenKey } from '../cart/store.ts';
 import type { ShopifyCart } from '../cart/store.ts';
 
 /** `[tether-group]` with `[tether-group-add]`: adds every product scope inside the group in one request. */
@@ -15,16 +17,22 @@ export const addGroup = (button: Element): Promise<ShopifyCart | null> =>
 
 function onClick(event: MouseEvent): void {
   const { target } = event;
-  const button = target instanceof window.Element ? target.closest(sel('group-add')) : null;
+  const button = isElement(target) ? target.closest(sel('group-add')) : null;
   if (!button) return;
   event.preventDefault();
-  busy(button, () => addGroup(button)).catch((error: unknown) => {
-    reportError(error, 'extras');
-  });
+  reportFailure(
+    busy(button, () => addGroup(button)),
+    'extras',
+  );
 }
 
+/**
+ * Loads the part only for the keys it follows (the cart's id and saved count, and the market) and for `null`, which
+ * `localStorage.clear()` sends: the page's other scripts may write their own keys often.
+ */
 function onStorage(event: StorageEvent): void {
-  if (!cfg.domain || !event.key?.startsWith(`${cfg.prefix}:`)) return;
+  const followed = [null, cfg.storageKey, seenKey(), marketStorageKey()];
+  if (!cfg.domain || !followed.includes(event.key)) return;
   withPart('extras', (part) => {
     part.onStorage(event);
   });
@@ -34,7 +42,7 @@ function onStorage(event: StorageEvent): void {
 function onVariantChanged(event: Event): void {
   if (!isOwnEvent(event, 'variant-changed')) return;
   const { target } = event;
-  if (!(target instanceof window.Element)) return;
+  if (!isElement(target)) return;
   if (!cfg.variantUrl && !target.hasAttribute(attr('variant-url'))) return;
   withPart('extras', (part) => {
     part.writeVariantUrl(target, event.detail);

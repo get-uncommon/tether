@@ -2,6 +2,7 @@
  * The Worker's settings as they arrive: Cloudflare vars and secrets, or `.dev.vars` / `process.env` for the CLI. Every
  * module reads them through `cleanEnv`, so "not set" means the same everywhere.
  */
+import type { KvListPage } from './store.ts';
 
 type EnvName =
   | 'SHOPIFY_DOMAIN'
@@ -99,13 +100,14 @@ export function cleanEnv(env: Record<string, unknown>): CleanEnv {
 }
 
 /**
- * The Worker's KV namespace binding, as far as Tether uses it. Cloudflare defines the signatures; only that the three
+ * The Worker's KV namespace binding, as far as Tether uses it. Cloudflare defines the signatures; only that the four
  * methods exist can be checked when the binding arrives.
  */
 export interface KvBinding {
   get(key: string, type?: 'text' | 'json'): Promise<unknown>;
   put(key: string, value: string, options?: { expirationTtl: number }): Promise<void>;
   delete(key: string): Promise<void>;
+  list(options: { prefix: string; cursor?: string }): Promise<KvListPage>;
 }
 
 /** The binding's name in wrangler.jsonc. */
@@ -113,7 +115,7 @@ const KV_BINDING = 'TETHER_SYNC';
 
 function isKvBinding(value: unknown): value is KvBinding {
   if (value === null || typeof value !== 'object') return false;
-  return ['get', 'put', 'delete'].every((method) => typeof Reflect.get(value, method) === 'function');
+  return ['get', 'put', 'delete', 'list'].every((method) => typeof Reflect.get(value, method) === 'function');
 }
 
 /** The TETHER_SYNC KV namespace, or `null` when the Worker has none, or a setting by that name that is no namespace. */

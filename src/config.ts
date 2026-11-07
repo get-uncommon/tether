@@ -78,6 +78,8 @@ export interface CartWarning {
   target?: string;
 }
 export type CheckoutTarget = '_self' | '_blank';
+/** What a `tether-products="url:…"` list shows while its URL parameter is missing or empty. */
+export type EmptyQuery = 'all' | 'none';
 type PurchaseKind = 'one-time' | 'subscription';
 
 /** Every option, with its default filled in. */
@@ -109,6 +111,8 @@ export interface TetherConfig {
   sellingPlanGroupsFirst: number;
   sellingPlansFirst: number;
   collectionFirst: number;
+  /** `all` lists every product while a `url:` list's parameter is missing or empty; `none` lists none, unasked. */
+  emptyQuery: EmptyQuery;
   /**
    * How many times a failed request is sent again. A query is retried after a network error (no answer, or a body that
    * stopped arriving), a 429, a 5xx or Shopify's `THROTTLED`. A mutation, a cart change included, is retried only
@@ -197,6 +201,7 @@ export const DEFAULTS: Readonly<TetherConfig> = {
   sellingPlanGroupsFirst: 10,
   sellingPlansFirst: 25,
   collectionFirst: 24,
+  emptyQuery: 'all',
   retries: 2,
   requestTimeout: 15_000,
   revalidate: true,
@@ -229,54 +234,6 @@ export const DEFAULTS: Readonly<TetherConfig> = {
 };
 
 export const cfg: TetherConfig = { ...DEFAULTS };
-
-function refuseChange(key: string | symbol): false {
-  warn(`Tether.config is read-only (${String(key)}): pass options to Tether.init() instead`);
-  return false;
-}
-
-/** Each config object's read-only view, made once, so reading the same object twice gives the same view. */
-const readOnlyViews = new WeakMap<object, object>();
-
-/**
- * Reads the live values, each object among them through its own view, and refuses every change: a write throws in
- * strict-mode code (as on a frozen object) and warns in any code.
- */
-const READ_ONLY: ProxyHandler<object> = {
-  get: (object, key) => viewOf(Reflect.get(object, key)),
-  // A descriptor's value is the view too, so `Object.getOwnPropertyDescriptor` doesn't hand out the live object.
-  getOwnPropertyDescriptor(object, key) {
-    const descriptor = Reflect.getOwnPropertyDescriptor(object, key);
-    if (descriptor) descriptor.value = viewOf(descriptor.value);
-    return descriptor;
-  },
-  set: (_object, key) => refuseChange(key),
-  deleteProperty: (_object, key) => refuseChange(key),
-  defineProperty: (_object, key) => refuseChange(key),
-};
-
-/** @returns An object's read-only view; any other value as it is. */
-function viewOf(value: unknown): unknown {
-  // The config's objects are its own copies (`resolveConfig`), never frozen and configurable, so a view of each is
-  // allowed, in `get` and in a descriptor.
-  return typeof value === 'object' && value !== null ? readOnlyView(value) : value;
-}
-
-/** @returns The read-only view of `target`, the same one on every call. */
-function readOnlyView(target: object): object {
-  let view = readOnlyViews.get(target);
-  if (!view) {
-    view = new Proxy(target, READ_ONLY);
-    readOnlyViews.set(target, view);
-  }
-  return view;
-}
-
-/**
- * `cfg` as `Tether.config` shows it. A value written there would skip the validation `configure()` does, so the view
- * is read-only; `Tether.init(options)` is how a site changes the config.
- */
-export const configView = new Proxy<TetherConfig>(cfg, READ_ONLY);
 
 /** The prefix becomes part of attribute names, CSS selectors and event names, so it is kept to those characters. */
 const PREFIX = /^[a-z][a-z0-9-]*$/;
@@ -507,6 +464,7 @@ export function resolveConfig(options: TetherOptions | Readonly<Record<string, u
     metafields: metafieldsOption(options.metafields ?? [], dropped),
     embedOrigins: embedOriginsOption(options.embedOrigins ?? [], dropped),
     checkoutTarget: choiceOption('checkoutTarget', options.checkoutTarget, ['_self', '_blank']),
+    emptyQuery: choiceOption('emptyQuery', options.emptyQuery, ['all', 'none']),
     defaultPurchase: choiceOption('defaultPurchase', options.defaultPurchase, ['one-time', 'subscription']),
     cartDrawerOpenClass: classOption('cartDrawerOpenClass', options.cartDrawerOpenClass),
   };
@@ -561,6 +519,13 @@ export function reportError(error: unknown, context: string): void {
   } catch (hookError) {
     warn('onError threw', hookError);
   }
+}
+
+/** Reports `change` failing (`reportError`), for a change nothing waits on. */
+export function reportFailure(change: Promise<unknown>, context: string): void {
+  change.catch((error: unknown) => {
+    reportError(error, context);
+  });
 }
 
 /** The hook failures reported so far, as `<hook>: <message>`. */

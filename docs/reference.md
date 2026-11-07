@@ -150,7 +150,8 @@ Markets have to be set up in Shopify (Settings → Markets) for prices and curre
 
 Set `autoMount: false`, call `Tether.init()` once, and `Tether.mount(container)` for every new
 page container. Keep the cart drawer outside the container. Call `Tether.unmount()` when leaving
-a page (it closes the drawer).
+a page (it closes the drawer); the container mounted after it is a new page for
+[analytics](analytics.md).
 
 ```js
 import Tether from "@occluze/tether";
@@ -288,7 +289,8 @@ needs the inventory permission), `plenty-in-stock` (in stock, not low), `on-sale
 
 Cart (outside product scopes): `cart-empty`, `cart-filled`, `cart-has-subscription`,
 `cart-no-subscription`, `cart-has-discount`, `cart-error`, `cart-warning` (Shopify changed the
-last request, e.g. less stock than asked; the message goes in `[tether-cart-warning]`).
+last request, e.g. less stock than asked; the message goes in `[tether-cart-warning]`, which gets
+`role="status"` unless it has a role of its own, so screen readers announce it).
 
 State (products and lists): `loading`, `ready`, `error`, `not-found` (see above).
 
@@ -314,6 +316,10 @@ loses to it.
 `tether-limit` is how many products the list shows, 1 to 250 (`collectionFirst` without it).
 `tether-products="tag:coffee"` uses Shopify search syntax instead of a collection.
 `tether-products="url:q"` searches for the page's `?q=`: a search results page on a static site.
+Without a `?q=`, or with an empty one, it lists all products; with `tether-empty-query="none"` (or the
+`emptyQuery: 'none'` option) it lists none and asks Shopify nothing, so `tether-show="list-empty"`
+shows, until a page with a search. `tether-empty-query="all"` keeps all products where the option is
+`'none'`; another value warns in the console and uses the option.
 `tether-recommendations="<handle>"` lists related products (`url:handle` on a dynamic product page;
 empty inside a `tether-product`: that product). `tether-products=""` lists all products. Search
 syntax caveat: Shopify matches words loosely, so `handle:a OR handle:b` can return other products, and
@@ -501,6 +507,7 @@ server helpers (`createStorefront()`, and `shop.config.js` with [Astro](astro.md
 | `sellingPlanGroupsFirst`   | `10`                       | Selling plan groups fetched per product, 1 to 250                                                                                                                                                                         |
 | `sellingPlansFirst`        | `25`                       | Selling plans fetched per group, and plan allocations per variant, 1 to 250                                                                                                                                               |
 | `collectionFirst`          | `24`                       | Products per page of a [product list](#product-lists) without `tether-limit`, 1 to 250                                                                                                                                    |
+| `emptyQuery`               | `'all'`                    | What a `tether-products="url:q"` list shows while its parameter is missing or empty: `'all'` products, or `'none'` (its `list-empty` state, with no request); `tether-empty-query` on a list overrides it                 |
 | `retries`                  | `2`                        | How often a failed request is sent again (see **Retries** below)                                                                                                                                                          |
 | `requestTimeout`           | `15000`                    | Milliseconds a Storefront API or account Worker request may take, its whole answer included, before it fails as a network error, in every supported browser; `0` sets no limit (see **Retries** below)                    |
 | `maxAge`                   | `60`                       | Seconds a Shopify answer may be cached; `0` leaves it to Shopify, which can be hours                                                                                                                                      |
@@ -712,11 +719,11 @@ doesn't run the gate at the new version: a test that fails only at a new version
 pull request by the `release-rehearsal` workflow, which writes the next minor and the next patch
 version into a worktree with the release's own rewrite
 (`node scripts/release.ts --rewrite-only X.Y.Z <folder>`) and runs `npm run check` there. It runs
-on pull requests that change `src/`, `server/`, `scripts/`, `test/`, the package files or the
-README.
+on every pull request but one that changes only `.claude/`, `LICENSE` or `.git-blame-ignore-revs`,
+files the gate doesn't read.
 
 So the release also checks, through `gh`, that the rehearsal passed for the newest commit that
-changes one of those paths: on that commit itself, or on the head of the pull request that merged
+changes a file the gate reads: on that commit itself, or on the head of the pull request that merged
 it. A commit pushed without a pull request (a release commit included) has no rehearsal run, and
 the release refuses until a pull request brings a change, or until you rehearse it yourself, in a
 worktree at the version you release, and pass `--rehearsed`:

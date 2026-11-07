@@ -15,6 +15,7 @@ import {
   jsonOf,
   parseJson,
   stringAt,
+  kvList,
 } from './mocks.js';
 
 /**
@@ -45,6 +46,7 @@ function kvNamespace() {
     async delete(key) {
       kv.delete(key);
     },
+    list: kvList(() => kv.keys()),
   };
   return { kv, TETHER_SYNC };
 }
@@ -112,6 +114,86 @@ test('subrequest budget: a Worker reconcile stops before the limit and resumes n
   assert.equal(apis.wf.items.size, 12);
 });
 
+/** @param {number} count Hand-made Webflow items, none of them a product's. */
+const handMadeItems = (count) =>
+  Array.from({ length: count }, (_, i) => ({ id: `hand${i}`, fieldData: { name: `Hand ${i}`, slug: `hand-${i}` } }));
+
+/**
+ * @param {ReturnType<typeof createMockApis>['calls']} calls
+ * @returns {number[]} The offsets of the item pages listed.
+ */
+const listedOffsets = (calls) =>
+  calls
+    .filter((call) => call.method === 'GET' && call.path.includes('/items?'))
+    .map((call) => Number(new URL(call.path, 'https://api.webflow.com').searchParams.get('offset')));
+
+test('subrequest budget: an item index too big for one run is listed over several, each page once', async () => {
+  const apis = createMockApis({ products: [shopifyProduct(1)], items: handMadeItems(1200) });
+  const { kv, TETHER_SYNC } = kvNamespace();
+  kv.set('tether-sync:reconcile:since', JSON.stringify('2026-01-01T00:00:00Z'));
+  const worker = createWorker(baseConfig, { fetch: apis.fetch, sleep: instantSleep });
+  const wenv = { ...env, TETHER_SYNC, MAX_SUBREQUESTS: '15' };
+  const used = [];
+  let complete = false;
+  for (let run = 0; run < 5 && !complete; run++) {
+    const before = apis.calls.length;
+    complete = (await worker.scheduled({}, wenv, { waitUntil() {} })).complete;
+    used.push(apis.calls.length - before);
+  }
+  assert.ok(complete);
+  assert.ok(used.length > 1, 'needed more than one run');
+  assert.ok(
+    used.every((count) => count <= 15),
+    `subrequests per run: ${used.join(', ')}`,
+  );
+  assert.deepEqual(
+    listedOffsets(apis.calls),
+    Array.from({ length: 12 }, (_, i) => i * 100),
+  );
+  assert.equal(apis.wf.items.size, 1201, 'the product got one item');
+  assert.equal(kv.get('tether-sync:index:listing'), undefined, 'the finished listing is cleared');
+  assert.ok(kv.get('tether-sync:index'));
+});
+
+test('a webhook lists at most 15 pages of the item index, and the reconcile finishes the listing and the product', async () => {
+  const apis = createMockApis({ products: [shopifyProduct(1)], items: handMadeItems(2000) });
+  const { kv, TETHER_SYNC } = kvNamespace();
+  const worker = createWorker(baseConfig, { fetch: apis.fetch, sleep: instantSleep });
+  const wenv = { ...env, TETHER_SYNC, MAX_SUBREQUESTS: '1000' };
+  /** @type {Promise<unknown>[]} */
+  const tasks = [];
+  const body = JSON.stringify({ id: 1 });
+  await worker.fetch(
+    new Request('https://w.test/webhooks/shopify', {
+      method: 'POST',
+      body,
+      headers: {
+        'x-shopify-topic': 'products/update',
+        'x-shopify-hmac-sha256': await signShopify(body, 'whsec'),
+        'x-shopify-shop-domain': 'shop.myshopify.com',
+      },
+    }),
+    wenv,
+    { waitUntil: (/** @type {Promise<unknown>} */ promise) => tasks.push(promise) },
+  );
+  await Promise.all(tasks);
+  assert.equal(listedOffsets(apis.calls).length, 15);
+  assert.equal(apis.wf.items.size, 2000, 'nothing written yet');
+  assert.ok(
+    [...kv.keys()].some((key) => key.startsWith('tether-sync:reconcile:retry:1:')),
+    'the product is queued for the reconcile',
+  );
+
+  kv.set('tether-sync:reconcile:since', JSON.stringify('2026-12-01T00:00:00Z'));
+  const result = await worker.scheduled({}, wenv, { waitUntil() {} });
+  assert.equal(result.complete, true);
+  assert.deepEqual(
+    listedOffsets(apis.calls),
+    Array.from({ length: 20 }, (_, i) => i * 100),
+  );
+  assert.equal(apis.wf.items.size, 2001);
+});
+
 test('POST /reconcile?since=all imports everything, and the cron finishes what one run cannot', async () => {
   const products = Array.from({ length: 10 }, (_, i) =>
     shopifyProduct(i + 1, { updatedAt: `2025-0${(i % 9) + 1}-01T00:00:00Z` }),
@@ -147,22 +229,10 @@ test('POST /reconcile?since=all imports everything, and the cron finishes what o
   assert.equal(bad.status, 400);
 });
 
-test('webhook failure is queued for the next reconcile', async () => {
+test('webhook failure is queued under its own key, and the next reconcile takes it into the retry list', async () => {
   const apis = createMockApis({ products: [shopifyProduct(1, { handle: 'bad' })], failCreateFor: 'bad' });
-  const store = memoryStore();
+  const { kv, TETHER_SYNC } = kvNamespace();
   const worker = createWorker(baseConfig, { fetch: apis.fetch, sleep: instantSleep });
-  /** @type {import('../src/env.ts').KvBinding} */
-  const kv = {
-    async get(key) {
-      return store.get(key);
-    },
-    async put(key, value) {
-      return store.put(key, JSON.parse(value));
-    },
-    async delete(key) {
-      return store.delete(key);
-    },
-  };
   /** @type {Promise<unknown>[]} */
   const tasks = [];
   const body = JSON.stringify({ id: 1 });
@@ -176,15 +246,52 @@ test('webhook failure is queued for the next reconcile', async () => {
         'x-shopify-shop-domain': 'shop.myshopify.com',
       },
     }),
-    { ...env, TETHER_SYNC: kv },
+    { ...env, TETHER_SYNC },
     { waitUntil: (/** @type {Promise<unknown>} */ promise) => tasks.push(promise) },
   );
   await Promise.all(tasks);
+  const queued = () => [...kv.keys()].filter((key) => key.startsWith('tether-sync:reconcile:retry:'));
+  assert.equal(queued().length, 1);
+  assert.match(queued()[0] ?? '', /^tether-sync:reconcile:retry:1:/);
+
+  kv.set('tether-sync:reconcile:since', JSON.stringify('2026-12-01T00:00:00Z'));
+  await worker.scheduled({}, { ...env, TETHER_SYNC }, { waitUntil() {} });
+  const retry = asList(parseJson(kv.get('tether-sync:reconcile:retry') ?? 'null'), 'the retry list');
   assert.deepEqual(
-    // The retry queue as the reconcile stores it.
-    asList(await store.get('tether-sync:reconcile:retry'), 'the retry queue').map((entry) => stringAt(entry, 'id')),
-    ['1'],
+    retry.map((entry) => [stringAt(entry, 'id'), fieldOf(entry, 'attempts')]),
+    [['1', 2]],
+    'the reconcile retried it and failed again',
   );
+  assert.deepEqual(queued(), [], 'its key is deleted once the list holds it');
+});
+
+test('a webhook failure queued while a reconcile runs survives the end of that reconcile', async () => {
+  const apis = createMockApis({ products: [shopifyProduct(1), shopifyProduct(2)] });
+  const store = memoryStore();
+  const reconciling = createApp(baseConfig, env, { store, fetch: apis.fetch, sleep: instantSleep });
+  await reconciling.sync.importAll();
+  const deletedItem = [...apis.wf.items.values()].find((item) => item.fieldData['slug'] === 'product-2');
+  assert.ok(deletedItem);
+  // Product 2 is deleted in Shopify, and its products/delete webhook fails in another invocation while a reconcile
+  // retries product 1.
+  apis.shop.products.delete('gid://shopify/Product/2');
+  await store.put('reconcile:retry', [{ id: '1', attempts: 1, error: 'webhook failed' }]);
+  const webhookApp = createApp(baseConfig, env, { store, fetch: apis.fetch, sleep: instantSleep });
+  let queuedMeanwhile = false;
+  /** @type {typeof fetch} */
+  const fetchQueueingOnce = async (input, init) => {
+    if (!queuedMeanwhile && typeof init?.body === 'string' && init.body.includes('Product/1')) {
+      queuedMeanwhile = true;
+      await webhookApp.sync.queueRetry('gid://shopify/Product/2', new Error('Webflow 503'));
+    }
+    return apis.fetch(input, init);
+  };
+  const app = createApp(baseConfig, env, { store, fetch: fetchQueueingOnce, sleep: instantSleep });
+  await app.sync.reconcile();
+  assert.ok(queuedMeanwhile, 'the webhook failed during the reconcile');
+
+  await reconciling.sync.reconcile();
+  assert.equal(apis.wf.items.get(deletedItem.id)?.isArchived, true, 'the next reconcile archived the deleted product');
 });
 
 test('reconcile: a failed publish leaves every product of the run for the next one, retries included', async () => {

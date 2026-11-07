@@ -151,7 +151,7 @@ export function deployOnlyTarget(hook: DeployHook): DeployOnlyTarget {
     collectionId: DEPLOY_ONLY_COLLECTION_ID,
     requests: 0,
     getCollection: () => Promise.resolve({ displayName: 'deploy hook', fields: [] }),
-    listAllItems: () => Promise.resolve([]),
+    listItemPage: () => Promise.resolve({ items: [], next: null }),
     getItem: () => Promise.resolve(null),
     createItem: (fieldData) =>
       afterChange({ id: `site:${String(fieldData['shopify-id'] || fieldData['slug'])}`, fieldData }),
@@ -180,7 +180,7 @@ export function withDeployHook(webflow: WebflowClient, hook: DeployHook): Webflo
     call: webflow.call,
     getItem: webflow.getItem,
     getCollection: webflow.getCollection,
-    listAllItems: webflow.listAllItems,
+    listItemPage: webflow.listItemPage,
     publish: webflow.publish,
     createItem: marking(webflow.createItem),
     updateItem: marking(webflow.updateItem),

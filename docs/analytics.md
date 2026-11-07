@@ -25,7 +25,7 @@ Tether pushes Google's standard ecommerce events to `window.dataLayer` (another 
 | `add_to_cart`, `remove_from_cart` | the cart changed: add-to-cart buttons, +/−, typed quantities, your own JS. The quantity is the difference |
 | `view_cart`                       | the cart drawer opened                                                                                    |
 | `begin_checkout`                  | the visitor goes to checkout (with the applied discount codes as `coupon`)                                |
-| `search`                          | search as you type got results (`search_term`)                                                            |
+| `search`                          | search as you type got an answer, also one without results (`search_term`)                                |
 
 Items have `item_id` (variant SKU, or the variant's numeric id), `item_name`, `item_variant`,
 `item_brand` (vendor), `item_category` (product type), `price` and `quantity`; events have
@@ -48,6 +48,11 @@ up Shopify's event bus (`window.Shopify.analytics`), loads Shopify's **Customer 
 Shopify's own `shopify.js`, and publishes page, product, collection, search and add-to-cart events.
 Shopify's script builds and sends them, so the data format stays Shopify's.
 
+- **Page views:** one for the page the visitor lands on and one for each page after it: an Astro
+  client-side navigation, or with page transitions (Barba, Swup) each container
+  `Tether.mount(container)` mounts after `Tether.unmount()`, as in the
+  [page transitions setup](reference.md#with-page-transitions-barba-swup-). A page transition that
+  skips `Tether.unmount()` sends no page view.
 - **Consent:** nothing is sent until the Customer Privacy API allows analytics (the visitor's
   choice, and your region settings under Settings → Customer privacy). Options:
   `consent: 'no-banner'` (default: your own banner calls `Shopify.customerPrivacy.setTrackingConsent`),

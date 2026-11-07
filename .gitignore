@@ -8,3 +8,5 @@ playwright-report/
 # What an interrupted build leaves beside its output folder (scripts/replace-folder.ts).
 /.dist-building-*/
 /.test-dist-building-*/
+# What an interrupted `npm run dev` leaves in dist/ (scripts/write-atomically.ts): the build removes them.
+/dist/*.tmp-[0-9]*

@@ -358,7 +358,7 @@ test('embedOrigins keeps https origins alone, and skips every other entry with a
 });
 
 test('Tether.config shows the live config and refuses writes, which would skip validation', async () => {
-  const { configView } = await import('../src/config.ts');
+  const { configView } = await import('../src/config-view.ts');
   quietly(() => configure({ domain: 'shop.test', markets: { detect: ['saved'] } }));
   assert.equal(configView.domain, 'shop.test');
   const { warned } = quietly(() => {
@@ -379,7 +379,7 @@ test('Tether.config shows the live config and refuses writes, which would skip v
 });
 
 test('Tether.config gives the same view of an object on every read, and a new one when configure() replaces it', async () => {
-  const { configView } = await import('../src/config.ts');
+  const { configView } = await import('../src/config-view.ts');
   quietly(() => configure({ domain: 'shop.test', markets: { detect: ['saved'] } }));
   const markets = configView.markets;
   assert.equal(configView.markets, markets);
@@ -391,7 +391,7 @@ test('Tether.config gives the same view of an object on every read, and a new on
 });
 
 test("Tether.config's descriptors hand out read-only views too, never the live objects", async () => {
-  const { configView } = await import('../src/config.ts');
+  const { configView } = await import('../src/config-view.ts');
   quietly(() => configure({ domain: 'shop.test', markets: { detect: ['saved'] } }));
   /** @type {unknown} */
   const markets = Object.getOwnPropertyDescriptor(configView, 'markets')?.value;

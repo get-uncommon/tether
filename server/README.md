@@ -43,7 +43,8 @@ This imports your products and registers the Shopify webhooks. From now on it ru
 
 The webhooks go to the address you called `/reconcile` on. Shopify sometimes sends a webhook twice.
 On `workers.dev`, a repeat that reaches another copy of the Worker is synced again. That costs one
-Shopify read and one KV read, and nothing is written. When the webhooks were registered on your
+Shopify read and one KV read, and nothing is written (except a repeated deletion with
+`onDelete: 'delete'`, which can cost one KV write; see [advanced](docs/advanced.md#6-shopify-webhooks)). When the webhooks were registered on your
 own domain (a route or custom domain, as customer accounts need), Cloudflare's cache drops those
 repeats too.
 

@@ -4,6 +4,7 @@ import { createHmac } from 'node:crypto';
 import {
   createApp,
   memoryStore,
+  kvStore,
   signShopify,
   verifyShopifyHmac,
   createThrottle,
@@ -281,6 +282,28 @@ test('reconcile retries failed products on the next run', async () => {
   const retried = await sync.reconcile();
   assert.equal(retried.failures.length, 0);
   assert.deepEqual(await store.get('reconcile:retry'), []);
+});
+
+test('kvStore lists the keys under a prefix across pages, without its own prefix', async () => {
+  const names = ['tether-sync:a:1', 'tether-sync:a:2', 'tether-sync:a:3', 'tether-sync:b:1', 'other:a:1'];
+  /** @type {(string | undefined)[]} */
+  const cursors = [];
+  const store = kvStore({
+    get: async () => null,
+    put: async () => {},
+    delete: async () => {},
+    async list({ prefix, cursor }) {
+      cursors.push(cursor);
+      const matching = names.filter((name) => name.startsWith(prefix));
+      const start = Number(cursor ?? 0);
+      const keys = matching.slice(start, start + 2).map((name) => ({ name }));
+      return start + 2 < matching.length
+        ? { keys, list_complete: false, cursor: String(start + 2) }
+        : { keys, list_complete: true };
+    },
+  });
+  assert.deepEqual(await store.list('a:'), ['a:1', 'a:2', 'a:3']);
+  assert.deepEqual(cursors, [undefined, '2']);
 });
 
 test('Webflow 429 is retried after Retry-After', async () => {

@@ -33,9 +33,20 @@ import type { Product } from './fragments.ts';
 import { MAX_CONNECTION_SIZE } from './shopify-values.ts';
 import type { ProductRef, RecommendationIntent } from './shopify-values.ts';
 import type { Collection, PageInfo, ProductPage, ProductQuery } from './loader.ts';
+import type { EmptyQuery } from './config.ts';
 
 /** `tether-products="url:q"`: the search in the page's `?q=`, for a results page on a static site. */
 const URL_QUERY_SOURCE = 'url:';
+
+/**
+ * What a `url:` list without a search in its parameter shows: no products, and no request for them. A new page each
+ * time, as `list-ready` hands its products to the site.
+ */
+const noProducts = (): ProductPage => ({
+  collection: null,
+  products: [],
+  pageInfo: { hasNextPage: false, endCursor: null },
+});
 
 /** Storefront API `ProductCollectionSortKeys`, which a collection's products take. */
 const COLLECTION_SORT_KEYS = new Set([
@@ -170,6 +181,8 @@ class ListScope {
   replacingToken: number | null = null;
   /** Whether the list has warned about its `tether-sort`, so a list that reloads warns once. */
   warnedSort = false;
+  /** Whether the list has warned about its `tether-empty-query`, likewise. */
+  warnedEmptyQuery = false;
 
   constructor(root: HTMLElement) {
     this.root = root;
@@ -187,8 +200,13 @@ class ListScope {
     return scoped(this.root, selector, listSelector());
   }
 
-  /** The collection or search query of the list's attributes. */
-  options(): ProductQuery {
+  /**
+   * The collection or search query of the list's attributes.
+   *
+   * @returns `null` for a `url:` list whose parameter is missing or empty, with `tether-empty-query` (or `emptyQuery`)
+   *   `none`: it lists nothing.
+   */
+  options(): ProductQuery | null {
     const { root } = this;
     const query: ProductQuery = {
       reverse: get(root, 'reverse') === 'true',
@@ -202,10 +220,26 @@ class ListScope {
       return query;
     }
     const raw = get(root, 'products') ?? '';
-    query.query = raw.startsWith(URL_QUERY_SOURCE)
-      ? new URL(window.location.href).searchParams.get(raw.slice(URL_QUERY_SOURCE.length)) || ''
-      : raw;
-    return query;
+    if (!raw.startsWith(URL_QUERY_SOURCE)) {
+      query.query = raw;
+      return query;
+    }
+    query.query = new URL(window.location.href).searchParams.get(raw.slice(URL_QUERY_SOURCE.length)) || '';
+    return query.query || this.emptyQuery() === 'all' ? query : null;
+  }
+
+  /**
+   * @returns The list's `tether-empty-query`, or the config's `emptyQuery` without one and, with a warning, for a value
+   *   that is neither `all` nor `none`.
+   */
+  emptyQuery(): EmptyQuery {
+    const raw = get(this.root, 'empty-query');
+    if (raw === 'all' || raw === 'none') return raw;
+    if (raw !== null && !this.warnedEmptyQuery) {
+      warn(`${attr('empty-query')} ${JSON.stringify(raw)} is not all or none: using ${cfg.emptyQuery}`, this.root);
+      this.warnedEmptyQuery = true;
+    }
+    return cfg.emptyQuery;
   }
 
   /**
@@ -249,7 +283,9 @@ class ListScope {
         if (stale()) return;
         this.products = recommendations.slice(0, listLimit(this.root, recommendations.length));
       } else {
-        const page = await getProducts({ ...this.options(), after: more ? (this.pageInfo?.endCursor ?? null) : null });
+        const query = this.options();
+        const after = more ? (this.pageInfo?.endCursor ?? null) : null;
+        const page = query ? await getProducts({ ...query, after }) : noProducts();
         if (stale()) return;
         this.collection = page.collection;
         this.pageInfo = page.pageInfo;

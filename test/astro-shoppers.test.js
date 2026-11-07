@@ -336,6 +336,7 @@ test('search as you type: results while typing, arrow keys, Escape, stale answer
   assert.ok(input instanceof window.HTMLInputElement);
   /** @param {string} text */
   const type = (text) => {
+    input.focus();
     input.value = text;
     input.dispatchEvent(new window.Event('input', { bubbles: true }));
   };

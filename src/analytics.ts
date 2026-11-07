@@ -17,10 +17,10 @@ import { ANALYTICS_EVENTS, isOwnEvent, sel } from './dom.ts';
 import { Cart } from './cart.ts';
 import { scopes } from './product.ts';
 import { startShopifyAnalytics } from './analytics-shopify.ts';
+import { PAGE_TRANSITION } from './analytics-queue.ts';
 import type { Money } from './shopify-values.ts';
 import type { Product, ProductVariant } from './fragments.ts';
 import type { AnalyticsBus, EventPayload } from './analytics-shopify.ts';
-import type { ProductScope } from './product.ts';
 import type { AnalyticsEventName, TetherEvents } from './markup.ts';
 
 /** The fields of the cart's product (`fragment TetherCart`) this module reads. */
@@ -172,8 +172,10 @@ let lastLines: Map<string, CartLine> | null = null;
 let lastCart: AnalyticsCart | null = null;
 /** Product roots whose view_item was sent on this page. */
 let viewed = new WeakSet<Element>();
-/** The body the last page_viewed was for: Astro's first `astro:page-load` comes after the landing page's. */
-let viewedBody: HTMLElement | null = null;
+/** The body the last page_viewed of a page load was for: Astro's first `astro:page-load` is on the landing page's. */
+let viewedBody: HTMLElement | undefined;
+/** The body each queued `astro:page-load` came for, from the core's queue. */
+let bodies = new WeakMap<Event, HTMLElement>();
 
 /** @param name The GA4 event. */
 function send(name: string, data: Record<string, unknown>, shopifyEvent?: string, shopifyPayload?: EventPayload): void {
@@ -186,15 +188,26 @@ function send(name: string, data: Record<string, unknown>, shopifyEvent?: string
   }
 }
 
-/** The scope of the page's own product: a product root outside every list. */
-function mainProduct(): ProductScope | null {
-  const el = document.querySelector(sel('product'));
-  if (!el || el.closest(`${sel('collection')},${sel('products')},${sel('recommendations')}`)) return null;
-  return scopes.get(el) ?? null;
+/**
+ * The root of the page's own product: its first product root, when that is outside every list.
+ *
+ * @param page The page's body, or the document for the page shown now.
+ */
+function mainProductRoot(page: ParentNode): Element | null {
+  const el = page.querySelector(sel('product'));
+  return el?.closest(`${sel('collection')},${sel('products')},${sel('recommendations')}`) ? null : el;
+}
+
+/** Whether the page shown now is a product's page: its own product has mounted. */
+function isProductPage(): boolean {
+  const root = mainProductRoot(document);
+  return root !== null && scopes.has(root);
 }
 
 function onProductReady({ product, scope }: TetherEvents['product-ready']): void {
-  if (viewed.has(scope.root) || mainProduct() !== scope) return;
+  // A queued event can be from a page the visitor has left since, so the scope's own page is the one asked.
+  const page = scope.root.closest('body') ?? document;
+  if (viewed.has(scope.root) || mainProductRoot(page) !== scope.root) return;
   viewed.add(scope.root);
   const variant = scope.variant ?? product.variants.nodes[0];
   const items = [itemFromVariant(product, variant)];
@@ -284,21 +297,27 @@ function report<Name extends AnalyticsEventName>(event: CustomEvent<TetherEvents
   REPORTERS[name](event.detail);
 }
 
-function publishPageView(): void {
-  viewedBody = document.body;
+function startPageView(): void {
+  viewed = new WeakSet();
   bus?.publish('page_viewed', {});
 }
 
 /**
- * Turns one buffered event into analytics events: a Tether event from `ANALYTICS_EVENTS`, or Astro's `astro:page-load`
- * for a client-side navigation to a new body, which starts a new page view. Only events Tether created count
- * (`isOwnEvent`): a look-alike another script dispatches, whatever its detail, sends nothing.
+ * Turns one buffered event into analytics events: a Tether event from `ANALYTICS_EVENTS`; an `astro:page-load` for a
+ * body other than the last page view's (a client-side navigation), or a page transition
+ * (`PAGE_TRANSITION`), each of which starts a page view. Only events Tether created count (`isOwnEvent`): a look-alike
+ * another script dispatches, whatever its detail, sends nothing.
  */
 function handle(event: Event): void {
+  if (event.type === PAGE_TRANSITION) {
+    startPageView();
+    return;
+  }
   if (event.type === 'astro:page-load') {
-    if (viewedBody === document.body) return;
-    viewed = new WeakSet();
-    publishPageView();
+    const body = bodies.get(event);
+    if (body === viewedBody) return;
+    viewedBody = body;
+    startPageView();
     return;
   }
   ANALYTICS_EVENTS.forEach((name) => {
@@ -308,15 +327,24 @@ function handle(event: Event): void {
 
 /**
  * Called by the core with the events it buffered while this part loaded; the queue then handles events as they come.
+ *
+ * @param pageLoads The body each `astro:page-load` in the queue came for.
+ * @param landing The body of the page `init()` ran on.
  */
-export async function startAnalytics(queue: Event[]): Promise<void> {
+export async function startAnalytics(
+  queue: Event[],
+  pageLoads: WeakMap<Event, HTMLElement>,
+  landing: HTMLElement,
+): Promise<void> {
+  bodies = pageLoads;
   if (cfg.analytics?.shopify) {
-    bus = await startShopifyAnalytics(() => mainProduct() != null).catch((error: unknown) => {
+    bus = await startShopifyAnalytics(isProductPage).catch((error: unknown) => {
       reportError(error, 'shopify analytics');
       return null;
     });
   }
-  publishPageView();
+  viewedBody = landing;
+  startPageView();
   queue.splice(0).forEach(handle);
   queue.push = (...events) => {
     events.forEach(handle);

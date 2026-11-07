@@ -129,6 +129,8 @@ class SearchBox {
   readonly resultsId: string;
   /** Counts searches, so only the latest one renders. */
   searchNumber = 0;
+  /** The search the visitor closed the results during (Escape, a click outside): its answer leaves them closed. */
+  dismissedSearch = 0;
   timer: ReturnType<typeof setTimeout> | undefined = undefined;
   lastTerm = '';
   /** Results per market and term, for typing back and forth: prices and names follow the market. */
@@ -222,7 +224,9 @@ class SearchBox {
     this.root.classList.toggle('is-open', open);
     this.results.hidden = !open;
     this.input.setAttribute('aria-expanded', String(open));
-    if (!open) this.highlight(this.options(), -1);
+    if (open) return;
+    this.dismissedSearch = this.searchNumber;
+    this.highlight(this.options(), -1);
   }
 
   options() {
@@ -296,7 +300,8 @@ class SearchBox {
     const count = products.length + collections.length + queries.length;
     this.showCount(count);
     this.setState(count ? 'ready' : 'empty');
-    this.open(true);
+    // The answer can come after the visitor closed the results or left the box; focusing it again opens them.
+    if (document.activeElement === this.input && this.dismissedSearch !== this.searchNumber) this.open(true);
     emit('search', { term, products, collections, queries }, this.root);
   }
 

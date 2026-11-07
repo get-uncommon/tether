@@ -2,7 +2,7 @@
  * A product scope's clicks and changes: option and plan buttons, purchase toggles, quantity steppers, the selects and
  * add to cart. One delegated listener of each kind on the root, so cards a list re-renders need no new listeners.
  */
-import { reportError } from './config.ts';
+import { reportError, reportFailure } from './config.ts';
 import { sel, get, emit, setText, busy, isElement, isField } from './dom.ts';
 import { addButtonLabel } from './variant-render.ts';
 import type { ProductScope } from './product.ts';
@@ -23,7 +23,7 @@ function closestOwn(scope: ProductScope, target: Element, selector: string): HTM
 function onAddClick(scope: ProductScope, button: HTMLElement): void {
   const { label, original } = addButtonLabel(button);
   const addingText = get(button, 'adding-text');
-  busy(button, async () => {
+  const added = busy(button, async () => {
     if (addingText) setText(label, addingText);
     try {
       await scope.addToCart();
@@ -33,14 +33,14 @@ function onAddClick(scope: ProductScope, button: HTMLElement): void {
     } finally {
       if (addingText) setText(label, original);
     }
-  })
-    .then(() => {
+  });
+  reportFailure(
+    added.then(() => {
       // The mode-dependent labels (tether-subscribe-text, tether-soldout-text) wait for aria-busy to clear.
       scope.renderVariant();
-    })
-    .catch((error: unknown) => {
-      reportError(error, 'add to cart render');
-    });
+    }),
+    'add to cart render',
+  );
 }
 
 function onClick(scope: ProductScope, event: Event, target: Element): void {

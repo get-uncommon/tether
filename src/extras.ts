@@ -69,15 +69,19 @@ export async function applyDiscountCode(form: Element, input: HTMLInputElement |
   }
 }
 
-/** Another tab changed the cart (it is loaded again here) or the visitor's market (this tab follows it). */
+/**
+ * Another tab changed the cart (it is loaded again here) or the visitor's market (this tab follows it), or cleared the
+ * storage (`key` is `null`), which the cart is loaded again for.
+ */
 export function onStorage(event: StorageEvent): void {
-  if (event.key === cfg.storageKey || event.key === `${cfg.storageKey}:seen`) {
+  const { key } = event;
+  if (key === null || key === cfg.storageKey || key === `${cfg.storageKey}:seen`) {
     Cart.init().catch((error: unknown) => {
       reportError(error, 'cart from another tab');
     });
     return;
   }
-  if (event.key !== marketStorageKey() || !event.newValue) return;
+  if (key !== marketStorageKey() || !event.newValue) return;
   // A value that isn't a market was written under the key by something else.
   const market = parseSavedMarket(event.newValue);
   if (!market) return;

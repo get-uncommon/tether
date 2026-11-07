@@ -22,12 +22,23 @@ Object.assign(globalThis, {
 const calls = [];
 let failNext = false;
 /**
+ * Settles before the next answer is sent, when a test holds it back.
+ *
+ * @type {Promise<void> | null}
+ */
+let holdNext = null;
+/**
  * @param {RequestInfo | URL} _url
  * @param {RequestInit} [init]
  */
 globalThis.fetch = async (_url, init) => {
   const { query, variables } = graphqlRequest(init);
   calls.push({ op: operationName(query), variables });
+  if (holdNext) {
+    const held = holdNext;
+    holdNext = null;
+    await held;
+  }
   if (failNext) {
     failNext = false;
     return jsonResponse({}, 500);
@@ -103,6 +114,7 @@ const markup = `
  * @param {string} value
  */
 const type = (input, value) => {
+  input.focus();
   input.value = value;
   input.dispatchEvent(new window.Event('input', { bubbles: true }));
 };
@@ -326,4 +338,40 @@ test('a click after a page swap stops a box no mount has pruned yet', () => {
   document.body.innerHTML = '<p>A page without search</p>';
   find('p').click();
   assert.deepEqual(stopped(signals), [true]);
+});
+
+test('results that arrive after Escape, a click outside or leaving the box stay closed until the box has focus', async () => {
+  document.body.innerHTML = `${markup}<p id="elsewhere">Elsewhere</p>`;
+  mountSearch(document);
+  const root = find('[tether-search]');
+  const input = root.querySelector('input');
+  assert.ok(input);
+  const dismissals = {
+    escape: () => input.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true })),
+    'click outside': () => {
+      find('#elsewhere').click();
+    },
+    'leaving the box': () => {
+      input.blur();
+    },
+  };
+  for (const [name, dismiss] of Object.entries(dismissals)) {
+    /** @type {() => void} */
+    let answer = () => {};
+    holdNext = new Promise((resolve) => {
+      answer = resolve;
+    });
+    const sent = calls.length;
+    root.removeAttribute('tether-search-state');
+    type(input, `latte ${name}`);
+    await waitFor(() => calls.length > sent, `the search before ${name}`);
+    dismiss();
+    answer();
+    await waitFor(() => root.getAttribute('tether-search-state') === 'ready', `the results after ${name}`);
+    assert.equal(root.classList.contains('is-open'), false, name);
+    assert.equal(input.getAttribute('aria-expanded'), 'false', name);
+    assert.equal(find('[tether-search-results]', root).hidden, true, name);
+  }
+  input.focus();
+  assert.equal(input.getAttribute('aria-expanded'), 'true', 'focus shows the results that arrived');
 });

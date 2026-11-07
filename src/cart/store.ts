@@ -133,7 +133,8 @@ export const currentWarnings = (): readonly CartWarning[] => warnings;
 
 const statusOf = (cart: ShopifyCart | null): CartStatus => (cart ? { kind: 'ready', cart } : { kind: 'empty' });
 
-const seenKey = () => `${cfg.storageKey}:seen`;
+/** The key of the cart's count on the last page (`<time>|<count>`). */
+export const seenKey = (): string => `${cfg.storageKey}:seen`;
 
 /**
  * The id of the visitor's cart, kept across pages. A stored value that isn't a cart id (written by another script,

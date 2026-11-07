@@ -3,7 +3,7 @@
  * codes and the `[tether-cart-lines]` repeaters. It renders what it is given (a `CartView`) and holds no state, so
  * every render shows the cart as the store has it at that moment.
  */
-import { cfg, reportError } from '../config.ts';
+import { cfg, reportFailure } from '../config.ts';
 import { getProduct } from '../loader.ts';
 import { allPlans } from '../selling-plans.ts';
 import { isSelect } from '../product-render.ts';
@@ -173,13 +173,12 @@ function renderLine(node: HTMLElement, line: ShopifyCartLine, view: CartView) {
   renderLineState(node, line, view);
   const planSelects = qsa(node, sel('line-plan')).filter(isSelect);
   planSelects.forEach((select) => {
-    getProduct(variant.product.handle)
-      .then((product) => {
+    reportFailure(
+      getProduct(variant.product.handle).then((product) => {
         fillPlanSelect(select, line, product);
-      })
-      .catch((error: unknown) => {
-        reportError(error, 'line plan options');
-      });
+      }),
+      'line plan options',
+    );
   });
 }
 
@@ -242,6 +241,8 @@ export function renderCart(view: CartView): void {
   });
   renderConditions(cart, view);
   qsa(document, sel('cart-warning')).forEach((el) => {
+    // A live region, so screen readers announce Shopify's message; the site's own role stays.
+    if (!el.hasAttribute('role')) el.setAttribute('role', 'status');
     setTextTracked(el, [...new Set(view.warnings.map((warning) => warning.message))].join(' '));
   });
   renderFields(cart);
