@@ -12,13 +12,9 @@ type DiscountCodes = string[] | string | ((current: string[]) => string[]);
  * replaced are skipped.
  */
 declare function changeQuantity(lineId: string, delta: number): Promise<ShopifyCart | null>;
-/**
- * Loads the saved cart. A cart Shopify no longer has is forgotten; one it can't be asked about (the network, the
- * token) is kept, because it is probably fine.
- */
-declare function init(): Promise<ShopifyCart | null>;
 export declare const Cart: {
-    init: typeof init;
+    /** Loads the saved cart in the queue, so a change Shopify answers meanwhile isn't replaced by an older answer. */
+    init: () => Promise<ShopifyCart | null>;
     /** The saved cart's id. */
     id: typeof savedCartId;
     readonly status: CartStatus;

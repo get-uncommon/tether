@@ -194,3 +194,9 @@ export declare function warn(...args: unknown[]): void;
  * @param context What failed, e.g. `product coffee-box`.
  */
 export declare function reportError(error: unknown, context: string): void;
+/**
+ * Calls one of the site's hooks. A bug in it is reported under `name`, and `fallback` answers instead, so the site's
+ * code never fails the render, or the cart change Shopify already applied, that called it.
+ */
+export declare function callHook(name: string, hook: () => unknown): void;
+export declare function callHook<T>(name: string, hook: () => T, fallback: () => T): T;

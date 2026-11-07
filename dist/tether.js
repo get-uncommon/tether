@@ -507,6 +507,14 @@
       warn("onError threw", hookError);
     }
   }
+  function callHook(name, hook2, fallback) {
+    try {
+      return hook2();
+    } catch (error) {
+      reportError(error, name);
+      return fallback?.();
+    }
+  }
 
   // server/src/shared/error-message.ts
   function messageOf(error) {
@@ -1035,12 +1043,13 @@
       done();
       return;
     }
-    try {
-      onLeave(node, done);
-    } catch (error) {
-      reportError(error, "repeater onLeave");
-      done();
-    }
+    callHook(
+      "repeater onLeave",
+      () => {
+        onLeave(node, done);
+      },
+      done
+    );
   }
   function insertFresh(container, wanted, fresh, onEnter) {
     wanted.forEach((node, index) => {
@@ -1049,11 +1058,9 @@
       if (previous?.parentNode === container) previous.after(node);
       else container.prepend(node);
       if (!onEnter) return;
-      try {
+      callHook("repeater onEnter", () => {
         onEnter(node);
-      } catch (error) {
-        reportError(error, "repeater onEnter");
-      }
+      });
     });
   }
   function repeatKeyed(container, items, keyOf, render2, { onEnter, onLeave } = {}) {
@@ -1125,8 +1132,9 @@
   }
   function formatMoney2(money) {
     if (!money) return "";
-    if (cfg.formatMoney) return cfg.formatMoney(money, cfg.locale);
-    return formatMoney(money, cfg.locale);
+    const { formatMoney: siteFormat, locale } = cfg;
+    const builtIn = () => formatMoney(money, locale);
+    return siteFormat ? callHook("formatMoney", () => siteFormat(money, locale), builtIn) : builtIn();
   }
   function formatDate(iso) {
     if (!iso) return "";
@@ -1146,13 +1154,8 @@
   function setTextTracked(el, value) {
     const before = readText(el);
     setText(el, value);
-    if (before !== readText(el) && el.hasAttribute(SEEN) && cfg.onValueChange) {
-      try {
-        cfg.onValueChange(el, before);
-      } catch (error) {
-        reportError(error, "onValueChange");
-      }
-    }
+    if (before !== readText(el) && el.hasAttribute(SEEN))
+      callHook("onValueChange", () => cfg.onValueChange?.(el, before));
     el.setAttribute(SEEN, "1");
   }
   function reveal(el) {
@@ -1238,12 +1241,10 @@
   function notifyLayoutChanged(reason) {
     clearTimeout(layoutTimer);
     layoutTimer = setTimeout(() => {
-      try {
+      callHook("layout-changed", () => {
         if (cfg.onLayoutChange) cfg.onLayoutChange(reason);
         else refreshScrollTrigger();
-      } catch (error) {
-        reportError(error, "layout-changed");
-      }
+      });
       emit("layout-changed", { reason });
     }, LAYOUT_DEBOUNCE_MS);
   }
@@ -1530,13 +1531,6 @@
   var announcedOpen = false;
   var returnFocus = null;
   var classWatcher = null;
-  function callHook(hook2, drawers2, name) {
-    try {
-      hook2?.(drawers2);
-    } catch (error) {
-      reportError(error, name);
-    }
-  }
   var isFocusable = (el) => el !== null && "focus" in el;
   var focusables = (drawer) => qsa(drawer, FOCUSABLE).filter((el) => el.offsetParent !== null || el === document.activeElement);
   var drawers = () => qsa(document, sel("cart-drawer"));
@@ -1588,7 +1582,7 @@
         focusInto(first);
       }, FOCUS_AFTER_OPEN_MS);
     }
-    callHook(cfg.onCartOpen, opened, "onCartOpen");
+    callHook("onCartOpen", () => cfg.onCartOpen?.(opened));
     emit("cart-toggled", { open: true });
   }
   function announceClosed(all, hadFocus) {
@@ -1596,7 +1590,7 @@
     syncDrawerAria();
     if (hadFocus && returnFocus?.isConnected) returnFocus.focus({ preventScroll: true });
     returnFocus = null;
-    callHook(cfg.onCartClose, all, "onCartClose");
+    callHook("onCartClose", () => cfg.onCartClose?.(all));
     emit("cart-toggled", { open: false });
   }
   function openCart() {
@@ -1604,7 +1598,7 @@
     const all = drawers();
     const opened = all.filter((drawer) => !isManual(drawer));
     if (all.length && !opened.length) return;
-    openWithoutDrawer = true;
+    openWithoutDrawer = !all.length;
     opened.forEach((drawer) => {
       drawer.classList.add(cfg.cartDrawerOpenClass);
     });
@@ -2151,6 +2145,22 @@
   // server/src/shared/cart-id.ts
   var CART_ID = /^gid:\/\/shopify\/Cart\/[\w-]+(\?key=[\w-]+)?$/;
 
+  // server/src/shared/serial.ts
+  function createSerialQueue() {
+    let tail = Promise.resolve();
+    let pending2 = 0;
+    const settled = () => {
+      pending2--;
+    };
+    const run = (task) => {
+      pending2++;
+      const result = tail.then(task);
+      tail = result.then(settled, settled);
+      return result;
+    };
+    return Object.assign(run, { idle: () => !pending2 });
+  }
+
   // src/cart/store.ts
   var status = { kind: "unknown" };
   var warnings = [];
@@ -2216,19 +2226,15 @@
     if (count !== null) showSavedCount(count);
   }
   function setWarnings(notes) {
-    warnings = notes.filter((note, index) => notes.findIndex((other) => other.message === note.message) === index).map((note) => ({ ...note, message: cfg.warningText?.(note) || note.message }));
+    const siteText = (note) => callHook(
+      "warningText",
+      () => cfg.warningText?.(note),
+      () => null
+    );
+    warnings = notes.filter((note, index) => notes.findIndex((other) => other.message === note.message) === index).map((note) => ({ ...note, message: siteText(note) || note.message }));
     if (warnings.length) emit("cart-warning", { warnings });
   }
-  var waitOnly = () => void 0;
-  function serial() {
-    let previous = Promise.resolve();
-    return (task) => {
-      const run = previous.then(task);
-      previous = run.then(waitOnly, waitOnly);
-      return run;
-    };
-  }
-  var runInOrder = serial();
+  var runInOrder = createSerialQueue();
   function enqueue(task) {
     return runInOrder(task).then(
       (value) => {
@@ -2408,7 +2414,7 @@
     return cart && !cart.totalQuantity ? null : savedCartId();
   }
   async function checkout(target = cfg.checkoutTarget) {
-    if (!cartToCheckOut()) return null;
+    if (runInOrder.idle() && !cartToCheckOut()) return null;
     const tab = target === "_blank" ? window.open("", "_blank") : null;
     if (tab) detachOpenerIfAllowed(tab);
     try {
@@ -2487,7 +2493,7 @@
     toAttributes(attributes).forEach((attribute) => merged.set(attribute.key, attribute.value));
     return [...merged].filter(([, value]) => value !== "").map(([key, value]) => ({ key, value }));
   }
-  async function init() {
+  async function load() {
     const id = savedCartId();
     if (!id) {
       settleLoad({ kind: "loaded", cart: null });
@@ -2506,7 +2512,8 @@
     return currentCart();
   }
   var Cart = {
-    init,
+    /** Loads the saved cart in the queue, so a change Shopify answers meanwhile isn't replaced by an older answer. */
+    init: () => runInOrder(load),
     /** The saved cart's id. */
     id: savedCartId,
     get status() {
@@ -3590,7 +3597,7 @@
   }
 
   // src/part-integrity.ts
-  var PART_INTEGRITY = { "tether.diagnose.js": "sha384-CqtXzvWbLD8aIgyTM43+KMXEFA7r7lhG+0XyQAw3Sp7B5qrzPsxlA9QfzBjoPqZz", "tether.markets.js": "sha384-WjowbRhM7OzzZOrCPZWSZqN7EjIiiR7u9cGmdI+9kgFVgmEQS8lVGWjgx+8jILOf", "tether.search.js": "sha384-fLQ7eKc5XOv0Cg2FfrZyeFAkRR4wDMjUWFpwvKrfPRnT2NvTuhKg80+KVu8Qce/G", "tether.lists.js": "sha384-l2uyr96zTetjo2WWhGsBamd1ZYkC3OB3G3+OScLEvxdok0c8k9GXLAh1WRALUr4S", "tether.extras.js": "sha384-qx7paZ/rjwtn1Yy9TgszulmBuJsIQ9y4eZ590AArnZ+IDB8IzwJ5dNOFJ+yMHPdb", "tether.account.js": "sha384-XUPSX/7R9chq2KlQ1RzLiV7jYcWGe7o5tj4rLZMnf8MEa2aDOOCW2269Bj/ZkbmX", "tether.account-pages.js": "sha384-ND3kIaRypgnHG3QMDb8CqDxt7fuukDCdHsIAHoOUUsz3+FjvBqXgRDV4Mjp6x8jr", "tether.analytics.js": "sha384-jnLesn/+edWBSPuXLj7VX1kSAGwEqtb0VbHjuU//ofqgxkndHlDFsS8Bc8htlGt8" };
+  var PART_INTEGRITY = { "tether.diagnose.js": "sha384-CqtXzvWbLD8aIgyTM43+KMXEFA7r7lhG+0XyQAw3Sp7B5qrzPsxlA9QfzBjoPqZz", "tether.markets.js": "sha384-WjowbRhM7OzzZOrCPZWSZqN7EjIiiR7u9cGmdI+9kgFVgmEQS8lVGWjgx+8jILOf", "tether.search.js": "sha384-fLQ7eKc5XOv0Cg2FfrZyeFAkRR4wDMjUWFpwvKrfPRnT2NvTuhKg80+KVu8Qce/G", "tether.lists.js": "sha384-l2uyr96zTetjo2WWhGsBamd1ZYkC3OB3G3+OScLEvxdok0c8k9GXLAh1WRALUr4S", "tether.extras.js": "sha384-qx7paZ/rjwtn1Yy9TgszulmBuJsIQ9y4eZ590AArnZ+IDB8IzwJ5dNOFJ+yMHPdb", "tether.account.js": "sha384-82dpAxK4rPlXuNxSk/dvaItjRQf+Z79EJnUqXtT9D8HjpF9XwoTIUxDViiV1dIhz", "tether.account-pages.js": "sha384-ND3kIaRypgnHG3QMDb8CqDxt7fuukDCdHsIAHoOUUsz3+FjvBqXgRDV4Mjp6x8jr", "tether.analytics.js": "sha384-jnLesn/+edWBSPuXLj7VX1kSAGwEqtb0VbHjuU//ofqgxkndHlDFsS8Bc8htlGt8" };
 
   // src/part-registry.ts
   function isTetherInternals(value) {
@@ -3598,7 +3605,7 @@
   }
 
   // src/version.ts
-  var VERSION = "0.9.6";
+  var VERSION = "0.9.7";
 
   // src/lazy-iife.ts
   var coreModules = {
@@ -3757,7 +3764,7 @@
   }
 
   // src/analytics-queue.ts
-  function queueAnalyticsEvents(load) {
+  function queueAnalyticsEvents(load2) {
     const queue = [];
     const listening = new window.AbortController();
     const options = { signal: listening.signal };
@@ -3765,7 +3772,7 @@
       document.addEventListener(`${cfg.prefix}:${name}`, (event) => queue.push(event), options);
     });
     document.addEventListener("astro:page-load", (event) => queue.push(event), options);
-    load().then((part) => part.startAnalytics(queue)).catch((error) => {
+    load2().then((part) => part.startAnalytics(queue)).catch((error) => {
       listening.abort();
       queue.length = 0;
       reportError(error, "analytics");
@@ -4166,7 +4173,7 @@
       return cart;
     }
   }
-  function init2(overrides = {}) {
+  function init(overrides = {}) {
     if (initPromise && !Object.keys(overrides).length) return initPromise;
     configure({ ...pageConfig(), ...overrides });
     if (!isConfigured()) {
@@ -4220,7 +4227,7 @@
   }
   var publicApi = {
     VERSION,
-    init: init2,
+    init,
     mount,
     unmount,
     /** The live config, read-only. */
@@ -4261,7 +4268,7 @@
     const config = pageGlobal("TETHER_CONFIG");
     if (!config || field(config, "autoMount") === false || pageGlobal("TETHER_INTEGRATION")) return;
     const start = () => {
-      init2().then(() => mount(document)).catch((error) => {
+      init().then(() => mount(document)).catch((error) => {
         reportError(error, "init");
       });
     };

@@ -171,12 +171,12 @@ export declare function settleLoad(outcome: {
 }): void;
 /** Until the saved cart has loaded, the counts show the count it had on the last page instead of the page's 0. */
 export declare function showLastKnownCount(): void;
-/** Sets Shopify's notes on the last change: each message once, in the site's words (`warningText`). */
+/**
+ * Sets Shopify's notes on the last change: each message once, in the site's words (`warningText`), else in Shopify's.
+ */
 export declare function setWarnings(notes: readonly CartWarning[]): void;
-/** @returns A runner that starts each task once the one before has settled, whether it succeeded or failed. */
-export declare function serial(): <T>(task: () => Promise<T>) => Promise<T>;
 /** The one queue every cart change runs through; checkout waits for the changes in it. */
-export declare const runInOrder: <T>(task: () => Promise<T>) => Promise<T>;
+export declare const runInOrder: import("../../server/src/shared/serial.js").SerialQueue;
 /**
  * Runs a cart change after the ones before it, so quick clicks never race. A failure sets the `error` status (shown by
  * `tether-show="cart-error"` until the next change succeeds), emits `tether:cart-error` and rejects.
