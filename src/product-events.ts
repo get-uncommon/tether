@@ -3,14 +3,12 @@
  * add to cart. One delegated listener of each kind on the root, so cards a list re-renders need no new listeners.
  */
 import { reportError } from './config.ts';
-import { sel, get, emit, setText, busy, isField } from './dom.ts';
+import { sel, get, emit, setText, busy, isElement, isField } from './dom.ts';
 import { addButtonLabel } from './variant-render.ts';
 import type { ProductScope } from './product.ts';
 import type { Purchase } from './product-state.ts';
 
 const productSelector = () => sel('product');
-
-const isElement = (target: EventTarget | null): target is Element => target instanceof window.Element;
 
 /**
  * @returns The nearest `selector` around `target` that belongs to the scope, not to a nested one. Typed as an HTML

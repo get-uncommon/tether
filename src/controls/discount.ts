@@ -6,10 +6,8 @@
  */
 import { reportError } from '../config.ts';
 import { Cart } from '../cart.ts';
-import { attr, sel, busy } from '../dom.ts';
+import { attr, sel, busy, isElement } from '../dom.ts';
 import { loadPart } from '../lazy.ts';
-
-const isElement = (target: EventTarget | null): target is Element => target instanceof window.Element;
 
 function codeInputOf(form: Element): HTMLInputElement | null {
   const input = form.querySelector(sel('discount-input')) ?? form.querySelector('input');

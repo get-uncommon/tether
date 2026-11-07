@@ -22,10 +22,11 @@ import {
   busy,
   show,
   integerAttribute,
+  isElement,
 } from './dom.ts';
 import { collectionFields } from './shopify-fields.ts';
 import { normalizeProductKey, primeProduct, withProductFragment } from './loader.ts';
-import { isCollectionAnswer, isRecommendationsAnswer, isSearchAnswer } from './product-shape.ts';
+import { isCollectionAnswer, isRecommendationsAnswer, isSearchAnswer } from './product-answers.ts';
 import { setScopeStatus, isNotFound, resolveProductKey } from './status.ts';
 import { listSelector } from './collection.ts';
 import type { Product } from './fragments.ts';
@@ -144,8 +145,6 @@ export async function getRecommendations(
   list.forEach(primeProduct);
   return list;
 }
-
-const isElement = (target: EventTarget | null): target is Element => target instanceof window.Element;
 
 /** @returns The list's `tether-limit`: how many products it shows, `fallback` without one. */
 const listLimit = (root: Element, fallback: number): number =>
