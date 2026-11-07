@@ -11,9 +11,9 @@ import { basename, dirname, join } from 'node:path';
  * Writes a new folder next to `out`, then puts it in `out`'s place once `write` has succeeded: the old folder is
  * renamed aside, the new one renamed in, and only then is the old one removed. When the second rename fails, the old
  * folder is renamed back. The new and the old folder are `out`'s siblings, `.<name>-building-XXXXXX` and
- * `.<name>-building-XXXXXX-previous`: on the same volume, so renaming them is atomic, and at `out`'s depth, so the
- * relative paths a source map holds stay right. An interrupted run leaves them behind, which the repository's ignore
- * files cover for dist/ and .test-dist/.
+ * `.<name>-building-XXXXXX-previous`, with `<name>` the folder's name less a leading dot: on the same volume, so
+ * renaming them is atomic, and at `out`'s depth, so the relative paths a source map holds stay right. An interrupted
+ * run leaves them behind, which the repository's ignore files cover for dist/ and .test-dist/.
  *
  * @param write Writes the new folder's files into the empty folder it is given.
  * @param move Renames a folder: `rename`, or a stand-in in the tests.
@@ -26,7 +26,7 @@ export async function replaceFolder(
   move: (from: string, to: string) => Promise<void> = rename,
 ): Promise<void> {
   await mkdir(dirname(out), { recursive: true });
-  const next = await mkdtemp(join(dirname(out), `.${basename(out)}-building-`));
+  const next = await mkdtemp(join(dirname(out), `.${basename(out).replace(/^\./, '')}-building-`));
   const previous = `${next}-previous`;
   try {
     await write(next);
