@@ -7,7 +7,7 @@ import { TetherError } from '../client.ts';
 import { isHttpsUrl } from '../shopify-values.ts';
 import { emit } from '../dom.ts';
 import { fetchCheckoutUrl } from './mutations.ts';
-import { currentCart, savedCartId } from './store.ts';
+import { currentCart, runInOrder, savedCartId } from './store.ts';
 import type { CheckoutTarget } from '../config.ts';
 
 type CheckoutUrlAnswer = { kind: 'url'; url: string | null } | { kind: 'failed'; error: unknown };
@@ -74,20 +74,32 @@ function detachOpenerIfAllowed(tab: Window) {
   }
 }
 
+/** @returns The saved cart's id, `null` with nothing to check out. */
+function cartToCheckOut(): string | null {
+  const cart = currentCart();
+  return cart && !cart.totalQuantity ? null : savedCartId();
+}
+
 /**
- * Goes to Shopify's checkout. With `_blank` the tab opens inside the click (Safari blocks `window.open` after an
- * await) and gets its URL once there is one.
+ * Goes to Shopify's checkout, with the cart as the changes already queued leave it. With `_blank` the tab opens inside
+ * the click (Safari blocks `window.open` after an await) and gets its URL once there is one.
  *
  * @returns The checkout URL, `null` with nothing to check out or after a reported failure.
  */
 export async function checkout(target: CheckoutTarget = cfg.checkoutTarget): Promise<string | null> {
-  const cartId = savedCartId();
-  const cart = currentCart();
-  if (!cartId || (cart && !cart.totalQuantity)) return null;
+  if (!cartToCheckOut()) return null;
   const tab = target === '_blank' ? window.open('', '_blank') : null;
   if (tab) detachOpenerIfAllowed(tab);
   try {
-    const url = await checkoutUrl(cartId);
+    // In the queue, a change still on its way reaches Shopify first, and none starts while the visitor leaves.
+    const url = await runInOrder(async () => {
+      const cartId = cartToCheckOut();
+      return cartId && checkoutUrl(cartId);
+    });
+    if (!url) {
+      tab?.close();
+      return null;
+    }
     if (!isHttpsUrl(url)) throw new TetherError('The checkout URL is not https: not opened');
     emit('checkout', { url, cart: currentCart() });
     if (tab && !tab.closed) tab.location.href = url;

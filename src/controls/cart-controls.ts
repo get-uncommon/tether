@@ -5,7 +5,7 @@
  */
 import { cfg, reportError } from '../config.ts';
 import { Cart, trapFocus } from '../cart.ts';
-import { sel, busy } from '../dom.ts';
+import { sel, busy, INTEGER_TEXT } from '../dom.ts';
 
 /** @returns The attribute a rendered cart line carries its line id in. */
 const lineKeyAttribute = (): string => `data-${cfg.prefix}-key`;
@@ -88,12 +88,26 @@ function showLineBusy(line: Element, change: Promise<unknown>, context: string):
   reportFailure(change, context);
 }
 
+/**
+ * A typed quantity; 0 or less removes the line. A field left empty or without a whole number, as while the visitor
+ * replaces the number, gets the line's quantity back and changes nothing.
+ */
+function onQuantityInput(input: HTMLInputElement, { line, id }: { line: Element; id: string }): void {
+  const typed = input.value.trim();
+  if (INTEGER_TEXT.test(typed)) {
+    showLineBusy(line, Cart.updateLine(id, Number(typed)), 'cart line');
+    return;
+  }
+  const current = Cart.lines.find((candidate) => candidate.id === id);
+  if (current) input.value = String(Cart.quantityOf(current));
+}
+
 function onChange(event: Event): void {
   const { target } = event;
   if (!isElement(target)) return;
   const found = lineOf(target);
   if (found && target instanceof window.HTMLInputElement && target.matches(sel('line', 'quantity'))) {
-    showLineBusy(found.line, Cart.updateLine(found.id, parseInt(target.value, 10) || 0), 'cart line');
+    onQuantityInput(target, found);
   } else if (found && target instanceof window.HTMLSelectElement && target.matches(sel('line-plan'))) {
     showLineBusy(found.line, Cart.updateLine(found.id, { sellingPlanId: target.value || null }), 'cart line plan');
   } else if (hasValue(target) && target.matches(sel('cart-note'))) {

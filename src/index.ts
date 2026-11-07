@@ -15,8 +15,9 @@ import { listSelector, mountedList } from './collection.ts';
 import { getProduct, clearProductCache, primeProduct, normalizeProductKey } from './loader.ts';
 import * as plans from './selling-plans.ts';
 import { resolveProductKey } from './status.ts';
-import { sel, emit, isOwnEvent, ANALYTICS_EVENTS, formatMoney, imageUrl, pageGlobal } from './dom.ts';
+import { sel, emit, isOwnEvent, formatMoney, imageUrl, pageGlobal } from './dom.ts';
 import { loadPart, coreModules } from './lazy.ts';
+import { queueAnalyticsEvents } from './analytics-queue.ts';
 import { VERSION } from './version.ts';
 import {
   mountedLists,
@@ -235,21 +236,6 @@ function bindControls() {
   bindNavigation({ ready: () => initPromise ?? Promise.resolve(null), mount, unmount });
 }
 
-/** Buffers Tether's events until the analytics part has loaded, so none are missed. */
-function startAnalyticsQueue() {
-  const queue: Event[] = [];
-  analyticsQueue = queue;
-  ANALYTICS_EVENTS.forEach((name) => {
-    document.addEventListener(`${cfg.prefix}:${name}`, (event) => queue.push(event));
-  });
-  document.addEventListener('astro:page-load', (event) => queue.push(event));
-  loadPart('analytics')
-    .then((part) => part.startAnalytics(queue))
-    .catch((error: unknown) => {
-      reportError(error, 'analytics');
-    });
-}
-
 /**
  * A saved cart from another market moves to this one, so its prices match the page's.
  */
@@ -282,7 +268,7 @@ export function init(overrides: TetherOptions = {}): Promise<Tether | null> {
   forgetBrowserModeTokens();
   bindControls();
   if (cfg.observe) startObserver();
-  if (cfg.analytics && !analyticsQueue) startAnalyticsQueue();
+  if (cfg.analytics) analyticsQueue ??= queueAnalyticsEvents(() => loadPart('analytics'));
   initPromise = applyStartMarket(overrides)
     .then(() => Cart.init())
     .then(cartInPageMarket)

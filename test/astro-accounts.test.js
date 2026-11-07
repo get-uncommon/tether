@@ -67,6 +67,25 @@ const TEE_ORDER = {
   },
 };
 
+test('analytics: when the part fails to load, the queued events are dropped and no more are queued', async () => {
+  const { queueAnalyticsEvents } = await import('../src/analytics-queue.ts');
+  /** @type {(error: Error) => void} */
+  let failLoad = () => {};
+  const queue = queueAnalyticsEvents(
+    () =>
+      new Promise((_resolve, reject) => {
+        failLoad = reject;
+      }),
+  );
+  document.dispatchEvent(new window.CustomEvent('tether:cart-updated', { detail: { cart: null } }));
+  document.dispatchEvent(new window.Event('astro:page-load'));
+  assert.equal(queue.length, 2, 'queued while the part loads');
+  failLoad(new Error('blocked by the page'));
+  await waitFor(() => queue.length === 0, 'the queue to be emptied');
+  document.dispatchEvent(new window.CustomEvent('tether:product-ready', { detail: {} }));
+  assert.deepEqual(queue, []);
+});
+
 test('customer accounts: no token in the browser, the Worker does the work', async () => {
   const account = await import('../src/account.ts');
   /** @type {string[]} */

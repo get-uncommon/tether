@@ -222,6 +222,12 @@ for (const { name, product: item, server: options, browser, expected } of CASES)
         );
         const unavailable = initial.isUnavailable(option.name, value);
         assert.equal(button.classList.contains('is-unavailable'), unavailable, `${value} unavailable`);
+        assert.equal(
+          button.getAttribute('aria-disabled'),
+          String(unavailable),
+          `${value} unavailable to a screen reader`,
+        );
+        assert.equal(button.getAttribute('aria-pressed'), String(initial.selected[option.name] === value));
         assert.equal(initial.unavailable[option.name]?.includes(value), unavailable, `${value} in unavailable`);
       }
     }
@@ -235,6 +241,45 @@ for (const { name, product: item, server: options, browser, expected } of CASES)
     }
   });
 }
+
+test('option elements get a chosen and unavailable state their role allows; role-less ones are buttons', async () => {
+  const { setSelected, setUnavailable } = await import('../src/dom.ts');
+  document.body.innerHTML = `<button id="button"></button><div id="role-button" role="button"></div>
+    <a id="link" href="?size=1"></a><div id="plain"></div><input id="radio" type="radio">
+    <div id="role-radio" role="radio"></div><div id="role-option" role="option"></div>
+    <label id="label"><input type="radio"></label><div id="listitem" role="listitem"></div>`;
+  for (const el of findAll('body > *')) {
+    setSelected(el, true);
+    setUnavailable(el, true);
+  }
+  /** @param {string} id */
+  const aria = (id) =>
+    Object.fromEntries(
+      [...find(`#${id}`).attributes]
+        .filter(({ name }) => name === 'role' || name.startsWith('aria-'))
+        .map(({ name, value }) => [name, value]),
+    );
+  const pressed = { 'aria-pressed': 'true', 'aria-disabled': 'true' };
+  assert.deepEqual(aria('button'), pressed, 'a native button keeps its own role');
+  assert.deepEqual(aria('role-button'), { role: 'button', ...pressed });
+  assert.deepEqual(aria('link'), { role: 'button', ...pressed }, 'a link option (a Webflow button) is a button');
+  assert.equal(find('#link').getAttribute('href'), '?size=1');
+  assert.deepEqual(aria('plain'), { role: 'button', ...pressed });
+  assert.deepEqual(aria('radio'), { 'aria-disabled': 'true' }, 'a radio says it with checked');
+  assert.equal(/** @type {HTMLInputElement} */ (find('#radio')).checked, true);
+  assert.deepEqual(aria('role-radio'), { role: 'radio', 'aria-checked': 'true', 'aria-disabled': 'true' });
+  assert.deepEqual(aria('role-option'), { role: 'option', 'aria-selected': 'true', 'aria-disabled': 'true' });
+  assert.deepEqual(aria('label'), {}, 'a label takes no state: its radio has it');
+  const inner = /** @type {HTMLInputElement} */ (find('#label input'));
+  assert.equal(inner.checked, true);
+  assert.equal(inner.getAttribute('aria-disabled'), 'true');
+  assert.deepEqual(aria('listitem'), { role: 'listitem' }, 'a role that takes no chosen state gets none');
+  for (const el of findAll('body > *'))
+    assert.ok(el.classList.contains('is-selected') && el.classList.contains('is-unavailable'));
+  setSelected(find('#link'), false);
+  setUnavailable(find('#link'), false);
+  assert.deepEqual(aria('link'), { role: 'button', 'aria-pressed': 'false', 'aria-disabled': 'false' });
+});
 
 test('initialState() keeps its shape: plain data plus isUnavailable()', () => {
   const initial = server.initialState(product);

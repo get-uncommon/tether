@@ -50,6 +50,8 @@ These are compatibility promises:
 
 A refactor keeps all of them. A change to one is a behaviour change, with a CHANGELOG line.
 
+CHANGELOG lines go under `## Unreleased`, the first section of `CHANGELOG.md`, whatever the next version turns out to be. A release turns those notes into its `## X.Y.Z (date)` section and leaves an empty `## Unreleased` above it, and a released section never changes again: `test/changelog.test.js` compares each one with its tag's copy. After merging a release into a branch, check that the branch's new lines are still under `## Unreleased`.
+
 ## Principles
 
 - **Simplicity first.** No single-use abstraction, no configurability nobody asked for, no error handling for impossible cases.

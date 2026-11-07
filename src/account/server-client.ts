@@ -5,7 +5,7 @@
  * not kept, and only pages with account markup load the part.
  */
 import { cfg } from '../config.ts';
-import { TetherError } from '../client.ts';
+import { TetherError, withTimeout } from '../client.ts';
 import { Cart } from '../cart.ts';
 import { emit } from '../dom.ts';
 import { isRecord, textOrNull } from '../../server/src/shared/json.ts';
@@ -48,10 +48,34 @@ function setLoginHint(loggedIn: boolean): void {
   else removeStored(hintKey());
 }
 
-/** @throws {TetherError} `NETWORK` when the request fails before an answer. */
-async function fetchFromWorker(url: string, init: RequestInit): Promise<Response> {
+/** An error page that isn't JSON reads as an empty answer: the response's status then says what went wrong. */
+async function readJsonObjectOrEmpty(response: Response): Promise<Record<string, unknown>> {
+  let json: unknown;
   try {
-    return await fetch(url, init);
+    json = await response.json();
+  } catch (error) {
+    // Any other error is the connection failing, or the time limit aborting, while the body streams in.
+    if (error instanceof SyntaxError) return {};
+    throw error;
+  }
+  return isRecord(json) ? json : {};
+}
+
+/**
+ * The Worker's response and its JSON body, under `requestTimeout` like a Storefront request: a Worker that stalls
+ * would otherwise hold the Checkout button busy for as long as the browser keeps the connection open.
+ *
+ * @throws {TetherError} `NETWORK` when the request or its body fails, or the whole answer takes too long.
+ */
+async function fetchFromWorker(
+  url: string,
+  init: RequestInit,
+): Promise<{ response: Response; data: Record<string, unknown> }> {
+  try {
+    return await withTimeout(cfg.requestTimeout, async (signal) => {
+      const response = await fetch(url, { ...init, signal });
+      return { response, data: await readJsonObjectOrEmpty(response) };
+    });
   } catch (error) {
     throw new TetherError(`Network error: ${messageOf(error)}`, {
       code: 'NETWORK',
@@ -59,31 +83,20 @@ async function fetchFromWorker(url: string, init: RequestInit): Promise<Response
   }
 }
 
-/** An error page that isn't JSON reads as an empty answer: the response's status then says what went wrong. */
-async function readJsonObjectOrEmpty(response: Response): Promise<Record<string, unknown>> {
-  let json: unknown;
-  try {
-    json = await response.json();
-  } catch {
-    return {};
-  }
-  return isRecord(json) ? json : {};
-}
-
 /**
  * One request to the Worker, with the session cookie. A POST carries the header the Worker requires against
  * cross-site forms.
  *
  * @throws {TetherError} `NOT_CONFIGURED` without `account.server`, `INVALID` for refused input, `HTTP_<status>` for
- *   any other failure but a 401, with the Worker's `userErrors`; `NETWORK` when the Worker can't be reached.
+ *   any other failure but a 401, with the Worker's `userErrors`; `NETWORK` when the Worker can't be reached or takes
+ *   longer than `requestTimeout`.
  */
 export async function serverFetch(path: string, { method = 'GET', body }: ServerRequest = {}): Promise<ServerAnswer> {
   const init: RequestInit = { method, credentials: 'include' };
   if (method === 'POST') init.headers = { 'Content-Type': 'application/json', 'X-Tether-Account': '1' };
   if (body) init.body = JSON.stringify(body);
-  const response = await fetchFromWorker(`${serverBase()}${path}`, init);
+  const { response, data } = await fetchFromWorker(`${serverBase()}${path}`, init);
   if (response.status === 401) return { kind: 'logged-out' };
-  const data = await readJsonObjectOrEmpty(response);
   if (!response.ok) {
     const reason = textOrNull(data['error']) ?? String(response.status);
     const userErrors = toUserErrors(data['userErrors']);

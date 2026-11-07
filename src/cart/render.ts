@@ -23,7 +23,7 @@ import {
   productUrl,
   notifyLayoutChanged,
 } from '../dom.ts';
-import { isOpen, syncDrawerAria } from './drawer.ts';
+import { syncDrawerAria } from './drawer.ts';
 import type { CartWarning } from '../config.ts';
 import type { Product } from '../fragments.ts';
 import type { ShopifyCart, ShopifyCartLine, PendingQuantity } from './store.ts';
@@ -227,7 +227,7 @@ export function renderCart(view: CartView): void {
   const money = (key: 'subtotalAmount' | 'totalAmount' | 'checkoutChargeAmount') =>
     cart ? formatMoney(cart.cost[key]) : '';
 
-  syncDrawerAria(isOpen());
+  syncDrawerAria();
   qsa(document, sel('cart-count')).forEach((el) => {
     setTextTracked(el, cart?.totalQuantity ?? 0);
   });

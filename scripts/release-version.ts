@@ -6,6 +6,7 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { parseVersion } from '../server/src/release-range.ts';
+import { UNRELEASED_HEADING } from './changelog.ts';
 import { VERSION_COPIES, syncVersions } from './versions.ts';
 
 const PACKAGE_VERSION = /"version": "\d+\.\d+\.\d+"/;
@@ -48,28 +49,33 @@ export async function editFile(
 }
 
 /**
- * Sets `version` in package.json and every copy of it (`syncVersions`), dates its CHANGELOG.md heading when it is
- * `## X.Y.Z (unreleased)`, and moves the README's pinned examples onto it.
+ * @returns `now`'s day in this machine's time zone, `YYYY-MM-DD`: the day the owner releases on, which in UTC can be
+ *   the day before or after.
+ */
+export function localDate(now = new Date()): string {
+  const day = (value: number) => String(value).padStart(2, '0');
+  return `${String(now.getFullYear())}-${day(now.getMonth() + 1)}-${day(now.getDate())}`;
+}
+
+/**
+ * Sets `version` in package.json and every copy of it (`syncVersions`), turns CHANGELOG.md's `## Unreleased` notes
+ * into the version's dated section under a new, empty `## Unreleased`, and moves the README's pinned examples onto it.
  *
  * @param version `X.Y.Z`.
  * @param date The release's day, `YYYY-MM-DD`.
- * @throws When `version` is not X.Y.Z, or package.json or a copy has no version to replace.
+ * @throws When `version` is not X.Y.Z, or package.json, a copy or CHANGELOG.md has nothing to replace.
  */
-export async function applyReleaseVersion(
-  root: string,
-  version: string,
-  date = new Date().toISOString().slice(0, 10),
-): Promise<void> {
+export async function applyReleaseVersion(root: string, version: string, date = localDate()): Promise<void> {
   const parsed = parseVersion(version);
   if (parsed?.join('.') !== version) throw new Error(`"${version}" is not X.Y.Z`);
   const [major, minor] = parsed;
   await editFile(root, 'package.json', (json) => json.replace(PACKAGE_VERSION, `"version": "${version}"`));
   await syncVersions(root);
-  await editFile(
-    root,
-    'CHANGELOG.md',
-    (changelog) => changelog.replace(`\n## ${version} (unreleased)\n`, `\n## ${version} (${date})\n`),
-    { optional: true },
+  // The new section goes in below the heading, not in its place: a branch whose new notes start right under it then
+  // conflicts with the release when it merges it, instead of adding them to the released section. Notes added further
+  // down still merge in, and test/changelog.test.js fails on the section that differs from its tag.
+  await editFile(root, 'CHANGELOG.md', (changelog) =>
+    changelog.replace(`\n${UNRELEASED_HEADING}\n`, `\n${UNRELEASED_HEADING}\n\n## ${version} (${date})\n`),
   );
   // Ranges like @0.3 follow the minor version.
   await editFile(

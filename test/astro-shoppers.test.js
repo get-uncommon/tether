@@ -35,6 +35,27 @@ test('cart: quick +/+ clicks add up (each builds on the last one asked for), the
   assert.ok(!find('[tether-cart-lines] > *').classList.contains('is-busy'));
 });
 
+test('cart: a quantity field left empty or without a number gets the quantity back, a number is sent', async () => {
+  await seedCart(cartFrom([{ merchandiseId: firstVariantId, quantity: 2 }]));
+  document.body.innerHTML = `<div tether-cart-lines><div><input tether-line="quantity"></div></div>`;
+  Tether.cart.render();
+  calls.length = 0;
+  const input = /** @type {HTMLInputElement} */ (find('[tether-line="quantity"]'));
+  for (const typed of ['', 'abc', '2.5']) {
+    input.value = typed;
+    input.dispatchEvent(new window.Event('change', { bubbles: true }));
+    assert.equal(input.value, '2', `"${typed}" puts the quantity back`);
+  }
+  assert.equal(calls.length, 0, 'nothing is sent');
+  input.value = ' 3 ';
+  input.dispatchEvent(new window.Event('change', { bubbles: true }));
+  await waitFor(() => Tether.cart.lines[0]?.quantity === 3, 'the update to finish');
+  assert.deepEqual(
+    calls.map((call) => call.op),
+    ['Tether_cartLinesUpdate'],
+  );
+});
+
 test('cart: + + + - while Shopify answers slowly: the count never steps past the target', async () => {
   const realFetch = globalThis.fetch;
   /** @type {number[]} */

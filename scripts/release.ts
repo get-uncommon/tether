@@ -26,14 +26,14 @@
  * leaves them on the previous release, so `npm ci` in the starter, and in every project `npm create astro` makes from
  * it, works at every commit. A release on an older minor line leaves main's starter alone.
  *
- * Needs a "## 0.4.0" or "## 0.4.0 (unreleased)" section in CHANGELOG.md first (the release notes come from it; the
- * heading is dated), a clean working tree, and HEAD at the branch the release goes on (a detached checkout works, so a
+ * Needs the release's notes under CHANGELOG.md's "## Unreleased" first (they become its dated section, which the
+ * release notes come from), a clean working tree, and HEAD at the branch the release goes on (a detached checkout works, so a
  * worktree can release). The version is set in package.json and written from there into every copy (`versions.ts`);
  * dist/ is rebuilt from it.
  *
  * A version on main's minor line or a newer one is released from main. An older minor line gets a maintenance release
  * from its branch `release/X.Y`, made once from that line's last tag (`git push origin vX.Y.Z:refs/heads/release/X.Y`);
- * the branch needs this script, `release-starter.ts`, `release-version.ts`, `github-runs.ts`,
+ * the branch needs this script, `release-starter.ts`, `release-version.ts`, `changelog.ts`, `github-runs.ts`,
  * `.github/workflows/release.yml`, `ci.yml` and `release-rehearsal.yml` from main first, since a tag runs the workflow
  * at its own commit and a push to the branch runs its own `ci.yml`. Deployed Worker copies install only a tag whose
  * commit is on main, so the script also records the maintenance commit in main's history, by a merge commit that keeps
@@ -48,7 +48,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { compareVersions, parseVersion } from '../server/src/release-range.ts';
 import { field } from '../server/src/shared/json.ts';
-import { sectionOf, withSection } from './changelog.ts';
+import { UNRELEASED_HEADING, headingProblems, sectionOf, withSection } from './changelog.ts';
 import { newestRun, rehearsalCommits, rehearsalPathspecs } from './github-runs.ts';
 import { installMismatches } from './installed-packages.ts';
 import { NPM_PACKAGE, StarterNotReady, lockStarterAfterRelease, withStarterRange } from './release-starter.ts';
@@ -285,8 +285,10 @@ async function checkReady(text: string, rehearsed: boolean): Promise<Line> {
     fail(`${branch} is on ${current.join('.')}, not on the ${version[0]}.${version[1]} line`);
   }
   const changelog = await readFile(join(ROOT, 'CHANGELOG.md'), 'utf8');
-  if (!new RegExp(`^## ${text.replace(/\./g, '\\.')}\\b`, 'm').test(changelog)) {
-    fail(`add a "## ${text}" section to CHANGELOG.md first`);
+  const problems = headingProblems(changelog);
+  if (problems.length) fail(`CHANGELOG.md: ${problems.join('; ')}`);
+  if (sectionOf(changelog, 'Unreleased') === UNRELEASED_HEADING) {
+    fail(`write ${text}'s notes under "${UNRELEASED_HEADING}" in CHANGELOG.md first`);
   }
   return line;
 }

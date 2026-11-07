@@ -365,7 +365,7 @@ function graphQLOutcome(
  * `AbortSignal.timeout` would; Safari before 16 lacks that. A request that never settles would hold every cart change
  * queued behind it (`enqueue`) for as long as the browser keeps the connection open.
  */
-async function withTimeout<T>(ms: number, send: (signal: AbortSignal | null) => Promise<T>): Promise<T> {
+export async function withTimeout<T>(ms: number, send: (signal: AbortSignal | null) => Promise<T>): Promise<T> {
   if (!ms) return send(null);
   const controller = new AbortController();
   const timer = setTimeout(() => {

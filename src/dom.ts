@@ -143,13 +143,49 @@ export function show(el: HTMLElement, visible: boolean): void {
   el.style.display = 'none';
 }
 
-/** Marks an option button or input as chosen: `is-selected`, `aria-pressed`, and its own or inner radio/checkbox. */
+const CHECKABLE = 'input[type="radio"],input[type="checkbox"]';
+const CHECKED_ROLES = ['radio', 'checkbox', 'switch', 'menuitemradio', 'menuitemcheckbox'];
+const BUTTON_INPUTS = ['button', 'submit', 'reset'];
+
+/**
+ * @returns The ARIA state that says `el` is chosen, as its role allows one. `null` for a radio or checkbox input, or
+ *   an element around one, whose `checked` says it, and for an element whose own role takes none.
+ */
+function chosenState(el: Element): 'aria-pressed' | 'aria-checked' | 'aria-selected' | null {
+  const role = el.getAttribute('role');
+  if (role === 'button') return 'aria-pressed';
+  if (role && CHECKED_ROLES.includes(role)) return 'aria-checked';
+  if (role === 'option' || role === 'tab') return 'aria-selected';
+  if (role) return null;
+  if (isInput(el)) return BUTTON_INPUTS.includes(el.type) ? 'aria-pressed' : null;
+  return el.querySelector(CHECKABLE) ? null : 'aria-pressed';
+}
+
+/**
+ * Marks an option element as chosen: `is-selected`, the ARIA state its role takes (`chosenState`), and its own or
+ * inner radio/checkbox. An element that is no button and has no role of its own (a Webflow button is a link) gets
+ * `role="button"`, where `aria-pressed` is valid.
+ */
 export function setSelected(el: Element, selected: boolean): void {
   el.classList.toggle('is-selected', selected);
-  el.setAttribute('aria-pressed', selected ? 'true' : 'false');
-  if (isInput(el) && (el.type === 'radio' || el.type === 'checkbox')) el.checked = selected;
-  const input = el.querySelector('input[type="radio"],input[type="checkbox"]');
+  const state = chosenState(el);
+  if (state === 'aria-pressed' && el.tagName !== 'BUTTON' && !isInput(el)) el.setAttribute('role', 'button');
+  if (state) el.setAttribute(state, String(selected));
+  if (isInput(el) && el.matches(CHECKABLE)) el.checked = selected;
+  const input = el.querySelector(CHECKABLE);
   if (input && isInput(input)) input.checked = selected;
+}
+
+/**
+ * Marks an option element the visitor can't buy: `is-unavailable`, and `aria-disabled` on the control assistive
+ * technology reads, the element itself or the radio/checkbox inside it. It stays clickable: choosing it picks the
+ * closest variant that has it.
+ */
+export function setUnavailable(el: Element, unavailable: boolean): void {
+  el.classList.toggle('is-unavailable', unavailable);
+  const isControl = chosenState(el) !== null || isInput(el);
+  const control = isControl ? el : el.querySelector(CHECKABLE);
+  control?.setAttribute('aria-disabled', String(unavailable));
 }
 
 let layoutTimer: ReturnType<typeof setTimeout> | undefined;
@@ -239,7 +275,8 @@ interface IntegerRange {
   fallback: number;
 }
 
-const INTEGER_TEXT = /^-?\d+$/;
+/** A whole number as text, the way attributes and quantity fields take one. */
+export const INTEGER_TEXT = /^-?\d+$/;
 
 /** The attributes `integerAttribute` has warned about, per element, so a list that reloads warns once. */
 const invalidIntegerAttributes = new WeakMap<Element, Set<string>>();

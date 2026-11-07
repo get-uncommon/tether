@@ -4,7 +4,7 @@ import { test, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { JSDOM } from 'jsdom';
-import { listenForFetch } from '../server/test/mocks.js';
+import { listenForFetch, urlOf } from '../server/test/mocks.js';
 import {
   cancelTimersAfterTests,
   captureTetherWarnings,
@@ -181,5 +181,45 @@ test(
       'the add is not sent again, the cart is loaded again, then the queued change runs',
     );
     assert.equal(Cart.count, 2);
+  },
+);
+
+test(
+  'a Worker that never answers fails as NETWORK within requestTimeout, and checkout goes on without the login',
+  { timeout: 10_000 },
+  async () => {
+    const { serverCheckoutUrl, serverFetch } = await import('../src/account/server-client.ts');
+    /** @type {string[]} */
+    const reported = [];
+    configure({
+      domain: 'shop.test',
+      token: 't',
+      autoMount: false,
+      requestTimeout: TIMEOUT_MS,
+      account: { server: '/_tether/account' },
+      onError: (_error, context) => reported.push(context),
+    });
+    const storefront = globalThis.fetch;
+    /** @type {typeof fetch} */
+    globalThis.fetch = (url, init) =>
+      urlOf(url).includes('/_tether/account/') ? toStalledServer(url, init) : storefront(url, init);
+    try {
+      for (const how of /** @type {const} */ (['answer', 'body'])) {
+        stall = how;
+        await assert.rejects(serverFetch('/me'), { code: 'NETWORK', message: TIMED_OUT });
+      }
+      stall = 'answer';
+      localStorage.setItem('tether:cart:shop.test', 'gid://shopify/Cart/abc');
+      const variant = product.variants.nodes[0]?.id ?? '';
+      answers['TetherCart'] = () => ({ data: { cart: cartFrom([{ merchandiseId: variant, quantity: 1 }]) } });
+      answers['TetherCheckout'] = () => ({ data: { cart: { checkoutUrl: 'https://shop.test/checkouts/1' } } });
+      await Cart.init();
+      Cart.setCheckoutResolver(serverCheckoutUrl);
+      assert.equal(await Cart.checkout('_self'), 'https://shop.test/checkouts/1');
+      assert.deepEqual(reported, ['account checkout']);
+    } finally {
+      Cart.setCheckoutResolver(null);
+      globalThis.fetch = storefront;
+    }
   },
 );

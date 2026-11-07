@@ -95,6 +95,9 @@ const DEFAULT_ACTION = '/search';
 const mounted = new WeakSet<Element>();
 let searchBoxCount = 0;
 
+/** The boxes listening on `document`, so one a page swap removed stops: its listener would keep its tree alive. */
+const liveBoxes = new Set<SearchBox>();
+
 /** @returns `node` when it is a link, else its first link. */
 const linkIn = (node: Element): Element | null => (node.tagName === 'A' ? node : node.querySelector('a'));
 
@@ -130,6 +133,11 @@ class SearchBox {
   lastTerm = '';
   /** Results per term, for typing back and forth. */
   readonly cache = new Map<string, SearchResults | null>();
+  /**
+   * Removes the box's listeners once its root has left the page. The window's own controller: a page's
+   * `addEventListener` takes only its own signals, and in jsdom those aren't Node's.
+   */
+  readonly listening = new window.AbortController();
 
   constructor(root: HTMLElement, input: HTMLInputElement, results: HTMLElement) {
     this.root = root;
@@ -144,6 +152,15 @@ class SearchBox {
     this.resultsId = results.id;
     this.setUpAria();
     this.listen();
+    liveBoxes.add(this);
+  }
+
+  /** Stops the box whose root a page swap removed; the root mounts afresh if it comes back. */
+  stop() {
+    this.listening.abort();
+    clearTimeout(this.timer);
+    liveBoxes.delete(this);
+    mounted.delete(this.root);
   }
 
   setUpAria() {
@@ -157,23 +174,44 @@ class SearchBox {
   }
 
   listen() {
-    this.input.addEventListener('input', () => {
-      const term = this.input.value.trim();
-      if (term === this.lastTerm) return;
-      this.lastTerm = term;
-      clearTimeout(this.timer);
-      this.timer = setTimeout(() => void this.search(term), cfg.searchDelay);
-    });
-    this.input.addEventListener('focus', () => {
-      if (this.input.value.trim().length >= this.minCharacters && this.options().length) this.open(true);
-    });
-    this.input.addEventListener('keydown', (event) => {
-      this.onKeydown(event);
-    });
-    document.addEventListener('click', (event) => {
-      // A click event's target is always a node.
-      if (!this.root.contains(event.target as Node | null)) this.open(false);
-    });
+    const { signal } = this.listening;
+    this.input.addEventListener(
+      'input',
+      () => {
+        const term = this.input.value.trim();
+        if (term === this.lastTerm) return;
+        this.lastTerm = term;
+        clearTimeout(this.timer);
+        this.timer = setTimeout(() => void this.search(term), cfg.searchDelay);
+      },
+      { signal },
+    );
+    this.input.addEventListener(
+      'focus',
+      () => {
+        if (this.input.value.trim().length >= this.minCharacters && this.options().length) this.open(true);
+      },
+      { signal },
+    );
+    this.input.addEventListener(
+      'keydown',
+      (event) => {
+        this.onKeydown(event);
+      },
+      { signal },
+    );
+    document.addEventListener(
+      'click',
+      (event) => {
+        if (!this.root.isConnected) {
+          this.stop();
+          return;
+        }
+        // A click event's target is always a node.
+        if (!this.root.contains(event.target as Node | null)) this.open(false);
+      },
+      { signal },
+    );
   }
 
   setState(state: SearchState) {
@@ -271,6 +309,8 @@ class SearchBox {
       option.id ||= `${this.resultsId}-${index}`;
       option.setAttribute('aria-selected', 'false');
     });
+    // No option is selected in the new results, and an id kept may now name another one.
+    this.input.removeAttribute('aria-activedescendant');
   }
 
   highlight(options: HTMLElement[], index: number) {
@@ -304,9 +344,12 @@ class SearchBox {
 }
 
 /**
- * Sets up every `[tether-search]` in `root` (and `root` itself) once.
+ * Sets up every `[tether-search]` in `root` (and `root` itself) once, and stops the boxes no longer on the page.
  */
 export function mountSearch(root: ParentNode & Partial<Pick<Element, 'matches'>> = document): void {
+  liveBoxes.forEach((box) => {
+    if (!box.root.isConnected) box.stop();
+  });
   for (const el of within(root, sel('search'))) {
     if (mounted.has(el)) continue;
     mounted.add(el);
