@@ -3,7 +3,7 @@
  * actions and return requests. Each change marks its form or row busy (`aria-busy`, `is-busy`), then sets
  * `tether-form-state` to `saved` or `error` with Shopify's message in `tether-form-error`.
  */
-import { attr, get, qsa, sel, setText } from '../dom.ts';
+import { attr, get, isElement, isField, qsa, sel, setText } from '../dom.ts';
 import {
   saveAddress,
   deleteAddress,
@@ -23,11 +23,6 @@ const SUBSCRIPTION_ACTIONS: readonly SubscriptionAction[] = ['pause', 'resume', 
 
 const isSubscriptionAction = (value: string | null): value is SubscriptionAction =>
   SUBSCRIPTION_ACTIONS.some((action) => action === value);
-
-const isField = (el: Element): el is HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement =>
-  el instanceof window.HTMLInputElement ||
-  el instanceof window.HTMLSelectElement ||
-  el instanceof window.HTMLTextAreaElement;
 
 const isForm = (el: Element): el is HTMLFormElement => el instanceof window.HTMLFormElement;
 
@@ -224,7 +219,7 @@ function onReturnRequest(button: HTMLElement): void {
 
 function onClick(event: MouseEvent): void {
   const target = event.target;
-  if (!(target instanceof window.Element)) return;
+  if (!isElement(target)) return;
   if (onAddressClick(event, target)) return;
   const subscriptionButton = target.closest(sel('subscription-action'));
   if (subscriptionButton instanceof window.HTMLElement) {
