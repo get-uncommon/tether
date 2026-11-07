@@ -34,6 +34,28 @@ test('server: same product query as the browser, so hydrated data has the same s
   assert.equal(productFragment(shop.config), productFragment(), 'same defaults as the browser config');
 });
 
+test('server: pageSize is an integer from 1 to 250, and anything else warns and uses 25', () => {
+  /** @type {string[]} */
+  const warned = [];
+  const { warn } = console;
+  console.warn = (...args) => warned.push(args.join(' '));
+  try {
+    const pageSize = (/** @type {unknown} */ value) =>
+      // @ts-expect-error -- the invalid sizes this test passes on purpose
+      server.createStorefront({ domain: 'shop.test', token: 't', pageSize: value }).config.pageSize;
+    assert.deepEqual([1, 250, undefined].map(pageSize), [1, 250, 25]);
+    assert.deepEqual([0, 251, 2.5, '50'].map(pageSize), [25, 25, 25, 25]);
+  } finally {
+    console.warn = warn;
+  }
+  assert.deepEqual(warned, [
+    '[tether] invalid pageSize 0: using 25',
+    '[tether] invalid pageSize 251: using 25',
+    '[tether] invalid pageSize 2.5: using 25',
+    '[tether] invalid pageSize "50": using 25',
+  ]);
+});
+
 test('server: getProduct by handle / id / URL, null when missing; allProducts pages through everything', async () => {
   const shop = server.createStorefront({ domain: 'shop.test', token: 't', pageSize: 2 });
   assert.equal((await shop.getProduct('coffee-box'))?.title, 'Coffee Box');

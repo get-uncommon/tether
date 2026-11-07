@@ -39,7 +39,8 @@ const versionIn = async (folder) => fieldOf(parseJson(await readFile(join(folder
  * - v0.7.2: the v0.7.1 updater, in 0.7.2's copy;
  * - v0.8.0: also removes the managed entries a release doesn't ship, refuses a release without the files the
  *   workflow runs after an update, and writes the minor of the release it installed, not its own, into a copy
- *   without a `TETHER_VERSION`.
+ *   without a `TETHER_VERSION`;
+ * - v0.9.1: gives up on a GitHub request or download that stalls, after a time limit, with the update's error.
  *
  * A test below fails when a release tag's updater or workflow is none of these.
  *
@@ -55,6 +56,7 @@ const OLD_UPDATERS = [
   { tag: 'v0.7.1', route: 'asset' },
   { tag: 'v0.7.2', route: 'asset' },
   { tag: 'v0.8.0', route: 'asset' },
+  { tag: 'v0.9.1', route: 'asset' },
 ];
 /**
  * The first release whose updater can update a copy: the ones before it replace `.github/`, which GitHub refuses.
@@ -62,11 +64,15 @@ const OLD_UPDATERS = [
  * @type {import('../server/src/release-range.ts').Version}
  */
 const FIRST_WORKING_UPDATER = [0, 3, 6];
-const [major, minor, patch] = stringAt(JSON.parse(await readFile(join(ROOT, 'package.json'), 'utf8')), 'version')
-  .split('.')
-  .map(Number);
-/** The next patch release, as the release script would write it: newer than every updater above. */
-const RELEASE_VERSION = `${String(major)}.${String(minor)}.${String(Number(patch) + 1)}`;
+const treeVersion = stringAt(JSON.parse(await readFile(join(ROOT, 'package.json'), 'utf8')), 'version');
+/**
+ * The next patch release after this tree's version, as the release script would write it, or after the newest
+ * release above, for a branch made before that release: newer than every updater above.
+ */
+const [major, minor, patch] = [treeVersion, ...OLD_UPDATERS.map(({ tag }) => tag.slice(1))]
+  .map((version) => parseVersion(version) ?? assert.fail(`${version} is not X.Y.Z`))
+  .reduce((newest, version) => (compareVersions(version, newest) > 0 ? version : newest));
+const RELEASE_VERSION = `${String(major)}.${String(minor)}.${String(patch + 1)}`;
 const UPGRADE_TIMEOUT_MS = 180_000;
 const UPSTREAM = 'test-owner/tether';
 const RELEASE_SHA = 'c0ffee'.repeat(6).padEnd(40, '0');

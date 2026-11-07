@@ -1,13 +1,12 @@
 // The package version has one source, the root package.json; the release script writes every copy from it.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { cp, mkdtemp, readdir, readFile, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { cp, readdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { VERSION_COPIES, packageVersion, syncVersions, versionMismatches } from '../scripts/versions.ts';
 import { compareVersions, parseVersion } from '../server/src/release-range.ts';
-import { asRecord, parseJson, recordAt, stringAt } from '../server/test/mocks.js';
+import { asRecord, parseJson, recordAt, stringAt, tempFolder } from '../server/test/mocks.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -15,8 +14,8 @@ test('every copy of the version says what package.json says', async () => {
   assert.deepEqual(await versionMismatches(ROOT), []);
 });
 
-test('the release writes the package.json version into every copy', async () => {
-  const copy = await mkdtemp(join(tmpdir(), 'tether-versions-'));
+test('the release writes the package.json version into every copy', async (t) => {
+  const copy = await tempFolder(t, 'tether-versions-');
   for (const file of ['package.json', ...VERSION_COPIES.map((versionCopy) => versionCopy.file)]) {
     await cp(join(ROOT, file), join(copy, file), { recursive: true });
   }

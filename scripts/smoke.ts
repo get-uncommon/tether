@@ -8,9 +8,9 @@
  *
  * A step that fails on Shopify's side for a moment (a 5xx, its internal error) is tried again: scripts/smoke-retry.ts.
  * Creates (and empties) a throwaway cart on that store. Run against your own dev store to also test selling plans.
- * It runs the built package (`@occluze/tether` resolves to dist/esm/ through the package's own exports), so it sends
- * the same minified GraphQL the browser build sends. It is typed by the source, which the published declarations are
- * generated from.
+ * It runs the package as built into .test-dist/ by `presmoke`, the build the tests use, so it sends the same minified
+ * GraphQL the browser build sends and leaves the committed dist/ to releases. It is typed by the source, which the
+ * published declarations are generated from.
  */
 import { JSDOM } from 'jsdom';
 import { messageOf } from '../server/src/shared/error-message.ts';
@@ -31,8 +31,8 @@ Object.assign(globalThis, {
   Option: optionConstructor,
 });
 
-/** A variable, so tsc types the built package by the source instead of resolving it to dist/. */
-const BUILT_PACKAGE = '@occluze/tether';
+/** A variable, so tsc types the built package by the source instead of resolving it to the build. */
+const BUILT_PACKAGE = new URL('../.test-dist/esm/index.js', import.meta.url).href;
 const { default: Tether } = (await import(BUILT_PACKAGE)) as typeof TetherPackage;
 
 const domain = process.env['TETHER_DOMAIN'] || 'hydrogen-preview.myshopify.com';

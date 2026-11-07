@@ -1,11 +1,11 @@
 // How `npm run release` reads GitHub's answers about the ci and release-rehearsal runs of the commit it releases.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { newestRun, rehearsalCommits, rehearsalPathspecs } from '../scripts/github-runs.ts';
+import { tempFolder } from '../server/test/mocks.js';
+import { isolatedGit } from './fixtures.js';
 
 const URL_OF_RUN = 'https://github.com/o/tether/actions/runs/1';
 
@@ -50,14 +50,9 @@ test("the rehearsal's paths, as pathspecs, find the newest commit that changes w
   assert.ok(pathspecs.includes(':(glob)src/**'));
   assert.ok(pathspecs.includes(':(glob)package.json'));
 
-  const repository = await mkdtemp(join(tmpdir(), 'tether-rehearsal-'));
-  t.after(() => rm(repository, { recursive: true, force: true }));
-  const git = (/** @type {string[]} */ ...args) =>
-    execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...args], {
-      cwd: repository,
-      encoding: 'utf8',
-    }).trim();
-  git('init', '--quiet');
+  const repository = await tempFolder(t, 'tether-rehearsal-');
+  const git = isolatedGit(repository);
+  git('init', '--quiet', '--initial-branch=main');
   const commit = async (/** @type {string} */ path, /** @type {string} */ message) => {
     await mkdir(join(repository, path, '..'), { recursive: true });
     await writeFile(join(repository, path), message);

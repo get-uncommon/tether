@@ -536,14 +536,15 @@ add to cart and every other cart change included, is sent again only after a 429
 which Shopify answers without running it: after a network error or a server error Shopify may
 already have applied it, so Tether doesn't send it twice, and a failed cart change loads the cart
 again to show what Shopify has. The first retry waits 300 ms (500 ms after `THROTTLED`), and each
-later one twice as long as the one before, up to 30 seconds. `retries` can be at most 10.
+later one twice as long as the one before, up to 30 seconds. `retries` can be at most 10: a larger
+number logs a warning and 10 is used.
 
 A request that has no complete answer after `requestTimeout` milliseconds (15 seconds by default)
 is stopped and counts as a network error (`NETWORK`): a query is sent again, a cart change isn't,
 and the cart is loaded again. So a connection that stalls fails the change with `tether:cart-error`
 instead of holding every cart change behind it. `requestTimeout` and `searchDelay` go up to
 2147483647 (about 24 days), the longest delay a browser's timer keeps: a longer one would fire at
-once, so it logs a warning and the default is used.
+once, so it logs a warning and 2147483647 is used.
 
 **Validation.** Every option is checked once, when Tether starts. An option Tether doesn't know (a
 typo such as `openCartOnAd`) logs a warning and is left out. A value it can't use logs a
@@ -676,8 +677,11 @@ npm run release -- X.Y.Z --push
 It first checks that the `ci` workflow passed on GitHub for the commit it releases (through `gh`,
 which must be logged in). It bumps the version everywhere (packages, `VERSION`, the sync, README
 pins, `server/TETHER_VERSION` for a new minor), builds, refuses a release commit that changes
-anything else, runs the versions test and the live smoke test, commits, tags and pushes. It doesn't
-run the whole gate again: a test that fails only at a new version is caught on the pull request by
+anything else, runs the versions test and the live smoke test, commits, tags and pushes. The push
+goes through the pre-push hook, which for a push with a new tag runs `npm run check` and
+`npm run lint:workflows` locally: a release takes as long as that gate, and when the hook fails,
+nothing is pushed and the release says so. The release itself doesn't run the gate at the new
+version: a test that fails only at a new version is caught on the pull request by
 the `release-rehearsal` workflow, which writes the next minor and the next patch version into a
 worktree with the release's own rewrite (`node scripts/release.ts --rewrite-only X.Y.Z <folder>`)
 and runs `npm run check` there. It runs on pull requests that change `src/`, `server/`, `scripts/`,

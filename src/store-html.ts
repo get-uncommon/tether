@@ -297,7 +297,9 @@ function cleanAttributes(element: Element, page: Page): void {
   else element.setAttribute('style', cleaned);
 }
 
-/** Link targets that open in this tab or one of its parents, so no new page gets `window.opener`; empty means `_self`. */
+/**
+ * Link targets that open in this tab or one of its parents, so no new page gets `window.opener`; empty means `_self`.
+ */
 const SAME_TAB_TARGETS = new Set(['', '_self', '_parent', '_top']);
 
 /** @param element A kept element, its attributes cleaned. */

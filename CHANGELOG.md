@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.9.2 (unreleased)
+
+- Fix: a count option above its maximum warns and uses the maximum instead of the default: `retries`
+  above 10 uses 10 (a site with `retries: 15`, valid in 0.9.0, got 2 in 0.9.1), and `requestTimeout`
+  or `searchDelay` above the longest delay a timer keeps (2147483647 ms) uses that.
+- Fix: `createStorefront({ pageSize })` takes an integer from 1 to 250, Shopify's limit for one
+  request; anything else warns and uses 25. A larger value used to fail every `allProducts()` call.
+- Sync Worker updates: the updater's `gh attestation verify` is stopped after 2 minutes, like its
+  GitHub requests, and the run ends with the error annotation. A copy gets this with the release
+  after the one that ships it, since it updates with the updater it has.
+- Repository: contributors never commit `dist/`, which only a release commit changes; CI fails a
+  pull request with a commit that changes it. `npm run smoke` builds into `.test-dist/`, as
+  `npm test` does, instead of rewriting `dist/`. `npm run release` refuses to start when
+  node_modules doesn't match package-lock.json, never fails after it has published (it prints the
+  command that finishes the Astro starter step), and says that its own push runs the pre-push hook's
+  whole gate. Tests leave nothing in the temp folder and run scratch-repository git without the
+  developer's git config.
+
 ## 0.9.1 (2026-11-07)
 
 - Fix: a retry waits at most 30 seconds, however many retries came before; the doubling wait passed

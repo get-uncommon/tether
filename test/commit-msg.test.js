@@ -8,17 +8,24 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
+import { isolatedGitEnv } from './fixtures.js';
 
 const SCRIPT = fileURLToPath(new URL('../scripts/commit-msg.ts', import.meta.url));
 const TRAILER = 'Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>';
 
-/** @returns The script's exit code and what it wrote to stderr. */
-async function check(/** @type {string} */ message) {
+/**
+ * @param {string} message
+ * @param {Record<string, string>} [config] The git settings the hook runs with, none of this machine's.
+ * @returns The script's exit code and what it wrote to stderr.
+ */
+async function check(message, config = {}) {
   const folder = await mkdtemp(join(tmpdir(), 'tether-commit-msg-'));
   try {
     const file = join(folder, 'COMMIT_EDITMSG');
     await writeFile(file, message);
-    await promisify(execFile)(process.execPath, ['--experimental-strip-types', SCRIPT, file]);
+    await promisify(execFile)(process.execPath, ['--experimental-strip-types', SCRIPT, file], {
+      env: { ...process.env, ...isolatedGitEnv(config) },
+    });
     return { code: 0, stderr: '' };
   } catch (error) {
     const { code, stderr } = /** @type {{ code: number, stderr: string }} */ (error);
@@ -29,7 +36,7 @@ async function check(/** @type {string} */ message) {
 }
 
 /** Runs every message through the script at once, since each run starts Node. */
-const checkAll = (/** @type {string[]} */ messages) => Promise.all(messages.map(check));
+const checkAll = (/** @type {string[]} */ messages) => Promise.all(messages.map((message) => check(message)));
 
 test('messages from the history pass', async () => {
   const messages = [
@@ -78,7 +85,7 @@ test('styles the history does not use fail, each with what to change', async () 
     ['fix(cart): keep line order\n', 'conventional-commit type'],
     ['add a cart drawer\n', 'capital letter'],
     ['Cart lines keep their order.\n', 'full stop'],
-    [`${'A'.repeat(121)}\n`, '121 characters'],
+    [`${'A'.repeat(121)}\n`, 'at most 120 characters; it is 121'],
     ['Cart lines keep their order\nThe body starts on the next line.\n', 'blank line'],
     ['\n# only a comment\n', 'empty'],
   ]);
@@ -88,4 +95,32 @@ test('styles the history does not use fail, each with what to change', async () 
     assert.equal(code, 1, message);
     assert.match(stderr, new RegExp(problem), message);
   }
+});
+
+test("git's comment lines start with core.commentChar, which may be auto", async () => {
+  const comments = (/** @type {string} */ char) =>
+    `${char} Please enter the commit message for your changes.\n${char}\n`;
+  const subject = 'Cart lines keep their order\n';
+  const semicolon = { 'core.commentChar': ';' };
+  assert.deepEqual(await check(`${subject}${comments(';')}`, semicolon), { code: 0, stderr: '' });
+  assert.match((await check(`${subject}${comments('#')}`, semicolon)).stderr, /blank line/, '# starts the body here');
+  const scissors = `Cart lines keep their order.\n; ------------------------ >8 ------------------------\nBody\n`;
+  assert.match((await check(scissors, semicolon)).stderr, /must not end with a full stop/);
+
+  // With auto, git picks the first character that starts no line of the message, and comments after it.
+  const auto = { 'core.commentChar': 'auto' };
+  assert.deepEqual(await check(`${subject}\n#1 in the issue list\n${comments(';')}`, auto), { code: 0, stderr: '' });
+  assert.deepEqual(await check(`${subject}${comments('#')}`, auto), { code: 0, stderr: '' });
+});
+
+test('each problem says what the message must do', async () => {
+  const { stderr } = await check('feat: cart lines keep their order.\nNo blank line.\n');
+  assert.deepEqual(
+    stderr.split('\n').filter((line) => line.startsWith('commit-msg: ')),
+    [
+      'commit-msg: the subject must not start with a conventional-commit type: say what changed in plain English',
+      'commit-msg: the subject must not end with a full stop',
+      'commit-msg: a blank line must separate the subject from the body',
+    ],
+  );
 });

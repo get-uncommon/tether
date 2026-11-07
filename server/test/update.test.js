@@ -1,13 +1,12 @@
 // The updater a deployed copy runs (scripts/update-tether.mjs).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, cp, readFile, readdir, writeFile, mkdir } from 'node:fs/promises';
+import { cp, readFile, readdir, writeFile, mkdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { parseJson, stringAt } from './mocks.js';
+import { parseJson, stringAt, tempFolder } from './mocks.js';
 import {
   listTags,
   newestPublished,
@@ -79,9 +78,9 @@ test('only v tags are releases: a tag without the v is never picked, since it co
   assert.equal(pickVersion(['0.7.0'], '0.7'), null);
 });
 
-test('updating a copy replaces the code and keeps config, wrangler ids and TETHER_VERSION', async () => {
+test('updating a copy replaces the code and keeps config, wrangler ids and TETHER_VERSION', async (t) => {
   const root = fileURLToPath(new URL('..', import.meta.url));
-  const base = await mkdtemp(join(tmpdir(), 'tether-update-'));
+  const base = await tempFolder(t, 'tether-update-');
   const copy = join(base, 'copy');
   const release = join(base, 'release');
   // An "old" deployed copy: older version, customized mapping, Cloudflare's KV id.
@@ -131,9 +130,9 @@ test('updating a copy replaces the code and keeps config, wrangler ids and TETHE
   assert.equal(workflowVersion(again), '', 'an empty version tells every workflow there is nothing to commit');
 });
 
-test('a copy without TETHER_VERSION takes the minor version it updated to, not the one it had', async () => {
+test('a copy without TETHER_VERSION takes the minor version it updated to, not the one it had', async (t) => {
   const root = fileURLToPath(new URL('..', import.meta.url));
-  const base = await mkdtemp(join(tmpdir(), 'tether-update-'));
+  const base = await tempFolder(t, 'tether-update-');
   const copy = join(base, 'copy');
   const release = join(base, 'release');
   await mkdir(copy);
@@ -359,8 +358,8 @@ async function releaseArchive(base) {
   return archive;
 }
 
-test('a signed release is unpacked only after its attestation verifies', async () => {
-  const base = await mkdtemp(join(tmpdir(), 'tether-signed-'));
+test('a signed release is unpacked only after its attestation verifies', async (t) => {
+  const base = await tempFolder(t, 'tether-signed-');
   const archive = await releaseArchive(base);
   const release = { ...RELEASE, assetUrl: 'https://x.test/a' };
   /**
@@ -405,8 +404,8 @@ async function withWorkflow(base, name, text) {
   return dir;
 }
 
-test('workflow check: outdated only when the release ships a higher revision', async () => {
-  const base = await mkdtemp(join(tmpdir(), 'tether-workflow-'));
+test('workflow check: outdated only when the release ships a higher revision', async (t) => {
+  const base = await tempFolder(t, 'tether-workflow-');
   const old = await withWorkflow(base, 'old', "on:\n  schedule:\n    - cron: '23 5 * * *'\n");
   const same = await withWorkflow(base, 'same', 'name: Update Tether\n');
   const newer = await withWorkflow(base, 'newer', '# Tether workflow revision: 2\n');
@@ -421,7 +420,7 @@ test('workflow check: outdated only when the release ships a higher revision', a
 });
 
 test('workflow check: an outdated workflow gets a GitHub warning and the manual step in the job summary', async (context) => {
-  const base = await mkdtemp(join(tmpdir(), 'tether-summary-'));
+  const base = await tempFolder(context, 'tether-summary-');
   const summary = join(base, 'summary.md');
   const previous = process.env['GITHUB_STEP_SUMMARY'];
   process.env['GITHUB_STEP_SUMMARY'] = summary;
@@ -445,9 +444,9 @@ test('workflow check: an outdated workflow gets a GitHub warning and the manual 
   assert.ok(summaryText.startsWith(`### Update the workflow file once\n\n${step}`), 'and so does the job summary');
 });
 
-test('an update run by its workflow warns when the copy needs the release workflow, and keeps the output contract', async () => {
+test('an update run by its workflow warns when the copy needs the release workflow, and keeps the output contract', async (t) => {
   const root = fileURLToPath(new URL('..', import.meta.url));
-  const base = await mkdtemp(join(tmpdir(), 'tether-outdated-'));
+  const base = await tempFolder(t, 'tether-outdated-');
   const copy = join(base, 'copy');
   const release = join(base, 'release');
   await cp(root, release, { recursive: true, filter: (source) => !source.includes('node_modules') });
@@ -465,9 +464,9 @@ test('an update run by its workflow warns when the copy needs the release workfl
   assert.equal(workflowVersion(out), version);
 });
 
-test('an update run with nothing to install still warns while the copy has an older workflow', async () => {
+test('an update run with nothing to install still warns while the copy has an older workflow', async (t) => {
   const root = fileURLToPath(new URL('..', import.meta.url));
-  const base = await mkdtemp(join(tmpdir(), 'tether-current-'));
+  const base = await tempFolder(t, 'tether-current-');
   const copy = join(base, 'copy');
   await cp(root, copy, { recursive: true, filter: (source) => !source.includes('node_modules') });
   await mkdir(join(copy, '.github', 'workflows'), { recursive: true });

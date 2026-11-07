@@ -1,13 +1,13 @@
 /**
  * The pre-push hook's check (`.config/lefthook.yml`), which lefthook hands git's pushed refs on stdin: the whole gate,
- * `npm run check`, unless every pushed commit changes only the Astro starter's package.json and lockfile
+ * `npm run check`, unless the push only adds commits that change only the Astro starter's package.json and lockfile
  * (`push-check.ts`). Run by hand, with no refs on stdin, it runs the whole gate.
  */
 import { readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { STARTER_FILES, pushCheck } from './push-check.ts';
+import { STARTER_FILES, gitHistory, pushCheck } from './push-check.ts';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -31,16 +31,9 @@ function run(command: string, args: readonly string[]): number {
   return spawnSync(command, args, { cwd: ROOT, stdio: 'inherit', shell, env: withoutHookRepository() }).status ?? 1;
 }
 
-/** The files each commit in `range` changes, merges against each parent, or `null` when git can't list them. */
-function filesOf(range: string): string[] | null {
-  const result = spawnSync('git', ['log', '--format=', '--name-only', '-m', range], { cwd: ROOT, encoding: 'utf8' });
-  if (result.status !== 0) return null;
-  return result.stdout.split('\n').filter(Boolean);
-}
-
 // A terminal on stdin means a run by hand, with no refs to read.
 const refs = process.stdin.isTTY ? '' : readFileSync(0, 'utf8');
-const check = pushCheck(refs, filesOf);
+const check = pushCheck(refs, gitHistory(ROOT));
 if (check.kind === 'gate') {
   console.log(`pre-push: the whole gate (${check.reason})`);
   process.exitCode = run('npm', ['run', 'check']);

@@ -8,7 +8,7 @@
  *   const product = await shop.getProduct('coffee-box');
  *   const all = await shop.allProducts();
  */
-import { DEFAULTS, resolveConfig } from './config.ts';
+import { DEFAULTS, resolveConfig, warn } from './config.ts';
 import { untypedQuery, withContext, TetherError } from './client.ts';
 import * as plans from './selling-plans.ts';
 import { imageUrl, formatPercent } from './dom.ts';
@@ -45,7 +45,7 @@ interface ServerOptions {
    * stalled request through that signal, and a request that ignores it is never ended.
    */
   fetch?: typeof fetch;
-  /** Products per request for `allProducts()` (default 25). */
+  /** Products per request for `allProducts()`: an integer from 1 to 250 (default 25). */
   pageSize?: number;
   /** The site's address, for product URLs in `jsonLd()` without `url`. */
   siteUrl?: string;
@@ -60,7 +60,8 @@ type StorefrontOptions = TetherOptions & ServerOptions & StoreEnv;
 /** The environment names that give the domain and the token. */
 type StoreEnv = Partial<Record<(typeof STORE_ENV_NAMES)['domain' | 'token'][number], string>>;
 
-type ServerConfig = TetherConfig & ServerOptions;
+/** The options as parsed: `pageSize` always set. */
+type ServerConfig = TetherConfig & Omit<ServerOptions, 'pageSize'> & { pageSize: number };
 
 interface HydrateOptions {
   card?: boolean;
@@ -68,6 +69,8 @@ interface HydrateOptions {
 }
 
 const DEFAULT_PAGE_SIZE = 25;
+/** The largest `first` Shopify accepts for a list; a larger one fails the query. */
+const MAX_PAGE_SIZE = 250;
 /** The images a card keeps: the main one and a hover image (`tether-bind="image:2"`). */
 const DEFAULT_CARD_IMAGES = 2;
 /** The version of the `data-tether-hydrate` payload, for the browser script reading it. */
@@ -104,21 +107,29 @@ function storefrontConfig(options: StorefrontOptions): ServerConfig {
   }
   const domain = typeof options.domain === 'string' && options.domain ? options.domain : '';
   const token = typeof options.token === 'string' && options.token ? options.token : '';
-  const conf: ServerConfig = resolveConfig({
-    // Only config keys, each parsed by `resolveConfig`.
-    ...known,
-    domain: domain || fromEnv(options, STORE_ENV_NAMES.domain),
-    token: token || fromEnv(options, STORE_ENV_NAMES.token),
-  });
+  const conf: ServerConfig = {
+    ...resolveConfig({
+      // Only config keys, each parsed by `resolveConfig`.
+      ...known,
+      domain: domain || fromEnv(options, STORE_ENV_NAMES.domain),
+      token: token || fromEnv(options, STORE_ENV_NAMES.token),
+    }),
+    pageSize: pageSizeOption(options.pageSize),
+  };
   if (options.fetch) conf.fetch = options.fetch;
-  if (options.pageSize !== undefined) conf.pageSize = options.pageSize;
   if (options.siteUrl !== undefined) conf.siteUrl = options.siteUrl;
   return conf;
 }
 
-/** @returns `pageSize` when it is a positive integer, else the default. */
-const validPageSize = (pageSize: number | undefined): number =>
-  typeof pageSize === 'number' && Number.isInteger(pageSize) && pageSize > 0 ? pageSize : DEFAULT_PAGE_SIZE;
+/**
+ * @param value From the site, which a JavaScript caller can set to anything.
+ * @returns `value` when it is an integer from 1 to `MAX_PAGE_SIZE`; the default, with a warning unless it was left out.
+ */
+function pageSizeOption(value: unknown): number {
+  if (typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= MAX_PAGE_SIZE) return value;
+  if (value !== undefined) warn(`invalid pageSize ${JSON.stringify(value)}: using ${String(DEFAULT_PAGE_SIZE)}`);
+  return DEFAULT_PAGE_SIZE;
+}
 
 /**
  * A product for a list (home, collections, recommendations): without descriptions and variant images, and only its
@@ -147,7 +158,7 @@ export function createStorefront(options: StorefrontOptions = {}) {
       { code: 'NOT_CONFIGURED' },
     );
   }
-  const catalog = createCatalog(conf, validPageSize(conf.pageSize));
+  const catalog = createCatalog(conf, conf.pageSize);
   const site = { productPath: conf.productPath, siteUrl: conf.siteUrl };
 
   /**

@@ -3,8 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse } from 'yaml';
@@ -15,7 +14,7 @@ import {
   workflowRevisionAt,
   workflowState,
 } from '../server/scripts/workflow-check.ts';
-import { asRecord, asString, fieldOf, listAt, numberAt, recordAt, stringAt } from '../server/test/mocks.js';
+import { asRecord, asString, fieldOf, listAt, numberAt, recordAt, stringAt, tempFolder } from '../server/test/mocks.js';
 
 const SERVER = fileURLToPath(new URL('../server/', import.meta.url));
 const shipped = () => readFile(join(SERVER, WORKFLOW_PATH), 'utf8');
@@ -236,9 +235,9 @@ test('the updater knows the revision of the workflow it ships with', async () =>
   assert.equal(workflowRevision(await shipped()), SHIPPED_REVISION);
 });
 
-test('a copy made before 0.7.0 runs an outdated workflow and is told to copy the shipped one in', async () => {
+test('a copy made before 0.7.0 runs an outdated workflow and is told to copy the shipped one in', async (t) => {
   const fixture = await readFile(new URL('workflows/update-tether-v0.6.8.yml', import.meta.url), 'utf8');
-  const copy = await mkdtemp(join(tmpdir(), 'tether-v068-'));
+  const copy = await tempFolder(t, 'tether-v068-');
   await mkdir(join(copy, '.github', 'workflows'), { recursive: true });
   await writeFile(join(copy, WORKFLOW_PATH), fixture);
   assert.deepEqual(await workflowState(copy, await workflowRevisionAt(SERVER)), {

@@ -361,18 +361,28 @@ const MAX_TIMER_MS = 2_147_483_647;
  */
 const MAX_RETRIES = 10;
 
-/** The bounded count options' largest values; the others take any non-negative integer. */
+/**
+ * The bounded count options' largest values; the others take any non-negative integer. A larger integer is the site
+ * asking for as much as there is, so it gets the maximum.
+ */
 const COUNT_MAXIMUMS: Partial<Readonly<Record<CountOption, number>>> = {
   requestTimeout: MAX_TIMER_MS,
   searchDelay: MAX_TIMER_MS,
   retries: MAX_RETRIES,
 };
 
-/** @returns `value` when it is a non-negative integer no more than the option's maximum, else the default. */
+/**
+ * @returns `value` when it is a non-negative integer, capped at the option's maximum with a warning; the default,
+ *   with a warning, for anything else.
+ */
 function countOption(name: CountOption, value: unknown): number {
-  const maximum = COUNT_MAXIMUMS[name] ?? Number.POSITIVE_INFINITY;
-  if (typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= maximum) return value;
-  return invalidOption(name, value, DEFAULTS[name]);
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) {
+    return invalidOption(name, value, DEFAULTS[name]);
+  }
+  const maximum = COUNT_MAXIMUMS[name];
+  if (maximum === undefined || value <= maximum) return value;
+  warn(`${name} ${String(value)} is more than its maximum: using ${String(maximum)}`);
+  return maximum;
 }
 
 function switchOption(name: SwitchOption, value: unknown): boolean {
