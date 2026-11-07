@@ -135,3 +135,34 @@ test('a burst of cart changes in another tab reloads the cart here once, behind 
     localStorage.clear();
   }
 });
+
+test('init() after a reload for another tab and another add were queued answers with that add applied', async () => {
+  const { fetch } = globalThis;
+  const variant = product.variants.nodes[0]?.id ?? '';
+  /** @param {number} quantity */
+  const cartOf = (quantity) => cartFrom([{ merchandiseId: variant, quantity }]);
+  let shopify = cartOf(1);
+  /** @type {typeof fetch} */
+  globalThis.fetch = async (_url, init) => {
+    if (operationName(graphqlRequest(init).query) === 'TetherCart') return jsonResponse({ data: { cart: shopify } });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    shopify = cartOf(shopify.totalQuantity + 1);
+    return jsonResponse({ data: { cartLinesAdd: { cart: shopify, userErrors: [], warnings: [] } } });
+  };
+  localStorage.setItem('tether:cart:shop.test', shopify.id);
+  try {
+    await Tether.cart.init();
+    const first = Tether.cart.add(variant);
+    window.dispatchEvent(new window.StorageEvent('storage', { key: 'tether:cart:shop.test:seen' }));
+    // The extras part, loaded by now, queues the reload once its import settles.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const second = Tether.cart.add(variant);
+    const loaded = await Tether.cart.init();
+    assert.equal(loaded?.totalQuantity, 3);
+    await Promise.all([first, second]);
+    assert.equal(Tether.cart.count, 3);
+  } finally {
+    globalThis.fetch = fetch;
+    localStorage.clear();
+  }
+});

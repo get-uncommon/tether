@@ -65,10 +65,17 @@ async function reloadAfterUnclearFailure(): Promise<void> {
 }
 
 /**
+ * A load queued behind other tasks that hasn't started, with no change queued after it: an `init()` meanwhile shares
+ * it instead of queueing another, since it still answers after every change queued before that call.
+ */
+let queuedLoad: Promise<ShopifyCart | null> | null = null;
+
+/**
  * Runs a cart change in the queue (`enqueue`). After a failure that doesn't say whether Shopify applied the change,
  * the cart is loaded again before the next change runs; the change still rejects.
  */
 function runChange<T>(task: () => Promise<T>): Promise<T> {
+  queuedLoad = null;
   return enqueue(() =>
     task().catch(async (error: unknown) => {
       if (isUnclearFailure(error)) await reloadAfterUnclearFailure();
@@ -152,12 +159,10 @@ async function load(): Promise<ShopifyCart | null> {
   return currentCart();
 }
 
-/** A load queued behind other tasks that hasn't started: an `init()` meanwhile shares it instead of queueing another. */
-let queuedLoad: Promise<ShopifyCart | null> | null = null;
-
 /**
  * Loads the saved cart in the queue, so a change Shopify answers meanwhile isn't replaced by an older answer. Calls
- * before the load starts (another tab writing the cart's keys in a burst) share it.
+ * before the load starts and before another change is queued (another tab writing the cart's keys in a burst) share
+ * it.
  */
 function reload(): Promise<ShopifyCart | null> {
   queuedLoad ??= queueFilling(() =>

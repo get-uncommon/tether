@@ -524,7 +524,7 @@ server helpers (`createStorefront()`, and `shop.config.js` with [Astro](astro.md
 | `onLineEnter`              | `null`                     | `(node) => {}` for a new cart line, to animate it in; an error it throws goes to `onError`                                                                                                                                |
 | `onLineLeave`              | `null`                     | `(node, done) => {}` for a removed cart line: animate it out, then call `done()`; an error it throws goes to `onError`, and the line is removed                                                                           |
 | `onValueChange`            | `null`                     | `(element, previousText) => {}` when a bound value's text changes, to animate it; an error it throws goes to `onError`                                                                                                    |
-| `onError`                  | `null`                     | `(error, context) => {}` for every failure that reaches the visitor; an error one of the hooks above throws is reported once per page load for each message                                                               |
+| `onError`                  | `null`                     | `(error, context) => {}` for every failure that reaches the visitor; an `Error` one of the hooks above throws is reported once per page load for each message, anything else it throws every time                         |
 | `debug`                    | `false`                    | Logs Tether's steps, such as retries, in the console                                                                                                                                                                      |
 | `markets.detect`           | the saved choice only      | `true` reads every source, a list (`['saved', 'server', 'webflow']`) only those, `false` none                                                                                                                             |
 | `markets.locales`          | none                       | Webflow locale (subdirectory or `<html lang>`) to `{ country, language, locale }`                                                                                                                                         |
@@ -699,15 +699,16 @@ note files into a new `## X.Y.Z (YYYY-MM-DD)` section at the top of `CHANGELOG.m
 day on the release machine's clock in its own time zone, and deletes them. The section lists the
 files by the first word of each one's first bullet (Breaking, then Security, then Fix, then every
 other kind, then Repository), and by file name within a kind; a file's bullets stay together. It
-then builds, refuses a release commit that changes anything else, runs the versions test and the live smoke test, commits, tags and pushes. The push
-goes through the pre-push hook, which for a push with a new tag runs `npm run check` and
-`npm run lint:workflows` locally: a release takes as long as that gate, and when the hook fails,
-nothing is pushed and the release says so. The release itself doesn't run the gate at the new
-version: a test that fails only at a new version is caught on the pull request by
-the `release-rehearsal` workflow, which writes the next minor and the next patch version into a
-worktree with the release's own rewrite (`node scripts/release.ts --rewrite-only X.Y.Z <folder>`)
-and runs `npm run check` there. It runs on pull requests that change `src/`, `server/`, `scripts/`,
-`test/`, the package files or the README.
+then builds, refuses a release commit that changes anything else, runs the versions test and the
+live smoke test, commits, tags and pushes. The push goes through the pre-push hook, which for a push
+with a new tag runs `npm run check` and `npm run lint:workflows` locally: a release takes as long as
+that gate, and when the hook fails, nothing is pushed and the release says so. The release itself
+doesn't run the gate at the new version: a test that fails only at a new version is caught on the
+pull request by the `release-rehearsal` workflow, which writes the next minor and the next patch
+version into a worktree with the release's own rewrite
+(`node scripts/release.ts --rewrite-only X.Y.Z <folder>`) and runs `npm run check` there. It runs
+on pull requests that change `src/`, `server/`, `scripts/`, `test/`, the package files or the
+README.
 
 So the release also checks, through `gh`, that the rehearsal passed for the newest commit that
 changes one of those paths: on that commit itself, or on the head of the pull request that merged
