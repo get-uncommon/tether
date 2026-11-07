@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.9.6 (2026-11-07)
+
 - Fix: an option value no available variant has is described as unavailable to screen readers
   (`aria-describedby="tether-unavailable"`, a `hidden` note Tether adds), not `aria-disabled`:
   choosing it still works, picking the closest variant that has it. A page's own element with

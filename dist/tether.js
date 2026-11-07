@@ -319,14 +319,20 @@
   }
   var readOnlyViews = /* @__PURE__ */ new WeakMap();
   var READ_ONLY = {
-    get(object, key) {
-      const value = Reflect.get(object, key);
-      return typeof value === "object" && value !== null ? readOnlyView(value) : value;
+    get: (object, key) => viewOf(Reflect.get(object, key)),
+    // A descriptor's value is the view too, so `Object.getOwnPropertyDescriptor` doesn't hand out the live object.
+    getOwnPropertyDescriptor(object, key) {
+      const descriptor = Reflect.getOwnPropertyDescriptor(object, key);
+      if (descriptor) descriptor.value = viewOf(descriptor.value);
+      return descriptor;
     },
     set: (_object, key) => refuseChange(key),
     deleteProperty: (_object, key) => refuseChange(key),
     defineProperty: (_object, key) => refuseChange(key)
   };
+  function viewOf(value) {
+    return typeof value === "object" && value !== null ? readOnlyView(value) : value;
+  }
   function readOnlyView(target) {
     let view = readOnlyViews.get(target);
     if (!view) {
@@ -1199,11 +1205,27 @@
     const input = el.querySelector(CHECKABLE);
     if (input && isInput(input)) input.checked = selected;
   }
-  function setUnavailable(el, unavailable) {
+  var UNAVAILABLE_NOTE = "tether-unavailable";
+  function describeUnavailable(control, unavailable) {
+    if (unavailable && !document.getElementById(UNAVAILABLE_NOTE)) {
+      const note = document.createElement("span");
+      note.id = UNAVAILABLE_NOTE;
+      note.hidden = true;
+      note.textContent = "Unavailable";
+      document.body.append(note);
+    }
+    const ids = (control.getAttribute("aria-describedby") ?? "").split(" ").filter((id) => id && id !== UNAVAILABLE_NOTE);
+    if (unavailable) ids.push(UNAVAILABLE_NOTE);
+    if (ids.length) control.setAttribute("aria-describedby", ids.join(" "));
+    else control.removeAttribute("aria-describedby");
+  }
+  function setUnavailable(el, unavailable, choosing) {
     el.classList.toggle("is-unavailable", unavailable);
     const isControl = chosenState(el) !== null || isInput(el);
     const control = isControl ? el : el.querySelector(CHECKABLE);
-    control?.setAttribute("aria-disabled", String(unavailable));
+    if (!control) return;
+    if (choosing === "picks-closest") describeUnavailable(control, unavailable);
+    else control.setAttribute("aria-disabled", String(unavailable));
   }
   var layoutTimer;
   var pageGlobal = (name) => Reflect.get(window, name);
@@ -1508,6 +1530,13 @@
   var announcedOpen = false;
   var returnFocus = null;
   var classWatcher = null;
+  function callHook(hook2, drawers2, name) {
+    try {
+      hook2?.(drawers2);
+    } catch (error) {
+      reportError(error, name);
+    }
+  }
   var isFocusable = (el) => el !== null && "focus" in el;
   var focusables = (drawer) => qsa(drawer, FOCUSABLE).filter((el) => el.offsetParent !== null || el === document.activeElement);
   var drawers = () => qsa(document, sel("cart-drawer"));
@@ -1559,7 +1588,7 @@
         focusInto(first);
       }, FOCUS_AFTER_OPEN_MS);
     }
-    cfg.onCartOpen?.(opened);
+    callHook(cfg.onCartOpen, opened, "onCartOpen");
     emit("cart-toggled", { open: true });
   }
   function announceClosed(all, hadFocus) {
@@ -1567,7 +1596,7 @@
     syncDrawerAria();
     if (hadFocus && returnFocus?.isConnected) returnFocus.focus({ preventScroll: true });
     returnFocus = null;
-    cfg.onCartClose?.(all);
+    callHook(cfg.onCartClose, all, "onCartClose");
     emit("cart-toggled", { open: false });
   }
   function openCart() {
@@ -2630,10 +2659,11 @@
     /**
      * Adds a code. A code Shopify doesn't accept is removed again, so it doesn't warn on every later change.
      *
-     * @throws {TetherError} `INVALID_DISCOUNT` (rejected) when Shopify doesn't accept the code.
+     * @throws {TetherError} `INVALID_DISCOUNT` (rejected) when Shopify doesn't accept the code, or it is blank.
      */
     async applyDiscount(typed) {
       const code = typed.trim();
+      if (!code) throw new TetherError("No discount code", { code: "INVALID_DISCOUNT" });
       const cart = await Cart.setDiscountCodes((current) => [.../* @__PURE__ */ new Set([...current, code])]);
       const wanted = code.toLowerCase();
       const applied = (cart?.discountCodes ?? []).find((discount) => discount.code.toLowerCase() === wanted);
@@ -2904,7 +2934,7 @@
         const value = get(node, "option-value") ?? "";
         setSelected(node, view.selected[name] === value);
         const unavailable = !isValueAvailable(product, view.selected, name, value);
-        setUnavailable(node, unavailable);
+        setUnavailable(node, unavailable, "picks-closest");
         node.setAttribute("data-unavailable", unavailable ? "true" : "false");
       });
     });
@@ -2924,12 +2954,16 @@
       }
       const mode = get(el, "purchase");
       setSelected(el, mode === purchase.kind);
-      setUnavailable(el, mode === "subscription" ? !view.subscriptionAvailable : scope.product.requiresSellingPlan);
+      setUnavailable(
+        el,
+        mode === "subscription" ? !view.subscriptionAvailable : scope.product.requiresSellingPlan,
+        "does-nothing"
+      );
     });
     scope.$(sel("plan-value")).forEach((node) => {
       const planId = get(node, "plan-value") ?? "";
       setSelected(node, line.kind === "subscription" && planId === line.planId);
-      setUnavailable(node, !allocationFor(variant, planId));
+      setUnavailable(node, !allocationFor(variant, planId), "does-nothing");
       const plan = scope.plans.find((candidate) => candidate.id === planId);
       const texts = planBindTexts(variant, planId, plan, FORMAT);
       qsa(node, sel("plan-bind")).forEach((el) => {
@@ -3564,7 +3598,7 @@
   }
 
   // src/version.ts
-  var VERSION = "0.9.5";
+  var VERSION = "0.9.6";
 
   // src/lazy-iife.ts
   var coreModules = {
