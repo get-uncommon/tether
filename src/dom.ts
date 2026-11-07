@@ -164,12 +164,16 @@ function chosenState(el: Element): 'aria-pressed' | 'aria-checked' | 'aria-selec
 /**
  * Marks an option element as chosen: `is-selected`, the ARIA state its role takes (`chosenState`), and its own or
  * inner radio/checkbox. An element that is no button and has no role of its own (a Webflow button is a link) gets
- * `role="button"`, where `aria-pressed` is valid.
+ * `role="button"`, where `aria-pressed` is valid, and a place in the Tab order unless it has its own `tabindex`; the
+ * product's events press it with Enter and Space.
  */
 export function setSelected(el: Element, selected: boolean): void {
   el.classList.toggle('is-selected', selected);
   const state = chosenState(el);
-  if (state === 'aria-pressed' && el.tagName !== 'BUTTON' && !isInput(el)) el.setAttribute('role', 'button');
+  if (state === 'aria-pressed' && el.tagName !== 'BUTTON' && !isInput(el)) {
+    el.setAttribute('role', 'button');
+    if (!el.hasAttribute('tabindex')) el.setAttribute('tabindex', '0');
+  }
   if (state) el.setAttribute(state, String(selected));
   if (isInput(el) && el.matches(CHECKABLE)) el.checked = selected;
   const input = el.querySelector(CHECKABLE);

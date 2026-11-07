@@ -12,7 +12,7 @@ import {
   operationName,
   product,
 } from './fixtures.js';
-import { numberAt, recordAt, stringAt, waitFor } from '../server/test/mocks.js';
+import { numberAt, recordAt, stringAt, waitFor, within } from '../server/test/mocks.js';
 
 cancelTimersAfterTests();
 
@@ -166,6 +166,24 @@ test('checkout: a + clicked just before waits for Shopify, and checkout gets the
   await plus;
   assert.deepEqual(order, ['update', 'checkout']);
   assert.deepEqual(counts, [2]);
+});
+
+test('checkout: an account resolver that changes the cart completes, and the cart keeps working', async () => {
+  await loadSaved(oneLine());
+  answers['Tether_cartAttributesUpdate'] = () => payload('cartAttributesUpdate', oneLine());
+  answers['TetherCheckout'] = () => ({ data: { cart: { checkoutUrl: 'https://shop.test/checkouts/1' } } });
+  Cart.setCheckoutResolver(async () => {
+    await Cart.setAttributes({ source: 'checkout' });
+    return null;
+  });
+  const url = await within(1000, Cart.checkout('_self'), 'the checkout');
+  assert.equal(url, 'https://shop.test/checkouts/1');
+  await within(1000, Cart.setAttributes({ source: 'later' }), 'a change after the checkout');
+  assert.deepEqual(
+    calls.map((call) => call.op).filter((op) => op === 'Tether_cartAttributesUpdate'),
+    ['Tether_cartAttributesUpdate', 'Tether_cartAttributesUpdate'],
+  );
+  assert.equal(reported.length, 0);
 });
 
 test('checkout: a queued removal of the last line leaves nothing to check out', async () => {

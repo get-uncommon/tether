@@ -241,7 +241,7 @@ export function serial(): <T>(task: () => Promise<T>) => Promise<T> {
   };
 }
 
-/** The one queue every cart change runs through; the checkout's URL lookup waits in it too. */
+/** The one queue every cart change runs through; checkout waits for the changes in it. */
 export const runInOrder = serial();
 
 /**

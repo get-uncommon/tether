@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- **Fix: 0.9.4's checkout could hang.** When a checkout resolver changes the cart during checkout
+  (for example the account part, or a site's own `Tether.cart.setCheckoutResolver` that calls
+  `setAttributes` or `setBuyerIdentity`), 0.9.4 waited for that change inside the cart's queue,
+  behind the checkout itself: checkout never finished and every later cart change waited until the
+  page was reloaded. Checkout now waits for the changes made before it, then asks the resolver
+  outside the queue, so it may change the cart. Sites on `@0.9` or `@latest` get this fix by
+  themselves; a site pinned to `@v0.9.4` should move to `@v0.9.5`.
+- Fix: an option, plan or purchase element that 0.9.4 gave `role="button"` (a link, `div` or other
+  element without a role) is in the Tab order (unless it has its own `tabindex`), and Enter or Space
+  chooses it like a click. In 0.9.4 a screen reader announced a button the keyboard couldn't reach.
+- The discount form's apply step runs in the extras part (`tether.extras.min.js`), which keeps the
+  core within its size budget; sites that host the script files themselves already host that file.
+
 ## 0.9.4 (2026-11-07)
 
 - Fix: a `tether-cart-drawer="manual"` drawer the site opens, by adding the open class, is usable:

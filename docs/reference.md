@@ -240,7 +240,8 @@ Images accept `max-width`, `max-height`, `crop` for Shopify CDN resizing (or, as
 `tether-max-width` / `data-max-width`, and the same for the others).
 
 Classes Tether sets: option buttons get `is-selected` (+ `aria-pressed`; a link or `div` option
-also gets `role="button"`, a radio or checkbox is `checked` instead) and `is-unavailable`
+also gets `role="button"` and, without its own `tabindex`, `tabindex="0"`, and Enter and Space press it;
+a radio or checkbox is `checked` instead) and `is-unavailable`
 (+ `aria-disabled`) when no available variant has that value with the other choices. Clicking an unavailable value picks the closest variant that has
 it and keeps the other choices where possible; a value no variant has is ignored. Add-to-cart gets `is-disabled` (+ `aria-disabled`, `disabled`) when the variant is sold out.
 The variant first selected is the one in `?variant=` / `tether-variant`, else the first available one.
@@ -592,8 +593,8 @@ too), and a `partsUrl` has to be https or on your own site.
 (jsDelivr serves them from the same folder) or at `partsUrl`, and as split chunks in a bundler:
 `tether.lists.min.js` (product lists, `Tether.getProducts()`, `Tether.getRecommendations()`),
 `tether.search.min.js` (search as you type), `tether.markets.min.js` (`markets.detect`,
-`tether-country-select`, `Tether.setCountry()`), `tether.extras.min.js` (bundles, `?variant=`),
-`tether.account.min.js` and `tether.account-pages.min.js` (customer accounts),
+`tether-country-select`, `Tether.setCountry()`), `tether.extras.min.js` (bundles, `?variant=`, the
+discount form), `tether.account.min.js` and `tether.account-pages.min.js` (customer accounts),
 `tether.analytics.min.js` (analytics) and `tether.diagnose.min.js` (`Tether.diagnose()`). So
 `Tether.getProducts()`, `Tether.getRecommendations()`, `Tether.detectMarket()` and
 `Tether.getLocalization()` return promises. The script build finds its folder from its own

@@ -1,37 +1,19 @@
 /**
  * The discount code form (`tether-discount-form` with `tether-discount-input`) and the remove buttons of applied codes
- * (`tether-discount-remove` inside `tether-discount-code`), delegated from the document. A code Shopify refuses marks
- * the form `is-invalid` (and the input `aria-invalid`) until the visitor types again.
+ * (`tether-discount-remove` inside `tether-discount-code`), delegated from the document. Applying a code is in the
+ * extras part, loaded on the first submit. A code Shopify refuses marks the form `is-invalid` (and the input
+ * `aria-invalid`) until the visitor types again.
  */
 import { reportError } from '../config.ts';
-import { TetherError } from '../client.ts';
 import { Cart } from '../cart.ts';
-import { attr, sel, busy, emit } from '../dom.ts';
+import { attr, sel, busy } from '../dom.ts';
+import { loadPart } from '../lazy.ts';
 
 const isElement = (target: EventTarget | null): target is Element => target instanceof window.Element;
 
 function codeInputOf(form: Element): HTMLInputElement | null {
   const input = form.querySelector(sel('discount-input')) ?? form.querySelector('input');
   return input instanceof window.HTMLInputElement ? input : null;
-}
-
-function markInvalid(form: Element, input: HTMLInputElement | null, invalid: boolean): void {
-  form.classList.toggle('is-invalid', invalid);
-  if (invalid) input?.setAttribute('aria-invalid', 'true');
-  else input?.removeAttribute('aria-invalid');
-}
-
-async function applyCode(form: Element, input: HTMLInputElement | null, code: string): Promise<void> {
-  try {
-    await Cart.applyDiscount(code);
-    markInvalid(form, input, false);
-    emit('discount-applied', { code }, form);
-    if (input) input.value = '';
-  } catch (error) {
-    markInvalid(form, input, true);
-    if (error instanceof TetherError && error.code === 'INVALID_DISCOUNT') emit('discount-invalid', { code }, form);
-    else reportError(error, 'discount');
-  }
 }
 
 function onSubmit(event: SubmitEvent): void {
@@ -42,7 +24,11 @@ function onSubmit(event: SubmitEvent): void {
   const input = codeInputOf(form);
   const code = input?.value.trim();
   if (!code) return;
-  void busy(form, () => applyCode(form, input, code));
+  busy(form, () => loadPart('extras').then((part) => part.applyDiscountCode(form, input, code))).catch(
+    (error: unknown) => {
+      reportError(error, 'discount');
+    },
+  );
 }
 
 function onInput(event: Event): void {
