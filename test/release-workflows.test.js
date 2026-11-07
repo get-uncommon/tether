@@ -185,7 +185,7 @@ test('CI and the pre-push hook lint the workflows with one script, at the versio
   assert.doesNotMatch(job, /[0-9a-f]{64}|actionlint_|zizmor==|npm ci/, 'no version of its own, and no dependency');
   const lefthook = await readFile(new URL('../.config/lefthook.yml', import.meta.url), 'utf8');
   const [, prePush = ''] = /\npre-push:\n([^]*)/.exec(lefthook) ?? [];
-  assert.match(prePush, /run: npm run check\n/);
+  assert.match(prePush, /use_stdin: true\n {6}run: node --experimental-strip-types scripts\/pre-push\.ts\n/);
   assert.match(prePush, /run: npm run lint:workflows\n/);
   const pkg = await readFile(new URL('../package.json', import.meta.url), 'utf8');
   assert.ok(pkg.includes('"lint:workflows": "node --experimental-strip-types scripts/lint-workflows.ts"'));
