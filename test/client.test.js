@@ -351,3 +351,29 @@ test('the first retry waits the base backoff, and each later one twice as long',
   assert.deepEqual(await result, { done: true });
   assert.deepEqual(sentAt, [0, 300, 900, 2100]);
 });
+
+test('the wait between two tries stops doubling at 30 seconds', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  /** @type {number[]} */
+  const sentAt = [];
+  const conf = {
+    ...resolveConfig({ domain: 'retry.test', token: 't', maxAge: 0, retries: 10, requestTimeout: 0 }),
+    /** @type {typeof fetch} */
+    fetch: async () => {
+      sentAt.push(Date.now());
+      return sentAt.length <= 10 ? jsonResponse({}, 429) : answered();
+    },
+  };
+  const result = request(conf, '{ shop { name } }', {}, hasData);
+  const progress = { settled: false };
+  void result.finally(() => {
+    progress.settled = true;
+  });
+  for (let step = 0; step < 200 && !progress.settled; step += 1) {
+    await new Promise((resolve) => setImmediate(resolve));
+    t.mock.timers.runAll();
+  }
+  assert.deepEqual(await result, { done: true });
+  // 300 ms doubling to 19.2 s, then 30 s three times.
+  assert.deepEqual(sentAt, [0, 300, 900, 2100, 4500, 9300, 18_900, 38_100, 68_100, 98_100, 128_100]);
+});
