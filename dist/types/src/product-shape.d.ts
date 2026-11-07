@@ -1,5 +1,5 @@
 import type { Product } from './fragments.js';
-import type { PageInfo } from './loader.js';
+import type { Collection, PageInfo } from './loader.js';
 /** A page of a GraphQL connection of products. */
 export interface ProductConnection {
     nodes: Product[];
@@ -44,41 +44,6 @@ export declare const PRODUCT: {
         }];
     };
 };
-/** A page of products, with the `pageInfo` paging reads. */
-export declare const PRODUCT_CONNECTION: {
-    readonly nodes: readonly [{
-        readonly id: "string";
-        readonly handle: "string";
-        readonly title: "string";
-        readonly options: readonly ["object"];
-        readonly images: {
-            readonly nodes: readonly ["object"];
-        };
-        readonly priceRange: {
-            readonly minVariantPrice: {
-                readonly amount: "string";
-                readonly currencyCode: "string";
-            };
-            readonly maxVariantPrice: {
-                readonly amount: "string";
-                readonly currencyCode: "string";
-            };
-        };
-        readonly variants: {
-            readonly nodes: readonly [{
-                readonly id: "string";
-                readonly price: {
-                    readonly amount: "string";
-                    readonly currencyCode: "string";
-                };
-                readonly selectedOptions: readonly ["object"];
-            }];
-        };
-    }];
-    readonly pageInfo: {
-        readonly hasNextPage: "boolean";
-    };
-};
 /** True for a value with the structure of `PRODUCT` and a non-empty id and handle. */
 export declare const isProductShape: (value: unknown) => value is Product;
 /**
@@ -88,3 +53,15 @@ export declare const isProductShape: (value: unknown) => value is Product;
 export declare const PRODUCT_NODE: (node: unknown) => node is Product | {
     id?: undefined;
 };
+/** A collection's answer: `null` for a handle the store doesn't have. Its other fields are written as text. */
+export declare const isCollectionAnswer: import("./client.js").DataCheck<{
+    collection: (Collection & {
+        products: ProductConnection;
+    }) | null;
+}>;
+export declare const isSearchAnswer: import("./client.js").DataCheck<{
+    products: ProductConnection;
+}>;
+export declare const isRecommendationsAnswer: import("./client.js").DataCheck<{
+    productRecommendations: Product[] | null;
+}>;

@@ -240,6 +240,7 @@
     sellingPlansFirst: 25,
     collectionFirst: 24,
     retries: 2,
+    requestTimeout: 15e3,
     revalidate: true,
     storageKey: "",
     cartDrawerOpenClass: "is-open",
@@ -304,6 +305,7 @@
     "sellingPlansFirst",
     "collectionFirst",
     "retries",
+    "requestTimeout",
     "maxAge",
     "lowStock",
     "searchDelay"
@@ -338,8 +340,11 @@
       dropped(name, value);
     }
   }
+  var DELAY_OPTIONS = /* @__PURE__ */ new Set(["requestTimeout", "searchDelay"]);
+  var MAX_TIMER_MS = 2147483647;
   function countOption(name, value) {
-    if (typeof value === "number" && Number.isInteger(value) && value >= 0) return value;
+    const maximum = DELAY_OPTIONS.has(name) ? MAX_TIMER_MS : Number.POSITIVE_INFINITY;
+    if (typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= maximum) return value;
     return invalidOption(name, value, DEFAULTS[name]);
   }
   function switchOption(name, value) {
@@ -545,13 +550,27 @@
     const unclear = res.ok && (serverError || operation === "mutation" && data == null);
     throw graphQLFailure(res, errors, conf, unclear ? "SERVER_ERROR" : void 0);
   }
-  async function attempt(conf, query2, variables, isData, retry, operation) {
+  async function withTimeout(ms, send2) {
+    if (!ms) return send2(null);
+    const controller = new AbortController();
+    const timer = setTimeout(() => {
+      controller.abort(new DOMException("signal timed out", "TimeoutError"));
+    }, ms);
+    try {
+      return await send2(controller.signal);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  async function attempt(conf, query2, variables, isData, retry, operation, signal) {
     let res;
     try {
       res = await (conf.fetch ?? fetch)(endpoint(conf), {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-Shopify-Storefront-Access-Token": conf.token },
-        body: JSON.stringify({ query: query2, variables })
+        body: JSON.stringify({ query: query2, variables }),
+        // A `fetch` given to the server helpers has to honour the signal, as the platform's does.
+        signal
       });
     } catch (error) {
       return networkFailure(error, retry);
@@ -588,7 +607,10 @@
       const access = { inventory: !storesWithoutInventory.has(store) };
       const sent = queryText(conf, query2, access, { context, operation });
       const retry = retries < conf.retries ? retryWhileLeft : "none";
-      const outcome = await attempt(conf, sent, variables, isData, retry, operation);
+      const outcome = await withTimeout(
+        conf.requestTimeout,
+        (signal) => attempt(conf, sent, variables, isData, retry, operation, signal)
+      );
       switch (outcome.kind) {
         case "data":
           return outcome.data;
@@ -598,9 +620,9 @@
           storesWithoutInventory.add(store);
           break;
         case "retry":
+          await sleep(outcome.backoffMs * 2 ** retries);
           retries += 1;
           log("retry", retries);
-          await sleep(outcome.backoffMs * 2 ** retries);
           break;
       }
     }
@@ -1369,6 +1391,13 @@
   };
   var isProductShape = (value) => field(value, "id") !== "" && field(value, "handle") !== "" && matches(value, PRODUCT);
   var PRODUCT_NODE = (node) => isRecord(node) && (node["id"] === void 0 || matches(node, PRODUCT));
+  var isCollectionAnswer = shaped({
+    collection: orNull({ handle: "string", products: PRODUCT_CONNECTION })
+  });
+  var isSearchAnswer = shaped({ products: PRODUCT_CONNECTION });
+  var isRecommendationsAnswer = shaped({
+    productRecommendations: orNull([PRODUCT])
+  });
 
   // src/cart/cart-shape.ts
   var LINE = {
@@ -1622,64 +1651,6 @@
     const normalized = normalizeProductKey(key);
     if (normalized) productCache.delete(normalized);
     return getProduct(key);
-  }
-  var isCollectionAnswer = shaped({
-    collection: orNull({ handle: "string", products: PRODUCT_CONNECTION })
-  });
-  var isSearchAnswer = shaped({ products: PRODUCT_CONNECTION });
-  var isRecommendationsAnswer = shaped({
-    productRecommendations: orNull([PRODUCT])
-  });
-  var COLLECTION_QUERY = `query TetherCollection($handle:String!,$first:Int!,$after:String,$sortKey:ProductCollectionSortKeys,$reverse:Boolean,$filters:[ProductFilter!]){collection(handle:$handle){${collectionFields()} products(first:$first,after:$after,sortKey:$sortKey,reverse:$reverse,filters:$filters){nodes{...TetherProduct}pageInfo{hasNextPage endCursor}}}}`;
-  var SEARCH_QUERY = `query TetherSearch($first:Int!,$after:String,$query:String,$sortKey:ProductSortKeys,$reverse:Boolean){products(first:$first,after:$after,query:$query,sortKey:$sortKey,reverse:$reverse){nodes{...TetherProduct}pageInfo{hasNextPage endCursor}}}`;
-  async function getProducts({
-    collection,
-    query: query2,
-    first = cfg.collectionFirst,
-    after = null,
-    sortKey,
-    reverse = false,
-    filters
-  } = {}) {
-    if (collection) {
-      const data2 = await gql(
-        withProductFragment(COLLECTION_QUERY),
-        {
-          handle: collection,
-          first,
-          after,
-          sortKey: sortKey || void 0,
-          reverse,
-          filters: filters ?? void 0
-        },
-        isCollectionAnswer
-      );
-      if (!data2.collection) throw new TetherError(`Collection not found: ${collection}`, { code: "NOT_FOUND" });
-      const { products, ...rest } = data2.collection;
-      products.nodes.forEach(primeProduct);
-      return { collection: rest, products: products.nodes, pageInfo: products.pageInfo };
-    }
-    const data = await gql(
-      withProductFragment(SEARCH_QUERY),
-      { first, after, query: query2 || void 0, sortKey: sortKey || void 0, reverse },
-      isSearchAnswer
-    );
-    data.products.nodes.forEach(primeProduct);
-    return { collection: null, products: data.products.nodes, pageInfo: data.products.pageInfo };
-  }
-  async function getRecommendations(product, intent = "RELATED") {
-    const key = normalizeProductKey(typeof product === "object" ? product?.id : product);
-    const byId = key?.startsWith("gid://") ?? false;
-    const data = await gql(
-      withProductFragment(
-        `query TetherRecs(${byId ? "$id: ID!" : "$handle: String!"},$intent:ProductRecommendationIntent){productRecommendations(${byId ? "productId: $id" : "productHandle: $handle"},intent:$intent){...TetherProduct}}`
-      ),
-      byId ? { id: key, intent } : { handle: key, intent },
-      isRecommendationsAnswer
-    );
-    const list = data.productRecommendations ?? [];
-    list.forEach(primeProduct);
-    return list;
   }
 
   // src/product-render.ts
@@ -3217,128 +3188,6 @@
     }
   };
 
-  // src/collection.ts
-  var URL_QUERY_SOURCE = "url:";
-  var listSelector = () => `${sel("collection")},${sel("products")},${sel("recommendations")}`;
-  var isElement2 = (target) => target instanceof window.Element;
-  var toLimit = (raw) => parseInt(raw ?? "", 10) || void 0;
-  var toIntent = (raw) => raw === "COMPLEMENTARY" ? "COMPLEMENTARY" : "RELATED";
-  var ListScope = class {
-    constructor(root) {
-      __publicField(this, "root");
-      __publicField(this, "products", []);
-      __publicField(this, "pageInfo", null);
-      __publicField(this, "collection", null);
-      /** Counts loads, so only the latest one renders. */
-      __publicField(this, "loadToken", 0);
-      this.root = root;
-      setScopeStatus(root, "loading");
-      root.addEventListener("click", (event) => {
-        if (!isElement2(event.target)) return;
-        const more = event.target.closest(sel("load-more"));
-        if (more?.closest(listSelector()) !== root) return;
-        event.preventDefault();
-        void busy(more, () => this.load(true));
-      });
-    }
-    $(selector) {
-      return scoped(this.root, selector, listSelector());
-    }
-    /** The collection or search query of the list's attributes. */
-    options() {
-      const { root } = this;
-      const query2 = { reverse: get(root, "reverse") === "true" };
-      const first = toLimit(get(root, "limit"));
-      if (first) query2.first = first;
-      const sortKey = get(root, "sort");
-      if (sortKey) query2.sortKey = sortKey;
-      if (has(root, "collection")) {
-        query2.collection = get(root, "collection") ?? "";
-        return query2;
-      }
-      const raw = get(root, "products") ?? "";
-      query2.query = raw.startsWith(URL_QUERY_SOURCE) ? new URL(window.location.href).searchParams.get(raw.slice(URL_QUERY_SOURCE.length)) || "" : raw;
-      return query2;
-    }
-    /**
-     * The product of a recommendations list: a handle, `url:…` (one dynamic product page), or empty inside a product
-     * scope for that product.
-     *
-     * @throws {TetherError} `NOT_FOUND` when there is no product to recommend for.
-     */
-    async loadRecommendations() {
-      let { key } = resolveProductKey(this.root, window.location, "recommendations");
-      const scope = this.root.closest(sel("product"));
-      if (!key && scope) ({ key } = resolveProductKey(scope));
-      if (!key) throw new TetherError("No product for recommendations", { code: "NOT_FOUND" });
-      return getRecommendations(key, toIntent(get(this.root, "intent")));
-    }
-    /** @param more Appends the next page instead of replacing the products. */
-    async load(more = false) {
-      this.loadToken += 1;
-      const token = this.loadToken;
-      const stale2 = () => token !== this.loadToken;
-      try {
-        if (has(this.root, "recommendations")) {
-          const recommendations = await this.loadRecommendations();
-          if (stale2()) return;
-          const limit = toLimit(get(this.root, "limit"));
-          this.products = limit ? recommendations.slice(0, limit) : recommendations;
-        } else {
-          const page = await getProducts({ ...this.options(), after: more ? this.pageInfo?.endCursor ?? null : null });
-          if (stale2()) return;
-          this.collection = page.collection;
-          this.pageInfo = page.pageInfo;
-          this.products = more ? [...this.products, ...page.products] : page.products;
-        }
-        this.render();
-        setScopeStatus(this.root, "ready");
-        emit("list-ready", { products: this.products, collection: this.collection }, this.root);
-      } catch (error) {
-        if (stale2()) return;
-        if (!more) setScopeStatus(this.root, isNotFound(error) ? "not-found" : "error", error);
-        if (!(isNotFound(error) && has(this.root, "recommendations"))) reportError(error, "list load failed");
-        emit("error", { error, context: "list" }, this.root);
-      }
-    }
-    render() {
-      const { collection } = this;
-      this.$(sel("collection-bind")).forEach((el) => {
-        switch (get(el, "collection-bind") ?? "") {
-          case "title":
-            setText(el, collection?.title ?? "");
-            break;
-          case "description":
-            setStoreHtml(el, collection?.descriptionHtml);
-            break;
-          case "image":
-            setImage(el, collection?.image?.url, collection?.image?.altText || collection?.title);
-            break;
-          case "count":
-            setText(el, this.products.length);
-            break;
-        }
-      });
-      this.$(sel("list")).forEach((container) => {
-        repeat(container, this.products, (node, product) => {
-          node.setAttribute(attr("product"), product.handle);
-          node.removeAttribute(attr("state"));
-        });
-        emit("list-rendered", { container }, this.root);
-      });
-      const empty = this.products.length === 0;
-      this.$(sel("show")).forEach((el) => {
-        const key = get(el, "show");
-        if (key === "list-empty") show(el, empty);
-        if (key === "list-filled") show(el, !empty);
-      });
-      this.$(sel("load-more")).forEach((el) => {
-        show(el, Boolean(this.pageInfo?.hasNextPage));
-      });
-      notifyLayoutChanged("list");
-    }
-  };
-
   // src/mounting.ts
   var HYDRATE_SELECTOR = 'script[type="application/json"][data-tether-hydrate]';
   var mountedProducts = /* @__PURE__ */ new WeakSet();
@@ -3578,7 +3427,7 @@
   }
 
   // src/part-integrity.ts
-  var PART_INTEGRITY = { "tether.diagnose.js": "sha384-exWttcEw4tQTiJ4OU0r/Y+0T5vVIYIo3kcmieqDPkUUmJQGr2HZzWxZCOmMhsvaY", "tether.markets.js": "sha384-hn9741hCQun49mIj7A2bazMG2wXxTpMDScOQK+8wMeY6KT1p+ovXcKDi3m6BK04C", "tether.search.js": "sha384-ZrByfRsWNOHbbWOocY4WOD2RWe4QI2qQRZ4Eb+fM5v/UHIQ8mlWxbSwrxJt8yLbc", "tether.extras.js": "sha384-lt7I8DOnCx8wwVHQM4ZT39+Jlv95WVED5eVDezUKchNXo4+j1oBXYtxzPFiPyxgm", "tether.account.js": "sha384-UF36poTg1vnXE7Pg+FYFGMJ4qjKhx9mbOug9bqTYhzgqRppOKS9M/1uY5D/cz9KF", "tether.account-pages.js": "sha384-jJYvZswrRw+pGDYrk0FswWcYqGpZkbR6ooxJGFu0lTYkUlVOcsCXuLLLU6M5kO54", "tether.analytics.js": "sha384-10v5pBMzgfF7BuLGQBg3cdbgMk701Uto5rGjhByiRD2jI9+/WF8DFcSWplIcdRNg" };
+  var PART_INTEGRITY = { "tether.diagnose.js": "sha384-6b98ZqhqrOFydwTyklda6rjvyWrgz1OnmffApLQ3+gg6VPSU1Yy3LhR1OT4lprfa", "tether.markets.js": "sha384-f9ZeUfc/tMICwVFPrC44Sa1oxm9c6jTQASJdNhHWDk55thsEVScodDBKSYUiuDgr", "tether.search.js": "sha384-kNQI7aVmvUyNgV2e6+PRy53xmbKiZi2n1hhYmHUDFCGU3BR6SoGpGKVKVbPE0ZtG", "tether.lists.js": "sha384-MfQgl9RjiTn6vr80fQymnFikrsDXh3wcmT8cu858s7z9p/oByQaJUKZo92qhjX1P", "tether.extras.js": "sha384-H4CWsEibHw/99UiBAi366ctyaNZrVMkK6Y1YJYYcGDbNthy5eQdS+RRcrlm1clmQ", "tether.account.js": "sha384-UeOp/wddJlVjmlYcVqqO9hU7ANLYEtY/TtK/y5cFkQ6J+SPBmqI/VReaAh+reCMC", "tether.account-pages.js": "sha384-jBeU+vF/U13v+9LZxg5R8lQb/PDHTXPVvu1EmsdDUrlh7BmIntbZJh2+iT6YykTy", "tether.analytics.js": "sha384-4gJ/lcu+S+sfpEHu64+0m2zbXpvNsyOxKDQchPEIb1SFg3ky1JlXODNSdRoodST9" };
 
   // src/part-registry.ts
   function isTetherInternals(value) {
@@ -3586,7 +3435,7 @@
   }
 
   // src/version.ts
-  var VERSION = "0.8.1";
+  var VERSION = "0.9.0";
 
   // src/lazy-iife.ts
   var coreModules = {
@@ -3594,13 +3443,14 @@
       return [cfg, isConfigured, log, MARKET_SOURCES, parseMarkets, reportError, warn];
     },
     get "client.ts"() {
-      return [endpoint, gql, orNull, shaped, TetherError];
+      return [endpoint, gql, matches, orNull, shaped, TetherError];
     },
     get "dom.ts"() {
       return [
         ANALYTICS_EVENTS,
         attr,
         attributesFromJson,
+        busy,
         emit,
         formatDate,
         formatMoney2,
@@ -3608,24 +3458,30 @@
         has,
         hasTemplate,
         isOwnEvent,
+        notifyLayoutChanged,
         parseJSONAttr,
         productUrl2,
         qsa,
         repeat,
+        scoped,
         sel,
         setImage,
+        setStoreHtml,
         setText,
         show
       ];
     },
     get "loader.ts"() {
-      return [clearProductCache, getProduct];
+      return [clearProductCache, getProduct, normalizeProductKey, primeProduct, withProductFragment];
+    },
+    get "fragments.ts"() {
+      return [collectionFields];
     },
     get "selling-plans.ts"() {
       return [allPlans];
     },
     get "status.ts"() {
-      return [boundary, resolveProductKey];
+      return [boundary, isNotFound, resolveProductKey, setScopeStatus];
     },
     get "cart.ts"() {
       return [Cart];
@@ -3688,12 +3544,16 @@
           return;
         }
         parts.delete(name);
-        const problem = isTetherInternals(tether) ? "did not register" : "can't register: window.Tether is no longer this Tether script's";
+        const problem = isTetherInternals(tether) ? "did not register" : "can't register: window.Tether is no longer this Tether script's, another script replaced it";
         reject(new Error(`${url2} ${problem}`));
       };
       script.onerror = () => {
         parts.delete(name);
-        reject(new Error(`Could not load ${url2}, or it is not the file built with this Tether script`));
+        reject(
+          new Error(
+            `Could not load ${url2}, or it is not the file built with this Tether script. Host the same release's files next to the Tether script or at partsUrl.`
+          )
+        );
       };
       document.head.appendChild(script);
     });
@@ -3717,6 +3577,19 @@
       parts.set(name, loading);
     }
     return loading;
+  }
+
+  // src/collection.ts
+  var listSelector = () => `${sel("collection")},${sel("products")},${sel("recommendations")}`;
+  function mountedList(root) {
+    setScopeStatus(root, "loading");
+    return {
+      root,
+      load: () => loadPart("lists").then((part) => part.loadList(root)).catch((error) => {
+        setScopeStatus(root, "error", error);
+        reportError(error, "lists");
+      })
+    };
   }
 
   // src/account-marks.ts
@@ -3781,7 +3654,7 @@
 
   // src/controls/cart-controls.ts
   var lineKeyAttribute = () => `data-${cfg.prefix}-key`;
-  var isElement3 = (target) => target instanceof window.Element;
+  var isElement2 = (target) => target instanceof window.Element;
   function lineOf(target) {
     const line = target.closest(`[${lineKeyAttribute()}]`);
     const id = line?.getAttribute(lineKeyAttribute());
@@ -3814,7 +3687,7 @@
   }
   function onClick2(event) {
     const { target } = event;
-    if (!isElement3(target)) return;
+    if (!isElement2(target)) return;
     if (target.closest(sel("cart-open"))) {
       event.preventDefault();
       Cart.toggle();
@@ -3851,7 +3724,7 @@
   }
   function onChange2(event) {
     const { target } = event;
-    if (!isElement3(target)) return;
+    if (!isElement2(target)) return;
     const found = lineOf(target);
     if (found && target instanceof window.HTMLInputElement && target.matches(sel("line", "quantity"))) {
       showLineBusy(found.line, Cart.updateLine(found.id, parseInt(target.value, 10) || 0), "cart line");
@@ -3877,7 +3750,7 @@
   }
 
   // src/controls/discount.ts
-  var isElement4 = (target) => target instanceof window.Element;
+  var isElement3 = (target) => target instanceof window.Element;
   function codeInputOf(form) {
     const input = form.querySelector(sel("discount-input")) ?? form.querySelector("input");
     return input instanceof window.HTMLInputElement ? input : null;
@@ -3901,7 +3774,7 @@
   }
   function onSubmit(event) {
     const { target } = event;
-    const form = isElement4(target) ? target.closest(sel("discount-form")) : null;
+    const form = isElement3(target) ? target.closest(sel("discount-form")) : null;
     if (!form) return;
     event.preventDefault();
     const input = codeInputOf(form);
@@ -3911,7 +3784,7 @@
   }
   function onInput(event) {
     const { target } = event;
-    if (!isElement4(target)) return;
+    if (!isElement3(target)) return;
     const form = target.closest(sel("discount-form"));
     if (!form) return;
     form.classList.remove("is-invalid");
@@ -3919,7 +3792,7 @@
   }
   function onClick3(event) {
     const { target } = event;
-    const remove = isElement4(target) ? target.closest(sel("discount-remove")) : null;
+    const remove = isElement3(target) ? target.closest(sel("discount-remove")) : null;
     if (!remove) return;
     event.preventDefault();
     const code = remove.closest(sel("discount-code"))?.getAttribute(attr("discount-code"));
@@ -4033,7 +3906,7 @@
       if (mountedLists.has(el)) return;
       mountedLists.add(el);
       count++;
-      const list = new ListScope(el);
+      const list = mountedList(el);
       liveLists.add(list);
       el.addEventListener(`${cfg.prefix}:list-rendered`, (event) => {
         if (isOwnEvent(event, "list-rendered")) mount(event.detail.container);
@@ -4165,6 +4038,8 @@
     observer.observe(document.body, { childList: true, subtree: true });
   }
   var detectMarket = (markets) => loadPart("markets").then((part) => part.detectMarket(markets ?? cfg.markets));
+  var getProducts = (query2) => loadPart("lists").then((part) => part.getProducts(query2));
+  var getRecommendations = (product, intent) => loadPart("lists").then((part) => part.getRecommendations(product, intent));
   var getLocalization = () => loadPart("markets").then((part) => part.getLocalization());
   var diagnose = (options) => loadPart("diagnose").then((part) => part.diagnose({ ...options, version: VERSION }));
   function on(name, listener) {

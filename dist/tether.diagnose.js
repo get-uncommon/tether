@@ -20,15 +20,15 @@
 
   // tether-core:client.ts
   var m2 = window.Tether.__core["client.ts"];
-  var [endpoint, gql, orNull, shaped, TetherError] = m2;
+  var [endpoint, gql, matches, orNull, shaped, TetherError] = m2;
 
   // tether-core:dom.ts
   var m3 = window.Tether.__core["dom.ts"];
-  var [ANALYTICS_EVENTS, attr, attributesFromJson, emit, formatDate, formatMoney, get, has, hasTemplate, isOwnEvent, parseJSONAttr, productUrl, qsa, repeat, sel, setImage, setText, show] = m3;
+  var [ANALYTICS_EVENTS, attr, attributesFromJson, busy, emit, formatDate, formatMoney, get, has, hasTemplate, isOwnEvent, notifyLayoutChanged, parseJSONAttr, productUrl, qsa, repeat, scoped, sel, setImage, setStoreHtml, setText, show] = m3;
 
   // tether-core:loader.ts
   var m4 = window.Tether.__core["loader.ts"];
-  var [clearProductCache, getProduct] = m4;
+  var [clearProductCache, getProduct, normalizeProductKey, primeProduct, withProductFragment] = m4;
 
   // tether-core:selling-plans.ts
   var m5 = window.Tether.__core["selling-plans.ts"];
@@ -36,7 +36,7 @@
 
   // tether-core:status.ts
   var m6 = window.Tether.__core["status.ts"];
-  var [boundary, resolveProductKey] = m6;
+  var [boundary, isNotFound, resolveProductKey, setScopeStatus] = m6;
 
   // src/api-version.ts
   var QUARTERLY_VERSION = /^(\d{4})-(01|04|07|10)$/;

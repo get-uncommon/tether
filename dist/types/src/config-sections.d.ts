@@ -30,6 +30,13 @@ export declare function embedOriginsOption(value: unknown, invalid: Invalid): st
 export declare function toMetafieldIdentifier(ref: unknown): MetafieldIdentifier | null;
 /** @returns The refs that name a valid identifier, as written; each other one is skipped with a warning. */
 export declare function metafieldsOption(value: unknown, invalid: Invalid): MetafieldRef[];
+/** How each field of a nested option is read: the field's value when it is of the right kind, else `undefined`. */
+type Schema<Section extends object> = {
+    [Key in keyof Section]-?: (value: unknown) => Section[Key] | undefined;
+};
+export declare const ACCOUNT: Schema<Partial<AccountConfig>>;
+export declare const MARKETS: Schema<MarketsConfig>;
+export declare const ANALYTICS: Schema<AnalyticsConfig>;
 /**
  * @param warn Says why an `account` without a usable `server` is off.
  * @returns `null` without a usable `account.server`: nothing of the account part loads.

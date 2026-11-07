@@ -7,6 +7,7 @@ export interface Parts {
     diagnose: typeof import('./diagnose.js');
     markets: typeof import('./markets-ui.js');
     search: typeof import('./search.js');
+    lists: typeof import('./lists.js');
     extras: typeof import('./extras.js');
     account: typeof import('./account.js');
     'account-pages': typeof import('./account-pages.js');

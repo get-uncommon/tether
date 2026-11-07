@@ -1,6 +1,6 @@
 import { productKey } from './shopify-values.js';
 import type { Product, Image } from './fragments.js';
-import type { ProductConnection } from './product-shape.js';
+import type { QueryText } from './client.js';
 /** Accepts a handle, numeric id, gid or a full product URL. */
 export declare const normalizeProductKey: typeof productKey;
 /** Puts a product the page already has (from a collection query) in the cache, under its handle and its id. */
@@ -10,6 +10,12 @@ export declare function primeProduct(product: Product | null | undefined): void;
  * @throws {TetherError} `NOT_FOUND` (rejected) for an empty key or a product the store doesn't have.
  */
 export declare function getProduct(rawKey: string | number | null | undefined): Promise<Product>;
+/**
+ * @param operation An operation that spreads `...TetherProduct`.
+ * @returns The operation with the product fragment (which starts on its own line), written for what the token may
+ *   read.
+ */
+export declare const withProductFragment: (operation: string) => QueryText;
 /** Forgets every product, for a new market: requests already sent no longer fill the cache. */
 export declare function clearProductCache(): void;
 /**
@@ -56,29 +62,3 @@ export interface ProductQuery {
     /** `ProductFilter` values, for a collection. */
     filters?: unknown[];
 }
-/** A collection's answer: `null` for a handle the store doesn't have. Its other fields are written as text. */
-export declare const isCollectionAnswer: import("./client.js").DataCheck<{
-    collection: (Collection & {
-        products: ProductConnection;
-    }) | null;
-}>;
-export declare const isSearchAnswer: import("./client.js").DataCheck<{
-    products: ProductConnection;
-}>;
-export declare const isRecommendationsAnswer: import("./client.js").DataCheck<{
-    productRecommendations: Product[] | null;
-}>;
-/**
- * A page of products from a collection (by handle) or from a search. Every product on it is cached.
- *
- * @throws {TetherError} `NOT_FOUND` for a collection the store doesn't have.
- */
-export declare function getProducts({ collection, query, first, after, sortKey, reverse, filters, }?: ProductQuery): Promise<ProductPage>;
-/**
- * Shopify's recommendations for a product. Every product in them is cached.
- *
- * @param product A product, or its handle, id or gid.
- */
-export declare function getRecommendations(product: string | number | {
-    id: string;
-} | null | undefined, intent?: 'RELATED' | 'COMPLEMENTARY'): Promise<Product[]>;

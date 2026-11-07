@@ -1,5 +1,6 @@
 import type { StorefrontConfig } from '../client.js';
 import type { ProductFragmentConfig, Product } from '../fragments.js';
+import type { ProductRef, RecommendationIntent } from '../shopify-values.js';
 import type { Collection, PageInfo, ProductPage } from '../loader.js';
 /** What the catalog needs of a storefront's config. */
 type CatalogConfig = StorefrontConfig & ProductFragmentConfig;
@@ -23,7 +24,6 @@ type CollectionWithProducts = Collection & {
     products: Product[];
     pageInfo: PageInfo;
 };
-type RecommendationIntent = 'RELATED' | 'COMPLEMENTARY';
 /** @param pageSize Products per page when a query doesn't say. */
 export declare function createCatalog(conf: CatalogConfig, pageSize: number): {
     getProduct: (raw: string | number | null | undefined) => Promise<Product | null>;
@@ -31,8 +31,6 @@ export declare function createCatalog(conf: CatalogConfig, pageSize: number): {
     allProducts: (options?: Omit<CatalogQuery, "first" | "after">) => Promise<Product[]>;
     getCollection: (handle: string, options?: Omit<CatalogQuery, "collection">) => Promise<CollectionWithProducts | null>;
     allCollections: () => Promise<Collection[]>;
-    getRecommendations: (product: string | number | {
-        id: string;
-    } | null | undefined, intent?: RecommendationIntent) => Promise<Product[]>;
+    getRecommendations: (product: ProductRef | null | undefined, intent?: RecommendationIntent) => Promise<Product[]>;
 };
 export {};

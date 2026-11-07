@@ -18,7 +18,7 @@
 - Repository: `npm run e2e:build` works on Windows. The pre-push hook runs only the starter's
   version test and Prettier for a push whose every commit changes only the starter's package files.
 
-## 0.9.0 (unreleased)
+## 0.9.0 (2026-11-07)
 
 A minor release: the package exports fewer paths, and self-hosted script tags need one more file.
 
