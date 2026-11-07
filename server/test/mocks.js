@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { isRecord } from '../src/shared/json.ts';
 import { firstKeys } from '../src/store.ts';
+import { signShopify } from '../src/hmac.ts';
 
 // Readers for the parsed JSON a fake receives or a store holds, which is `unknown`: each asserts the shape the test
 // reads, so a request of the wrong shape fails the test where it is read instead of reading as `undefined`.
@@ -557,4 +558,32 @@ export async function listenForFetch(server) {
     if (!FETCH_BAD_PORTS.has(address.port)) return address.port;
     await new Promise((resolve) => server.close(resolve));
   }
+}
+
+/**
+ * Delivers a signed product webhook to the Worker and waits for its work.
+ *
+ * @param {ReturnType<typeof import('../src/index.ts').createWorker>} worker
+ * @param {Record<string, unknown>} wenv
+ * @param {string} topic
+ * @param {number} id
+ */
+export async function deliverWebhook(worker, wenv, topic, id) {
+  /** @type {Promise<unknown>[]} */
+  const tasks = [];
+  const body = JSON.stringify({ id });
+  await worker.fetch(
+    new Request('https://w.test/webhooks/shopify', {
+      method: 'POST',
+      body,
+      headers: {
+        'x-shopify-topic': topic,
+        'x-shopify-hmac-sha256': await signShopify(body, 'whsec'),
+        'x-shopify-shop-domain': 'shop.myshopify.com',
+      },
+    }),
+    wenv,
+    { waitUntil: (/** @type {Promise<unknown>} */ promise) => tasks.push(promise) },
+  );
+  await Promise.all(tasks);
 }

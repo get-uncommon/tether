@@ -16,11 +16,15 @@ export interface ProductState {
   removed?: true;
 }
 
-/** A product a webhook or an earlier run failed to sync, retried by the next reconcile. */
+/** A product a webhook or an earlier run failed to sync, retried by the reconcile. */
 export interface RetryEntry {
   id: string;
   attempts: number;
   error: string;
+  /** When the product's first failure was, in ms since the epoch: the sync gives up on it a day after. */
+  failingSince: number;
+  /** When the next attempt is due, in ms since the epoch. */
+  retryAt: number;
 }
 
 /**
@@ -62,17 +66,38 @@ export async function readProductState(store: Store, key: string): Promise<Produ
   return state;
 }
 
-function parseRetry(value: unknown): RetryEntry | null {
+const timeOr = (value: unknown, fallback: number) =>
+  typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+
+/**
+ * An entry without `failingSince` or `retryAt`, as releases before them store it, fails from `now` on and is due now.
+ *
+ * @param now The time of the read, in ms since the epoch.
+ */
+function parseRetry(value: unknown, now: number): RetryEntry | null {
   if (!isRecord(value)) return null;
-  const { id, attempts, error } = value;
+  const { id, attempts, error, failingSince, retryAt } = value;
   if (typeof id !== 'string' && typeof id !== 'number') return null;
-  return { id: String(id), attempts: typeof attempts === 'number' ? attempts || 1 : 1, error: scalarText(error) };
+  return {
+    id: String(id),
+    attempts: typeof attempts === 'number' ? attempts || 1 : 1,
+    error: scalarText(error),
+    failingSince: timeOr(failingSince, now),
+    retryAt: timeOr(retryAt, now),
+  };
 }
 
-export async function readRetries(store: Store): Promise<RetryEntry[]> {
-  const value = await store.get(RETRY_KEY);
-  if (!Array.isArray(value)) return [];
-  return value.flatMap((entry: unknown) => parseRetry(entry) ?? []);
+/** The retry list: its entries, and the value KV holds, to tell whether a run changed it. */
+export interface RetryList {
+  entries: RetryEntry[];
+  stored: unknown;
+}
+
+/** @param now The time of the read, in ms since the epoch. */
+export async function readRetries(store: Store, now: number): Promise<RetryList> {
+  const stored = await store.get(RETRY_KEY);
+  const entries = Array.isArray(stored) ? stored.flatMap((entry: unknown) => parseRetry(entry, now) ?? []) : [];
+  return { entries, stored };
 }
 
 /** @param id A numeric product id. */
@@ -92,7 +117,7 @@ export const RETRY_INBOX_TTL_SECONDS = 30 * 24 * 60 * 60;
 export interface RetryInbox {
   /** Every key taken in, its product's duplicates included: each is deleted once the retry list is stored. */
   keys: string[];
-  /** One entry per product not on the retry list yet. */
+  /** One entry per product. */
   entries: RetryEntry[];
 }
 
@@ -104,19 +129,18 @@ function inboxKeyProduct(key: string): string {
 }
 
 /**
- * The first {@link RETRY_INBOX_PAGE} queued failures. A product's keys are read until one holds its failure, and none
- * is read for a product already on the retry list, which keeps its attempts. A key listed whose value is gone, deleted
- * by a run whose delete the list doesn't show yet, is left out.
+ * The first {@link RETRY_INBOX_PAGE} queued failures. A product's keys are read until one holds its failure. A key
+ * listed whose value is gone, deleted by a run whose delete the list doesn't show yet, is left out.
  *
- * @param listed The ids on the retry list.
+ * @param now The time of the read, in ms since the epoch.
  */
-export async function readRetryInbox(store: Store, listed: ReadonlySet<string>): Promise<RetryInbox> {
+export async function readRetryInbox(store: Store, now: number): Promise<RetryInbox> {
   const keys = await store.list(RETRY_INBOX_PREFIX, RETRY_INBOX_PAGE);
   const entries = new Map<string, RetryEntry>();
   for (const key of keys) {
     const product = inboxKeyProduct(key);
-    if (listed.has(product) || entries.has(product)) continue;
-    const entry = parseRetry(await store.get(key));
+    if (entries.has(product)) continue;
+    const entry = parseRetry(await store.get(key), now);
     if (entry) entries.set(product, entry);
   }
   return { keys, entries: [...entries.values()] };

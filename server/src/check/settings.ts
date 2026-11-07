@@ -266,13 +266,20 @@ function checkRunLimits(steps: Steps, { config, env, worker }: SettingsContext, 
       `Raise match.indexTtlMinutes to ${String(MIN_INDEX_TTL_MINUTES)} or more (the default is a day): a create whose slug is taken lists the items afresh anyway.`,
     );
   if (!worker) return;
-  const kvOperations = maxReconcileKvOperations(config.reconcile, maxSubrequests(env));
+  const deployOnly = target?.kind === 'deploy-hook';
+  const kvOperations = maxReconcileKvOperations(
+    config.reconcile,
+    maxSubrequests(env),
+    deployOnly ? 'deploy-only' : 'webflow',
+  );
   if (kvOperations > KV_OPERATIONS_PER_INVOCATION)
     steps.add(
       'warn',
       'Reconcile budget',
       `A reconcile run can use up to ${String(kvOperations)} KV operations, more than the ${String(KV_OPERATIONS_PER_INVOCATION)} Cloudflare allows one invocation: a run that gets there fails.`,
-      'Lower reconcile.maxProductsPerRun or MAX_SUBREQUESTS.',
+      deployOnly
+        ? 'Lower reconcile.maxChangesPerRun, reconcile.maxProductsPerRun or MAX_SUBREQUESTS.'
+        : 'Lower reconcile.maxProductsPerRun or MAX_SUBREQUESTS.',
     );
 }
 
