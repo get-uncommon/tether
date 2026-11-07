@@ -256,8 +256,10 @@ export class ProductScope {
     if (!this.variant?.availableForSale) return null;
     const line = this.getLine();
     if (!line || line.quantity < 1) return null;
+    // What was added, even if the visitor picks another variant while the cart updates.
+    const added = { product: this.product, variant: this.variant, line };
     const cart = await Cart.add(line);
-    emit('product-added', { product: this.product, variant: this.variant, line }, this.root);
+    emit('product-added', added, this.root);
     return cart;
   }
 

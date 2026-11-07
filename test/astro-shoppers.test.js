@@ -5,6 +5,7 @@ import {
   Tether,
   firstVariant,
   calls,
+  cfg,
   fieldOf,
   firstVariantId,
   productScope,
@@ -12,8 +13,8 @@ import {
   seedCart,
   server,
 } from './astro-harness.js';
-import { cartFrom, find, graphqlRequest, jsonResponse, product } from './fixtures.js';
-import { listAt, numberAt, parseJson, recordAt, recordsAt, waitFor } from '../server/test/mocks.js';
+import { cartFrom, detailOf, find, graphqlRequest, jsonResponse, product } from './fixtures.js';
+import { listAt, numberAt, parseJson, recordAt, recordsAt, waitFor, within } from '../server/test/mocks.js';
 
 test('cart: quick +/+ clicks add up (each builds on the last one asked for), the line is busy meanwhile', async () => {
   const cart = cartFrom([{ merchandiseId: firstVariantId, quantity: 1 }]);
@@ -97,6 +98,36 @@ test('cart: + + + - while Shopify answers slowly: the count never steps past the
       counts.every((count) => count !== undefined && count <= 3),
       `counts seen: ${counts.join(', ')}`,
     );
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+test('product-added names the variant added, though the visitor picks another while the cart updates', async () => {
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    if (graphqlRequest(init).query.includes('cartCreate')) await new Promise((resolve) => setTimeout(resolve, 30));
+    return realFetch(url, init);
+  };
+  try {
+    window.localStorage.removeItem(cfg.storageKey);
+    await Tether.cart.init();
+    document.body.innerHTML = '<div tether-product="coffee-box"></div>';
+    Tether.mount(document);
+    await rendered();
+    const scope = productScope();
+    scope.select('Size', '250g');
+    const added = scope.variant?.id;
+    /** @type {unknown[]} */
+    const reported = [];
+    document.addEventListener('tether:product-added', (event) => reported.push(detailOf(event)['variant']), {
+      once: true,
+    });
+    const adding = scope.addToCart();
+    scope.select('Size', '1kg');
+    assert.notEqual(scope.variant?.id, added);
+    await adding;
+    assert.equal(fieldOf(reported[0], 'id'), added);
   } finally {
     globalThis.fetch = realFetch;
   }
@@ -334,6 +365,44 @@ test('a page built for another market: html.tether-market-pending until the live
   document.body.innerHTML = `${de.hydrate(product)}<div tether-product="coffee-box"><span tether-bind="price">built price</span></div>`;
   Tether.mount(document);
   assert.ok(document.documentElement.classList.contains('tether-market-pending'));
+  await waitFor(
+    () => !document.documentElement.classList.contains('tether-market-pending'),
+    'the live prices for this market',
+  );
+});
+
+test('a product asked for before and after clearProductCache reaches both callers', async () => {
+  const queued = Tether.getProduct('coffee-box');
+  Tether.clearProductCache();
+  const again = Tether.getProduct('coffee-box');
+  await within(5000, Promise.all([queued, again]), 'both callers, with the request not yet sent at the clear');
+
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    await new Promise((resolve) => setTimeout(resolve, 30)); // still on its way at the clear
+    return realFetch(url, init);
+  };
+  try {
+    Tether.clearProductCache();
+    const sent = Tether.getProduct('coffee-box');
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    Tether.clearProductCache();
+    const after = Tether.getProduct('coffee-box');
+    await within(5000, Promise.all([sent, after]), 'both callers, with the request in flight at the clear');
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+test('a country switch while the page waits for its market still drops html.tether-market-pending', async () => {
+  const de = server.createStorefront({ domain: 'shop.test', token: 't', country: 'DE' });
+  document.documentElement.classList.remove('tether-market-pending');
+  document.body.innerHTML = `${de.hydrate(product)}<div tether-product="coffee-box"></div>`;
+  Tether.mount(document);
+  // What setCountry() does: forget the products, then render each one again.
+  Tether.clearProductCache();
+  document.body.insertAdjacentHTML('beforeend', '<div tether-product="coffee-box"></div>');
+  Tether.mount(document);
   await waitFor(
     () => !document.documentElement.classList.contains('tether-market-pending'),
     'the live prices for this market',

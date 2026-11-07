@@ -27,13 +27,12 @@ interface Waiter {
 
 /** Handle or gid to the product, loaded or loading. */
 const productCache = new Map<string, Promise<Product>>();
-const waiting = new Map<string, Waiter>();
 /** Keys of products that came from the server and weren't refreshed yet. */
 const stale = new Set<string>();
 /** Handle or gid to when it last loaded live, in ms since the epoch. */
 const freshAt = new Map<string, number>();
-/** Keys for the next batch. */
-const pending: string[] = [];
+/** The next batch: each key with its caller, taken out when the batch is sent. */
+const queued = new Map<string, Waiter>();
 let flushScheduled = false;
 /**
  * Bumped by `clearProductCache()`: responses to requests sent before that (in the old market, after a country
@@ -65,8 +64,7 @@ export function getProduct(rawKey: string | number | null | undefined): Promise<
   if (cached) return cached;
 
   const loading = new Promise<Product>((resolve, reject) => {
-    waiting.set(key, { resolve, reject });
-    pending.push(key);
+    queued.set(key, { resolve, reject });
     if (!flushScheduled) {
       flushScheduled = true;
       setTimeout(() => void flush(), 0);
@@ -110,12 +108,6 @@ function batchQuery(keys: string[]): { query: QueryText; variables: Record<strin
   return { query, variables, handles };
 }
 
-function settleWaiting(key: string, settle: (waiter: Waiter) => void): void {
-  const waiter = waiting.get(key);
-  waiting.delete(key);
-  if (waiter) settle(waiter);
-}
-
 function forgetMissLater(key: string, batchGeneration: number): void {
   if (batchGeneration !== generation) return;
   const miss = productCache.get(key);
@@ -140,8 +132,10 @@ function isBatchData(data: unknown): data is BatchData {
 async function flush() {
   flushScheduled = false;
   const batchGeneration = generation;
-  const keys = pending.splice(0);
-  if (!keys.length) return;
+  // Never empty: a flush is scheduled only by a product it queues.
+  const batch = [...queued];
+  queued.clear();
+  const keys = batch.map(([key]) => key);
   const { query, variables, handles } = batchQuery(keys);
   log('fetch products', keys);
 
@@ -149,11 +143,9 @@ async function flush() {
   try {
     data = await gql(query, variables, isBatchData);
   } catch (error) {
-    keys.forEach((key) => {
-      settleWaiting(key, (waiter) => {
-        if (batchGeneration === generation) productCache.delete(key);
-        waiter.reject(error);
-      });
+    batch.forEach(([key, waiter]) => {
+      if (batchGeneration === generation) productCache.delete(key);
+      waiter.reject(error);
     });
     return;
   }
@@ -166,27 +158,28 @@ async function flush() {
   });
 
   const now = Date.now();
-  keys.forEach((key) => {
-    settleWaiting(key, (waiter) => {
-      const product = found.get(key);
-      if (!product) {
-        forgetMissLater(key, batchGeneration);
-        waiter.reject(new TetherError(`Product not found: ${key}`, { code: 'NOT_FOUND' }));
-        return;
-      }
-      if (batchGeneration === generation) {
-        primeProduct(product);
-        freshAt.set(product.handle, now);
-        freshAt.set(product.id, now);
-      }
-      waiter.resolve(product);
-    });
+  batch.forEach(([key, waiter]) => {
+    const product = found.get(key);
+    if (!product) {
+      forgetMissLater(key, batchGeneration);
+      waiter.reject(new TetherError(`Product not found: ${key}`, { code: 'NOT_FOUND' }));
+      return;
+    }
+    if (batchGeneration === generation) {
+      primeProduct(product);
+      freshAt.set(product.handle, now);
+      freshAt.set(product.id, now);
+    }
+    waiter.resolve(product);
   });
 }
 
-/** Forgets every product, for a new market: requests already sent no longer fill the cache. */
+/**
+ * Forgets every product, for a new market: requests already sent no longer fill the cache. A product still queued
+ * stays, since its request goes out in the new market.
+ */
 export function clearProductCache(): void {
-  productCache.clear();
+  for (const key of productCache.keys()) if (!queued.has(key)) productCache.delete(key);
   generation += 1;
   stale.clear();
   freshAt.clear();
