@@ -170,7 +170,7 @@ test('parts are small and the core is under budget', async () => {
   // Each budget is a ceiling a build must stay under, with no headroom promised: growth past one is a decision, made by
   // moving code into a part or by raising the budget in the change that needs it. The build, not golfed source, keeps
   // the files small.
-  assert.ok((await gz('tether.min.js')) < 29.75 * 1024, 'core gzip budget');
+  assert.ok((await gz('tether.min.js')) < 28.75 * 1024, 'core gzip budget');
   assert.ok((await gz('tether.search.min.js')) < 3 * 1024);
   assert.ok((await gz('tether.lists.min.js')) < 2.75 * 1024, 'lists part budget');
   assert.ok((await gz('tether.account.min.js')) < 4.75 * 1024, 'account part budget');
