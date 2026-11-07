@@ -562,3 +562,18 @@ export function reportError(error: unknown, context: string): void {
     warn('onError threw', hookError);
   }
 }
+
+/**
+ * Calls one of the site's hooks. A bug in it is reported under `name`, and `fallback` answers instead, so the site's
+ * code never fails the render, or the cart change Shopify already applied, that called it.
+ */
+export function callHook(name: string, hook: () => unknown): void;
+export function callHook<T>(name: string, hook: () => T, fallback: () => T): T;
+export function callHook(name: string, hook: () => unknown, fallback?: () => unknown): unknown {
+  try {
+    return hook();
+  } catch (error) {
+    reportError(error, name);
+    return fallback?.();
+  }
+}

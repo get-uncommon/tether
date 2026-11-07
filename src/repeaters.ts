@@ -2,7 +2,7 @@
  * Lists rendered from a template: a repeater's first child in the designer is the template, and every item gets a
  * copy of it. The other children are placeholder content and are removed.
  */
-import { cfg, reportError, warn } from './config.ts';
+import { callHook, cfg, warn } from './config.ts';
 
 /** Each repeater's template, captured on first render. */
 const templates = new WeakMap<Element, HTMLElement | null>();
@@ -61,12 +61,13 @@ function leave(node: HTMLElement, onLeave: KeyedHooks['onLeave']): void {
     done();
     return;
   }
-  try {
-    onLeave(node, done);
-  } catch (error) {
-    reportError(error, 'repeater onLeave');
-    done();
-  }
+  callHook(
+    'repeater onLeave',
+    () => {
+      onLeave(node, done);
+    },
+    done,
+  );
 }
 
 /**
@@ -87,11 +88,9 @@ function insertFresh(
     if (previous?.parentNode === container) previous.after(node);
     else container.prepend(node);
     if (!onEnter) return;
-    try {
+    callHook('repeater onEnter', () => {
       onEnter(node);
-    } catch (error) {
-      reportError(error, 'repeater onEnter');
-    }
+    });
   });
 }
 

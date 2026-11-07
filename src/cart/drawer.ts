@@ -4,7 +4,7 @@
  * site, with the open class, and Tether follows the class. A page without a drawer (a cart built in React, Svelte or
  * Vue) still has an open state, for `Tether.cart.subscribe`.
  */
-import { cfg, reportError } from '../config.ts';
+import { callHook, cfg } from '../config.ts';
 import { sel, get, qsa, emit } from '../dom.ts';
 
 const FOCUSABLE =
@@ -24,15 +24,6 @@ let returnFocus: HTMLElement | null = null;
 
 /** Follows the open class on each drawer, so a `manual` drawer the site opens or closes itself is announced. */
 let classWatcher: MutationObserver | null = null;
-
-/** Calls the site's `onCartOpen` or `onCartClose`: a bug in it is reported, and the cart still opens or closes. */
-function callHook(hook: ((drawers: HTMLElement[]) => void) | null, drawers: HTMLElement[], name: string): void {
-  try {
-    hook?.(drawers);
-  } catch (error) {
-    reportError(error, name);
-  }
-}
 
 const isFocusable = (el: Element | null): el is HTMLElement => el !== null && 'focus' in el;
 
@@ -106,7 +97,7 @@ function announceOpen(opened: HTMLElement[]): void {
       focusInto(first);
     }, FOCUS_AFTER_OPEN_MS);
   }
-  callHook(cfg.onCartOpen, opened, 'onCartOpen');
+  callHook('onCartOpen', () => cfg.onCartOpen?.(opened));
   emit('cart-toggled', { open: true });
 }
 
@@ -116,7 +107,7 @@ function announceClosed(all: HTMLElement[], hadFocus: boolean): void {
   syncDrawerAria();
   if (hadFocus && returnFocus?.isConnected) returnFocus.focus({ preventScroll: true });
   returnFocus = null;
-  callHook(cfg.onCartClose, all, 'onCartClose');
+  callHook('onCartClose', () => cfg.onCartClose?.(all));
   emit('cart-toggled', { open: false });
 }
 
@@ -129,7 +120,8 @@ export function openCart(): void {
   const all = drawers();
   const opened = all.filter((drawer) => !isManual(drawer));
   if (all.length && !opened.length) return;
-  openWithoutDrawer = true;
+  // Drawers keep their own open state (the class), which the site can change: this flag is for a page without one.
+  openWithoutDrawer = !all.length;
   opened.forEach((drawer) => {
     drawer.classList.add(cfg.cartDrawerOpenClass);
   });

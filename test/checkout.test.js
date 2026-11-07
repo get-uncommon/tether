@@ -199,6 +199,23 @@ test('checkout: a queued removal of the last line leaves nothing to check out', 
   assert.equal(reported.length, 0);
 });
 
+for (const [start, saved] of /** @type {const} */ ([
+  ['no cart yet', null],
+  ['an empty saved cart', cartFrom([])],
+])) {
+  test(`checkout: with ${start}, an add called just before is checked out`, async () => {
+    if (saved) await loadSaved(saved);
+    else await Cart.init();
+    answers['Tether_cartCreate'] = () => payload('cartCreate', oneLine(1));
+    answers['Tether_cartLinesAdd'] = () => payload('cartLinesAdd', oneLine(1));
+    answers['TetherCheckout'] = () => ({ data: { cart: { checkoutUrl: 'https://shop.test/checkouts/1' } } });
+    const add = Cart.add(VARIANT);
+    assert.equal(await Cart.checkout('_self'), 'https://shop.test/checkouts/1');
+    await add;
+    assert.equal(reported.length, 0);
+  });
+}
+
 test('checkout: without any checkout URL the failure is reported and nothing opens', async () => {
   await loadSaved(oneLine());
   answers['TetherCheckout'] = () => ({ errors: [{ message: 'Internal error' }] });

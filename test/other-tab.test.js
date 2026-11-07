@@ -1,8 +1,19 @@
-// Another tab of the same site changes the market: this tab follows it through the extras part.
+// Another tab of the same site changes the market or the cart: this tab follows it through the extras part.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
+import {
+  cancelTimersAfterTests,
+  cartFrom,
+  detailOf,
+  graphqlRequest,
+  jsonResponse,
+  operationName,
+  product,
+} from './fixtures.js';
 import { waitFor } from '../server/test/mocks.js';
+
+cancelTimersAfterTests();
 
 const dom = new JSDOM('<!doctype html><body></body>', { url: 'https://site.test/' });
 Object.assign(globalThis, {
@@ -44,4 +55,47 @@ test('a value under the market key that is not a valid market is skipped, not re
   otherTab(JSON.stringify({ country: 'BE' }));
   await waitFor(() => Tether.config.country === 'BE', 'the valid market after the invalid ones');
   assert.deepEqual(reported, []);
+});
+
+test('a reload for another tab’s cart change waits for the change in flight here, so its older answer never replaces it', async () => {
+  const { fetch } = globalThis;
+  const variant = product.variants.nodes[0]?.id ?? '';
+  /** @param {number} quantity */
+  const cartOf = (quantity) => cartFrom([{ merchandiseId: variant, quantity }]);
+  let shopify = cartOf(1);
+  /** @param {number} ms */
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  /** @type {typeof fetch} */
+  globalThis.fetch = async (_url, init) => {
+    if (operationName(graphqlRequest(init).query) === 'Tether_cartLinesAdd') {
+      await sleep(20);
+      shopify = cartOf(2);
+      return jsonResponse({ data: { cartLinesAdd: { cart: shopify, userErrors: [], warnings: [] } } });
+    }
+    // Shopify reads the cart as it is when the request arrives, and answers after the add would have.
+    const read = shopify;
+    await sleep(60);
+    return jsonResponse({ data: { cart: read } });
+  };
+  document.body.innerHTML = '<span id="count" tether-cart-count></span>';
+  localStorage.setItem('tether:cart:shop.test', shopify.id);
+  let reloaded = false;
+  const onUpdate = (/** @type {Event} */ event) => {
+    reloaded ||= detailOf(event)['reason'] === 'load';
+  };
+  try {
+    await Tether.cart.init();
+    document.addEventListener('tether:cart-updated', onUpdate);
+    const add = Tether.cart.add(variant);
+    window.dispatchEvent(new window.StorageEvent('storage', { key: 'tether:cart:shop.test:seen' }));
+    await add;
+    await waitFor(() => reloaded, 'the reload');
+    assert.equal(Tether.cart.count, 2);
+    assert.equal(document.getElementById('count')?.textContent, '2');
+  } finally {
+    document.removeEventListener('tether:cart-updated', onUpdate);
+    globalThis.fetch = fetch;
+    localStorage.clear();
+    document.body.innerHTML = '';
+  }
 });
