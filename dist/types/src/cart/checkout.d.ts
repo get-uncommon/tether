@@ -8,7 +8,8 @@ type CheckoutResolver = () => Promise<string | null>;
 export declare function setCheckoutResolver(resolver: CheckoutResolver | null): void;
 /**
  * Goes to Shopify's checkout, with the cart as the changes already queued leave it. With `_blank` the tab opens inside
- * the click (Safari blocks `window.open` after an await) and gets its URL once there is one.
+ * the click (Safari blocks `window.open` after an await) and gets its URL once there is one, so a queued change that
+ * empties the cart closes the tab again.
  *
  * @returns The checkout URL, `null` with nothing to check out or after a reported failure.
  */

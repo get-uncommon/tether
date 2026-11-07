@@ -177,6 +177,10 @@ export declare function showLastKnownCount(): void;
 export declare function setWarnings(notes: readonly CartWarning[]): void;
 /** The one queue every cart change runs through; checkout waits for the changes in it. */
 export declare const runInOrder: import("../../server/src/shared/serial.js").SerialQueue;
+/** Queues a task that can leave the cart with lines when it has none (`mayFill`). */
+export declare function queueFilling<T>(queue: () => Promise<T>): Promise<T>;
+/** @returns True while a queued add or load can still give an empty cart, or none, lines. */
+export declare const mayFill: () => boolean;
 /**
  * Runs a cart change after the ones before it, so quick clicks never race. A failure sets the `error` status (shown by
  * `tether-show="cart-error"` until the next change succeeds), emits `tether:cart-error` and rejects.

@@ -159,8 +159,7 @@
   var toUserErrors = (value) => listOf(value, toUserError).filter((error) => error !== null);
 
   // src/account/server-client.ts
-  var known = null;
-  var asking = null;
+  var loginState = { kind: "unknown" };
   function serverBase() {
     const server = cfg.account?.server;
     if (!server) {
@@ -217,23 +216,25 @@
     return answer.kind === "answer" && answer.data["loggedIn"] === true ? { loggedIn: true, customer: toAccountCustomer(answer.data["customer"]) } : { loggedIn: false };
   }
   async function serverLogin() {
-    const request = asking ?? (asking = askWhoIsLoggedIn());
+    if (loginState.kind === "known") return loginState.login;
+    if (loginState.kind === "unknown") loginState = { kind: "asking", request: askWhoIsLoggedIn() };
+    const { request } = loginState;
+    const isCurrent = () => loginState.kind === "asking" && loginState.request === request;
     let login2;
     try {
       login2 = await request;
     } catch (error) {
-      if (asking === request) asking = null;
+      if (isCurrent()) loginState = { kind: "unknown" };
       throw error;
     }
-    if (asking !== request) return serverLogin();
-    known = login2;
+    if (!isCurrent()) return serverLogin();
+    loginState = { kind: "known", login: login2 };
     setLoginHint(login2.loggedIn);
     return login2;
   }
-  var isServerLoggedIn = () => known?.loggedIn === true;
+  var isServerLoggedIn = () => loginState.kind === "known" && loginState.login.loggedIn;
   function forgetServerLogin() {
-    known = null;
-    asking = null;
+    loginState = { kind: "unknown" };
   }
   function navigate(url) {
     const replacement = cfg.account?.navigate;
@@ -420,7 +421,7 @@
   } = {}) {
     if (await serverLogout(returnTo) === "stayed") await render(document);
   }
-  async function loginState() {
+  async function loginState2() {
     try {
       return (await serverLogin()).loggedIn ? { kind: "logged-in" } : { kind: "logged-out" };
     } catch (error) {
@@ -441,7 +442,7 @@
     return fallback;
   }
   async function render(root = document) {
-    const state = await loginState();
+    const state = await loginState2();
     if (state.kind === "unknown") reportError(state.error, "account");
     const loggedIn = state.kind === "logged-in";
     qsa(root, sel("show")).forEach((el) => {

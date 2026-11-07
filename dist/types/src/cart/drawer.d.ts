@@ -1,6 +1,10 @@
 /** Every cart drawer on the page. */
 export declare const drawers: () => HTMLElement[];
-/** True while a drawer, or the drawer-less cart, is open. */
+/**
+ * True while a drawer, or the drawer-less cart, is open. The page watcher asks after every change to the page, so the
+ * elements with the open class come first, from the browser's live class index: only a drawer-less open cart has the
+ * drawers looked up.
+ */
 export declare function isOpen(): boolean;
 /**
  * `aria-expanded` on the open buttons, and dialog semantics on the drawers unless their markup has its own. Each

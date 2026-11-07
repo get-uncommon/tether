@@ -153,6 +153,4 @@ export declare function productFragment(o?: ProductFragmentConfig, access?: Stor
  * @returns `fragment TetherCart on Cart`.
  */
 export declare function cartFragment(access?: StoreAccess): string;
-/** The collection fields Tether renders, for inside a `collection { }` selection. */
-export declare function collectionFields(): string;
 export {};

@@ -246,9 +246,21 @@
       el.textContent = countryField(inUse, get(el, "country-bind") || DEFAULT_BIND);
     });
   }
+  var followingSelects = false;
+  function onCountrySelectChange(event) {
+    const { target } = event;
+    if (!(target instanceof window.HTMLSelectElement) || !target.matches(sel("country-select")) || !target.value) return;
+    setCountry(target.value).catch((error) => {
+      reportError(error, "country");
+    });
+  }
   function renderCountrySelects(root = document) {
     const selects = within(root, `select${sel("country-select")}`);
     const binds = within(root, sel("country-bind"));
+    if (selects.length && !followingSelects) {
+      followingSelects = true;
+      document.addEventListener("change", onCountrySelectChange);
+    }
     if (!selects.length && !binds.length) return Promise.resolve();
     return getLocalization().then((localization) => {
       fillCountries(selects, binds, localization);

@@ -39,29 +39,29 @@ export declare function isUnclearFailure(error: unknown): boolean;
  * @throws {TetherError} `ERROR` without a variant id.
  */
 export declare function toLineInput(input: string | number | LineSpec | null | undefined, quantity?: number, options?: Omit<LineSpec, 'variantId' | 'quantity'>): CartLineInput;
-/** A mutation on the saved cart. */
+/** A mutation on the saved cart, with one variable besides `$cartId`. */
 interface CartMutation {
     /** The mutation, e.g. `cartLinesAdd`. */
     name: string;
-    /** Its variable definitions besides `$cartId`. */
-    args: string;
-    /** Its arguments besides `cartId`. */
-    inner: string;
-    variables: Record<string, unknown>;
+    /** The variable, named like the mutation's argument and like the `CartInput` field `create` sets. */
+    variable: string;
+    /** The variable's GraphQL type. */
+    type: string;
+    value: unknown;
     /**
-     * The `CartInput` of a new cart that does what the mutation asks, when there is no cart (or Shopify no longer has
-     * it); `null` leaves the visitor without a cart instead.
+     * Whether, when there is no cart (or Shopify no longer has it), a new cart is made with the value, which does what
+     * the mutation asks; without it the visitor is left without a cart.
      */
-    createInput: Record<string, unknown> | null;
+    create: boolean;
 }
 /**
- * Runs a mutation on the saved cart, or creates a cart from `createInput` when there is none to change.
+ * Runs a mutation on the saved cart, or creates a cart with its value (`create`) when there is none to change.
  *
- * @returns The changed cart; `null` without a cart and without a `createInput`.
+ * @returns The changed cart; `null` without a cart and without `create`.
  * @throws {TetherError} For a failed request or Shopify's user errors; also when the cart is gone and there is no
- *   `createInput` (the saved cart is forgotten first).
+ *   `create` (the saved cart is forgotten first).
  */
-export declare function mutateCart({ name, args, inner, variables, createInput, }: CartMutation): Promise<ShopifyCart | null>;
+export declare function mutateCart({ name, variable, type, value, create }: CartMutation): Promise<ShopifyCart | null>;
 /** @returns The cart, `null` when Shopify doesn't have it (expired or checked out). */
 export declare function fetchCart(id: string): Promise<ShopifyCart | null>;
 /** @returns The cart's current checkout URL, `null` when Shopify doesn't have the cart. */

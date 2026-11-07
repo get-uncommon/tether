@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.9.8 (2026-11-07)
+
+- Fix: an `Error` a site hook throws (`formatMoney` for every price, `onLineEnter` for every line)
+  reaches `onError` once per page load for each message, instead of on every call.
+- Fix: an open cart drawer the site takes off the page (a page swap without `Tether.unmount()`, a
+  re-render) is announced closed: `aria-expanded` on `tether-cart-open`, `onCartClose`,
+  `tether:cart-toggled` and `subscribe` say so, and a `manual` drawer the site opens afterwards is
+  usable instead of staying `inert` and `aria-hidden`.
+- Fix: a burst of cart changes in another tab loads the cart again here once, not once per change,
+  so this tab's own changes and Checkout don't wait behind repeated reloads.
+- Repository: the build writes a new output folder and puts it in place of the old one only once
+  every step has succeeded, moving the old one aside first and back when the new one can't take its
+  place, so a failed build leaves `dist/` as it was. It refuses an `--out` folder that holds files a
+  build doesn't write.
+- Repository: the next release's notes are one file per change in `.changes/` instead of a shared
+  `## Unreleased` list in `CHANGELOG.md`, so merging a release into an open branch can't move the
+  branch's notes into the released section. The release writes them as its section and deletes them.
+
 ## 0.9.7 (2026-11-07)
 
 - Fix: a `warningText` or `formatMoney` that throws is reported (`onError`) and no longer fails a

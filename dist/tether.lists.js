@@ -27,13 +27,15 @@
   var m3 = window.Tether.__core["dom.ts"];
   var [ANALYTICS_EVENTS, attr, attributesFromJson, busy, emit, formatDate, formatMoney, get, has, hasTemplate, integerAttribute, isOwnEvent, notifyLayoutChanged, parseJSONAttr, productUrl, qsa, repeat, scoped, sel, setImage, setStoreHtml, setText, show] = m3;
 
-  // tether-core:fragments.ts
-  var m4 = window.Tether.__core["fragments.ts"];
-  var [collectionFields] = m4;
+  // src/shopify-fields.ts
+  var IMAGE_FIELDS = "url altText width height";
+  function collectionFields() {
+    return ` id handle title description descriptionHtml image{${IMAGE_FIELDS}}seo{title description}`;
+  }
 
   // tether-core:loader.ts
-  var m5 = window.Tether.__core["loader.ts"];
-  var [clearProductCache, getProduct, normalizeProductKey, primeProduct, withProductFragment] = m5;
+  var m4 = window.Tether.__core["loader.ts"];
+  var [clearProductCache, getProduct, normalizeProductKey, primeProduct, withProductFragment] = m4;
 
   // server/src/shared/json.ts
   function isRecord(value) {
@@ -64,16 +66,16 @@
   });
 
   // tether-core:status.ts
-  var m6 = window.Tether.__core["status.ts"];
-  var [boundary, isNotFound, resolveProductKey, setScopeStatus] = m6;
+  var m5 = window.Tether.__core["status.ts"];
+  var [boundary, isNotFound, resolveProductKey, setScopeStatus] = m5;
 
   // tether-core:collection.ts
-  var m7 = window.Tether.__core["collection.ts"];
-  var [listSelector] = m7;
+  var m6 = window.Tether.__core["collection.ts"];
+  var [listSelector] = m6;
 
   // tether-core:shopify-values.ts
-  var m8 = window.Tether.__core["shopify-values.ts"];
-  var [isHttpsUrl, MAX_CONNECTION_SIZE] = m8;
+  var m7 = window.Tether.__core["shopify-values.ts"];
+  var [isHttpsUrl, MAX_CONNECTION_SIZE] = m7;
 
   // src/lists.ts
   var URL_QUERY_SOURCE = "url:";

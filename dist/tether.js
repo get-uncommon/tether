@@ -507,11 +507,16 @@
       warn("onError threw", hookError);
     }
   }
+  var reportedHookFailures = /* @__PURE__ */ new Set();
   function callHook(name, hook2, fallback) {
     try {
       return hook2();
     } catch (error) {
-      reportError(error, name);
+      const failure = error instanceof Error && `${name}: ${error.message}`;
+      if (!failure || !reportedHookFailures.has(failure)) {
+        if (failure) reportedHookFailures.add(failure);
+        reportError(error, name);
+      }
       return fallback?.();
     }
   }
@@ -1325,11 +1330,13 @@
     return Object.entries(attributes).map(([key, value]) => ({ key, value: String(value ?? "") }));
   }
 
+  // src/shopify-fields.ts
+  var IMAGE_FIELDS = "url altText width height";
+
   // src/fragments.ts
   var MONEY = "amount currencyCode";
   var FULL_ACCESS = { inventory: true };
   var inventoryField = (access) => access.inventory ? "quantityAvailable" : "";
-  var IMAGE = "url altText width height";
   function metafieldsField(metafields) {
     const identifiers = [];
     for (const ref of metafields) {
@@ -1338,18 +1345,15 @@
     }
     if (!identifiers.length) return "";
     const list = identifiers.map(({ namespace, key }) => `{namespace: ${JSON.stringify(namespace)}, key: ${JSON.stringify(key)}}`).join(", ");
-    return `metafields(identifiers:[${list}]){namespace key type value reference{... on MediaImage{image{${IMAGE}}}}}`;
+    return `metafields(identifiers:[${list}]){namespace key type value reference{... on MediaImage{image{${IMAGE_FIELDS}}}}}`;
   }
   var SELLING_PLAN_FIELDS = ` id name description recurringDeliveries options{name value}priceAdjustments{orderCount adjustmentValue{__typename ... on SellingPlanPercentagePriceAdjustment{adjustmentPercentage}... on SellingPlanFixedAmountPriceAdjustment{adjustmentAmount{${MONEY}}}... on SellingPlanFixedPriceAdjustment{price{${MONEY}}}}}`;
   var ALLOCATION_FIELDS = ` sellingPlan{id}checkoutChargeAmount{${MONEY}}remainingBalanceChargeAmount{${MONEY}}priceAdjustments{price{${MONEY}}compareAtPrice{${MONEY}}perDeliveryPrice{${MONEY}}unitPrice{${MONEY}}}`;
   function productFragment(o = cfg, access = FULL_ACCESS) {
-    return ` fragment TetherProduct on Product{id handle title description descriptionHtml productType vendor tags availableForSale publishedAt onlineStoreUrl requiresSellingPlan seo{title description}featuredImage{${IMAGE}}images(first:${o.imagesFirst}){nodes{${IMAGE}}}options{name optionValues{name swatch{color image{previewImage{${IMAGE}}}}}}priceRange{minVariantPrice{${MONEY}}maxVariantPrice{${MONEY}}}compareAtPriceRange{minVariantPrice{${MONEY}}maxVariantPrice{${MONEY}}}${metafieldsField(o.metafields)} sellingPlanGroups(first:${o.sellingPlanGroupsFirst}){nodes{name appName options{name values}sellingPlans(first:${o.sellingPlansFirst}){nodes{${SELLING_PLAN_FIELDS}}}}}variants(first:${o.variantsFirst}){nodes{id title availableForSale currentlyNotInStock ${inventoryField(access)} sku barcode selectedOptions{name value}image{${IMAGE}}price{${MONEY}}compareAtPrice{${MONEY}}unitPrice{${MONEY}}sellingPlanAllocations(first:${o.sellingPlansFirst}){nodes{${ALLOCATION_FIELDS}}}}}}`;
+    return ` fragment TetherProduct on Product{id handle title description descriptionHtml productType vendor tags availableForSale publishedAt onlineStoreUrl requiresSellingPlan seo{title description}featuredImage{${IMAGE_FIELDS}}images(first:${o.imagesFirst}){nodes{${IMAGE_FIELDS}}}options{name optionValues{name swatch{color image{previewImage{${IMAGE_FIELDS}}}}}}priceRange{minVariantPrice{${MONEY}}maxVariantPrice{${MONEY}}}compareAtPriceRange{minVariantPrice{${MONEY}}maxVariantPrice{${MONEY}}}${metafieldsField(o.metafields)} sellingPlanGroups(first:${o.sellingPlanGroupsFirst}){nodes{name appName options{name values}sellingPlans(first:${o.sellingPlansFirst}){nodes{${SELLING_PLAN_FIELDS}}}}}variants(first:${o.variantsFirst}){nodes{id title availableForSale currentlyNotInStock ${inventoryField(access)} sku barcode selectedOptions{name value}image{${IMAGE_FIELDS}}price{${MONEY}}compareAtPrice{${MONEY}}unitPrice{${MONEY}}sellingPlanAllocations(first:${o.sellingPlansFirst}){nodes{${ALLOCATION_FIELDS}}}}}}`;
   }
   function cartFragment(access = FULL_ACCESS) {
-    return ` fragment TetherCart on Cart{id checkoutUrl totalQuantity note createdAt updatedAt attributes{key value}buyerIdentity{countryCode email}discountCodes{code applicable}cost{subtotalAmount{${MONEY}}totalAmount{${MONEY}}checkoutChargeAmount{${MONEY}}}lines(first:100){nodes{id quantity attributes{key value}cost{totalAmount{${MONEY}}subtotalAmount{${MONEY}}amountPerQuantity{${MONEY}}compareAtAmountPerQuantity{${MONEY}}}discountAllocations{discountedAmount{${MONEY}}}sellingPlanAllocation{sellingPlan{id name description recurringDeliveries options{name value}}checkoutChargeAmount{${MONEY}}priceAdjustments{price{${MONEY}}compareAtPrice{${MONEY}}perDeliveryPrice{${MONEY}}}}merchandise{... on ProductVariant{id title sku availableForSale requiresShipping ${inventoryField(access)} image{${IMAGE}}price{${MONEY}}compareAtPrice{${MONEY}}selectedOptions{name value}product{id title handle vendor featuredImage{${IMAGE}}}}}... on ComponentizableCartLine{lineComponents{id quantity merchandise{... on ProductVariant{id title product{title handle}}}}}}}}`;
-  }
-  function collectionFields() {
-    return ` id handle title description descriptionHtml image{${IMAGE}}seo{title description}`;
+    return ` fragment TetherCart on Cart{id checkoutUrl totalQuantity note createdAt updatedAt attributes{key value}buyerIdentity{countryCode email}discountCodes{code applicable}cost{subtotalAmount{${MONEY}}totalAmount{${MONEY}}checkoutChargeAmount{${MONEY}}}lines(first:100){nodes{id quantity attributes{key value}cost{totalAmount{${MONEY}}subtotalAmount{${MONEY}}amountPerQuantity{${MONEY}}compareAtAmountPerQuantity{${MONEY}}}discountAllocations{discountedAmount{${MONEY}}}sellingPlanAllocation{sellingPlan{id name description recurringDeliveries options{name value}}checkoutChargeAmount{${MONEY}}priceAdjustments{price{${MONEY}}compareAtPrice{${MONEY}}perDeliveryPrice{${MONEY}}}}merchandise{... on ProductVariant{id title sku availableForSale requiresShipping ${inventoryField(access)} image{${IMAGE_FIELDS}}price{${MONEY}}compareAtPrice{${MONEY}}selectedOptions{name value}product{id title handle vendor featuredImage{${IMAGE_FIELDS}}}}}... on ComponentizableCartLine{lineComponents{id quantity merchandise{... on ProductVariant{id title product{title handle}}}}}}}}`;
   }
 
   // src/selling-plans.ts
@@ -1530,7 +1534,7 @@
   var openWithoutDrawer = false;
   var announcedOpen = false;
   var returnFocus = null;
-  var classWatcher = null;
+  var pageWatcher = null;
   var isFocusable = (el) => el !== null && "focus" in el;
   var focusables = (drawer) => qsa(drawer, FOCUSABLE).filter((el) => el.offsetParent !== null || el === document.activeElement);
   var drawers = () => qsa(document, sel("cart-drawer"));
@@ -1538,18 +1542,15 @@
   var hasFocusInside = (all) => all.some((drawer) => drawer.contains(document.activeElement));
   var isManual = (drawer) => get(drawer, "cart-drawer") === "manual";
   function isOpen() {
-    const all = drawers();
-    return all.length ? all.some(isOpenDrawer) : openWithoutDrawer;
+    const openClassed = [...document.getElementsByClassName(cfg.cartDrawerOpenClass)];
+    return openClassed.some((el) => el.matches(sel("cart-drawer"))) || openWithoutDrawer && !drawers().length;
   }
-  function watchOpenClass(drawer) {
-    classWatcher ?? (classWatcher = new MutationObserver(() => {
-      const open = isOpen();
-      if (open === announcedOpen) return;
-      const all = drawers();
-      if (open) announceOpen(all.filter(isOpenDrawer));
-      else announceClosed(all, hasFocusInside(all));
-    }));
-    classWatcher.observe(drawer, { attributes: true, attributeFilter: ["class"] });
+  function announceChange() {
+    const open = isOpen();
+    if (open === announcedOpen) return;
+    const all = drawers();
+    if (open) announceOpen(all.filter(isOpenDrawer));
+    else announceClosed(all, hasFocusInside(all));
   }
   function syncDrawerAria() {
     qsa(document, sel("cart-open")).forEach((button) => {
@@ -1564,7 +1565,14 @@
       drawer.setAttribute("aria-modal", String(open));
       drawer.setAttribute("aria-hidden", String(!open));
       drawer.inert = !open;
-      watchOpenClass(drawer);
+    });
+    if (pageWatcher) return;
+    pageWatcher = new MutationObserver(announceChange);
+    pageWatcher.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["class"],
+      childList: true,
+      subtree: true
     });
   }
   function focusInto(drawer) {
@@ -1587,6 +1595,7 @@
   }
   function announceClosed(all, hadFocus) {
     announcedOpen = false;
+    openWithoutDrawer = false;
     syncDrawerAria();
     if (hadFocus && returnFocus?.isConnected) returnFocus.focus({ preventScroll: true });
     returnFocus = null;
@@ -1606,7 +1615,6 @@
   }
   function closeCart() {
     if (!isOpen()) return;
-    openWithoutDrawer = false;
     const all = drawers();
     const hadFocus = hasFocusInside(all);
     all.forEach((drawer) => {
@@ -2146,19 +2154,14 @@
   var CART_ID = /^gid:\/\/shopify\/Cart\/[\w-]+(\?key=[\w-]+)?$/;
 
   // server/src/shared/serial.ts
+  var settled = () => void 0;
   function createSerialQueue() {
     let tail = Promise.resolve();
-    let pending2 = 0;
-    const settled = () => {
-      pending2--;
-    };
-    const run = (task) => {
-      pending2++;
+    return (task) => {
       const result = tail.then(task);
       tail = result.then(settled, settled);
       return result;
     };
-    return Object.assign(run, { idle: () => !pending2 });
   }
 
   // src/cart/store.ts
@@ -2235,6 +2238,14 @@
     if (warnings.length) emit("cart-warning", { warnings });
   }
   var runInOrder = createSerialQueue();
+  var fillingTasks = 0;
+  function queueFilling(queue) {
+    fillingTasks++;
+    return queue().finally(() => {
+      fillingTasks--;
+    });
+  }
+  var mayFill = () => fillingTasks > 0;
   function enqueue(task) {
     return runInOrder(task).then(
       (value) => {
@@ -2313,17 +2324,15 @@
     const withIdentity = cfg.country ? { buyerIdentity: { countryCode: cfg.country }, ...input } : input;
     return send("cartCreate", "$input: CartInput!", "input: $input", { input: withIdentity });
   }
-  async function mutateCart({
-    name,
-    args,
-    inner,
-    variables,
-    createInput
-  }) {
+  async function mutateCart({ name, variable, type, value, create }) {
+    const createInput = create ? { [variable]: value } : null;
     const cartId = savedCartId();
     if (!cartId) return createInput ? createCart(createInput) : null;
     try {
-      return await send(name, `$cartId: ID!, ${args}`, `cartId: $cartId, ${inner}`, { ...variables, cartId });
+      return await send(name, `$cartId: ID!, $${variable}: ${type}`, `cartId: $cartId, ${variable}: $${variable}`, {
+        [variable]: value,
+        cartId
+      });
     } catch (error) {
       if (!isCartGone(error)) throw error;
       forgetSavedCart();
@@ -2361,17 +2370,17 @@
   }
   var updateLines = (lines) => mutateCart({
     name: "cartLinesUpdate",
-    args: "$lines: [CartLineUpdateInput!]!",
-    inner: "lines: $lines",
-    variables: { lines },
-    createInput: null
+    variable: "lines",
+    type: "[CartLineUpdateInput!]!",
+    value: lines,
+    create: false
   });
   var removeLines = (lineIds) => mutateCart({
     name: "cartLinesRemove",
-    args: "$lineIds: [ID!]!",
-    inner: "lineIds: $lineIds",
-    variables: { lineIds },
-    createInput: null
+    variable: "lineIds",
+    type: "[ID!]!",
+    value: lineIds,
+    create: false
   });
   var setLineQuantity = (lineId, target) => target > 0 ? updateLines([{ id: lineId, quantity: target }]) : removeLines([lineId]);
 
@@ -2414,7 +2423,7 @@
     return cart && !cart.totalQuantity ? null : savedCartId();
   }
   async function checkout(target = cfg.checkoutTarget) {
-    if (runInOrder.idle() && !cartToCheckOut()) return null;
+    if (!cartToCheckOut() && !mayFill()) return null;
     const tab = target === "_blank" ? window.open("", "_blank") : null;
     if (tab) detachOpenerIfAllowed(tab);
     try {
@@ -2450,7 +2459,9 @@
       reportError(error, "cart reload after a failed change");
     }
   }
+  var queuedLoad = null;
   function runChange(task) {
+    queuedLoad = null;
     return enqueue(
       () => task().catch(async (error) => {
         if (isUnclearFailure(error)) await reloadAfterUnclearFailure();
@@ -2511,9 +2522,17 @@
     }
     return currentCart();
   }
+  function reload() {
+    queuedLoad ?? (queuedLoad = queueFilling(
+      () => runInOrder(() => {
+        queuedLoad = null;
+        return load();
+      })
+    ));
+    return queuedLoad;
+  }
   var Cart = {
-    /** Loads the saved cart in the queue, so a change Shopify answers meanwhile isn't replaced by an older answer. */
-    init: () => runInOrder(load),
+    init: reload,
     /** The saved cart's id. */
     id: savedCartId,
     get status() {
@@ -2575,20 +2594,22 @@
       const lines = (Array.isArray(input) ? input : [input]).map(
         (line) => toLineInput(line, quantity, options)
       );
-      return runChange(async () => {
-        const cart = await mutateCart({
-          name: "cartLinesAdd",
-          args: "$lines: [CartLineInput!]!",
-          inner: "lines: $lines",
-          variables: { lines },
-          createInput: { lines }
-        });
-        if (!cart) throw new TetherError("Shopify answered the add without a cart");
-        commit(cart, "add");
-        emit("added", { cart, lines });
-        if (cfg.openCartOnAdd) openCart();
-        return cart;
-      });
+      return queueFilling(
+        () => runChange(async () => {
+          const cart = await mutateCart({
+            name: "cartLinesAdd",
+            variable: "lines",
+            type: "[CartLineInput!]!",
+            value: lines,
+            create: true
+          });
+          if (!cart) throw new TetherError("Shopify answered the add without a cart");
+          commit(cart, "add");
+          emit("added", { cart, lines });
+          if (cfg.openCartOnAdd) openCart();
+          return cart;
+        })
+      );
     },
     /**
      * `updateLine(lineId, 3)` or `updateLine(lineId, { quantity, sellingPlanId, attributes })`.
@@ -2617,15 +2638,14 @@
       });
     },
     setNote(note) {
-      const variables = { note: note ?? "" };
       return runChange(
         async () => commit(
           await mutateCart({
             name: "cartNoteUpdate",
-            args: "$note: String!",
-            inner: "note: $note",
-            variables,
-            createInput: variables
+            variable: "note",
+            type: "String!",
+            value: note ?? "",
+            create: true
           }),
           "note"
         )
@@ -2638,13 +2658,12 @@
      */
     setAttributes(attributes) {
       return runChange(async () => {
-        const variables = { attributes: mergedAttributes(attributes) };
         const cart = await mutateCart({
           name: "cartAttributesUpdate",
-          args: "$attributes: [AttributeInput!]!",
-          inner: "attributes: $attributes",
-          variables,
-          createInput: variables
+          variable: "attributes",
+          type: "[AttributeInput!]!",
+          value: mergedAttributes(attributes),
+          create: true
         });
         return commit(cart, "attributes");
       });
@@ -2652,13 +2671,12 @@
     /** Replaces the discount codes; `[]` removes them all. */
     setDiscountCodes(codes) {
       return runChange(async () => {
-        const variables = { discountCodes: discountCodesFrom(codes) };
         const cart = await mutateCart({
           name: "cartDiscountCodesUpdate",
-          args: "$discountCodes: [String!]!",
-          inner: "discountCodes: $discountCodes",
-          variables,
-          createInput: variables
+          variable: "discountCodes",
+          type: "[String!]!",
+          value: discountCodesFrom(codes),
+          create: true
         });
         return commit(cart, "discount");
       });
@@ -2695,10 +2713,10 @@
       return runChange(async () => {
         const cart = await mutateCart({
           name: "cartBuyerIdentityUpdate",
-          args: "$buyerIdentity: CartBuyerIdentityInput!",
-          inner: "buyerIdentity: $buyerIdentity",
-          variables: { buyerIdentity },
-          createInput: create ? { buyerIdentity } : null
+          variable: "buyerIdentity",
+          type: "CartBuyerIdentityInput!",
+          value: buyerIdentity,
+          create
         }).catch((error) => {
           if (create || !isCartGone(error)) throw error;
           return null;
@@ -3597,7 +3615,7 @@
   }
 
   // src/part-integrity.ts
-  var PART_INTEGRITY = { "tether.diagnose.js": "sha384-CqtXzvWbLD8aIgyTM43+KMXEFA7r7lhG+0XyQAw3Sp7B5qrzPsxlA9QfzBjoPqZz", "tether.markets.js": "sha384-WjowbRhM7OzzZOrCPZWSZqN7EjIiiR7u9cGmdI+9kgFVgmEQS8lVGWjgx+8jILOf", "tether.search.js": "sha384-fLQ7eKc5XOv0Cg2FfrZyeFAkRR4wDMjUWFpwvKrfPRnT2NvTuhKg80+KVu8Qce/G", "tether.lists.js": "sha384-l2uyr96zTetjo2WWhGsBamd1ZYkC3OB3G3+OScLEvxdok0c8k9GXLAh1WRALUr4S", "tether.extras.js": "sha384-qx7paZ/rjwtn1Yy9TgszulmBuJsIQ9y4eZ590AArnZ+IDB8IzwJ5dNOFJ+yMHPdb", "tether.account.js": "sha384-82dpAxK4rPlXuNxSk/dvaItjRQf+Z79EJnUqXtT9D8HjpF9XwoTIUxDViiV1dIhz", "tether.account-pages.js": "sha384-ND3kIaRypgnHG3QMDb8CqDxt7fuukDCdHsIAHoOUUsz3+FjvBqXgRDV4Mjp6x8jr", "tether.analytics.js": "sha384-jnLesn/+edWBSPuXLj7VX1kSAGwEqtb0VbHjuU//ofqgxkndHlDFsS8Bc8htlGt8" };
+  var PART_INTEGRITY = { "tether.diagnose.js": "sha384-CqtXzvWbLD8aIgyTM43+KMXEFA7r7lhG+0XyQAw3Sp7B5qrzPsxlA9QfzBjoPqZz", "tether.markets.js": "sha384-4UK4+noZOE06Ra3Eyin9kAUXz/bbvcbq3gvdwNBItnPCQzmPyD398YoM0P1aTL0Q", "tether.search.js": "sha384-fLQ7eKc5XOv0Cg2FfrZyeFAkRR4wDMjUWFpwvKrfPRnT2NvTuhKg80+KVu8Qce/G", "tether.lists.js": "sha384-C+ibx3RT6OStQI+eq0K+ai44lQsHeI4iueLoZaW/+AqVZ7D+gcjoHiohd0CFyNUd", "tether.extras.js": "sha384-qx7paZ/rjwtn1Yy9TgszulmBuJsIQ9y4eZ590AArnZ+IDB8IzwJ5dNOFJ+yMHPdb", "tether.account.js": "sha384-A5LC6eOq1My82IYPD0qA/NKhefGuBvA+9vwY7l/t0S40/SwIjWCBXJIO3YNyYGPc", "tether.account-pages.js": "sha384-ND3kIaRypgnHG3QMDb8CqDxt7fuukDCdHsIAHoOUUsz3+FjvBqXgRDV4Mjp6x8jr", "tether.analytics.js": "sha384-jnLesn/+edWBSPuXLj7VX1kSAGwEqtb0VbHjuU//ofqgxkndHlDFsS8Bc8htlGt8" };
 
   // src/part-registry.ts
   function isTetherInternals(value) {
@@ -3605,7 +3623,7 @@
   }
 
   // src/version.ts
-  var VERSION = "0.9.7";
+  var VERSION = "0.9.8";
 
   // src/lazy-iife.ts
   var coreModules = {
@@ -3644,9 +3662,6 @@
     },
     get "loader.ts"() {
       return [clearProductCache, getProduct, normalizeProductKey, primeProduct, withProductFragment];
-    },
-    get "fragments.ts"() {
-      return [collectionFields];
     },
     get "selling-plans.ts"() {
       return [allPlans];
@@ -3792,6 +3807,13 @@
   }
   var isLoginOutcome = (value) => value === "in" || value === "expired" || value === "error";
 
+  // src/part-use.ts
+  function withPart(name, use) {
+    loadPart(name).then(use).catch((error) => {
+      reportError(error, name);
+    });
+  }
+
   // src/account-api.ts
   var ACCOUNT_ATTRIBUTES = [
     "account-login",
@@ -3812,9 +3834,7 @@
     if (!cfg.account) return;
     const needed = within(root, accountSelector()).length > 0 || isLoginOutcome(new URLSearchParams(window.location.search).get("account")) || hasLoginHint();
     if (!needed) return;
-    loadPart("account").then((part) => part.mountAccount(root)).catch((error) => {
-      reportError(error, "account");
-    });
+    withPart("account", (part) => part.mountAccount(root));
   }
   function fromPart(name) {
     return (...args) => loadPart("account").then((part) => {
@@ -3993,30 +4013,29 @@
 
   // src/controls/extras.ts
   var addGroup = (button) => loadPart("extras").then((part) => part.addGroup(button));
-  var reportExtrasError = (error) => {
-    reportError(error, "extras");
-  };
   function onClick4(event) {
     const { target } = event;
     const button = target instanceof window.Element ? target.closest(sel("group-add")) : null;
     if (!button) return;
     event.preventDefault();
-    busy(button, () => addGroup(button)).catch(reportExtrasError);
+    busy(button, () => addGroup(button)).catch((error) => {
+      reportError(error, "extras");
+    });
   }
   function onStorage(event) {
     if (!cfg.domain || !event.key?.startsWith(`${cfg.prefix}:`)) return;
-    loadPart("extras").then((part) => {
+    withPart("extras", (part) => {
       part.onStorage(event);
-    }).catch(reportExtrasError);
+    });
   }
   function onVariantChanged(event) {
     if (!isOwnEvent(event, "variant-changed")) return;
     const { target } = event;
     if (!(target instanceof window.Element)) return;
     if (!cfg.variantUrl && !target.hasAttribute(attr("variant-url"))) return;
-    loadPart("extras").then((part) => {
+    withPart("extras", (part) => {
       part.writeVariantUrl(target, event.detail);
-    }).catch(reportExtrasError);
+    });
   }
   function bindExtrasControls() {
     document.addEventListener("click", onClick4);
@@ -4054,14 +4073,6 @@
       hooks.unmount();
     });
   }
-  function onChange3(event) {
-    const { target } = event;
-    if (!(target instanceof window.HTMLSelectElement) || !target.matches(sel("country-select"))) return;
-    if (!target.value) return;
-    setCountry(target.value).catch((error) => {
-      reportError(error, "country");
-    });
-  }
   function onOnline() {
     retryFailed();
     liveLists.forEach((list) => {
@@ -4070,7 +4081,6 @@
   }
   function bindNavigation(hooks) {
     if (cfg.astro) bindAstroRouter(hooks);
-    document.addEventListener("change", onChange3);
     window.addEventListener("online", onOnline);
   }
 
@@ -4101,16 +4111,12 @@
   }
   function mountParts(root) {
     if (within(root, `${sel("country-select")},${sel("country-bind")}`).length) {
-      loadPart("markets").then((part) => part.renderCountrySelects(root)).catch((error) => {
-        reportError(error, "markets");
-      });
+      withPart("markets", (part) => part.renderCountrySelects(root));
     }
     mountAccountIfUsed(root);
     if (within(root, sel("search")).length) {
-      loadPart("search").then((part) => {
+      withPart("search", (part) => {
         part.mountSearch(root);
-      }).catch((error) => {
-        reportError(error, "search");
       });
     }
   }
@@ -4165,7 +4171,7 @@
   async function cartInPageMarket(cart) {
     const country = cfg.country;
     const cartCountry = cart?.buyerIdentity.countryCode;
-    if (!cart || !country || !cartCountry || cartCountry === country) return cart;
+    if (!country || !cartCountry || cartCountry === country) return cart;
     try {
       return await Cart.setBuyerIdentity({ countryCode: country }, { create: false });
     } catch (error) {
