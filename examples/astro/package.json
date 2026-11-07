@@ -8,7 +8,7 @@
     "preview": "astro preview"
   },
   "dependencies": {
-    "@occluze/tether": "^0.8.0",
+    "@occluze/tether": "^0.9.0",
     "astro": "^7.4.5"
   }
 }
