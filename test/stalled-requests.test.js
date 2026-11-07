@@ -27,8 +27,8 @@ const { request, hasData } = await import('../src/client.ts');
 
 const MUTATION = 'mutation Add($cartId: ID!) { cartLinesAdd(cartId: $cartId, lines: []) { cart { id } } }';
 const TIMEOUT_MS = 50;
-/** Node's message for a fetch its `AbortSignal.timeout` ended. */
-const TIMED_OUT = /^Network error: The operation was aborted due to timeout$/;
+/** The message of the abort reason `requestTimeout` ends a fetch with. */
+const TIMED_OUT = /^Network error: signal timed out$/;
 
 /** How each request the server gets stalls: before its headers, or partway through its body. */
 let stall = /** @type {'answer' | 'body'} */ ('answer');
@@ -90,6 +90,35 @@ test('a query that timed out is sent again, a mutation is not', { timeout: 10_00
   });
   assert.equal(received, 1, 'the mutation is not');
 });
+
+/** Timers Node has pending, which a request's timeout adds to until it is cleared. */
+const pendingTimers = () => process.getActiveResourcesInfo().filter((resource) => resource === 'Timeout').length;
+
+test(
+  'without AbortSignal.timeout, as in Safari 15, requests still time out and clear their timer',
+  { timeout: 10_000 },
+  async () => {
+    const timeout = Object.getOwnPropertyDescriptor(AbortSignal, 'timeout');
+    assert.ok(timeout);
+    Object.defineProperty(AbortSignal, 'timeout', { value: undefined, configurable: true });
+    try {
+      stall = 'answer';
+      await assert.rejects(request(stalledConfig(0), MUTATION, {}, hasData, { operation: 'mutation' }), {
+        code: 'NETWORK',
+        message: TIMED_OUT,
+      });
+      const before = pendingTimers();
+      const answered = {
+        ...resolveConfig({ domain: 'answered.test', token: 't', maxAge: 0, retries: 0, requestTimeout: 60_000 }),
+        fetch: () => Promise.resolve(jsonResponse({ data: { shop: { name: 'Shop' } } })),
+      };
+      assert.deepEqual(await request(answered, '{ shop { name } }', {}, hasData), { shop: { name: 'Shop' } });
+      assert.equal(pendingTimers(), before, 'no timer is left pending once the answer is read');
+    } finally {
+      Object.defineProperty(AbortSignal, 'timeout', timeout);
+    }
+  },
+);
 
 /** @type {string[]} */
 const ops = [];

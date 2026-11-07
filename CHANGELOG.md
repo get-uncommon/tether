@@ -16,8 +16,8 @@ A minor release: the package exports fewer paths, and self-hosted script tags ne
   entry points instead.
 - Storefront requests time out after `requestTimeout` milliseconds (default 15000, `0` for none) and
   fail as `NETWORK`: a query retries, a cart change isn't sent again and the cart is loaded again,
-  so a stalled connection no longer holds every later cart change. It uses `AbortSignal.timeout`
-  (Safari 16 and newer). A `fetch` passed to the server helpers must honour `init.signal`.
+  so a stalled connection no longer holds every later cart change. It works in every supported
+  browser. A `fetch` passed to the server helpers must honour `init.signal`.
 - Fix: the retry waits start at 300 ms (500 ms after `THROTTLED`) and double, as documented; the
   first retry used to wait twice that.
 - Docs: the reference documents every `TETHER_CONFIG` option and every `markets`, `analytics` and

@@ -358,6 +358,24 @@ function graphQLOutcome(
   throw graphQLFailure(res, errors, conf, unclear ? 'SERVER_ERROR' : undefined);
 }
 
+/**
+ * Runs `send` with a signal that aborts it, the answer's body included, after `ms` milliseconds (`0`: never), as
+ * `AbortSignal.timeout` would; Safari before 16 lacks that. A request that never settles would hold every cart change
+ * queued behind it (`enqueue`) for as long as the browser keeps the connection open.
+ */
+async function withTimeout<T>(ms: number, send: (signal: AbortSignal | null) => Promise<T>): Promise<T> {
+  if (!ms) return send(null);
+  const controller = new AbortController();
+  const timer = setTimeout(() => {
+    controller.abort(new DOMException('signal timed out', 'TimeoutError'));
+  }, ms);
+  try {
+    return await send(controller.signal);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /** One request. Failures that retrying can't fix, or that `retry` doesn't allow retrying, throw. */
 async function attempt<T>(
   conf: StorefrontConfig,
@@ -366,6 +384,7 @@ async function attempt<T>(
   isData: DataCheck<T>,
   retry: RetryPolicy,
   operation: Operation,
+  signal: AbortSignal | null,
 ): Promise<Attempt<T>> {
   let res;
   try {
@@ -373,10 +392,8 @@ async function attempt<T>(
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Shopify-Storefront-Access-Token': conf.token },
       body: JSON.stringify({ query, variables }),
-      // Ends the request, its body included, after `requestTimeout` ms: one that never settles would hold every cart
-      // change queued behind it (`enqueue`) for as long as the browser keeps the connection open. A `fetch` given to
-      // the server helpers has to honour the signal, as the platform's does.
-      signal: conf.requestTimeout ? AbortSignal.timeout(conf.requestTimeout) : null,
+      // A `fetch` given to the server helpers has to honour the signal, as the platform's does.
+      signal,
     });
   } catch (error) {
     return networkFailure(error, retry);
@@ -438,7 +455,9 @@ export async function request<T>(
     const access = { inventory: !storesWithoutInventory.has(store) };
     const sent = queryText(conf, query, access, { context, operation });
     const retry = retries < conf.retries ? retryWhileLeft : 'none';
-    const outcome = await attempt(conf, sent, variables, isData, retry, operation);
+    const outcome = await withTimeout(conf.requestTimeout, (signal) =>
+      attempt(conf, sent, variables, isData, retry, operation, signal),
+    );
     switch (outcome.kind) {
       case 'data':
         return outcome.data;
