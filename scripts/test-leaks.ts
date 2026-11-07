@@ -17,9 +17,10 @@
  * once the whole file has run that long, and Node then names only the file.
  */
 import { execFileSync, spawn } from 'node:child_process';
-import { EventEmitter, once } from 'node:events';
+import { EventEmitter } from 'node:events';
 import { existsSync, mkdtempSync, readdirSync, rmSync, writeSync } from 'node:fs';
 import { createRequire } from 'node:module';
+import { Socket } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -179,6 +180,14 @@ if (process.env['NODE_TEST_CONTEXT'] !== undefined) {
 /** How long Git for Windows' bash may take to start, on a busy machine. */
 const MSYS_START_TIMEOUT_MS = 30_000;
 
+/** @returns Git for Windows' bash, or `undefined` for a git without Git for Windows' MSYS. */
+export function msysBash(): string | undefined {
+  // Git for Windows' exec path is <git>/mingw64/libexec/git-core; its MSYS programs are in <git>/usr/bin.
+  const gitCore = execFileSync('git', ['--exec-path'], { encoding: 'utf8' }).trim();
+  const bash = join(gitCore, '..', '..', '..', 'usr', 'bin', 'bash.exe');
+  return existsSync(bash) ? bash : undefined;
+}
+
 /**
  * Keeps Git for Windows' MSYS runtime running, started with this process's temp folder, until the returned function is
  * called or this process ends. Every MSYS program (Git's bash, sh and tar) shares one mount table, which the first of
@@ -186,33 +195,64 @@ const MSYS_START_TIMEOUT_MS = 30_000;
  * them exits. Without this, a test's bash or tar, running with its file's temp folder, could be that first program,
  * and every other MSYS program on the machine, a shell in another terminal included, would then write its `/tmp`
  * files into that folder and fail the file.
+ *
+ * The running `bash` never keeps this process alive. One that fails to start, exits, or prints nothing within
+ * `startTimeoutMs` is given up with a note on stderr, and the tests run without it.
  */
-async function holdMsysTemp(): Promise<() => void> {
-  // Git for Windows' exec path is <git>/mingw64/libexec/git-core; its MSYS programs are in <git>/usr/bin.
-  const gitCore = execFileSync('git', ['--exec-path'], { encoding: 'utf8' }).trim();
-  const bash = join(gitCore, '..', '..', '..', 'usr', 'bin', 'bash.exe');
-  if (!existsSync(bash)) {
-    return () => {
-      // A git without Git for Windows' MSYS: no MSYS program shares its mount table with the tests'.
-    };
-  }
+export async function holdMsysTemp(bash: string, startTimeoutMs = MSYS_START_TIMEOUT_MS): Promise<() => void> {
   // `read` returns once its input ends: when the returned function ends it, or when this process exits.
-  const holder = spawn(bash, ['--noprofile', '--norc', '-c', 'echo started; read -r _'], {
+  const keeper = spawn(bash, ['--noprofile', '--norc', '-c', 'echo started; read -r _'], {
     stdio: ['pipe', 'pipe', 'ignore'],
   });
-  await once(holder.stdout, 'data', { signal: AbortSignal.timeout(MSYS_START_TIMEOUT_MS) });
+  /** Why `bash` is given up, or `undefined` once it has started. */
+  const failure = await new Promise<string | undefined>((resolve) => {
+    const timer = setTimeout(() => {
+      resolve(`${bash} printed nothing in ${String(startTimeoutMs / 1000)} s`);
+    }, startTimeoutMs);
+    const settle = (outcome: string | undefined) => {
+      clearTimeout(timer);
+      resolve(outcome);
+    };
+    keeper.stdout.once('data', () => {
+      settle(undefined);
+    });
+    keeper.once('error', (error) => {
+      settle(error.message);
+    });
+    keeper.once('exit', (code, signal) => {
+      settle(`${bash} exited with ${String(code ?? signal)} before it started`);
+    });
+  });
+  if (failure !== undefined) {
+    keeper.kill();
+    process.stderr.write(
+      `test-leaks: running the tests without a bash holding the MSYS /tmp (${failure}): a test's bash or tar may map every MSYS program's /tmp into its file's temp folder\n`,
+    );
+    return () => {
+      // No bash is running to release.
+    };
+  }
+  // bash needs only its stdin pipe open, and none of it holds the event loop: a process whose reporter never finishes
+  // still exits, which ends bash's `read`.
+  keeper.stdout.destroy();
+  keeper.unref();
+  if (keeper.stdin instanceof Socket) keeper.stdin.unref();
   return () => {
-    holder.stdin.end();
+    keeper.stdin.destroy();
   };
 }
 
-// The runner, which starts every test file's process.
+// The runner, which starts every test file's process: it loads this module only as a reporter, never through
+// `--import`, which reaches only the test files' processes. A process given it through `--import` outside a test run
+// has neither `NODE_TEST_CONTEXT` nor `--test`.
+const runsTheTests = process.env['NODE_TEST_CONTEXT'] === undefined && process.execArgv.includes('--test');
+const keeperBash = runsTheTests && process.platform === 'win32' ? msysBash() : undefined;
 const releaseMsysTemp =
-  process.env['NODE_TEST_CONTEXT'] === undefined && process.platform === 'win32'
-    ? await holdMsysTemp()
-    : () => {
-        // Only Windows runs MSYS programs.
-      };
+  keeperBash === undefined
+    ? () => {
+        // Only the runner on Windows, with Git for Windows' MSYS, has a bash to release.
+      }
+    : await holdMsysTemp(keeperBash);
 
 /** A test the runner has started, by its file and name, indented by its depth. */
 function runningTest({ file, nesting, name }: { file?: string | undefined; nesting: number; name: string }) {
