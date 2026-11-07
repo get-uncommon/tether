@@ -132,9 +132,8 @@ test("Shopify analytics: Shopify's own scripts load, nothing is sent before cons
     .poll(() => page.evaluate(() => typeof window.Shopify?.customerPrivacy?.setTrackingConsent), { timeout: 15000 })
     .toBe('function');
 
-  // Whether Shopify's script registered on the bus, and whether anything went out without consent.
-  const before = sent.length;
-  test.info().annotations.push({ type: 'before consent', description: `${before} sends` });
+  // Shopify's scripts are loaded and the page view is on the bus, but the visitor hasn't consented.
+  expect(sent.length).toBe(0);
 
   // The visitor accepts analytics (what a cookie banner does).
   await page.evaluate(() => {
@@ -159,15 +158,5 @@ test("Shopify analytics: Shopify's own scripts load, nothing is sent before cons
   });
   await page.locator('#pdp [tether-add-to-cart]').click();
   await expect(page.locator('[tether-cart-count]')).toHaveText(/[1-9]/, { timeout: 15000 });
-  await page.waitForTimeout(3000);
-  const bodies = sent.join('\n');
-  test.info().annotations.push({ type: 'after consent', description: `${sent.length} sends: ${bodies.slice(0, 300)}` });
-  console.log(
-    '[shopify analytics] sends before consent:',
-    before,
-    '| after:',
-    sent.length,
-    '|',
-    (bodies.match(/"event_name":"\w+"/g) ?? []).join(' '),
-  );
+  await expect.poll(() => sent.length, { timeout: 15000 }).toBeGreaterThan(0);
 });

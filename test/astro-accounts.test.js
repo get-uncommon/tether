@@ -278,7 +278,7 @@ const ACCOUNT_PAGES = `
     <button id="pause" tether-subscription-action="pause">Pause</button><button id="resume" tether-subscription-action="resume">Resume</button>
     <span tether-subscription-show="paused" hidden>Paused</span></div></div>
   <ul tether-addresses><li><span tether-address-bind="formatted"></span><b tether-address-show="default" hidden>Default</b></li></ul>
-  <form tether-address-form><input name="address1" value="x"><p tether-form-error></p><button>Save</button></form>
+  <form tether-address-form><input name="address1" value="x"><p tether-form-error></p><p id="own-role" tether-form-error role="status"></p><button>Save</button></form>
   <form tether-profile-form><input name="firstName"><input name="lastName"></form>`;
 
 /** @param {string} selector */
@@ -404,6 +404,8 @@ test('account pages: addresses with the default, a Shopify error in the form, th
     assert.equal(routerSaw, true, 'account forms are handled in the capture phase, before a router');
     await waitFor(() => find('[tether-address-form]').getAttribute('tether-form-state') === 'error', "Shopify's error");
     assert.equal(find('[tether-address-form] [tether-form-error]').textContent, 'City is required');
+    assert.equal(find('[tether-address-form] [tether-form-error]').getAttribute('role'), 'alert', 'announced');
+    assert.equal(find('#own-role').getAttribute('role'), 'status', "the site's own role stays");
     assert.equal(
       posts.filter((post) => post.path === '/address').length,
       1,

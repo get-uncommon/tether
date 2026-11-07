@@ -24,7 +24,9 @@ function removeFromBothAreas(key: string): void {
 /**
  * Removes the customer tokens and pending login that Tether 0.6's browser-mode accounts kept in this browser. The
  * session held a refresh token with the customer's full scope, so it must not stay behind once accounts run through
- * the Worker. TODO: remove in 0.8.0, when no visitor's browser still holds a 0.6 session.
+ * the Worker. Storage keeps the keys until a page removes them, and a visitor can return to a site after any length of
+ * time, so no release can tell they are gone: this runs on every `init()` and stays until Tether stops supporting
+ * upgrades from sites that last ran 0.6, which is a breaking change of its own.
  */
 export function forgetBrowserModeTokens(): void {
   removeFromBothAreas(`${cfg.prefix}:account:${cfg.domain}`);

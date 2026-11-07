@@ -57,6 +57,8 @@ async function act(el: HTMLElement, change: () => Promise<void>): Promise<'saved
   el.setAttribute(attr('form-state'), 'pending');
   const errorBoxes = qsa(el, sel('form-error'));
   errorBoxes.forEach((box) => {
+    // A live region from before the message is written, so screen readers announce it; the site's own role stays.
+    if (!box.hasAttribute('role')) box.setAttribute('role', 'alert');
     setText(box, '');
   });
   try {

@@ -167,7 +167,7 @@ account: {
   </div>
   <button tether-order-return tether-order-show="returnable" tether-confirm="Request this return?">Request a return</button>
   <p tether-order-show="return-requested" hidden>Return requested. We'll email you.</p>
-  <p tether-form-error></p>
+  <p tether-form-error role="alert"></p>
 </section>
 ```
 
@@ -188,7 +188,7 @@ account: {
 ```html
 <form tether-profile-form>
   <input name="firstName"> <input name="lastName"> <button>Save</button>
-  <p tether-form-error></p>
+  <p tether-form-error role="alert"></p>
 </form>
 
 <ul tether-addresses>
@@ -207,13 +207,14 @@ account: {
   <input name="zip"> <input name="city"> <input name="countryCode" placeholder="NL"> <input name="phoneNumber">
   <label><input type="checkbox" name="isDefault"> Default address</label>
   <button>Save</button> <button type="reset" tether-address-new>New</button>
-  <p tether-form-error></p>
+  <p tether-form-error role="alert"></p>
 </form>
 ```
 
 `tether-address-bind`: `formatted`, `name`, `company`, `address1`, `address2`, `city`, `zip`,
 `province`, `country`, `phone`. Forms get `tether-form-state="pending|saved|error"`, and Shopify's
-message (e.g. "Zip is invalid") goes in `tether-form-error`.
+message (e.g. "Zip is invalid") goes in `tether-form-error`. Tether gives a `tether-form-error`
+without a `role` of its own `role="alert"`, so screen readers announce the message.
 
 **Subscriptions** (Shopify Subscriptions or any app that uses Shopify's subscription contracts):
 
@@ -233,7 +234,7 @@ message (e.g. "Zip is invalid") goes in `tether-form-error`.
     <button tether-subscription-action="pause">Pause</button>
     <button tether-subscription-action="resume">Resume</button>
     <button tether-subscription-action="cancel" tether-confirm="Cancel this subscription?">Cancel</button>
-    <p tether-form-error></p>
+    <p tether-form-error role="alert"></p>
   </article>
 </div>
 <a tether-account-link="payment">Change payment method</a>   <!-- Shopify's secure page -->
