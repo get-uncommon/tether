@@ -3,6 +3,7 @@ import { test, before, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
 import {
+  cancelTimersAfterTests,
   captureTetherWarnings,
   detailOf,
   find,
@@ -13,6 +14,8 @@ import {
   pageGlobals,
 } from './fixtures.js';
 import { fieldOf, parseJson, waitFor } from '../server/test/mocks.js';
+
+cancelTimersAfterTests();
 
 // The failures these tests cause on purpose are checked through onError, states and events, not the console.
 captureTetherWarnings();

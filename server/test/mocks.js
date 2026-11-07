@@ -475,3 +475,33 @@ export function within(ms, promise, what) {
     clearTimeout(timer);
   });
 }
+
+/**
+ * The ports `fetch` refuses without connecting ("bad port" in the Fetch standard), from 1024 up, where the system picks
+ * a port for `listen(0)`. Linux picks above them, but Windows can be set to pick from 1024 on.
+ */
+const FETCH_BAD_PORTS = new Set([
+  1719, 1720, 1723, 2049, 3659, 4045, 4190, 5060, 5061, 6000, 6566, 6665, 6666, 6667, 6668, 6669, 6679, 6697, 10080,
+]);
+
+/**
+ * Listens on a free loopback port that `fetch` can reach, picking again while the system hands out one it refuses.
+ *
+ * @param {import('node:net').Server} server
+ * @returns {Promise<number>} The port.
+ */
+export async function listenForFetch(server) {
+  for (;;) {
+    await new Promise((resolve, reject) => {
+      server.once('error', reject);
+      server.listen(0, '127.0.0.1', () => {
+        server.off('error', reject);
+        resolve(undefined);
+      });
+    });
+    const address = server.address();
+    assert.ok(address && typeof address === 'object');
+    if (!FETCH_BAD_PORTS.has(address.port)) return address.port;
+    await new Promise((resolve) => server.close(resolve));
+  }
+}

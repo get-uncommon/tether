@@ -27,6 +27,8 @@ export const NODE_OPTIONS = ['--experimental-strip-types', '--no-warnings'];
 export const UPDATE_STEP_ID = 'up';
 /** The name every revision of the workflow gives the step that tests the new version and imports its entry. */
 export const TEST_STEP = 'Test the new version before it goes live';
+/** How {@link TEST_STEP} runs the release's tests. */
+const ALL_TESTS = 'node --test test/*.test.js';
 /** The job every revision of the workflow runs the updater in. */
 const UPDATE_JOB = 'update';
 /**
@@ -332,9 +334,10 @@ ${String(fieldOf(error, 'stdout'))}${String(fieldOf(error, 'stderr'))}`),
  * @param {string} work A folder for the repository, the jobs and the artifacts, which doesn't exist yet.
  * @param {Record<string, string>} updateEnv What the step that runs the updater has besides; the copy's tests run
  *   without it, as on GitHub.
+ * @param {string} [testFiles] What {@link TEST_STEP} hands `node --test` in place of the workflow's `test/*.test.js`.
  * @returns {Promise<WorkflowRun>}
  */
-export async function runWorkflow(deployed, work, updateEnv) {
+export async function runWorkflow(deployed, work, updateEnv, testFiles) {
   const { origin, env: gitEnv, git } = await deployedRepository(deployed, work);
   const summary = join(work, 'summary.md');
   /** @type {NodeJS.ProcessEnv} */
@@ -371,10 +374,15 @@ export async function runWorkflow(deployed, work, updateEnv) {
         continue;
       }
       assert.ok(step.run !== undefined, `${label} runs something`);
+      let script = step.run;
+      if (step.name === TEST_STEP && testFiles !== undefined) {
+        assert.ok(script.includes(ALL_TESTS), `${label} runs ${ALL_TESTS}`);
+        script = script.replace(ALL_TESTS, `node --test ${testFiles}`);
+      }
       const extra = step.id === UPDATE_STEP_ID ? updateEnv : {};
       const env = { ...base, ...expanded(step.env, context), ...extra, RUNNER_TEMP: slashed(temp) };
       const file = join(temp, `${String(index)}.sh`);
-      const result = await runScript(step.run, step.shell, { label, file, cwd: runner.checkout, env });
+      const result = await runScript(script, step.shell, { label, file, cwd: runner.checkout, env });
       logs.set(label, result.stdout);
       for (const [key, value] of result.outputs) context.set(`steps.${label}.outputs.${key}`, value);
     }

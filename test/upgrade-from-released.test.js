@@ -2,11 +2,11 @@
 // updater it already has, from a released version, which installs this tree; the workflow then records the change,
 // tests it, imports src/entry.js, and commits and pushes what it recorded. It lives outside server/ because it reads
 // the releases from this repository's git history, which a deployed copy doesn't have.
-import { test } from 'node:test';
+import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile, execFileSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
-import { chmod, copyFile, cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { existsSync, mkdtempSync } from 'node:fs';
+import { cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { dirname, join, posix } from 'node:path';
@@ -16,7 +16,8 @@ import { releaseAssetName } from '../server/scripts/release-asset.ts';
 import { compareVersions, parseVersion, versionsInRange } from '../server/src/release-range.ts';
 import { KEPT, MANAGED } from '../server/scripts/update-tether.ts';
 import { SHIPPED_REVISION, WORKFLOW_PATH, workflowRevisionAt } from '../server/scripts/workflow-check.ts';
-import { asRecord, fieldOf, numberAt, parseJson, stringAt } from '../server/test/mocks.js';
+import { installGhStub } from './gh-stub.js';
+import { asRecord, fieldOf, listenForFetch, numberAt, parseJson, stringAt } from '../server/test/mocks.js';
 import {
   COPY_REPOSITORY,
   NODE_OPTIONS,
@@ -43,7 +44,7 @@ const versionIn = async (folder) => fieldOf(parseJson(await readFile(join(folder
  * A test below fails when a release tag's updater or workflow is none of these.
  *
  * Each takes its real route, against a local stand-in for GitHub: `codeload` downloads the tarball codeload serves,
- * `asset` the Release's asset, which a stand-in for `gh` passes (`ghStub`), since nothing local can sign it.
+ * `asset` the Release's asset, which a stand-in for `gh` passes (test/gh-stub.js), since nothing local can sign it.
  *
  * @type {{ tag: string, route: 'codeload' | 'asset' }[]}
  */
@@ -70,7 +71,6 @@ const UPGRADE_TIMEOUT_MS = 180_000;
 const UPSTREAM = 'test-owner/tether';
 const RELEASE_SHA = 'c0ffee'.repeat(6).padEnd(40, '0');
 const OFFLINE_GITHUB = pathToFileURL(join(ROOT, 'test', 'offline-github.js')).href;
-const GH_STUB = pathToFileURL(join(ROOT, 'test', 'gh-stub.js')).href;
 const ASSET = releaseAssetName(RELEASE_VERSION);
 /** Where the Release's asset is on github.com. */
 const ASSET_PATH = `${UPSTREAM}/releases/download/v${RELEASE_VERSION}/${ASSET}`;
@@ -329,71 +329,88 @@ async function fakeGitHub(tarball) {
     }
     response.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(answer));
   });
-  await new Promise((resolve) =>
-    server.listen(0, '127.0.0.1', () => {
-      resolve(undefined);
-    }),
-  );
-  const address = server.address();
-  assert.ok(address && typeof address === 'object');
-  const close = () =>
-    new Promise((resolve) =>
+  // The updaters reach it with fetch.
+  const port = await listenForFetch(server);
+  const close = () => {
+    server.closeAllConnections();
+    return new Promise((resolve) =>
       server.close(() => {
         resolve(undefined);
       }),
     );
-  return { url: `http://127.0.0.1:${String(address.port)}`, requests, close };
+  };
+  return { url: `http://127.0.0.1:${String(port)}`, requests, close };
 }
 
 /**
- * Puts a `gh` first on the `PATH` that answers the one call the 0.7 updaters make, `gh attestation verify …`, as `gh`
- * does for an attestation that verifies, and writes its arguments to `log`, one per line. On Linux and macOS it is a
- * shell script. On Windows the updater's `spawnSync` finds only an .exe, so it is a copy of node.exe that
- * test/gh-stub.js, loaded through `NODE_OPTIONS`, turns into the stand-in.
- *
- * @param {string} dir An empty folder for it.
- * @param {string} log
- * @returns {Promise<{ env: Record<string, string>, nodeOptions: string[] }>} What puts it first.
- */
-async function ghStub(dir, log) {
-  await mkdir(dir, { recursive: true });
-  const env = { ...workflowPath([dir]), TETHER_TEST_GH_LOG: log };
-  if (process.platform === 'win32') {
-    await copyFile(process.execPath, join(dir, 'gh.exe'));
-    return { env, nodeOptions: [`--import=${GH_STUB}`] };
-  }
-  const script = join(dir, 'gh');
-  await writeFile(
-    script,
-    [
-      '#!/bin/sh',
-      '[ "$1 $2" = "attestation verify" ] || { echo "gh stub: unexpected gh $*" >&2; exit 1; }',
-      `printf '%s\\n' "$@" > "$TETHER_TEST_GH_LOG"`,
-      '',
-    ].join('\n'),
-  );
-  await chmod(script, 0o755);
-  return { env, nodeOptions: [] };
-}
-
-/**
- * Puts the release on {@link fakeGitHub} the way `route` downloads it: a top folder with `server/` in it, the
- * repository in codeload's tarball, the folder alone in the asset.
- *
  * @param {string} release This tree's `server/`, as {@link releaseFolder} wrote it.
- * @param {string} work An empty folder for the tarball and the `gh` stand-in.
+ * @param {string} work A folder for the tarball.
  * @param {'codeload' | 'asset'} route
- * @returns The stand-in, the environment that sends the copy's updater to it, and a check of what the updater did.
+ * @returns {Promise<Buffer>} The release as `route` downloads it: a top folder with `server/` in it, the repository in
+ *   codeload's tarball, the folder alone in the asset.
  */
-async function publishRelease(release, work, route) {
+async function tarball(release, work, route) {
   // The asset's layout is release.yml's `git archive --prefix="tether-server-$V/" … -- server`.
   const top = route === 'asset' ? `tether-server-${RELEASE_VERSION}` : `tether-${RELEASE_VERSION}`;
   await cp(release, join(work, 'archive', top, 'server'), { recursive: true });
   // Relative paths: GNU tar reads the `C:` of a Windows path as a remote host.
   execFileSync('tar', ['-czf', 'release.tgz', '-C', 'archive', top], { cwd: work, timeout: SYNC_CHILD_TIMEOUT_MS });
-  const github = await fakeGitHub(await readFile(join(work, 'release.tgz')));
+  return readFile(join(work, 'release.tgz'));
+}
+
+/**
+ * What every copy's test installs or reads, built once for the file, since they all install the same release: the
+ * release, the release the updater refuses for having no version, each route's tarball, and the `gh` stand-in.
+ *
+ * @typedef {{ release: string, refused: string, tarballs: Record<'codeload' | 'asset', Buffer>, ghBin: string,
+ *   ghOptions: string[] }} Release
+ */
+
+const SHARED = mkdtempSync(join(tmpdir(), 'tether-upgrade-release-'));
+after(() => rm(SHARED, { recursive: true, force: true }));
+/** @type {Promise<Release> | undefined} */
+let built;
+
+/** @returns {Promise<Release>} */
+async function buildRelease() {
+  const release = join(SHARED, 'release');
+  await releaseFolder(release);
+  const refused = join(SHARED, 'refused');
+  await cp(release, refused, { recursive: true });
+  const refusedPkgPath = join(refused, 'package.json');
+  const refusedPkg = asRecord(parseJson(await readFile(refusedPkgPath, 'utf8')), 'package.json');
+  delete refusedPkg['version'];
+  await writeFile(refusedPkgPath, JSON.stringify(refusedPkg, null, 2));
+  const tarballs = {
+    codeload: await tarball(release, join(SHARED, 'codeload'), 'codeload'),
+    asset: await tarball(release, join(SHARED, 'asset'), 'asset'),
+  };
+  const ghBin = join(SHARED, 'bin');
+  return { release, refused, tarballs, ghBin, ghOptions: await installGhStub(ghBin) };
+}
+
+/** @returns {Promise<Release>} */
+function sharedRelease() {
+  built ??= buildRelease();
+  return built;
+}
+
+/**
+ * Puts the release on {@link fakeGitHub} the way `route` downloads it.
+ *
+ * @param {Release} release
+ * @param {string} work A folder for what the `gh` stand-in is called with.
+ * @param {'codeload' | 'asset'} route
+ * @returns The stand-in, the environment that sends the copy's updater to it, and a check of what the updater did.
+ */
+async function publishRelease({ tarballs, ghBin, ghOptions }, work, route) {
+  const github = await fakeGitHub(tarballs[route]);
+  await mkdir(work, { recursive: true });
   const ghLog = join(work, 'gh-arguments.txt');
-  const gh = route === 'asset' ? await ghStub(join(work, 'bin'), ghLog) : { env: workflowPath([]), nodeOptions: [] };
+  const gh =
+    route === 'asset'
+      ? { env: { ...workflowPath([ghBin]), TETHER_TEST_GH_LOG: ghLog }, nodeOptions: ghOptions }
+      : { env: workflowPath([]), nodeOptions: [] };
   /** @type {Record<string, string>} */
   const env = {
     ...gh.env,
@@ -456,6 +473,15 @@ async function takeThisMinor(deployed) {
   );
 }
 
+/**
+ * Every copy installs the same release, so the release's whole server/test runs in the first copy's test step only,
+ * in this tree's layout as a copy has it; each later copy's step runs one file, which still shows the step runs the
+ * installed tests, judged by their exit code.
+ */
+let wholeSuiteRan = false;
+/** Reads the copy's own files: its package.json, its .dev.vars.example and its config. */
+const ONE_TEST_FILE = 'test/setup.test.js';
+
 for (const { tag, route } of OLD_UPDATERS) {
   test(
     `a copy made from ${tag} is updated to this tree by its own workflow and updater, which commits what it tested; a later failed update shows on the run`,
@@ -472,17 +498,19 @@ for (const { tag, route } of OLD_UPDATERS) {
       const work = await mkdtemp(join(tmpdir(), 'tether-upgrade-'));
       try {
         const deployed = join(work, 'deployed');
-        const release = join(work, 'release');
         await extractServer(tag, deployed);
         await takeThisMinor(deployed);
-        await releaseFolder(release);
+        const shared = await sharedRelease();
+        const { release } = shared;
         const ownConfig = await readFile(join(deployed, 'tether-sync.config.js'), 'utf8');
         const revision = await workflowRevisionAt(deployed);
         assert.ok(revision !== null, `${tag} ships the update workflow`);
         const outdated = revision < SHIPPED_REVISION;
 
-        const published = await publishRelease(release, join(work, 'download'), route);
-        const workflow = await runWorkflow(deployed, join(work, 'actions'), published.env).finally(() =>
+        const published = await publishRelease(shared, join(work, 'download'), route);
+        const testFiles = wholeSuiteRan ? ONE_TEST_FILE : undefined;
+        wholeSuiteRan = true;
+        const workflow = await runWorkflow(deployed, join(work, 'actions'), published.env, testFiles).finally(() =>
           published.github.close(),
         );
         await published.checkDownload();
@@ -520,14 +548,8 @@ for (const { tag, route } of OLD_UPDATERS) {
         // A failing run. Revision 1 of the workflow pipes the updater through `tee` without pipefail, so its step
         // passes whatever the exit code, and only the annotation and the summary show the failure; later revisions
         // fail the step on the exit code.
-        const refused = join(work, 'refused');
-        await cp(release, refused, { recursive: true });
-        const refusedPkgPath = join(refused, 'package.json');
-        const refusedPkg = asRecord(parseJson(await readFile(refusedPkgPath, 'utf8')), 'package.json');
-        delete refusedPkg['version'];
-        await writeFile(refusedPkgPath, JSON.stringify(refusedPkg, null, 2));
         const summary = join(work, 'summary.md');
-        const failed = await node(copy, ['scripts/update-tether.mjs', '--from', refused], { summary }).then(
+        const failed = await node(copy, ['scripts/update-tether.mjs', '--from', shared.refused], { summary }).then(
           () => assert.fail('the update of a release without a version passed'),
           (/** @type {unknown} */ error) => error,
         );

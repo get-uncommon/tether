@@ -267,7 +267,9 @@ test(
   { timeout: 60_000 },
   async () => {
     // Accepts connections and never answers, as the Windows RPC ports do.
-    const silent = createServer(() => {});
+    /** @type {import('node:net').Socket[]} */
+    const held = [];
+    const silent = createServer((socket) => held.push(socket));
     await within(
       10_000,
       new Promise((resolve) => {
@@ -288,7 +290,9 @@ test(
         message: 'timed out after 0.2s waiting for the answer to GET /plain/',
       });
     } finally {
-      silent.close();
+      // The request that timed out left its connection open on the server's side.
+      for (const socket of held) socket.destroy();
+      await new Promise((resolve) => silent.close(resolve));
     }
   },
 );

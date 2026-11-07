@@ -87,6 +87,33 @@ test('file store: two processes writing at once both keep every key', async () =
   assert.equal(Object.keys(disk).length, 2 * rounds, 'no write lost');
 });
 
+/** How long a write waits before it tries a held lock again: `LOCK_RETRY_MS` in src/node.ts. */
+const LOCK_RETRY_MS = 20;
+
+/**
+ * Counts the waits of {@link LOCK_RETRY_MS} the code makes until `stop()`, which puts the real `setTimeout` back.
+ *
+ * @returns {{ count: () => number, stop: () => void }}
+ */
+function countLockWaits() {
+  const start = globalThis.setTimeout;
+  let waits = 0;
+  /**
+   * @param {() => void} callback
+   * @param {number} [ms]
+   */
+  const counting = (callback, ms) => {
+    if (ms === LOCK_RETRY_MS) waits += 1;
+    return start(callback, ms);
+  };
+  // Defined, not assigned: the type of the global setTimeout is also the DOM's.
+  Object.defineProperty(globalThis, 'setTimeout', { value: counting, writable: true, configurable: true });
+  return {
+    count: () => waits,
+    stop: () => Object.defineProperty(globalThis, 'setTimeout', { value: start, writable: true, configurable: true }),
+  };
+}
+
 test('file store: a write waits for the lock another process holds, and takes over one left by a dead process', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'tether-sync-'));
   const path = join(dir, 'state.json');
@@ -94,13 +121,19 @@ test('file store: a write waits for the lock another process holds, and takes ov
   await writeFile(`${path}.lock`, '');
   await store.put('k', 1);
   let written = false;
-  const flushed = store.flush().then(() => {
-    written = true;
-  });
-  await new Promise((resolve) => setTimeout(resolve, 100));
-  assert.equal(written, false, 'waits while the lock is held');
-  await rm(`${path}.lock`);
-  await within(30_000, flushed, 'the write to take the freed lock');
+  const waits = countLockWaits();
+  try {
+    const flushed = store.flush().then(() => {
+      written = true;
+    });
+    // Found the lock held, waited, and found it held again.
+    await waitFor(() => waits.count() >= 2, 'the write to wait for the held lock twice');
+    assert.equal(written, false, 'waits while the lock is held');
+    await rm(`${path}.lock`);
+    await within(30_000, flushed, 'the write to take the freed lock');
+  } finally {
+    waits.stop();
+  }
   assert.deepEqual(parseJson(await readFile(path, 'utf8')), { k: 1 });
 
   await writeFile(`${path}.lock`, '');

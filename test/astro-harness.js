@@ -4,6 +4,7 @@ import { before, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
 import {
+  cancelTimersAfterTests,
   captureTetherWarnings,
   cartFrom,
   graphqlRequest,
@@ -14,6 +15,8 @@ import {
   pageGlobals,
 } from './fixtures.js';
 import { numberAt, parseJson, recordAt, recordsAt, stringAt, waitFor } from '../server/test/mocks.js';
+
+cancelTimersAfterTests();
 
 // The failures these tests cause on purpose are checked through onError, states and events, not the console.
 captureTetherWarnings();
@@ -30,8 +33,13 @@ Object.assign(globalThis, pageGlobals(dom.window));
 /** @typedef {import('../src/fragments.ts').Product} Product */
 /** @typedef {Parameters<Parameters<typeof import('../src/cart/store.ts').subscribe>[0]>[1]} CartMeta */
 
-/** @type {(ReturnType<typeof graphqlRequest> & { op: string })[]} */
+/**
+ * The requests Tether sent, but for those of {@link queuedRequestsSent} alone.
+ *
+ * @type {(ReturnType<typeof graphqlRequest> & { op: string })[]}
+ */
 export const calls = [];
+const PROBE = 'probe-';
 /**
  * The cart "Shopify" has for the saved id: `seedCart` sets it.
  *
@@ -54,7 +62,9 @@ const withPrice = (sent, amount) => parseJson(JSON.stringify(sent).replace(/"amo
 globalThis.fetch = async (_url, init) => {
   const { query, variables } = graphqlRequest(init);
   const op = operationName(query);
-  calls.push({ op, query, variables });
+  const asked = Object.entries(variables).filter(([key]) => key.startsWith('h'));
+  if (!asked.length || asked.some(([, handle]) => !String(handle).startsWith(PROBE)))
+    calls.push({ op, query, variables });
   /** @param {unknown} data */
   const ok = (data) => jsonResponse({ data });
   if (op === 'TetherProducts') {
@@ -137,8 +147,18 @@ export async function seedCart(cart) {
   await Tether.cart.init();
 }
 
-/** For a check that nothing more happens: a request that shouldn't go out leaves no condition to wait for. */
-export const settle = (ms = 60) => new Promise((resolve) => setTimeout(resolve, ms));
+let probes = 0;
+/**
+ * For a check that nothing more happens: settles once a product load asked for now has been answered, and what Tether
+ * does with the answers, in microtasks, is done. That load goes out with, or after, every request Tether had queued:
+ * a background refresh waits for one 0 ms timer and joins the next product batch.
+ */
+export async function queuedRequestsSent() {
+  probes += 1;
+  // A handle of its own each time: a product not found is remembered, and loaded again only later.
+  await assert.rejects(Tether.getProduct(`${PROBE}${String(probes)}`), { code: 'NOT_FOUND' });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+}
 /** Waits until the first `selector` on the page has rendered. */
 export const rendered = (selector = '[tether-product]') =>
   waitFor(() => document.querySelector(selector)?.getAttribute('tether-state') === 'ready', `${selector} to render`);

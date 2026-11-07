@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { after } from 'node:test';
+import { setTimeout as setNodeTimeout } from 'node:timers';
 import { asRecord, listAt, numberAt, parseJson, recordAt, recordsAt, stringAt, within } from '../server/test/mocks.js';
 import { isTetherInternals } from '../src/part-registry.ts';
 
@@ -295,6 +297,52 @@ export function captureTetherWarnings() {
     else warn(...args);
   };
   return captured;
+}
+
+/**
+ * Cancels, once the file's tests are done, the one-off timers the code under test still has pending: a debounce
+ * (`tether:layout-changed`, the cart's focus, `observe`) or a cache expiry that would fire only after the last test, and
+ * that scripts/test-leaks.ts would otherwise report as left open. Intervals are not tracked, so one left running still
+ * fails the file.
+ */
+export function cancelTimersAfterTests() {
+  /** @type {Set<NodeJS.Timeout>} */
+  const started = new Set();
+  /**
+   * @template {unknown[]} TArgs
+   * @param {(...args: TArgs) => void} callback
+   * @param {number | undefined} ms
+   * @param {TArgs} args
+   */
+  const tracked = (callback, ms, ...args) => {
+    const timer = setNodeTimeout(callback, ms, ...args);
+    started.add(timer);
+    return timer;
+  };
+  // Defined, not assigned: the type of the global setTimeout is also the DOM's, which returns a number.
+  Object.defineProperty(globalThis, 'setTimeout', { value: tracked, writable: true, configurable: true });
+  after(() => {
+    // A timer that has fired already is cleared as a no-op.
+    started.forEach((timer) => {
+      clearTimeout(timer);
+    });
+  });
+}
+
+/**
+ * @param {Response} response
+ * @param {{ read: boolean }} request Its `read` turns true once the body has been read with `json()`, after which
+ *   what reads it continues in microtasks: a test waits for it before checking that the answer changed nothing.
+ */
+export function whenRead(response, request) {
+  const json = response.json.bind(response);
+  response.json = async () => {
+    /** @type {unknown} */
+    const body = await json();
+    request.read = true;
+    return body;
+  };
+  return response;
 }
 
 /**

@@ -41,13 +41,13 @@
     "deps": "depcruise --config .config/dependency-cruiser.cjs src server/src server/bin server/scripts scripts",
     "check": "npm run format:check && npm run lint && npm run typecheck && npm run knip && npm run deps && npm test",
     "prepare": "lefthook install",
-    "test": "node --experimental-strip-types --import ./scripts/test-leaks.ts --test --test-timeout=600000 --test-force-exit --test-reporter=spec --test-reporter-destination=stdout --test-reporter=./scripts/test-leaks.ts --test-reporter-destination=stderr test/*.test.js server/test/*.test.js && npm run test:types",
+    "test": "node --experimental-strip-types --import ./scripts/test-leaks.ts --test --test-timeout=300000 --test-force-exit --test-reporter=spec --test-reporter-destination=stdout --test-reporter=./scripts/test-leaks.ts --test-reporter-destination=stderr test/*.test.js server/test/*.test.js && npm run test:types",
     "test:types": "tsc -p test/types/tsconfig.json",
     "smoke": "node --experimental-strip-types scripts/smoke.ts",
     "pretest": "node --experimental-strip-types scripts/build.ts --out .test-dist",
     "presmoke": "node --experimental-strip-types scripts/build.ts",
     "release": "node --experimental-strip-types scripts/release.ts",
-    "e2e:build": "npm run build && cd examples/astro && (test -f .env || cp .env.example .env) && npm install --no-save --no-audit --no-fund --ignore-scripts ../.. && npx astro build",
+    "e2e:build": "npm run build && node --experimental-strip-types scripts/e2e-build.ts && cd examples/astro && npm install --no-save --no-audit --no-fund --ignore-scripts ../.. && npx astro build",
     "e2e": "npm run e2e:build && playwright test -c test/e2e/playwright.config.js"
   },
   "devDependencies": {

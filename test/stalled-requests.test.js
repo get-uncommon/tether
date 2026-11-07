@@ -4,7 +4,18 @@ import { test, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { JSDOM } from 'jsdom';
-import { captureTetherWarnings, cartFrom, graphqlRequest, jsonResponse, operationName, product } from './fixtures.js';
+import { listenForFetch } from '../server/test/mocks.js';
+import {
+  cancelTimersAfterTests,
+  captureTetherWarnings,
+  cartFrom,
+  graphqlRequest,
+  jsonResponse,
+  operationName,
+  product,
+} from './fixtures.js';
+
+cancelTimersAfterTests();
 
 captureTetherWarnings();
 
@@ -32,9 +43,7 @@ const TIMED_OUT = /^Network error: signal timed out$/;
 
 /** How each request the server gets stalls: before its headers, or partway through its body. */
 let stall = /** @type {'answer' | 'body'} */ ('answer');
-let received = 0;
 const server = createServer((_req, res) => {
-  received += 1;
   if (stall === 'body') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.write('{"data":');
@@ -44,25 +53,29 @@ const server = createServer((_req, res) => {
 let toStalledServer = () => Promise.reject(new Error('the server is not listening yet'));
 
 before(async () => {
-  await new Promise((resolve) => {
-    server.listen(0, '127.0.0.1', () => {
-      resolve(undefined);
-    });
-  });
-  const address = server.address();
-  assert.ok(address && typeof address === 'object');
-  toStalledServer = (_url, init) => nodeFetch(`http://127.0.0.1:${String(address.port)}/`, init);
+  const port = await listenForFetch(server);
+  toStalledServer = (_url, init) => nodeFetch(`http://127.0.0.1:${String(port)}/`, init);
 });
 
-after(() => {
+after(async () => {
   server.closeAllConnections();
-  server.close();
+  await new Promise((resolve) => server.close(resolve));
 });
+
+/**
+ * The requests sent to the stalled server, counted as they are sent: the server may take a timed-out one only after
+ * the next test has begun.
+ */
+let sent = 0;
 
 /** @param {number} retries */
 const stalledConfig = (retries) => ({
   ...resolveConfig({ domain: 'stalled.test', token: 't', maxAge: 0, retries, requestTimeout: TIMEOUT_MS }),
-  fetch: toStalledServer,
+  /** @type {typeof fetch} */
+  fetch: (url, init) => {
+    sent += 1;
+    return toStalledServer(url, init);
+  },
 });
 
 test(
@@ -81,14 +94,14 @@ test(
 
 test('a query that timed out is sent again, a mutation is not', { timeout: 10_000 }, async () => {
   stall = 'answer';
-  received = 0;
+  sent = 0;
   await assert.rejects(request(stalledConfig(1), '{ shop { name } }', {}, hasData), { code: 'NETWORK' });
-  assert.equal(received, 2, 'the query is sent again once');
-  received = 0;
+  assert.equal(sent, 2, 'the query is sent again once');
+  sent = 0;
   await assert.rejects(request(stalledConfig(1), MUTATION, {}, hasData, { operation: 'mutation' }), {
     code: 'NETWORK',
   });
-  assert.equal(received, 1, 'the mutation is not');
+  assert.equal(sent, 1, 'the mutation is not');
 });
 
 /** Timers Node has pending, which a request's timeout adds to until it is cleared. */
