@@ -4,6 +4,7 @@ import { getProduct, getProducts, getRecommendations, clearProductCache, primePr
 import * as plans from './selling-plans.js';
 import { resolveProductKey } from './status.js';
 import { formatMoney, imageUrl } from './dom.js';
+import { VERSION } from './version.js';
 import { setCountry } from './page-market.js';
 import { addGroup } from './controls/extras.js';
 import type { TetherConfig, TetherOptions, MarketsConfig } from './config.js';
@@ -11,7 +12,7 @@ import type { ShopifyCart } from './cart/store.js';
 import type { ProductScope } from './product.js';
 import type { DiagnoseOptions } from './diagnose.js';
 import type { TetherEvents } from './markup.js';
-export { addGroup, setCountry };
+export { addGroup, setCountry, VERSION };
 export type { TetherOptions as TetherConfig, TetherConfig as ResolvedTetherConfig } from './config.js';
 export type { MarketsConfig, CartWarning } from './config.js';
 export type { Money } from './shopify-values.js';
@@ -33,7 +34,6 @@ export type { AddressFields as CustomerAddressInput } from './account/operations
 export type { CustomerAddress, Fulfillment, MailingAddress, OrderDetail, OrderDetailLine, SubscriptionContract, SubscriptionLine, } from './account/page-answers.js';
 /** The helpers for selling plans, `Tether.plans`. */
 export type SellingPlanHelpers = typeof plans;
-export declare const VERSION = "0.8.0";
 /**
  * Mounts every product scope and product list inside `root`. Safe to call repeatedly.
  *

@@ -1220,10 +1220,7 @@
     return ` fragment TetherCart on Cart{id checkoutUrl totalQuantity note createdAt updatedAt attributes{key value}buyerIdentity{countryCode email}discountCodes{code applicable}cost{subtotalAmount{${MONEY}}totalAmount{${MONEY}}checkoutChargeAmount{${MONEY}}}lines(first:100){nodes{id quantity attributes{key value}cost{totalAmount{${MONEY}}subtotalAmount{${MONEY}}amountPerQuantity{${MONEY}}compareAtAmountPerQuantity{${MONEY}}}discountAllocations{discountedAmount{${MONEY}}}sellingPlanAllocation{sellingPlan{id name description recurringDeliveries options{name value}}checkoutChargeAmount{${MONEY}}priceAdjustments{price{${MONEY}}compareAtPrice{${MONEY}}perDeliveryPrice{${MONEY}}}}merchandise{... on ProductVariant{id title sku availableForSale requiresShipping ${inventoryField(access)} image{${IMAGE}}price{${MONEY}}compareAtPrice{${MONEY}}selectedOptions{name value}product{id title handle vendor featuredImage{${IMAGE}}}}}... on ComponentizableCartLine{lineComponents{id quantity merchandise{... on ProductVariant{id title product{title handle}}}}}}}}`;
   }
   function collectionFields() {
-    return `
-  id handle title description descriptionHtml
-  image { ${IMAGE} }
-  seo { title description }`;
+    return ` id handle title description descriptionHtml image{${IMAGE}}seo{title description}`;
   }
 
   // src/selling-plans.ts
@@ -1523,12 +1520,12 @@
     if (ids.length) {
       definitions.push("$ids: [ID!]!");
       variables["ids"] = ids;
-      selections.push("byId: nodes(ids: $ids) { ... on Product { ...TetherProduct } }");
+      selections.push(`byId:nodes(ids:$ids){... on Product{...TetherProduct}}`);
     }
     handles.forEach((handle, index) => {
       definitions.push(`$h${index}: String!`);
       variables[`h${index}`] = handle;
-      selections.push(`h${index}: product(handle: $h${index}) { ...TetherProduct }`);
+      selections.push(`h${index}:product(handle:$h${index}){...TetherProduct}`);
     });
     const query2 = withProductFragment(`query TetherProducts(${definitions.join(",")}){${selections.join(" ")}}`);
     return { query: query2, variables, handles };
@@ -2234,7 +2231,7 @@
   }
   async function fetchCheckoutUrl(id) {
     const data = await gql(
-      "query TetherCheckout($id: ID!) { cart(id: $id) { checkoutUrl } }",
+      `query TetherCheckout($id:ID!){cart(id:$id){checkoutUrl}}`,
       { id },
       shaped({ cart: orNull({ checkoutUrl: "string" }) })
     );
@@ -3588,6 +3585,9 @@
     return isRecord(value) && isRecord(value["__core"]) && isRecord(value["__parts"]);
   }
 
+  // src/version.ts
+  var VERSION = "0.8.1";
+
   // src/lazy-iife.ts
   var coreModules = {
     get "config.ts"() {
@@ -3656,11 +3656,18 @@
   var MINIFIED_SCRIPT = /\.min\.js(\?|$)/;
   var coreScript = typeof document === "undefined" ? "" : document.currentScript?.getAttribute("src") ?? "";
   var coreScriptUrl = coreScript ? new URL(coreScript, document.baseURI).href : "";
+  var JSDELIVR_ALIAS = /^(https:\/\/cdn\.jsdelivr\.net\/(gh|npm)\/@?[^/@]+\/[^/@]+)(@(latest|\d+(\.\d+)?))?\//;
+  function exactReleaseFolder(folder) {
+    return folder.replace(
+      JSDELIVR_ALIAS,
+      (_alias, path, source) => `${path}@${source === "gh" ? "v" : ""}${VERSION}/`
+    );
+  }
   var parts = /* @__PURE__ */ new Map();
   function partsFolder() {
     if (cfg.partsUrl) return new URL(cfg.partsUrl, document.baseURI).href;
     if (!coreScriptUrl) return null;
-    return coreScriptUrl.replace(/[^/]*$/, "");
+    return exactReleaseFolder(coreScriptUrl.replace(/[^/]*$/, ""));
   }
   function applyIntegrity(script, integrity) {
     script.integrity = integrity;
@@ -3681,16 +3688,12 @@
           return;
         }
         parts.delete(name);
-        const problem = isTetherInternals(tether) ? "did not register" : "can't register: window.Tether is no longer this Tether script's, another script replaced it";
+        const problem = isTetherInternals(tether) ? "did not register" : "can't register: window.Tether is no longer this Tether script's";
         reject(new Error(`${url2} ${problem}`));
       };
       script.onerror = () => {
         parts.delete(name);
-        reject(
-          new Error(
-            `Could not load ${url2}, or it is not the file built with this Tether script. Host the same release's files next to the Tether script or at partsUrl.`
-          )
-        );
+        reject(new Error(`Could not load ${url2}, or it is not the file built with this Tether script`));
       };
       document.head.appendChild(script);
     });
@@ -4015,7 +4018,6 @@
   }
 
   // src/index.ts
-  var VERSION = "0.8.0";
   var OBSERVE_DEBOUNCE_MS = 50;
   function pageConfig() {
     const config = pageGlobal("TETHER_CONFIG");
