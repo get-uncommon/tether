@@ -101,6 +101,8 @@ async function demo() {
   window.Tether.mount(document);
   // @ts-expect-error: unknown purchase mode
   scope?.setPurchase('weekly');
+  // @ts-expect-error: a scope's fields change only through its methods
+  if (scope) scope.quantity = 2;
 }
 void demo;
 

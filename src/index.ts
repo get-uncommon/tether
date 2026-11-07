@@ -40,7 +40,7 @@ import { bindNavigation, rememberDocumentMount } from './controls/navigation.ts'
 import { field } from '../server/src/shared/json.ts';
 import type { TetherConfig, TetherOptions, MarketsConfig } from './config.ts';
 import type { ShopifyCart } from './cart/store.ts';
-import type { ProductScope } from './product.ts';
+import type { ReadonlyProductScope } from './product.ts';
 import type { DiagnoseOptions } from './diagnose.ts';
 import type { TetherEvents } from './markup.ts';
 import type { Parts, TetherInternals } from './lazy.ts';
@@ -77,7 +77,7 @@ export type {
 } from './cart/store.ts';
 export type { Attributes, LineSpec as LineInput } from './cart/mutations.ts';
 export type { TetherError, TetherErrorCode, GraphQLError, UserError } from './client.ts';
-export type { ProductScope } from './product.ts';
+export type { ReadonlyProductScope as ProductScope } from './product.ts';
 export type { Purchase } from './product-state.ts';
 export type { ProductPage, ProductQuery } from './loader.ts';
 export type { DetectedMarket, Localization, MarketSource } from './markets.ts';
@@ -215,7 +215,7 @@ export function unmount(): void {
 }
 
 /** @returns The product scope `el` is in. */
-export function getScope(el: Element | null | undefined): ProductScope | null {
+export function getScope(el: Element | null | undefined): ReadonlyProductScope | null {
   const root = el?.closest(sel('product'));
   return root ? (scopes.get(root) ?? null) : null;
 }
