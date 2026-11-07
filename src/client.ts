@@ -67,7 +67,7 @@ export class TetherError extends Error {
 /** What a request needs from a config: the browser's `cfg`, or a config the server helpers build. */
 export type StorefrontConfig = Pick<
   TetherConfig,
-  'domain' | 'token' | 'apiVersion' | 'country' | 'language' | 'maxAge' | 'retries'
+  'domain' | 'token' | 'apiVersion' | 'country' | 'language' | 'maxAge' | 'retries' | 'requestTimeout'
 > & { fetch?: typeof fetch };
 /** Checks a query's `data` before its caller reads it as a `T`. */
 export type DataCheck<T> = (data: unknown) => data is T;
@@ -218,9 +218,9 @@ export function withContext(
   return inContext(query, { country, language });
 }
 
-/** Backoff after a network error, a 429 or a 5xx: this times 2^attempt. */
+/** The first retry's wait after a network error, a 429 or a 5xx; each later retry waits twice as long as the last. */
 const RETRY_BACKOFF_MS = 300;
-/** Backoff after Shopify's `THROTTLED` error, which asks for a longer wait: this times 2^attempt. */
+/** The same for Shopify's `THROTTLED` error, which asks for a longer wait. */
 const THROTTLE_BACKOFF_MS = 500;
 /** Shopify's status for a request its bot protection rejected; retrying doesn't help. */
 const SECURITY_REJECTION = 430;
@@ -323,7 +323,10 @@ type Attempt<T> =
  */
 type RetryPolicy = 'none' | 'not-run' | 'any';
 
-/** No answer arrived, or its body stopped arriving: retried when `retry` allows any retry, else `NETWORK`. */
+/**
+ * No answer arrived, in time (`requestTimeout`) or at all, or its body stopped arriving: retried when `retry`
+ * allows any retry, else `NETWORK`.
+ */
 function networkFailure(error: unknown, retry: RetryPolicy): Attempt<never> {
   if (retry === 'any') return { kind: 'retry', backoffMs: RETRY_BACKOFF_MS };
   throw new TetherError(`Network error: ${messageOf(error)}`, { code: 'NETWORK' });
@@ -370,6 +373,10 @@ async function attempt<T>(
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Shopify-Storefront-Access-Token': conf.token },
       body: JSON.stringify({ query, variables }),
+      // Ends the request, its body included, after `requestTimeout` ms: one that never settles would hold every cart
+      // change queued behind it (`enqueue`) for as long as the browser keeps the connection open. A `fetch` given to
+      // the server helpers has to honour the signal, as the platform's does.
+      signal: conf.requestTimeout ? AbortSignal.timeout(conf.requestTimeout) : null,
     });
   } catch (error) {
     return networkFailure(error, retry);
@@ -408,11 +415,11 @@ async function attempt<T>(
  * `conf.retries`; which failures are retried is the operation's (`Operation`).
  *
  * @param isData Checks that `data` has what the caller then reads, so a malformed answer fails here.
- * @throws {TetherError} `NOT_CONFIGURED` without a domain or token, `NETWORK` when the store can't be reached or
- *   the answer's body stops arriving, `INVALID_RESPONSE` for a 2xx whose body isn't valid (not JSON, not in the
- *   GraphQL shape, or `data` that `isData` refuses), `SERVER_ERROR` for a 2xx whose GraphQL errors leave open
- *   whether Shopify ran it (a top-level `INTERNAL_SERVER_ERROR`, or a mutation's errors without `data`),
- *   `HTTP_<status>` for any other HTTP or GraphQL failure.
+ * @throws {TetherError} `NOT_CONFIGURED` without a domain or token, `NETWORK` when the store can't be reached, the
+ *   answer's body stops arriving or the whole answer takes longer than `conf.requestTimeout`, `INVALID_RESPONSE` for
+ *   a 2xx whose body isn't valid (not JSON, not in the GraphQL shape, or `data` that `isData` refuses),
+ *   `SERVER_ERROR` for a 2xx whose GraphQL errors leave open whether Shopify ran it (a top-level
+ *   `INTERNAL_SERVER_ERROR`, or a mutation's errors without `data`), `HTTP_<status>` for any other HTTP or GraphQL failure.
  */
 export async function request<T>(
   conf: StorefrontConfig,
@@ -441,9 +448,9 @@ export async function request<T>(
         storesWithoutInventory.add(store);
         break;
       case 'retry':
+        await sleep(outcome.backoffMs * 2 ** retries);
         retries += 1;
         log('retry', retries);
-        await sleep(outcome.backoffMs * 2 ** retries);
         break;
     }
   }

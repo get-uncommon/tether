@@ -307,3 +307,28 @@ test("a document Tether didn't write is a mutation when it has the keyword outsi
   await assert.rejects(storefront.query(MUTATION), { code: 'HTTP_504' });
   assert.equal(sent, 1, "the server's query() sends a mutation once");
 });
+
+test('the first retry waits the base backoff, and each later one twice as long', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  /** @type {number[]} */
+  const sentAt = [];
+  const conf = {
+    ...resolveConfig({ domain: 'retry.test', token: 't', maxAge: 0, retries: 3, requestTimeout: 0 }),
+    /** @type {typeof fetch} */
+    fetch: async () => {
+      sentAt.push(Date.now());
+      return sentAt.length <= 3 ? jsonResponse({}, 429) : answered();
+    },
+  };
+  const result = request(conf, '{ shop { name } }', {}, hasData);
+  const progress = { settled: false };
+  void result.finally(() => {
+    progress.settled = true;
+  });
+  for (let step = 0; step < 100 && !progress.settled; step += 1) {
+    await new Promise((resolve) => setImmediate(resolve));
+    t.mock.timers.runAll();
+  }
+  assert.deepEqual(await result, { done: true });
+  assert.deepEqual(sentAt, [0, 300, 900, 2100]);
+});

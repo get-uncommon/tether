@@ -1,6 +1,7 @@
 // configure() parses every option where it arrives: an invalid value warns and falls back to its default.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import { DEFAULTS, cfg, configure, resolveConfig } from '../src/config.ts';
 import { isQuarterlyVersion } from '../src/api-version.ts';
 
@@ -236,4 +237,18 @@ test('Tether.config shows the live config and refuses writes, which would skip v
   assert.equal(warned.length, 2);
   quietly(() => configure({ domain: 'other.test' }));
   assert.equal(configView.domain, 'other.test', 'a view, not a copy');
+});
+
+test("docs/reference.md's Config table has a row for every option and every field of a nested one", async () => {
+  const { ACCOUNT, ANALYTICS, MARKETS } = await import('../src/config-sections.ts');
+  const reference = await readFile(new URL('../docs/reference.md', import.meta.url), 'utf8');
+  const config = reference.slice(reference.indexOf('\n## Config\n'), reference.indexOf('\n## Troubleshooting'));
+  const options = [
+    ...Object.keys(DEFAULTS),
+    ...Object.keys(MARKETS).map((key) => `markets.${key}`),
+    ...Object.keys(ANALYTICS).map((key) => `analytics.${key}`),
+    ...Object.keys(ACCOUNT).map((key) => `account.${key}`),
+  ];
+  const missing = options.filter((option) => !config.includes(`\n| \`${option}\``));
+  assert.deepEqual(missing, [], 'options without a row in the Config table');
 });

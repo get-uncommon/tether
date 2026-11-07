@@ -115,6 +115,11 @@ export interface TetherConfig {
    * already have applied the change.
    */
   retries: number;
+  /**
+   * Milliseconds a Storefront request may take, its body included, before it counts as a network error (0: no limit).
+   * A query is then retried; a mutation isn't, and a cart change loads the cart again.
+   */
+  requestTimeout: number;
   /** Refresh server-rendered products once in the background. */
   revalidate: boolean;
   /** The localStorage key of the cart id (default `<prefix>:cart:<domain>`). */
@@ -191,6 +196,7 @@ export const DEFAULTS: Readonly<TetherConfig> = {
   sellingPlansFirst: 25,
   collectionFirst: 24,
   retries: 2,
+  requestTimeout: 15_000,
   revalidate: true,
   storageKey: '',
   cartDrawerOpenClass: 'is-open',
@@ -259,6 +265,7 @@ type CountOption =
   | 'sellingPlansFirst'
   | 'collectionFirst'
   | 'retries'
+  | 'requestTimeout'
   | 'maxAge'
   | 'lowStock'
   | 'searchDelay';
@@ -296,6 +303,7 @@ const COUNT_OPTIONS: readonly CountOption[] = [
   'sellingPlansFirst',
   'collectionFirst',
   'retries',
+  'requestTimeout',
   'maxAge',
   'lowStock',
   'searchDelay',

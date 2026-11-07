@@ -22,7 +22,7 @@
       "types": "./dist/types/src/presets/barba.d.ts",
       "default": "./dist/presets/barba.esm.js"
     },
-    "./dist/*": "./dist/*"
+    "./dist/tether.*": "./dist/tether.*"
   },
   "files": [
     "dist",
