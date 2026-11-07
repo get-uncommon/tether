@@ -10,9 +10,16 @@
  * The reporter also names the tests still running when their file was ended: `--test-timeout` ends a file's process
  * once the whole file has run that long, and Node then names only the file.
  */
+import { execFileSync } from 'node:child_process';
 import { writeSync } from 'node:fs';
 import { relative } from 'node:path';
 import type { TestEvent } from 'node:test/reporters';
+
+// Every test process forgets the repository a git hook points git at (GIT_DIR, GIT_INDEX_FILE, …): under the pre-push
+// hook a test's `git init`, commits and pushes in a scratch repository would otherwise land in this one.
+for (const name of execFileSync('git', ['rev-parse', '--local-env-vars'], { encoding: 'utf8' }).split('\n')) {
+  if (name !== '') Reflect.deleteProperty(process.env, name);
+}
 
 const MARK = 'test-leaks: ';
 const RUNNER_HANDLES = new Set(['PipeWrap', 'TTYWrap', 'CloseReq']);

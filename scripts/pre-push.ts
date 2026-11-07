@@ -11,12 +11,24 @@ import { STARTER_FILES, pushCheck } from './push-check.ts';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
+/**
+ * The environment without the variables that tie git to a repository (GIT_DIR, GIT_INDEX_FILE, …, as git lists them).
+ * Git sets them for a hook, and a test that runs git in a scratch repository would otherwise commit, configure and push
+ * in this one: it has set core.bare and moved the branch before.
+ */
+function withoutHookRepository(): NodeJS.ProcessEnv {
+  const names = spawnSync('git', ['rev-parse', '--local-env-vars'], { encoding: 'utf8' }).stdout.split('\n');
+  const env = { ...process.env };
+  for (const name of names.filter(Boolean)) Reflect.deleteProperty(env, name);
+  return env;
+}
+
 /** @returns The command's exit status. */
 function run(command: string, args: readonly string[]): number {
   // On Windows npm and npx are batch files, which Node starts only through a shell; their arguments here are fixed
   // words and paths without spaces, so the shell has nothing to quote.
   const shell = process.platform === 'win32' && (command === 'npm' || command === 'npx');
-  return spawnSync(command, args, { cwd: ROOT, stdio: 'inherit', shell }).status ?? 1;
+  return spawnSync(command, args, { cwd: ROOT, stdio: 'inherit', shell, env: withoutHookRepository() }).status ?? 1;
 }
 
 /** The files each commit in `range` changes, merges against each parent, or `null` when git can't list them. */
