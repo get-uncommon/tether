@@ -59,8 +59,8 @@ export async function takeOverStaleLock(lockPath: string, held: Stats): Promise<
 }
 
 /**
- * A marker has done its job once no waiter can still act on its view of the stale lock: past {@link STALE_LOCK_MS}, as
- * long as the lock itself trusts a write to take.
+ * Removes the takeover markers older than {@link STALE_LOCK_MS}. A waiter acts on its `stat` of a stale lock within that
+ * time, so no waiter still needs an older marker to see that the lock was taken over.
  */
 async function removeOldMarkers(lockPath: string): Promise<void> {
   const folder = dirname(lockPath);
@@ -75,6 +75,7 @@ async function removeOldMarkers(lockPath: string): Promise<void> {
     if (made && Date.now() - made.mtimeMs > STALE_LOCK_MS) await rm(marker, { force: true });
   }
 }
+
 /**
  * Runs `work` holding `${path}.lock`, an advisory lock every process writing the state file takes, so one process's
  * read, merge and rename never overlaps another's and loses its keys.
@@ -104,6 +105,9 @@ async function withFileLock<T>(path: string, work: () => Promise<T>): Promise<T>
     return await work();
   } finally {
     await rm(lockPath, { force: true });
+    // The marker of this lock's own takeover is left for the waiters still acting on the stale lock; a later write
+    // removes it.
+    await removeOldMarkers(lockPath);
   }
 }
 

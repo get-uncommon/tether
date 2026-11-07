@@ -187,6 +187,25 @@ test('the server catalog refuses a product missing fields, and reads a node of a
   await assert.rejects(answering({ productRecommendations: [{ id: gid }] }).getRecommendations(gid), invalid);
 });
 
+test('recommendations for no product reject with NOT_FOUND, in the browser part and the server catalog', async () => {
+  /** @type {string[]} */
+  const sent = [];
+  const shop = createStorefront({
+    domain: 'shop.test',
+    token: 't',
+    fetch: async (_url, init) => {
+      sent.push(graphqlRequest(init).query);
+      return jsonResponse({ data: { productRecommendations: [] } });
+    },
+  });
+  const { getRecommendations } = await import('../src/lists.ts');
+  for (const product of [null, undefined, '', { id: '' }]) {
+    await assert.rejects(shop.getRecommendations(product), { name: 'TetherError', code: 'NOT_FOUND' });
+    await assert.rejects(getRecommendations(product), { name: 'TetherError', code: 'NOT_FOUND' });
+  }
+  assert.deepEqual(sent, [], 'no request with a null handle');
+});
+
 /**
  * A store with one retry, whose fake answers each request with the next of `answers` and counts the requests.
  *

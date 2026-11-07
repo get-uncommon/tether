@@ -109,6 +109,14 @@ test('file store: a write waits for the lock another process holds, and takes ov
   await store.put('k', 2);
   await within(30_000, store.flush(), 'the write to take over the stale lock');
   assert.deepEqual(parseJson(await readFile(path, 'utf8')), { k: 2 });
+
+  const markers = async () => (await readdir(dir)).filter((name) => name.startsWith('state.json.lock.taken-'));
+  const [marker] = await markers();
+  assert.ok(marker, 'the takeover leaves its marker for the other waiters');
+  await utimes(join(dir, marker), longAgo, longAgo);
+  await store.put('k', 3);
+  await within(30_000, store.flush(), 'the next write');
+  assert.deepEqual(await markers(), [], 'the next write removes the old marker');
 });
 
 test('file store: of the waiters that find one lock stale, only the first takes it over', async () => {

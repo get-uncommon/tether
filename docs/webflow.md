@@ -13,11 +13,11 @@ step. With Astro, see the [Astro guide](astro.md); with Next.js, SvelteKit, Vite
 | **With the Worker**       | you also want the CMS sync, rebuilds when products change, or customer accounts | either of the above, plus your own free Cloudflare Worker ([Worker](../server/README.md), [accounts](accounts.md)) |
 
 The script tag pinned to one release: `…/tether@vX.Y.Z/dist/tether.min.js`. Its optional parts
-(search, accounts, markets, analytics) load from the core's release folder when a page uses them
-(from `@vX.Y.Z` even when the script tag says `@X.Y`), each checked against a hash built into the
-core. To host them yourself, put the same release's files in one folder
-and set `partsUrl`. Customer accounts need the Worker ([setup](accounts.md#setup)): it keeps the
-customer's tokens, so the browser never holds one.
+(product lists, search, markets, bundles, accounts, analytics, diagnose) load from the core's
+release folder when a page uses them (from `@vX.Y.Z` even when the script tag says `@X.Y`), each
+checked against a hash built into the core. To host them yourself, put the same release's files in
+one folder and set `partsUrl`. Customer accounts need the Worker ([setup](accounts.md#setup)): it
+keeps the customer's tokens, so the browser never holds one.
 
 ## 1. Connect Shopify (5 minutes)
 

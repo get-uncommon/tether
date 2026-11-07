@@ -41,7 +41,7 @@ import type { ShopifyCart } from './cart/store.ts';
 import type { ProductScope } from './product.ts';
 import type { DiagnoseOptions } from './diagnose.ts';
 import type { TetherEvents } from './markup.ts';
-import type { TetherInternals } from './lazy.ts';
+import type { Parts, TetherInternals } from './lazy.ts';
 import type { ProductQuery } from './loader.ts';
 
 export { addGroup, setCountry, VERSION };
@@ -321,15 +321,9 @@ const detectMarket = (markets?: MarketsConfig | null) =>
 /** `Tether.getProducts()`: a page of a collection or a search, from the lists part. */
 const getProducts = (query?: ProductQuery) => loadPart('lists').then((part) => part.getProducts(query));
 
-/**
- * `Tether.getRecommendations()`: Shopify's recommendations for a product, from the lists part.
- *
- * @param product A product, or its handle, id or gid.
- */
-const getRecommendations = (
-  product: string | number | { id: string } | null | undefined,
-  intent?: 'RELATED' | 'COMPLEMENTARY',
-) => loadPart('lists').then((part) => part.getRecommendations(product, intent));
+/** `Tether.getRecommendations()`: Shopify's recommendations for a product, from the lists part. */
+const getRecommendations: Parts['lists']['getRecommendations'] = (product, intent) =>
+  loadPart('lists').then((part) => part.getRecommendations(product, intent));
 
 const getLocalization = () => loadPart('markets').then((part) => part.getLocalization());
 

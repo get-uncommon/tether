@@ -62,8 +62,9 @@ removes them on the next render.
 ## The server part
 
 `createStorefront()` from `@occluze/tether/server` works in any server or build step (Node, Workers,
-Deno): the [Astro guide's server API](astro.md#server-api) applies as is. Pass options directly
-when your framework doesn't use `import.meta.env`:
+Deno): the [Astro guide's server API](astro.md#server-api) applies as is, its `fetch` option too
+(a `fetch` you pass hands `init.signal` on, so `requestTimeout` can end a stalled request). Pass
+options directly when your framework doesn't use `import.meta.env`:
 
 ```js
 import { createStorefront } from '@occluze/tether/server';

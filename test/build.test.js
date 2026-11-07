@@ -24,6 +24,8 @@ const DIST = join(dirname(fileURLToPath(import.meta.url)), '..', '.test-dist');
 const PART_FILE = /^tether\.[\w-]+(\.min)?\.js$/;
 /** The files `PART_FILE` matches that are no optional part. */
 const CORES = new Set(['tether.min.js', 'tether.esm.js']);
+/** The one product of the list's collection, which no `tether-product` on the page asks for. */
+const teaBox = { ...structuredClone(product), id: 'gid://shopify/Product/2', handle: 'tea-box', title: 'Tea Box' };
 /** @type {import('jsdom').DOMWindow} */
 let win;
 /** @type {{ op: string, query: string }[]} */
@@ -37,6 +39,10 @@ before(
   </head><body>
     <div tether-product="coffee-box"><h1 tether-bind="title"></h1><span id="price" tether-bind="price"></span></div>
     <select id="cs" tether-country-select></select>
+    <div id="list" tether-collection="tea">
+      <h2 tether-collection-bind="title"></h2>
+      <div tether-list><div><span tether-bind="title"></span><span tether-bind="price"></span></div></div>
+    </div>
   </body></html>`;
     const virtualConsole = new VirtualConsole();
     const dom = new JSDOM(html, {
@@ -56,6 +62,18 @@ before(
                   .filter((key) => key.startsWith('h'))
                   .map((key) => [key, variables[key] === 'coffee-box' ? product : null]),
               ),
+            TetherCollection: () => ({
+              collection: {
+                id: 'gid://shopify/Collection/1',
+                handle: 'tea',
+                title: 'Tea',
+                description: '',
+                descriptionHtml: '',
+                image: null,
+                seo: { title: null, description: null },
+                products: { nodes: [teaBox], pageInfo: { hasNextPage: false, endCursor: null } },
+              },
+            }),
             TetherLocalization: () => ({
               localization: {
                 country: { isoCode: 'NL', name: 'Netherlands', currency: { isoCode: 'EUR', symbol: '€' } },
@@ -114,6 +132,26 @@ test('a part beside the core loads with the integrity hash of the file built wit
   const file = await readFile(join(DIST, 'tether.markets.min.js'));
   assert.equal(script.integrity, `sha384-${createHash('sha384').update(file).digest('base64')}`);
   assert.equal(script.crossOrigin, 'anonymous', 'the core is on another origin (file:) than the page');
+});
+
+test('a list loads the lists part from its own file, and its cards mount from the products it cached', async () => {
+  const { createHash } = await import('node:crypto');
+  const list = find('#list', win.document);
+  await waitFor(() => list.getAttribute('tether-state') === 'ready', 'the list to render', 30_000);
+  const script = [...win.document.scripts].find((element) => element.src.endsWith('tether.lists.min.js'));
+  assert.ok(script, 'the lists part has a script');
+  const file = await readFile(join(DIST, 'tether.lists.min.js'));
+  assert.equal(script.integrity, `sha384-${createHash('sha384').update(file).digest('base64')}`);
+  assert.ok(partsOf(win)?.lists, 'registered');
+  assert.equal(find('[tether-collection-bind="title"]', list).textContent, 'Tea');
+  const card = find('[tether-product="tea-box"]', list);
+  await waitFor(() => card.getAttribute('tether-state') === 'ready', 'the card to mount as a product scope', 30_000);
+  assert.equal(find('[tether-bind="title"]', card).textContent, 'Tea Box');
+  assert.match(find('[tether-bind="price"]', card).textContent, /\d/);
+  assert.ok(
+    ops.filter((sent) => sent.op === 'TetherProducts').every((sent) => !sent.query.includes('tea-box')),
+    "the card used the core's cache, which the part primed",
+  );
 });
 
 test('the diagnose part loads on first call and shares the core (same config, same cache)', async () => {

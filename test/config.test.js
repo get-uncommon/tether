@@ -41,6 +41,19 @@ test('counts must be whole numbers of 0 or more', () => {
   assert.equal(warned.length, 4);
 });
 
+test('a delay longer than setTimeout keeps falls back to its default instead of firing at once', () => {
+  const { result, warned } = quietly(() =>
+    resolveConfig({ requestTimeout: 1e10, searchDelay: Number.MAX_SAFE_INTEGER }),
+  );
+  assert.equal(result.requestTimeout, DEFAULTS.requestTimeout);
+  assert.equal(result.searchDelay, DEFAULTS.searchDelay);
+  assert.deepEqual(warned, [
+    '[tether] invalid requestTimeout 10000000000: using 15000',
+    '[tether] invalid searchDelay 9007199254740991: using 150',
+  ]);
+  assert.equal(resolveConfig({ requestTimeout: 2_147_483_647 }).requestTimeout, 2_147_483_647);
+});
+
 test('prefix, checkoutTarget and defaultPurchase fall back to their defaults', () => {
   const { result, warned } = quietly(() =>
     resolveConfig({ prefix: 'x"] *', checkoutTarget: '_top', defaultPurchase: 'subscription' }),

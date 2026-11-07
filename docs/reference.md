@@ -314,7 +314,23 @@ syntax caveat: Shopify matches words loosely, so `handle:a OR handle:b` can retu
 search only covers the store's default language. `tether-sort` takes the Shopify
 sort keys (`BEST_SELLING`, `PRICE`, `CREATED`, `TITLE`, …), with `tether-reverse="true"`.
 Lists, and `Tether.getProducts()` and `Tether.getRecommendations()`, are an optional part (2 KB) that
-loads with a page's first list.
+loads with a page's first list. A list shows its loading state at once, but its first query waits
+for that file, one more request on the way to the first cards. On a script-tag page where the list
+is the main content, such as a collection page, preload it from the exact release the core loads its
+parts from, with the file's [`integrity`](https://www.srihash.org/) hash:
+
+```html
+<link
+  rel="preload"
+  as="script"
+  href="https://cdn.jsdelivr.net/gh/ravi-klaassens/tether@vX.Y.Z/dist/tether.lists.min.js"
+  integrity="sha384-…"
+  crossorigin="anonymous"
+/>
+```
+
+A core on `@X.Y` loads its parts from its own `@vX.Y.Z`, so such a preload names the release the
+core is on, and is updated with it: a preload of another release is downloaded for nothing.
 
 Using Webflow CMS lists instead? Put `tether-product` on each CMS item, bound to the handle.
 
@@ -525,7 +541,9 @@ later one twice as long as the one before.
 A request that has no complete answer after `requestTimeout` milliseconds (15 seconds by default)
 is stopped and counts as a network error (`NETWORK`): a query is sent again, a cart change isn't,
 and the cart is loaded again. So a connection that stalls fails the change with `tether:cart-error`
-instead of holding every cart change behind it.
+instead of holding every cart change behind it. `requestTimeout` and `searchDelay` go up to
+2147483647 (about 24 days), the longest delay a browser's timer keeps: a longer one would fire at
+once, so it logs a warning and the default is used.
 
 **Validation.** Every option is checked once, when Tether starts. An option Tether doesn't know (a
 typo such as `openCartOnAd`) logs a warning and is left out. A value it can't use logs a
@@ -560,10 +578,17 @@ together with the core. The browser refuses a part from another release, so it f
 Parts on another origin than the page load with CORS (jsDelivr sends the headers; your own host must
 too), and a `partsUrl` has to be https or on your own site.
 
-**Optional parts.** `Tether.diagnose()` and markets (`markets.detect`, `tether-country-select`,
-`Tether.setCountry()`) live in separate files that load on first use: `tether.diagnose.min.js` and
-`tether.markets.min.js` next to the main script (jsDelivr serves them from the same folder), or split
-chunks in a bundler. `Tether.detectMarket()` and `Tether.getLocalization()` return promises.
+**Optional parts.** These live in separate files that load on first use, next to the main script
+(jsDelivr serves them from the same folder) or at `partsUrl`, and as split chunks in a bundler:
+`tether.lists.min.js` (product lists, `Tether.getProducts()`, `Tether.getRecommendations()`),
+`tether.search.min.js` (search as you type), `tether.markets.min.js` (`markets.detect`,
+`tether-country-select`, `Tether.setCountry()`), `tether.extras.min.js` (bundles, `?variant=`),
+`tether.account.min.js` and `tether.account-pages.min.js` (customer accounts),
+`tether.analytics.min.js` (analytics) and `tether.diagnose.min.js` (`Tether.diagnose()`). So
+`Tether.getProducts()`, `Tether.getRecommendations()`, `Tether.detectMarket()` and
+`Tether.getLocalization()` return promises. The script build finds its folder from its own
+`<script src>`: a core bundled into another file, inlined, or loaded with `type="module"` sets
+`partsUrl` to a folder with the same release's parts.
 
 **Accessibility.** The cart drawer gets `role="dialog"`, `aria-modal` and a label (`tether-cart-label`
 to change it); opening moves focus into it, Tab stays inside, Escape closes it and returns focus.
@@ -627,8 +652,6 @@ one. In a fork, enable Actions on the fork's Actions tab. Optionally add the rep
 store, selling plans included; without them it uses Shopify's public demo store. A run takes
 1–2 minutes, and Actions minutes are free on public repositories.
 
-Run `npm test` and `npm run smoke` before every release; the smoke test needs no setup.
-
 ---
 
 ## Development
@@ -670,9 +693,21 @@ The `release` workflow then runs on the tag, in this order:
    file, and pick the release up through their Update Tether action within their range. The ES
    module build (`tether.esm.js` and `esm/`) is left out of the Release: bundlers take it from npm.
 4. It publishes to npm with provenance (npm trusted publishing, no token in the repo). It comes
-   last, so a failed publish doesn't hold back the Workers, and can be run again on its own.
+   after the GitHub Release, so a failed publish doesn't hold back the Workers, and can be run again
+   on its own.
+5. It purges jsDelivr's alias URLs of the release's files (`@X.Y`, and for the newest release `@X`,
+   `@latest` and no version): the `gh/` ones once the GitHub Release exists, the `npm/` ones once
+   npm has the version. A failed purge warns; the alias then updates when jsDelivr's cache of it
+   expires, within 7 days.
 
-jsDelivr serves the tag immediately.
+Exact URLs (`@vX.Y.Z`, and `@X.Y.Z` on npm) work as soon as the tag and the npm version exist; alias
+URLs serve the new release once they are purged.
+
+With `--push`, `npm run release` then waits up to 20 minutes for npm to have the version and locks
+the Astro starter on it (its range and its lockfile, in one commit it pushes to main), so `npm ci`
+works in the starter and in projects made from it. When npm takes longer, it prints the command that
+does that step alone: `npm run release -- X.Y.Z --starter --push`. A maintenance release leaves
+main's starter alone.
 
 **Maintenance releases:** a fix for an older minor line X.Y is released from its branch
 `release/X.Y`, made once from that line's last tag (`git push origin vX.Y.Z:refs/heads/release/X.Y`)

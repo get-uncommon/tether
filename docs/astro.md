@@ -383,13 +383,19 @@ and the markup, and tells you what to fix.
 | `allProducts({ query, collection })`                                 | every product, page by page (for `getStaticPaths`)                                                                                                        |
 | `getCollection(handle, { first, sortKey, … })`                       | the collection with `products` and `pageInfo`, or `null`                                                                                                  |
 | `allCollections()`                                                   | every collection (`handle`, `title`, `description`, `image`, `seo`)                                                                                       |
-| `getRecommendations(handleOrId)`                                     | related products                                                                                                                                          |
+| `getRecommendations(handleOrId)`                                     | related products; rejects with `NOT_FOUND` for an empty, `null` or `undefined` product                                                                    |
 | `initialState(product, { variant })`                                 | what Tether shows first: `variant`, `selected`, `price`, `compareAtPrice`, `available`, `purchase`, `plan`, `plans`, `savings`, `show`, `isUnavailable()` |
 | `hydrate(products, { card, images })`                                | the `<script>` tag for the browser (see above); cards keep 2 images by default                                                                            |
 | `jsonLd(product, { url })`, `jsonLdData(product)`                    | schema.org Product / ProductGroup for search engines                                                                                                      |
 | `formatMoney(money)`, `formatPercent(n)`, `imageUrl(url, { width })` | strings, same rules as the browser                                                                                                                        |
 | `productUrl(handle)`                                                 | the product's link from `productPath`, or `null` for an empty handle                                                                                      |
 | `query(graphql, variables)`                                          | any Storefront API query, in the configured market; answers its `data` as an `object` you check                                                           |
+
+Besides the [config options](reference.md#config), `createStorefront()` takes `siteUrl` (for
+`jsonLd()` without `url`), `pageSize` (products per request of `allProducts()`, default 25) and
+`fetch`, which replaces the global `fetch` (a cache, a test double). A `fetch` you pass must hand
+`init.signal` on to the request it makes: `requestTimeout` ends a stalled request through that
+signal, so a `fetch` that drops it waits as long as the connection does.
 
 A product is the Storefront API product, the same shape the browser uses: `title`, `handle`,
 `descriptionHtml`, `featuredImage`, `images.nodes`, `options[].optionValues[].name`,

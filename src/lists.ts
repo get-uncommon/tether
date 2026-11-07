@@ -28,6 +28,7 @@ import { isCollectionAnswer, isRecommendationsAnswer, isSearchAnswer } from './p
 import { setScopeStatus, isNotFound, resolveProductKey } from './status.ts';
 import { listSelector } from './collection.ts';
 import type { Product } from './fragments.ts';
+import type { ProductRef, RecommendationIntent } from './shopify-values.ts';
 import type { Collection, PageInfo, ProductPage, ProductQuery } from './loader.ts';
 
 /** `tether-products="url:q"`: the search in the page's `?q=`, for a results page on a static site. */
@@ -95,14 +96,15 @@ export async function getProducts({
 /**
  * Shopify's recommendations for a product. Every product in them is cached.
  *
- * @param product A product, or its handle, id or gid.
+ * @throws {TetherError} `NOT_FOUND` when `product` names no product (empty, `null` or `undefined`).
  */
 export async function getRecommendations(
-  product: string | number | { id: string } | null | undefined,
-  intent: 'RELATED' | 'COMPLEMENTARY' = 'RELATED',
+  product: ProductRef | null | undefined,
+  intent: RecommendationIntent = 'RELATED',
 ): Promise<Product[]> {
   const key = normalizeProductKey(typeof product === 'object' ? product?.id : product);
-  const byId = key?.startsWith('gid://') ?? false;
+  if (!key) throw new TetherError('No product for recommendations', { code: 'NOT_FOUND' });
+  const byId = key.startsWith('gid://');
   const data = await gql(
     withProductFragment(
       `query TetherRecs(${byId ? '$id: ID!' : '$handle: String!'}, $intent: ProductRecommendationIntent) {
@@ -129,8 +131,7 @@ const toLimit = (raw: string | null): number | undefined => parseInt(raw ?? '', 
  * @param raw A `tether-intent`.
  * @returns Shopify's recommendation intent, `RELATED` unless `COMPLEMENTARY` is written.
  */
-const toIntent = (raw: string | null): 'RELATED' | 'COMPLEMENTARY' =>
-  raw === 'COMPLEMENTARY' ? 'COMPLEMENTARY' : 'RELATED';
+const toIntent = (raw: string | null): RecommendationIntent => (raw === 'COMPLEMENTARY' ? 'COMPLEMENTARY' : 'RELATED');
 
 class ListScope {
   readonly root: HTMLElement;
@@ -184,7 +185,6 @@ class ListScope {
     let { key } = resolveProductKey(this.root, window.location, 'recommendations');
     const scope = this.root.closest(sel('product'));
     if (!key && scope) ({ key } = resolveProductKey(scope));
-    if (!key) throw new TetherError('No product for recommendations', { code: 'NOT_FOUND' });
     return getRecommendations(key, toIntent(get(this.root, 'intent')));
   }
 

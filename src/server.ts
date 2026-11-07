@@ -40,7 +40,10 @@ export type Storefront = ReturnType<typeof createStorefront>;
 
 /** The options only a storefront has. */
 interface ServerOptions {
-  /** Replaces the global `fetch` (tests, caching). */
+  /**
+   * Replaces the global `fetch` (tests, caching). It must pass `init.signal` on to the request: `requestTimeout` ends a
+   * stalled request through that signal, and a request that ignores it is never ended.
+   */
   fetch?: typeof fetch;
   /** Products per request for `allProducts()` (default 25). */
   pageSize?: number;
