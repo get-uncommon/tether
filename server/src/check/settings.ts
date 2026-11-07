@@ -4,7 +4,8 @@
  */
 import { accountProblems, accountSettings } from '../account/settings.ts';
 import { envProblems, kvBinding, MIN_SECRET_LENGTH } from '../env.ts';
-import { deployHookMinSeconds, invalidNumberSettings } from '../settings.ts';
+import { KV_OPERATIONS_PER_INVOCATION, maxReconcileKvOperations } from '../reconcile.ts';
+import { deployHookMinSeconds, invalidNumberSettings, maxSubrequests } from '../settings.ts';
 import type { Steps } from './steps.ts';
 import type { CleanEnv } from '../env.ts';
 import type { SyncConfig } from '../mapping.ts';
@@ -33,6 +34,11 @@ interface SettingsContext {
 const QUARTERLY_API_VERSION = /^\d{4}-(01|04|07|10)$/;
 const MYSHOPIFY_DOMAIN = /^[a-z0-9][a-z0-9-]*\.myshopify\.com$/i;
 const WEBFLOW_ID = /^[a-f0-9]{24}$/i;
+/**
+ * Below this, the Worker's cron (every 10 minutes) lists the item index again most runs: a request per 100 items each
+ * time, and a collection that takes longer than the TTL to list is stale as soon as it is complete.
+ */
+const MIN_INDEX_TTL_MINUTES = 60;
 
 /** Filled-in values that are ignored: said first, or "missing" further down would be confusing. */
 export function reportIgnoredValues(steps: Steps, rawEnv: Record<string, unknown>): void {
@@ -249,6 +255,27 @@ function checkSecrets(steps: Steps, { env, rawEnv, worker }: SettingsContext): v
   }
 }
 
+/** The reconcile's budgets against what one run can do. */
+function checkRunLimits(steps: Steps, { config, env, worker }: SettingsContext, target: SyncTarget | null): void {
+  const { indexTtlMinutes } = config.match;
+  if (target?.kind !== 'deploy-hook' && indexTtlMinutes < MIN_INDEX_TTL_MINUTES)
+    steps.add(
+      'warn',
+      'Item index',
+      `match.indexTtlMinutes is ${String(indexTtlMinutes)}: the Webflow items are listed again whenever the index is older, one request per 100 items. A Worker run lists about 3,700, so a bigger collection takes several runs, and creates wait for the run that completes it.`,
+      `Raise match.indexTtlMinutes to ${String(MIN_INDEX_TTL_MINUTES)} or more (the default is a day): a create whose slug is taken lists the items afresh anyway.`,
+    );
+  if (!worker) return;
+  const kvOperations = maxReconcileKvOperations(config.reconcile, maxSubrequests(env));
+  if (kvOperations > KV_OPERATIONS_PER_INVOCATION)
+    steps.add(
+      'warn',
+      'Reconcile budget',
+      `A reconcile run can use up to ${String(kvOperations)} KV operations, more than the ${String(KV_OPERATIONS_PER_INVOCATION)} Cloudflare allows one invocation: a run that gets there fails.`,
+      'Lower reconcile.maxProductsPerRun or MAX_SUBREQUESTS.',
+    );
+}
+
 /**
  * Checks every setting, adding one step per finding.
  *
@@ -261,5 +288,6 @@ export function checkSettings(steps: Steps, context: SettingsContext): Connectio
   const target = checkTarget(steps, config, env);
   checkSecrets(steps, context);
   checkNumberSettings(steps, env);
+  checkRunLimits(steps, context, target);
   return domain && target ? { domain, target } : null;
 }

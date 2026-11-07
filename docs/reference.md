@@ -150,8 +150,8 @@ Markets have to be set up in Shopify (Settings → Markets) for prices and curre
 
 Set `autoMount: false`, call `Tether.init()` once, and `Tether.mount(container)` for every new
 page container. Keep the cart drawer outside the container. Call `Tether.unmount()` when leaving
-a page (it closes the drawer); the container mounted after it is a new page for
-[analytics](analytics.md).
+a page (it closes the drawer); the container mounted with it, before or after, is a new page
+for [analytics](analytics.md).
 
 ```js
 import Tether from "@occluze/tether";
@@ -167,14 +167,19 @@ Tether.init({
   }),
 });
 
+barba.hooks.beforeLeave(() => Tether.unmount());
 barba.hooks.beforeEnter(({ next }) => Tether.mount(next.container));
-barba.hooks.afterLeave(() => Tether.unmount());
 // Barba's first load only runs once(): mount there too.
+
+// Swup (#swup is its default container):
+swup.hooks.on('visit:start', () => Tether.unmount());
+swup.hooks.on('content:replace', () => Tether.mount(document.querySelector('#swup')));
 ```
 
 With Barba, mount in `beforeEnter` (and in `once()` for the first load) rather than
-`afterEnter`, so products load during the transition. With `sync: true` the old and new
-containers exist at the same time, so always pass the container, never `document`.
+`afterEnter`, so products load during the transition, and unmount in `beforeLeave`, which runs
+before `beforeEnter` with or without `sync: true`. With `sync: true` the old and new containers
+exist at the same time, so always pass the container, never `document`.
 
 Markup written for an older `wfs-*` prefix keeps working with `prefix: 'wfs'`.
 

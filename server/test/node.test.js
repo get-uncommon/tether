@@ -23,7 +23,7 @@ test('file store: a state file removed by another process leaves what this proce
   assert.deepEqual(JSON.parse(await readFile(path, 'utf8')), { other: 1 }, 'the next write recreates the file');
 });
 
-test('file store: lists the keys under a prefix, with what another process wrote', async (t) => {
+test('file store: lists the first keys under a prefix, with what another process wrote', async (t) => {
   const dir = await tempFolder(t, 'tether-sync-');
   const path = join(dir, 'state.json');
   const here = fileStore(path, { delayMs: 10_000 });
@@ -33,8 +33,10 @@ test('file store: lists the keys under a prefix, with what another process wrote
   await here.flush();
   await there.put('reconcile:retry:2:b', {});
   await there.flush();
+  await here.put('reconcile:retry:3:c', {});
   await here.delete('reconcile:retry:1:a');
-  assert.deepEqual(await here.list('reconcile:retry:'), ['reconcile:retry:2:b']);
+  assert.deepEqual(await here.list('reconcile:retry:', 1), ['reconcile:retry:2:b']);
+  assert.deepEqual(await here.list('reconcile:retry:', 10), ['reconcile:retry:2:b', 'reconcile:retry:3:c']);
   await here.flush();
 });
 

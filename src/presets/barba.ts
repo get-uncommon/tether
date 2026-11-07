@@ -17,7 +17,7 @@
  *
  *   // once per page container, e.g. in Barba's beforeEnter AND once():
  *   Tether.mount(container);
- *   // when leaving a page:
+ *   // when leaving a page, e.g. in Barba's beforeLeave:
  *   Tether.unmount();
  */
 import type { TetherConfig } from '../config.ts';

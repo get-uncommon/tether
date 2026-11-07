@@ -62,3 +62,26 @@ test('the setup check reports the deploy interval the sync uses', async () => {
   assert.match(await message({ DEPLOY_HOOK_MIN_SECONDS: '300' }), /at most every 300s/);
   assert.match(await message({ DEPLOY_HOOK_MIN_SECONDS: 'soon' }), /at most every 60s/);
 });
+
+test('the setup check warns when a reconcile run can pass 1,000 KV operations, or the item index expires fast', async () => {
+  const env = {
+    SHOPIFY_DOMAIN: 'shop.myshopify.com',
+    SHOPIFY_ADMIN_TOKEN: 'shpat_token',
+    WEBFLOW_TOKEN: 'wf_token',
+    WEBFLOW_COLLECTION_ID: 'a'.repeat(24),
+  };
+  const titles = (/** @type {{ steps: { title: string }[] }} */ report) => report.steps.map((step) => step.title);
+  const usual = await runCheck(defaultConfig, env, { deep: false, worker: true });
+  assert.ok(!titles(usual).includes('Reconcile budget'));
+  assert.ok(!titles(usual).includes('Item index'));
+
+  const busy = await runCheck(
+    { ...defaultConfig, match: { ...defaultConfig.match, indexTtlMinutes: 10 } },
+    { ...env, MAX_SUBREQUESTS: '1000' },
+    { deep: false, worker: true },
+  );
+  const budget = checkStep(busy, 'Reconcile budget');
+  assert.equal(budget.level, 'warn');
+  assert.match(budget.message, /up to 3398 KV operations, more than the 1000/);
+  assert.equal(checkStep(busy, 'Item index').level, 'warn');
+});

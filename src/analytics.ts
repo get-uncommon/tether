@@ -17,7 +17,8 @@ import { ANALYTICS_EVENTS, isOwnEvent, sel } from './dom.ts';
 import { Cart } from './cart.ts';
 import { scopes } from './product.ts';
 import { startShopifyAnalytics } from './analytics-shopify.ts';
-import { PAGE_TRANSITION } from './analytics-queue.ts';
+import { PAGE_LEFT, PAGE_MOUNT } from './analytics-queue.ts';
+import type { PageMount } from './analytics-queue.ts';
 import type { Money } from './shopify-values.ts';
 import type { Product, ProductVariant } from './fragments.ts';
 import type { AnalyticsBus, EventPayload } from './analytics-shopify.ts';
@@ -176,6 +177,22 @@ let viewed = new WeakSet<Element>();
 let viewedBody: HTMLElement | undefined;
 /** The body each queued `astro:page-load` came for, from the core's queue. */
 let bodies = new WeakMap<Event, HTMLElement>();
+/** The container of the page being viewed: the first one mounted, then each new page's. */
+let pageRoot: Document | Element | null = null;
+/**
+ * A page transition in the same body, which Astro's navigation never makes (it closes the cart without `unmount()`,
+ * as its `astro:page-load` starts the page view): `'left'` after `unmount()`, until the next container mounts; or a
+ * container mounted outside `pageRoot` before `unmount()`, which `unmount()` then makes the new page, as Barba's sync
+ * mode mounts the next page while the old one is still in the document.
+ */
+let transition: 'left' | Document | Element | null = null;
+
+/** @returns The container of the page being viewed, or of the one coming in, that `node` is in. */
+function containerOf(node: Node): Document | Element | null {
+  if (pageRoot?.contains(node)) return pageRoot;
+  if (transition !== 'left' && transition?.contains(node)) return transition;
+  return null;
+}
 
 /** @param name The GA4 event. */
 function send(name: string, data: Record<string, unknown>, shopifyEvent?: string, shopifyPayload?: EventPayload): void {
@@ -191,7 +208,7 @@ function send(name: string, data: Record<string, unknown>, shopifyEvent?: string
 /**
  * The root of the page's own product: its first product root, when that is outside every list.
  *
- * @param page The page's body, or the document for the page shown now.
+ * @param page The page's outermost element, or the document for the page shown now.
  */
 function mainProductRoot(page: ParentNode): Element | null {
   const el = page.querySelector(sel('product'));
@@ -204,10 +221,22 @@ function isProductPage(): boolean {
   return root !== null && scopes.has(root);
 }
 
+/**
+ * @returns The page `el` is on: its page container (`containerOf`), as with Barba's sync mode both pages are in the
+ *   document; else the outermost element it is in: the page's `<html>`, or for a page the visitor has left since, the
+ *   body Astro swapped out or the container a page transition removed.
+ */
+function pageOf(el: Element): ParentNode {
+  const container = containerOf(el);
+  if (container) return container;
+  let page = el;
+  while (page.parentElement) page = page.parentElement;
+  return page;
+}
+
 function onProductReady({ product, scope }: TetherEvents['product-ready']): void {
   // A queued event can be from a page the visitor has left since, so the scope's own page is the one asked.
-  const page = scope.root.closest('body') ?? document;
-  if (viewed.has(scope.root) || mainProductRoot(page) !== scope.root) return;
+  if (viewed.has(scope.root) || mainProductRoot(pageOf(scope.root)) !== scope.root) return;
   viewed.add(scope.root);
   const variant = scope.variant ?? product.variants.nodes[0];
   const items = [itemFromVariant(product, variant)];
@@ -302,15 +331,40 @@ function startPageView(): void {
   bus?.publish('page_viewed', {});
 }
 
+function enterPage(root: Document | Element): void {
+  pageRoot = root;
+  transition = null;
+  startPageView();
+}
+
+function onPageMount(root: Document | Element): void {
+  if (root === document) transition = null;
+  else if (transition === 'left') enterPage(root);
+  else if (!pageRoot) pageRoot = root;
+  else if (!containerOf(root)) transition = root;
+}
+
+function onPageLeft(): void {
+  if (transition && transition !== 'left') enterPage(transition);
+  else transition = 'left';
+}
+
+/** Only the core queues events of this type, never a page's script, so the detail is the root `mount()` was given. */
+const isPageMount = (event: Event): event is PageMount => event.type === PAGE_MOUNT;
+
 /**
  * Turns one buffered event into analytics events: a Tether event from `ANALYTICS_EVENTS`; an `astro:page-load` for a
- * body other than the last page view's (a client-side navigation), or a page transition
- * (`PAGE_TRANSITION`), each of which starts a page view. Only events Tether created count (`isOwnEvent`): a look-alike
+ * body other than the last page view's (a client-side navigation), or a page transition (from `PAGE_MOUNT` and
+ * `PAGE_LEFT`), each of which starts a page view. Only events Tether created count (`isOwnEvent`): a look-alike
  * another script dispatches, whatever its detail, sends nothing.
  */
 function handle(event: Event): void {
-  if (event.type === PAGE_TRANSITION) {
-    startPageView();
+  if (isPageMount(event)) {
+    onPageMount(event.detail);
+    return;
+  }
+  if (event.type === PAGE_LEFT) {
+    onPageLeft();
     return;
   }
   if (event.type === 'astro:page-load') {

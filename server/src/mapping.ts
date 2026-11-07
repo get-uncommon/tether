@@ -61,7 +61,7 @@ export interface MatchSettings {
   indexTtlMinutes: number;
 }
 
-interface ReconcileSettings {
+export interface ReconcileSettings {
   /** Webflow writes. */
   maxChangesPerRun: number;
   /** Products checked (one store read each). */

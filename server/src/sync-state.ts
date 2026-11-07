@@ -75,26 +75,51 @@ export async function readRetries(store: Store): Promise<RetryEntry[]> {
   return value.flatMap((entry: unknown) => parseRetry(entry) ?? []);
 }
 
-/** A failure waiting under its own key for the next reconcile. */
-export interface QueuedRetry {
-  key: string;
-  entry: RetryEntry;
-}
-
 /** @param id A numeric product id. */
 export const retryInboxKey = (id: string): string => `${RETRY_INBOX_PREFIX}${id}:${crypto.randomUUID()}`;
 
 /**
- * The failures queued under their own keys. A key listed whose value is gone, deleted by a run whose delete the list
- * doesn't show yet, is left out.
+ * The inbox keys one reconcile takes in, so a run's KV operations stay bounded however many failures wait: Cloudflare
+ * allows 1,000 per Worker invocation. A bigger inbox drains over the next runs.
  */
-export async function readRetryInbox(store: Store): Promise<QueuedRetry[]> {
-  const queued: QueuedRetry[] = [];
-  for (const key of await store.list(RETRY_INBOX_PREFIX)) {
+const RETRY_INBOX_PAGE = 100;
+/** A run's KV operations on the inbox: the list, at most a read per key, and a delete per key. */
+export const RETRY_INBOX_KV_OPERATIONS = 1 + 2 * RETRY_INBOX_PAGE;
+/** KV drops a queued failure no reconcile took in after 30 days, so a release that never lists the inbox leaves none. */
+export const RETRY_INBOX_TTL_SECONDS = 30 * 24 * 60 * 60;
+
+/** The failures one reconcile takes from the inbox. */
+export interface RetryInbox {
+  /** Every key taken in, its product's duplicates included: each is deleted once the retry list is stored. */
+  keys: string[];
+  /** One entry per product not on the retry list yet. */
+  entries: RetryEntry[];
+}
+
+/** The product id a key from {@link retryInboxKey} names. */
+function inboxKeyProduct(key: string): string {
+  const rest = key.slice(RETRY_INBOX_PREFIX.length);
+  const end = rest.indexOf(':');
+  return end === -1 ? rest : rest.slice(0, end);
+}
+
+/**
+ * The first {@link RETRY_INBOX_PAGE} queued failures. A product's keys are read until one holds its failure, and none
+ * is read for a product already on the retry list, which keeps its attempts. A key listed whose value is gone, deleted
+ * by a run whose delete the list doesn't show yet, is left out.
+ *
+ * @param listed The ids on the retry list.
+ */
+export async function readRetryInbox(store: Store, listed: ReadonlySet<string>): Promise<RetryInbox> {
+  const keys = await store.list(RETRY_INBOX_PREFIX, RETRY_INBOX_PAGE);
+  const entries = new Map<string, RetryEntry>();
+  for (const key of keys) {
+    const product = inboxKeyProduct(key);
+    if (listed.has(product) || entries.has(product)) continue;
     const entry = parseRetry(await store.get(key));
-    if (entry) queued.push({ key, entry });
+    if (entry) entries.set(product, entry);
   }
-  return queued;
+  return { keys, entries: [...entries.values()] };
 }
 
 /**

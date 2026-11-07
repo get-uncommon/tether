@@ -6,7 +6,7 @@ import { Tether, cfg, rendered } from './astro-harness.js';
 import { waitFor } from '../server/test/mocks.js';
 
 test('analytics: when the part fails to load, the queued events are dropped and no more are queued', async () => {
-  const { queueAnalyticsEvents } = await import('../src/analytics-queue.ts');
+  const { queueAnalyticsEvents, PAGE_LEFT } = await import('../src/analytics-queue.ts');
   /** @type {(error: Error) => void} */
   let failLoad = () => {};
   const queue = queueAnalyticsEvents(
@@ -21,7 +21,8 @@ test('analytics: when the part fails to load, the queued events are dropped and 
   failLoad(new Error('blocked by the page'));
   await waitFor(() => queue.length === 0, 'the queue to be emptied');
   document.dispatchEvent(new window.CustomEvent('tether:product-ready', { detail: {} }));
-  assert.deepEqual(queue, []);
+  queue.push(new window.Event(PAGE_LEFT));
+  assert.equal(queue.length, 0);
 });
 
 test("analytics: an Astro navigation before the part loaded sends each page's view and its product's view", async () => {

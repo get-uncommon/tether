@@ -4,7 +4,7 @@
  * second Webflow write.
  */
 import { mapProduct, withoutOwned, onlyExisting } from './mapping.ts';
-import { readProductState, productKey, retryInboxKey } from './sync-state.ts';
+import { RETRY_INBOX_TTL_SECONDS, readProductState, productKey, retryInboxKey } from './sync-state.ts';
 import { sha256, toHex } from './crypto.ts';
 import { SyncError, httpStatusOf, numericId, scalarText, stableStringify } from './util.ts';
 import { messageOf } from './shared/error-message.ts';
@@ -13,7 +13,7 @@ import type { ItemIndex } from './item-index.ts';
 import type { FieldData, SyncConfig } from './mapping.ts';
 import type { Product } from './product.ts';
 import type { Store } from './store.ts';
-import type { ProductState } from './sync-state.ts';
+import type { ProductState, RetryEntry } from './sync-state.ts';
 import type { Logger } from './util.ts';
 import type { CmsTarget } from './webflow.ts';
 
@@ -276,11 +276,44 @@ function retryReason(error: unknown): string {
 }
 
 /**
- * Remembers a product to retry on the next reconcile, after a webhook failed: one KV write, under a key of its own, so
- * a reconcile running at the same time can't overwrite it. A product queued twice is retried once.
+ * The inbox key this isolate last queued for each product, oldest first. While that key is still in the store, the
+ * next reconcile retries the product anyway, so a product that fails on every webhook during an outage costs a KV write
+ * per reconcile that takes it in, not one per webhook.
  */
-export async function queueRetry(ctx: SyncContext, id: string | number, error: unknown): Promise<void> {
+const queuedKeys = new Map<string, string>();
+/** Products {@link queuedKeys} remembers: the least recently queued is forgotten first. */
+const QUEUED_KEYS_MAX = 1000;
+
+export interface QueueRetryOptions {
+  /**
+   * The webhook was a `products/delete`. Its failure is always queued: the reconcile's cursor never finds a deletion,
+   * and KV can still show a key for up to a minute after a reconcile in another location took it in and deleted it.
+   */
+  deletion?: boolean;
+}
+
+/**
+ * Remembers a product to retry on the next reconcile, after a webhook failed: one KV write, under a key of its own, so
+ * a reconcile running at the same time can't overwrite it, and none while this isolate's last key for the product is
+ * still queued. A product queued twice is retried once.
+ */
+export async function queueRetry(
+  ctx: SyncContext,
+  id: string | number,
+  error: unknown,
+  { deletion = false }: QueueRetryOptions = {},
+): Promise<void> {
   if (ctx.dryRun) return;
   const shopifyId = numericId(id);
-  await ctx.store.put(retryInboxKey(shopifyId), { id: shopifyId, attempts: 1, error: retryReason(error) });
+  const queued = queuedKeys.get(shopifyId);
+  if (!deletion && queued !== undefined && (await ctx.store.get(queued)) !== null) return;
+  const key = retryInboxKey(shopifyId);
+  const entry: RetryEntry = { id: shopifyId, attempts: 1, error: retryReason(error) };
+  await ctx.store.put(key, entry, { expirationTtl: RETRY_INBOX_TTL_SECONDS });
+  queuedKeys.delete(shopifyId);
+  queuedKeys.set(shopifyId, key);
+  for (const oldest of queuedKeys.keys()) {
+    if (queuedKeys.size <= QUEUED_KEYS_MAX) break;
+    queuedKeys.delete(oldest);
+  }
 }

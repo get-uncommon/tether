@@ -7,15 +7,20 @@ import { ANALYTICS_EVENTS } from './dom.ts';
 import type { Parts } from './lazy.ts';
 
 /**
- * The type of the event `mount()` queues for a container mounted after `unmount()`: a page transition, which keeps
- * the body, so it starts a page view of its own. It is only queued, never dispatched.
+ * The types of the events `mount()` and `unmount()` queue, from which the analytics part tells a page transition: a
+ * new page in the same body, which starts a page view of its own. They are only queued, never dispatched.
  */
-export const PAGE_TRANSITION = 'page-transition';
+export const PAGE_MOUNT = 'page-mount';
+export const PAGE_LEFT = 'page-left';
+
+/** The event `mount(root)` queues. */
+export type PageMount = CustomEvent<Document | Element>;
 
 /**
  * Buffers the events the analytics part handles until `load` has the part, then hands it the buffer. When the part
- * fails to load (an ad blocker, a CSP rule, an integrity mismatch) or to start, the buffer is emptied and its
- * listeners removed, so the page keeps no cart or product details for a part that will never read them.
+ * fails to load (an ad blocker, a CSP rule, an integrity mismatch) or to start, the buffer is emptied, its listeners
+ * removed and what is pushed to it dropped, so the page keeps no cart or product details for a part that will never
+ * read them.
  *
  * Each `astro:page-load` is kept with the body it came for, and the part is given the landing page's body, so a
  * navigation made before the part loaded still counts both pages, and Astro's first `astro:page-load`, on the landing
@@ -44,6 +49,8 @@ export function queueAnalyticsEvents(load: () => Promise<Pick<Parts['analytics']
     .catch((error: unknown) => {
       listening.abort();
       queue.length = 0;
+      // `mount()` and `unmount()` keep pushing to it.
+      queue.push = () => 0;
       reportError(error, 'analytics');
     });
   return queue;

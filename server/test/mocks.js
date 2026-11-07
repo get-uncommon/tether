@@ -4,6 +4,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { isRecord } from '../src/shared/json.ts';
+import { firstKeys } from '../src/store.ts';
 
 // Readers for the parsed JSON a fake receives or a store holds, which is `unknown`: each asserts the shape the test
 // reads, so a request of the wrong shape fails the test where it is read instead of reading as `undefined`.
@@ -141,16 +142,15 @@ export function shopifyProduct(number, over = {}) {
 }
 
 /**
- * KV's `list` over a fake namespace's keys: one page, with every key that has the prefix.
+ * KV's `list` over a fake namespace's keys: the first `limit` keys with the prefix, in key order.
  *
  * @param {() => Iterable<string>} keys
  * @returns {import('../src/env.ts').KvBinding['list']}
  */
 export const kvList =
   (keys) =>
-  async ({ prefix }) => ({
-    keys: [...keys()].filter((name) => name.startsWith(prefix)).map((name) => ({ name })),
-    list_complete: true,
+  async ({ prefix, limit }) => ({
+    keys: firstKeys(keys(), prefix, limit).map((name) => ({ name })),
   });
 
 /**

@@ -11,6 +11,7 @@ import { parseConfigFile } from './config-file.ts';
 import { asRecord } from './json.ts';
 import { isRecord } from './shared/json.ts';
 import { messageOf } from './shared/error-message.ts';
+import { firstKeys } from './store.ts';
 
 import type { Stats } from 'node:fs';
 import type { IncomingMessage, Server, ServerResponse } from 'node:http';
@@ -268,8 +269,8 @@ export function fileStore(
       dirty.set(key, undefined);
       schedule();
     },
-    async list(prefix) {
-      return [...(await load()).keys()].filter((key) => key.startsWith(prefix));
+    async list(prefix, limit) {
+      return firstKeys((await load()).keys(), prefix, limit);
     },
   };
 }

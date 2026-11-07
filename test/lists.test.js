@@ -207,11 +207,13 @@ test('a url: list without its parameter lists every product, or none unasked wit
     );
     window.history.replaceState(null, '', '/search?q=');
     assert.deepEqual(await shown(), [], 'an empty parameter is none too');
+    window.history.replaceState(null, '', '/search?q=+%20');
+    assert.deepEqual(await shown(), [], 'and so is one of only spaces');
     assert.equal(calls.length, 2);
-    window.history.replaceState(null, '', '/search?q=latte');
+    window.history.replaceState(null, '', '/search?q=+latte+');
     await loadList(find('#list'));
     assert.deepEqual(cards(), ['a'], 'a load with a search lists it');
-    assert.equal(calls.at(-1)?.variables['query'], 'latte');
+    assert.equal(calls.at(-1)?.variables['query'], 'latte', 'without the spaces around it');
     configure({ domain: 'shop.test', token: 't', retries: 0, emptyQuery: 'some' });
     assert.equal(warnings.at(-1)?.[1], 'invalid emptyQuery "some": using "all"');
   } finally {

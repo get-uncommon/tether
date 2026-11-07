@@ -14,6 +14,7 @@ import {
   normalizeProduct,
   toSlug,
 } from '../src/index.ts';
+import { firstKeys } from '../src/store.ts';
 import {
   createMockApis,
   shopifyProduct,
@@ -284,26 +285,21 @@ test('reconcile retries failed products on the next run', async () => {
   assert.deepEqual(await store.get('reconcile:retry'), []);
 });
 
-test('kvStore lists the keys under a prefix across pages, without its own prefix', async () => {
+test('kvStore lists one page of keys under a prefix, without its own prefix', async () => {
   const names = ['tether-sync:a:1', 'tether-sync:a:2', 'tether-sync:a:3', 'tether-sync:b:1', 'other:a:1'];
-  /** @type {(string | undefined)[]} */
-  const cursors = [];
+  /** @type {{ prefix: string, limit: number }[]} */
+  const requests = [];
   const store = kvStore({
     get: async () => null,
     put: async () => {},
     delete: async () => {},
-    async list({ prefix, cursor }) {
-      cursors.push(cursor);
-      const matching = names.filter((name) => name.startsWith(prefix));
-      const start = Number(cursor ?? 0);
-      const keys = matching.slice(start, start + 2).map((name) => ({ name }));
-      return start + 2 < matching.length
-        ? { keys, list_complete: false, cursor: String(start + 2) }
-        : { keys, list_complete: true };
+    async list(options) {
+      requests.push(options);
+      return { keys: firstKeys(names, options.prefix, options.limit).map((name) => ({ name })) };
     },
   });
-  assert.deepEqual(await store.list('a:'), ['a:1', 'a:2', 'a:3']);
-  assert.deepEqual(cursors, [undefined, '2']);
+  assert.deepEqual(await store.list('a:', 2), ['a:1', 'a:2']);
+  assert.deepEqual(requests, [{ prefix: 'tether-sync:a:', limit: 2 }]);
 });
 
 test('Webflow 429 is retried after Retry-After', async () => {

@@ -4,10 +4,10 @@
  * items themselves.
  *
  * A listing checks the run's budget before each page. One that runs out stores the pages it has under
- * `index:listing` and throws {@link IndexListingStopped}; the next listing of a stale index continues from there, so a
- * collection too big for one Worker run is listed over several. While a listing waits, deleting items before its
- * offset shifts the rest, so it can skip an item: a product whose item the index misses gets a slug conflict on its
- * create, and the conflict lists the collection afresh.
+ * `index:listing` and throws {@link IndexListingStopped}; the next listing of a stale index continues from there for
+ * a day, or for `match.indexTtlMinutes` when that is longer, so a collection too big for one Worker run is listed over
+ * several. While a listing waits, deleting items before its offset shifts the rest, so it can skip an item: a product
+ * whose item the index misses gets a slug conflict on its create, and the conflict lists the collection afresh.
  */
 import { toSlug } from './mapping.ts';
 import { isRecord } from './shared/json.ts';
@@ -71,6 +71,11 @@ export interface ItemIndex {
 const KEY = 'index';
 const LISTING_KEY = 'index:listing';
 const MS_PER_MINUTE = 60000;
+/**
+ * How old a stopped listing can be and still be continued, at least: a collection that takes longer than
+ * `match.indexTtlMinutes` to list would otherwise start again at its first page each time and never finish.
+ */
+const LISTING_RESUMABLE_MS = 24 * 60 * MS_PER_MINUTE;
 
 function parseById(value: unknown): Map<string, string> {
   if (!isRecord(value)) return new Map();
@@ -175,7 +180,9 @@ export function createItemIndex(options: ItemIndexOptions): ItemIndex {
   let index: IndexSnapshot | null = null;
   let dirty = false;
   const ttlMs = match.indexTtlMinutes * MS_PER_MINUTE;
-  const isCurrent = (snapshot: IndexSnapshot) => now() - Date.parse(snapshot.at) < ttlMs;
+  const youngerThan = (snapshot: IndexSnapshot, ms: number) => now() - Date.parse(snapshot.at) < ms;
+  const isCurrent = (snapshot: IndexSnapshot) => youngerThan(snapshot, ttlMs);
+  const isResumable = (listing: StoredListing) => youngerThan(listing, Math.max(ttlMs, LISTING_RESUMABLE_MS));
 
   /** Lists every item now, from the first page. */
   async function listed(): Promise<IndexSnapshot & { items: WebflowItem[] }> {
@@ -186,10 +193,14 @@ export function createItemIndex(options: ItemIndexOptions): ItemIndex {
     return whole;
   }
 
-  /** Lists a stale index again, on from the listing a run stopped, unless that one is stale too. */
+  /**
+   * Lists a stale index again, on from the listing a run stopped unless that one is too old to continue. A continued
+   * listing keeps the time it started, so with a short TTL the index it completes is stale already: this run uses it,
+   * and the next one lists again.
+   */
   async function relisted(): Promise<IndexSnapshot> {
     const stored = parseListing(await store.get(LISTING_KEY));
-    const resume = stored && isCurrent(stored) ? stored : null;
+    const resume = stored && isResumable(stored) ? stored : null;
     const { snapshot, items } = await listFrom(resume);
     if (stored && !dryRun) await store.delete(LISTING_KEY);
     // A continued listing holds pages listed by earlier runs, so it doesn't count as listed now.
