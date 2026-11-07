@@ -31,7 +31,7 @@
 
   // tether-core:client.ts
   var m3 = window.Tether.__core["client.ts"];
-  var [endpoint, gql, matches, orNull, shaped, TetherError] = m3;
+  var [endpoint, gql, matches, orNull, shaped, TetherError, withTimeout] = m3;
 
   // server/src/shared/account-routes.ts
   var OPERATION_ROUTES = {

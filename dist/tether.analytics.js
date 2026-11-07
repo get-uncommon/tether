@@ -29,7 +29,7 @@
 
   // tether-core:client.ts
   var m5 = window.Tether.__core["client.ts"];
-  var [endpoint, gql, matches, orNull, shaped, TetherError] = m5;
+  var [endpoint, gql, matches, orNull, shaped, TetherError, withTimeout] = m5;
 
   // src/analytics-shopify.ts
   var BUFFER_SIZE = 500;

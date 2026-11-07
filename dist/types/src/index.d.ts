@@ -95,7 +95,7 @@ declare const publicApi: {
         setNote(note: string | null | undefined): Promise<ShopifyCart | null>;
         setAttributes(attributes: import("./cart/mutations.js").Attributes): Promise<ShopifyCart | null>;
         setDiscountCodes(codes: string | string[] | ((current: string[]) => string[])): Promise<ShopifyCart | null>;
-        applyDiscount(code: string): Promise<ShopifyCart | null>;
+        applyDiscount(typed: string): Promise<ShopifyCart | null>;
         removeDiscount(code: string): Promise<ShopifyCart | null>;
         setBuyerIdentity(buyerIdentity: {
             countryCode?: string;

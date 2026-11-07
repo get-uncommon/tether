@@ -2,37 +2,6 @@
 
 ## Unreleased
 
-- Fix: a `tether-cart-drawer="manual"` drawer the site opens, by adding the open class, is usable:
-  Tether follows the class, so the open drawer is no longer `inert` and `aria-hidden`, focus moves
-  in, and `Tether.cart.isOpen()`, `tether:cart-toggled` and `subscribe` see it. Esc,
-  `tether-cart-close` and `Tether.cart.close()` close it. `Tether.cart.open()` on a page whose
-  drawers are all manual does nothing, instead of announcing an open cart nothing showed.
-- Fix: a closed cart drawer is `inert` with `cartFocus: false` too, so its buttons and links, hidden
-  from screen readers, are out of the Tab order.
-- Fix: checkout waits for the cart changes still on their way: a + (or a removed line, or a code)
-  clicked just before Checkout reaches Shopify first, and the checkout shows it. A checkout resolver
-  (`Tether.cart.setCheckoutResolver`) may change the cart itself, with `setAttributes` or
-  `setBuyerIdentity`.
-- Fix: customer-account requests to the Worker get `requestTimeout`, as Storefront requests do. A
-  Worker that doesn't answer fails as `NETWORK`, and a logged-in customer's Checkout goes on to
-  Shopify's checkout without the login instead of staying busy.
-- Fix: a cart quantity field left empty or without a whole number gets the line's quantity back
-  instead of removing the line; `0` still removes it.
-- Fix: a search box a page swap removed stops listening on the document, so its results and markup
-  are no longer kept for the life of the tab.
-- Fix: the search input's `aria-activedescendant` is cleared when new results come in, so screen
-  readers no longer announce an option that isn't selected.
-- Fix: a plan or purchase toggle the variant can't use gets `aria-disabled`. An option, plan or
-  purchase element that is no button and has no role (a link, as Webflow's Button is, or a `div`)
-  gets `role="button"`, so its `aria-pressed` is valid, and is pressed as a button is: it is in the
-  Tab order (`tabindex="0"`, unless it has its own `tabindex`), and Enter and Space choose it; one
-  with its own role gets the state that role takes (`aria-checked` for `role="radio"`,
-  `aria-selected` for `role="option"`). A radio or checkbox input, or an element around one, is
-  `checked` and no longer gets `aria-pressed`: style it with `is-selected` or `input:checked`
-  instead of `[aria-pressed="true"]`.
-- The discount form applies its code through the extras part, `tether.extras.min.js`, which it loads
-  on the first submit: a site that hosts Tether itself needs that file next to the core, as bundles
-  and `?variant=` links already do.
 - Fix: an option value no available variant has is described as unavailable to screen readers
   (`aria-describedby="tether-unavailable"`, a `hidden` note Tether adds), not `aria-disabled`:
   choosing it still works, picking the closest variant that has it. A page's own element with
@@ -44,6 +13,49 @@
   none.
 - Fix: `Object.getOwnPropertyDescriptor(Tether.config, key)` gives the same read-only view a read
   does, so no write can skip the validation `Tether.init()` does.
+
+## 0.9.5 (2026-11-07)
+
+- **Fix: 0.9.4's checkout could hang.** When a checkout resolver changes the cart during checkout
+  (for example the account part, or a site's own `Tether.cart.setCheckoutResolver` that calls
+  `setAttributes` or `setBuyerIdentity`), 0.9.4 waited for that change inside the cart's queue,
+  behind the checkout itself: checkout never finished and every later cart change waited until the
+  page was reloaded. Checkout now waits for the changes made before it, then asks the resolver
+  outside the queue, so it may change the cart. Sites on `@0.9` or `@latest` get this fix by
+  themselves; a site pinned to `@v0.9.4` should move to `@v0.9.5`.
+- Fix: an option, plan or purchase element that 0.9.4 gave `role="button"` (a link, `div` or other
+  element without a role) is in the Tab order (unless it has its own `tabindex`), and Enter or Space
+  chooses it like a click. In 0.9.4 a screen reader announced a button the keyboard couldn't reach.
+- The discount form's apply step runs in the extras part (`tether.extras.min.js`), which keeps the
+  core within its size budget; sites that host the script files themselves already host that file.
+
+## 0.9.4 (2026-11-07)
+
+- Fix: a `tether-cart-drawer="manual"` drawer the site opens, by adding the open class, is usable:
+  Tether follows the class, so the open drawer is no longer `inert` and `aria-hidden`, focus moves
+  in, and `Tether.cart.isOpen()`, `tether:cart-toggled` and `subscribe` see it. Esc,
+  `tether-cart-close` and `Tether.cart.close()` close it. `Tether.cart.open()` on a page whose
+  drawers are all manual does nothing, instead of announcing an open cart nothing showed.
+- Fix: a closed cart drawer is `inert` with `cartFocus: false` too, so its buttons and links, hidden
+  from screen readers, are out of the Tab order.
+- Fix: checkout waits for the cart changes still on their way: a + (or a removed line, or a code)
+  clicked just before Checkout reaches Shopify first, and the checkout shows it.
+- Fix: customer-account requests to the Worker get `requestTimeout`, as Storefront requests do. A
+  Worker that doesn't answer fails as `NETWORK`, and a logged-in customer's Checkout goes on to
+  Shopify's checkout without the login instead of staying busy.
+- Fix: a cart quantity field left empty or without a whole number gets the line's quantity back
+  instead of removing the line; `0` still removes it.
+- Fix: a search box a page swap removed stops listening on the document, so its results and markup
+  are no longer kept for the life of the tab.
+- Fix: the search input's `aria-activedescendant` is cleared when new results come in, so screen
+  readers no longer announce an option that isn't selected.
+- Fix: an option value no available variant has gets `aria-disabled`, and a plan or purchase toggle
+  the variant can't use too. An option, plan or purchase element that is no button and has no role
+  (a link, as Webflow's Button is, or a `div`) gets `role="button"`, so its `aria-pressed` is valid;
+  one with its own role gets the state that role takes (`aria-checked` for `role="radio"`,
+  `aria-selected` for `role="option"`). A radio or checkbox input, or an element around one, is
+  `checked` and no longer gets `aria-pressed`: style it with `is-selected` or `input:checked`
+  instead of `[aria-pressed="true"]`.
 - Fix: `Tether.cart.applyDiscount(' CODE ')` and `removeDiscount(' CODE ')` take the code without
   the spaces around it: a valid code with spaces no longer rejects as `INVALID_DISCOUNT`.
 

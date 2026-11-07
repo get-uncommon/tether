@@ -105,6 +105,12 @@ export declare function withContext(query: string, ctx?: {
     language?: string | undefined;
 }): string;
 /**
+ * Runs `send` with a signal that aborts it, the answer's body included, after `ms` milliseconds (`0`: never), as
+ * `AbortSignal.timeout` would; Safari before 16 lacks that. A request that never settles would hold every cart change
+ * queued behind it (`enqueue`) for as long as the browser keeps the connection open.
+ */
+export declare function withTimeout<T>(ms: number, send: (signal: AbortSignal | null) => Promise<T>): Promise<T>;
+/**
  * One Storefront API request, for any config: the browser's shared one (`gql`) or one the server helpers build.
  * Queries carry a time bucket so Shopify's cache of an identical query text is at most `maxAge` seconds old. A query
  * written for the store's access leaves out inventory once the token turns out not to read it (`INVENTORY_FIELD`);

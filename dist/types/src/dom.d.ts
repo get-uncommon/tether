@@ -33,8 +33,19 @@ export declare function setText(el: Element, value: string | number | boolean | 
 export declare function setTextTracked(el: HTMLElement, value: string | number | boolean | null | undefined): void;
 /** Shows or hides `el`, restoring its own display value when shown again. */
 export declare function show(el: HTMLElement, visible: boolean): void;
-/** Marks an option button or input as chosen: `is-selected`, `aria-pressed`, and its own or inner radio/checkbox. */
+/**
+ * Marks an option element as chosen: `is-selected`, the ARIA state its role takes (`chosenState`), and its own or
+ * inner radio/checkbox. An element that is no button and has no role of its own (a Webflow button is a link) gets
+ * `role="button"`, where `aria-pressed` is valid, and a place in the Tab order unless it has its own `tabindex`; the
+ * product's events press it with Enter and Space.
+ */
 export declare function setSelected(el: Element, selected: boolean): void;
+/**
+ * Marks an option element the visitor can't buy: `is-unavailable`, and `aria-disabled` on the control assistive
+ * technology reads, the element itself or the radio/checkbox inside it. It stays clickable: choosing it picks the
+ * closest variant that has it.
+ */
+export declare function setUnavailable(el: Element, unavailable: boolean): void;
 /**
  * A global the page's own scripts set on `window`: `TETHER_CONFIG`, the site's config, `TETHER_INTEGRATION`, set by a
  * framework integration (Astro) that starts Tether itself, and GSAP's `ScrollTrigger`. Another script wrote it, so it
@@ -64,6 +75,8 @@ interface IntegerRange {
     max?: number;
     fallback: number;
 }
+/** A whole number as text, the way attributes and quantity fields take one. */
+export declare const INTEGER_TEXT: RegExp;
 /**
  * Parses a count attribute with the config's count-option rules: an integer above `max` is the site asking for as
  * much as there is, so it gets `max`; a missing or empty attribute is `fallback`, and so, with a warning, is one that

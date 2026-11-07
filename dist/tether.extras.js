@@ -9,6 +9,7 @@
   var extras_exports = {};
   __export(extras_exports, {
     addGroup: () => addGroup,
+    applyDiscountCode: () => applyDiscountCode,
     onStorage: () => onStorage,
     writeVariantUrl: () => writeVariantUrl
   });
@@ -17,25 +18,29 @@
   var m = window.Tether.__core["config.ts"];
   var [cfg, isConfigured, log, MARKET_SOURCES, parseMarkets, reportError, warn] = m;
 
+  // tether-core:client.ts
+  var m2 = window.Tether.__core["client.ts"];
+  var [endpoint, gql, matches, orNull, shaped, TetherError, withTimeout] = m2;
+
   // tether-core:dom.ts
-  var m2 = window.Tether.__core["dom.ts"];
-  var [ANALYTICS_EVENTS, attr, attributesFromJson, busy, emit, formatDate, formatMoney, get, has, hasTemplate, integerAttribute, isOwnEvent, notifyLayoutChanged, parseJSONAttr, productUrl, qsa, repeat, scoped, sel, setImage, setStoreHtml, setText, show] = m2;
+  var m3 = window.Tether.__core["dom.ts"];
+  var [ANALYTICS_EVENTS, attr, attributesFromJson, busy, emit, formatDate, formatMoney, get, has, hasTemplate, integerAttribute, isOwnEvent, notifyLayoutChanged, parseJSONAttr, productUrl, qsa, repeat, scoped, sel, setImage, setStoreHtml, setText, show] = m3;
 
   // tether-core:product.ts
-  var m3 = window.Tether.__core["product.ts"];
-  var [scopes] = m3;
+  var m4 = window.Tether.__core["product.ts"];
+  var [scopes] = m4;
 
   // tether-core:cart.ts
-  var m4 = window.Tether.__core["cart.ts"];
-  var [Cart] = m4;
+  var m5 = window.Tether.__core["cart.ts"];
+  var [Cart] = m5;
 
   // tether-core:page-market.ts
-  var m5 = window.Tether.__core["page-market.ts"];
-  var [setCountry] = m5;
+  var m6 = window.Tether.__core["page-market.ts"];
+  var [setCountry] = m6;
 
   // tether-core:market-codes.ts
-  var m6 = window.Tether.__core["market-codes.ts"];
-  var [toCountry, toLanguage] = m6;
+  var m7 = window.Tether.__core["market-codes.ts"];
+  var [toCountry, toLanguage] = m7;
 
   // src/markets.ts
   var storageKey = () => `${cfg.prefix}:market:${cfg.domain}`;
@@ -87,6 +92,23 @@
     } catch (error) {
       reportError(error, "group add");
       return null;
+    }
+  }
+  function markInvalid(form, input, invalid) {
+    form.classList.toggle("is-invalid", invalid);
+    if (invalid) input?.setAttribute("aria-invalid", "true");
+    else input?.removeAttribute("aria-invalid");
+  }
+  async function applyDiscountCode(form, input, code) {
+    try {
+      await Cart.applyDiscount(code);
+      markInvalid(form, input, false);
+      emit("discount-applied", { code }, form);
+      if (input) input.value = "";
+    } catch (error) {
+      markInvalid(form, input, true);
+      if (error instanceof TetherError && error.code === "INVALID_DISCOUNT") emit("discount-invalid", { code }, form);
+      else reportError(error, "discount");
     }
   }
   function onStorage(event) {

@@ -6,6 +6,8 @@ import type { ShopifyCart } from './cart/store.js';
  * @returns The cart, `null` with nothing to add or after a reported failure.
  */
 export declare function addGroup(button: Element): Promise<ShopifyCart | null>;
+/** Applies the code a `tether-discount-form` submitted; one Shopify refuses marks the form `is-invalid`. */
+export declare function applyDiscountCode(form: Element, input: HTMLInputElement | null, code: string): Promise<void>;
 /** Another tab changed the cart (it is loaded again here) or the visitor's market (this tab follows it). */
 export declare function onStorage(event: StorageEvent): void;
 /**

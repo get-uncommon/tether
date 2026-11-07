@@ -31,7 +31,7 @@
 
   // tether-core:client.ts
   var m2 = window.Tether.__core["client.ts"];
-  var [endpoint, gql, matches, orNull, shaped, TetherError] = m2;
+  var [endpoint, gql, matches, orNull, shaped, TetherError, withTimeout] = m2;
 
   // tether-core:dom.ts
   var m3 = window.Tether.__core["dom.ts"];
@@ -171,31 +171,34 @@
     if (loggedIn) setStored(hintKey(), "1");
     else removeStored(hintKey());
   }
+  async function readJsonObjectOrEmpty(response) {
+    let json;
+    try {
+      json = await response.json();
+    } catch (error) {
+      if (error instanceof SyntaxError) return {};
+      throw error;
+    }
+    return isRecord(json) ? json : {};
+  }
   async function fetchFromWorker(url, init) {
     try {
-      return await fetch(url, init);
+      return await withTimeout(cfg.requestTimeout, async (signal) => {
+        const response = await fetch(url, { ...init, signal });
+        return { response, data: await readJsonObjectOrEmpty(response) };
+      });
     } catch (error) {
       throw new TetherError(`Network error: ${messageOf(error)}`, {
         code: "NETWORK"
       });
     }
   }
-  async function readJsonObjectOrEmpty(response) {
-    let json;
-    try {
-      json = await response.json();
-    } catch {
-      return {};
-    }
-    return isRecord(json) ? json : {};
-  }
   async function serverFetch(path, { method = "GET", body } = {}) {
     const init = { method, credentials: "include" };
     if (method === "POST") init.headers = { "Content-Type": "application/json", "X-Tether-Account": "1" };
     if (body) init.body = JSON.stringify(body);
-    const response = await fetchFromWorker(`${serverBase()}${path}`, init);
+    const { response, data } = await fetchFromWorker(`${serverBase()}${path}`, init);
     if (response.status === 401) return { kind: "logged-out" };
-    const data = await readJsonObjectOrEmpty(response);
     if (!response.ok) {
       const reason = textOrNull(data["error"]) ?? String(response.status);
       const userErrors = toUserErrors(data["userErrors"]);
