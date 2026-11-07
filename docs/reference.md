@@ -306,6 +306,7 @@ loses to it.
 </div>
 ```
 
+`tether-limit` is how many products the list shows, 1 to 250 (`collectionFirst` without it).
 `tether-products="tag:coffee"` uses Shopify search syntax instead of a collection.
 `tether-products="url:q"` searches for the page's `?q=`: a search results page on a static site.
 `tether-recommendations="<handle>"` lists related products (`url:handle` on a dynamic product page;
@@ -351,8 +352,8 @@ Using Webflow CMS lists instead? Put `tether-product` on each CMS item, bound to
 Shopify's predictive search, in its own optional part (3 KB) that loads only on pages with
 `tether-search`. Each list's first child is the template; lists without results are hidden. The
 root gets `is-open` and `tether-search-state` (`loading`, `ready`, `empty`, `error`); the input is
-a combobox (arrow keys, Enter, Escape) for screen readers. `tether-search-limit` (default 6),
-`tether-search-min` (characters, default 2). Event: `tether:search`.
+a combobox (arrow keys, Enter, Escape) for screen readers. `tether-search-limit` (results of each kind,
+1 to 10, default 6), `tether-search-min` (characters, at least 1, default 2). Event: `tether:search`.
 
 ### Bundles / build-a-box
 
@@ -480,17 +481,17 @@ server helpers (`createStorefront()`, and `shop.config.js` with [Astro](astro.md
 | `collectionPath`           | `'/collection'`            | The folder of collection links in [search results](#search-as-you-type)                                                                                                                                                   |
 | `metafields`               | `[]`                       | Product metafields to fetch: `'namespace.key'` or `{ namespace, key }`                                                                                                                                                    |
 | `embedOrigins`             | `[]`                       | More origins a description's iframes may load from, besides the built-in video players: `['https://video.example']`. Whatever such an origin serves is shown in the description, so add only hosts whose embeds you trust |
-| `imagesFirst`              | `25`                       | Images fetched per product                                                                                                                                                                                                |
-| `variantsFirst`            | `100`                      | Variants fetched per product                                                                                                                                                                                              |
-| `sellingPlanGroupsFirst`   | `10`                       | Selling plan groups fetched per product                                                                                                                                                                                   |
-| `sellingPlansFirst`        | `25`                       | Selling plans fetched per group, and plan allocations per variant                                                                                                                                                         |
-| `collectionFirst`          | `24`                       | Products per page of a [product list](#product-lists) without `tether-limit`                                                                                                                                              |
+| `imagesFirst`              | `25`                       | Images fetched per product, 1 to 250                                                                                                                                                                                      |
+| `variantsFirst`            | `100`                      | Variants fetched per product, 1 to 250                                                                                                                                                                                    |
+| `sellingPlanGroupsFirst`   | `10`                       | Selling plan groups fetched per product, 1 to 250                                                                                                                                                                         |
+| `sellingPlansFirst`        | `25`                       | Selling plans fetched per group, and plan allocations per variant, 1 to 250                                                                                                                                               |
+| `collectionFirst`          | `24`                       | Products per page of a [product list](#product-lists) without `tether-limit`, 1 to 250                                                                                                                                    |
 | `retries`                  | `2`                        | How often a failed request is sent again (see **Retries** below)                                                                                                                                                          |
 | `requestTimeout`           | `15000`                    | Milliseconds a Storefront API request may take, its whole answer included, before it fails as a network error, in every supported browser; `0` sets no limit (see **Retries** below)                                      |
 | `maxAge`                   | `60`                       | Seconds a Shopify answer may be cached; `0` leaves it to Shopify, which can be hours                                                                                                                                      |
 | `revalidate`               | `true`                     | Refreshes server-rendered products once in the background (see **Server-rendered products** below)                                                                                                                        |
 | `storageKey`               | `'<prefix>:cart:<domain>'` | The `localStorage` key of the cart id                                                                                                                                                                                     |
-| `cartDrawerOpenClass`      | `'is-open'`                | The class an open cart drawer gets                                                                                                                                                                                        |
+| `cartDrawerOpenClass`      | `'is-open'`                | The class an open cart drawer gets: one class name, without spaces                                                                                                                                                        |
 | `openCartOnAdd`            | `true`                     | Opens the cart drawer after an add to cart                                                                                                                                                                                |
 | `cartFocus`                | `true`                     | Moves keyboard focus into the open cart drawer, keeps Tab inside it and returns focus on close                                                                                                                            |
 | `checkoutTarget`           | `'_self'`                  | `'_blank'` opens checkout in a new tab                                                                                                                                                                                    |
@@ -555,6 +556,9 @@ knows (written as you like: `'de'` becomes `DE`, `'pt-br'` becomes `PT_BR`), and
 a path on your site or an https URL (http only on localhost). So is `partsUrl` (or an http URL on the
 page's own origin); one elsewhere is left out, and the parts load beside the core. Each
 `embedOrigins` entry must be an https origin alone (no path or query); any other entry is left out.
+A count above its maximum (`retries` above 10, a list size such as `imagesFirst` above 250) warns and
+uses the maximum; the count attributes (`tether-limit`, `tether-search-limit`, `tether-search-min`)
+follow the same rules, with one warning per element.
 
 **Server-rendered products.** The products in a `<script type="application/json" data-tether-hydrate>`
 tag (`shop.hydrate()`) are shown without a request, prices included, until the background refresh

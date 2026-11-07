@@ -9,7 +9,8 @@
 # `.config/workflow-linters.json`, each download checked against its sha256 there. It installs no dependency.
 #
 # The `dist` job fails a pull request with a commit that changes dist/, which only a release commit (`Tether X.Y.Z`,
-# made by `npm run release`) does: dist/ is what the last release built, and a release rebuilds it.
+# made by `npm run release`, changing only the release's files) does: dist/ is what the last release built, and a
+# release rebuilds it. `scripts/dist-commits.ts` has the rule, merges included.
 name: ci
 
 on:
@@ -71,20 +72,19 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      # The whole history without file contents: the commits and trees are all `git log -- dist/` reads.
+      # The whole history without file contents: the guard reads commits and trees, and package.json only of a commit
+      # that changes dist/, which git then fetches.
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
           fetch-depth: 0
           filter: blob:none
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: '22.18'
+          package-manager-cache: false
       - name: No commit but a release changes dist/
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: |
-          changed=$(git log --no-merges --format='%h %s' "$BASE_SHA..$HEAD_SHA" -- dist/ | grep -Ev '^[0-9a-f]+ Tether [0-9]+\.[0-9]+\.[0-9]+$' || true)
-          if [ -n "$changed" ]; then
-            echo "$changed"
-            echo "::error::these commits change dist/, which only a release commit does: drop their dist/ changes (git checkout origin/main -- dist/)"
-            exit 1
-          fi
+        run: node --experimental-strip-types scripts/dist-guard.ts "$BASE_SHA" "$HEAD_SHA"

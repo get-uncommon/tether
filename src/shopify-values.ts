@@ -9,6 +9,9 @@ export interface Money {
   currencyCode: string;
 }
 
+/** The largest `first` the Storefront API takes for a connection: a larger one fails the whole query. */
+export const MAX_CONNECTION_SIZE = 250;
+
 /** The `.env` names a store's domain and public Storefront token are read from, first match wins. */
 export const STORE_ENV_NAMES = {
   domain: ['PUBLIC_SHOPIFY_DOMAIN', 'PUBLIC_SHOPIFY_STORE_DOMAIN', 'SHOPIFY_DOMAIN'],

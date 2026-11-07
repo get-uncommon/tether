@@ -20,6 +20,7 @@ export { MARKET_SOURCES } from './config-sections.ts';
 import { toCountry, toLanguage } from './market-codes.ts';
 import type { ApiVersion } from '../server/src/shared/api-versions.ts';
 import type { ShopDomain } from './config-sections.ts';
+import { MAX_CONNECTION_SIZE } from './shopify-values.ts';
 import type { Money } from './shopify-values.ts';
 import type { CountryCode, LanguageCode } from './market-codes.ts';
 
@@ -282,7 +283,7 @@ type HookOption =
   | 'onError';
 type SwitchOption =
   'revalidate' | 'openCartOnAdd' | 'cartFocus' | 'variantUrl' | 'autoMount' | 'observe' | 'astro' | 'debug';
-type TextOption = 'token' | 'productPath' | 'collectionPath' | 'cartDrawerOpenClass';
+type TextOption = 'token' | 'productPath' | 'collectionPath';
 
 const SWITCH_OPTIONS: readonly SwitchOption[] = [
   'revalidate',
@@ -294,7 +295,7 @@ const SWITCH_OPTIONS: readonly SwitchOption[] = [
   'astro',
   'debug',
 ];
-const TEXT_OPTIONS: readonly TextOption[] = ['token', 'productPath', 'collectionPath', 'cartDrawerOpenClass'];
+const TEXT_OPTIONS: readonly TextOption[] = ['token', 'productPath', 'collectionPath'];
 
 /** Options that are written into queries as list sizes or used as counts. */
 const COUNT_OPTIONS: readonly CountOption[] = [
@@ -337,7 +338,7 @@ function dropped(name: string, value: unknown): void {
  */
 function warnUnknownKeys(options: Readonly<Record<string, unknown>>): void {
   for (const key of Object.keys(options)) {
-    if (!(key in DEFAULTS)) warn(`unknown option ${JSON.stringify(key)}: ignored`);
+    if (!Object.hasOwn(DEFAULTS, key)) warn(`unknown option ${JSON.stringify(key)}: ignored`);
   }
 }
 
@@ -361,25 +362,39 @@ const MAX_TIMER_MS = 2_147_483_647;
  */
 const MAX_RETRIES = 10;
 
+/** A count option's integers: from `min` (0 when left out) up to `max` (no limit when left out). */
+interface CountRange {
+  min?: number;
+  max?: number;
+}
+
+/** A connection's `first` asks for at least one node: no variants would leave a product nothing to show. */
+const CONNECTION_RANGE: CountRange = { min: 1, max: MAX_CONNECTION_SIZE };
+
 /**
- * The bounded count options' largest values; the others take any non-negative integer. A larger integer is the site
- * asking for as much as there is, so it gets the maximum.
+ * The bounded count options' ranges; the others take any non-negative integer. An integer above the maximum is the
+ * site asking for as much as there is, so it gets the maximum.
  */
-const COUNT_MAXIMUMS: Partial<Readonly<Record<CountOption, number>>> = {
-  requestTimeout: MAX_TIMER_MS,
-  searchDelay: MAX_TIMER_MS,
-  retries: MAX_RETRIES,
+const COUNT_RANGES: Partial<Readonly<Record<CountOption, CountRange>>> = {
+  imagesFirst: CONNECTION_RANGE,
+  variantsFirst: CONNECTION_RANGE,
+  sellingPlanGroupsFirst: CONNECTION_RANGE,
+  sellingPlansFirst: CONNECTION_RANGE,
+  collectionFirst: CONNECTION_RANGE,
+  requestTimeout: { max: MAX_TIMER_MS },
+  searchDelay: { max: MAX_TIMER_MS },
+  retries: { max: MAX_RETRIES },
 };
 
 /**
- * @returns `value` when it is a non-negative integer, capped at the option's maximum with a warning; the default,
- *   with a warning, for anything else.
+ * @returns `value` when it is an integer from the option's minimum, capped at its maximum with a warning; the
+ *   default, with a warning, for anything else.
  */
 function countOption(name: CountOption, value: unknown): number {
-  if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) {
+  const { min = 0, max: maximum } = COUNT_RANGES[name] ?? {};
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < min) {
     return invalidOption(name, value, DEFAULTS[name]);
   }
-  const maximum = COUNT_MAXIMUMS[name];
   if (maximum === undefined || value <= maximum) return value;
   warn(`${name} ${String(value)} is more than its maximum: using ${String(maximum)}`);
   return maximum;
@@ -391,6 +406,13 @@ function switchOption(name: SwitchOption, value: unknown): boolean {
 
 function textOption(name: TextOption, value: unknown): string {
   return typeof value === 'string' ? value : invalidOption(name, value, DEFAULTS[name]);
+}
+
+/** One `classList` token: `DOMTokenList.add` throws for an empty one or one with whitespace. */
+const CLASS_TOKEN = /^\S+$/;
+
+function classOption(name: 'cartDrawerOpenClass', value: unknown): string {
+  return typeof value === 'string' && CLASS_TOKEN.test(value) ? value : invalidOption(name, value, DEFAULTS[name]);
 }
 
 /** @returns An `Intl` locale as written, `undefined` for one `Intl` doesn't accept. */
@@ -465,6 +487,7 @@ export function resolveConfig(options: TetherOptions | Readonly<Record<string, u
     embedOrigins: embedOriginsOption(options.embedOrigins ?? [], dropped),
     checkoutTarget: choiceOption('checkoutTarget', options.checkoutTarget, ['_self', '_blank']),
     defaultPurchase: choiceOption('defaultPurchase', options.defaultPurchase, ['one-time', 'subscription']),
+    cartDrawerOpenClass: classOption('cartDrawerOpenClass', options.cartDrawerOpenClass),
   };
   for (const name of COUNT_OPTIONS) resolved[name] = countOption(name, options[name]);
   for (const name of SWITCH_OPTIONS) resolved[name] = switchOption(name, options[name]);

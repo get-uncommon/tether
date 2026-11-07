@@ -13,7 +13,13 @@ import { untypedQuery, withContext, TetherError } from './client.ts';
 import * as plans from './selling-plans.ts';
 import { imageUrl, formatPercent } from './dom.ts';
 import { initialState } from './initial.ts';
-import { STORE_ENV_NAMES, formatMoney, productKey, productUrl as productUrlFor } from './shopify-values.ts';
+import {
+  MAX_CONNECTION_SIZE,
+  STORE_ENV_NAMES,
+  formatMoney,
+  productKey,
+  productUrl as productUrlFor,
+} from './shopify-values.ts';
 import { createCatalog } from './storefront/catalog.ts';
 import { jsonLdData, scriptJson } from './storefront/json-ld.ts';
 import type { TetherConfig, TetherOptions } from './config.ts';
@@ -69,8 +75,6 @@ interface HydrateOptions {
 }
 
 const DEFAULT_PAGE_SIZE = 25;
-/** The largest `first` Shopify accepts for a list; a larger one fails the query. */
-const MAX_PAGE_SIZE = 250;
 /** The images a card keeps: the main one and a hover image (`tether-bind="image:2"`). */
 const DEFAULT_CARD_IMAGES = 2;
 /** The version of the `data-tether-hydrate` payload, for the browser script reading it. */
@@ -103,7 +107,7 @@ function fromEnv(options: StoreEnv, names: readonly (keyof StoreEnv)[]): string 
 function storefrontConfig(options: StorefrontOptions): ServerConfig {
   const known: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(options)) {
-    if (key in DEFAULTS) known[key] = value;
+    if (Object.hasOwn(DEFAULTS, key)) known[key] = value;
   }
   const domain = typeof options.domain === 'string' && options.domain ? options.domain : '';
   const token = typeof options.token === 'string' && options.token ? options.token : '';
@@ -123,10 +127,10 @@ function storefrontConfig(options: StorefrontOptions): ServerConfig {
 
 /**
  * @param value From the site, which a JavaScript caller can set to anything.
- * @returns `value` when it is an integer from 1 to `MAX_PAGE_SIZE`; the default, with a warning unless it was left out.
+ * @returns `value` when it is an integer from 1 to `MAX_CONNECTION_SIZE`; the default, with a warning unless it was left out.
  */
 function pageSizeOption(value: unknown): number {
-  if (typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= MAX_PAGE_SIZE) return value;
+  if (typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= MAX_CONNECTION_SIZE) return value;
   if (value !== undefined) warn(`invalid pageSize ${JSON.stringify(value)}: using ${String(DEFAULT_PAGE_SIZE)}`);
   return DEFAULT_PAGE_SIZE;
 }

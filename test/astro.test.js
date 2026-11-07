@@ -16,6 +16,25 @@ test('server: createStorefront(import.meta.env) maps the PUBLIC_SHOPIFY_* names 
   assert.equal(shop.config.domain, 'x.myshopify.com');
   assert.equal(shop.config.token, 'tok');
   assert.ok(!('MODE' in shop.config));
+  // A name Object.prototype has is no option either, so it is left out like MODE, without a warning.
+  /** @type {unknown[][]} */
+  const warned = [];
+  const { warn } = console;
+  console.warn = (...args) => warned.push(args);
+  try {
+    const inherited = server.createStorefront({
+      ...importMetaEnv,
+      ...Object.fromEntries([
+        ['constructor', 'x'],
+        ['toString', 'y'],
+      ]),
+    });
+    assert.equal(Object.hasOwn(inherited.config, 'constructor'), false);
+    assert.equal(Object.hasOwn(inherited.config, 'toString'), false);
+  } finally {
+    console.warn = warn;
+  }
+  assert.deepEqual(warned, []);
   assert.throws(() => server.createStorefront({}), /needs domain and token/);
 });
 

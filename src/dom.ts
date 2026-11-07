@@ -232,6 +232,49 @@ export function parseJSONAttr(el: Element | null | undefined, name: string): unk
   }
 }
 
+/** The integers a count attribute takes, and the value it has when it is missing or invalid. */
+interface IntegerRange {
+  min: number;
+  max?: number;
+  fallback: number;
+}
+
+const INTEGER_TEXT = /^-?\d+$/;
+
+/** The attributes `integerAttribute` has warned about, per element, so a list that reloads warns once. */
+const invalidIntegerAttributes = new WeakMap<Element, Set<string>>();
+
+function warnInvalidAttribute(el: Element, name: string, message: string): void {
+  const warned = invalidIntegerAttributes.get(el) ?? new Set();
+  invalidIntegerAttributes.set(el, warned);
+  if (warned.has(name)) return;
+  warned.add(name);
+  warn(`${attr(name)} ${message}`, el);
+}
+
+/**
+ * Parses a count attribute with the config's count-option rules: an integer above `max` is the site asking for as
+ * much as there is, so it gets `max`; a missing or empty attribute is `fallback`, and so, with a warning, is one that
+ * isn't an integer or is below `min`. An element warns once per attribute.
+ */
+export function integerAttribute(el: Element, name: string, { min, max, fallback }: IntegerRange): number {
+  const raw = get(el, name)?.trim();
+  if (!raw) return fallback;
+  // Number() alone would also take `0x10` and `1e2`.
+  const value = INTEGER_TEXT.test(raw) ? Number(raw) : Number.NaN;
+  if (Number.isNaN(value) || value < min) {
+    warnInvalidAttribute(
+      el,
+      name,
+      `${JSON.stringify(raw)} is not a whole number from ${String(min)}: using ${String(fallback)}`,
+    );
+    return fallback;
+  }
+  if (max === undefined || value <= max) return value;
+  warnInvalidAttribute(el, name, `${raw} is more than its maximum: using ${String(max)}`);
+  return max;
+}
+
 export type AttributeValue = string | number | boolean | null | undefined;
 
 /** @returns A JSON value as attribute text: `''` for none, an object or array as its JSON. */
