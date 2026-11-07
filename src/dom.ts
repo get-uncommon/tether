@@ -87,6 +87,9 @@ const isTextField = (el: Element): el is HTMLInputElement | HTMLTextAreaElement 
 export const isField = (el: Element): el is HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement =>
   isTextField(el) || el.tagName === 'SELECT';
 
+/** An event's target that is an element, not the document or the window. */
+export const isElement = (target: EventTarget | null): target is Element => target instanceof window.Element;
+
 /**
  * Sets the text of `el`, or its value when it is a form field.
  *

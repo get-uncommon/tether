@@ -6,7 +6,7 @@
 **Shopify products, cart and subscriptions in Webflow or Astro, with HTML attributes.**
 
 [![npm](https://img.shields.io/npm/v/@occluze/tether?colorA=000000&colorB=3DE72E)](https://www.npmjs.com/package/@occluze/tether)
-[![size](https://img.shields.io/badge/gzipped-30%20KB-3DE72E?labelColor=000000)](https://cdn.jsdelivr.net/gh/ravi-klaassens/tether@0.10/dist/tether.min.js)
+[![size](https://img.shields.io/badge/gzipped-29%20KB-3DE72E?labelColor=000000)](https://cdn.jsdelivr.net/gh/ravi-klaassens/tether@0.10/dist/tether.min.js)
 [![license](https://img.shields.io/npm/l/@occluze/tether?colorA=000000&colorB=3DE72E)](LICENSE)
 
 ## Install

@@ -7,13 +7,8 @@ import { orNull, request, shaped, TetherError } from '../client.ts';
 import { productFragment } from '../fragments.ts';
 import { collectionFields } from '../shopify-fields.ts';
 import { productKey } from '../shopify-values.ts';
-import {
-  PRODUCT,
-  PRODUCT_NODE,
-  isCollectionAnswer,
-  isRecommendationsAnswer,
-  isSearchAnswer,
-} from '../product-shape.ts';
+import { PRODUCT, PRODUCT_NODE } from '../product-shape.ts';
+import { isCollectionAnswer, isRecommendationsAnswer, isSearchAnswer } from '../product-answers.ts';
 import type { DataCheck, StorefrontConfig } from '../client.ts';
 import type { ProductFragmentConfig, Product } from '../fragments.ts';
 import type { ProductRef, RecommendationIntent } from '../shopify-values.ts';

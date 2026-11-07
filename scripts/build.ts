@@ -12,10 +12,11 @@
  *                                         (.config/tsconfig/declarations.json)
  *
  * Size comes from the build, not from golfed source: ES2020 output (no helpers for ?. and ??), GraphQL strings
- * minified, the parts in their own files.
+ * minified, the minified `<script>` files passed through terser as well (`terserPlugin`), the parts in their own files.
  */
 import * as esbuild from 'esbuild';
 import ts from 'typescript';
+import { minify as terser } from 'terser';
 import { existsSync } from 'node:fs';
 import { readFile, readdir, writeFile, mkdir } from 'node:fs/promises';
 import { gzipSync, brotliCompressSync } from 'node:zlib';
@@ -30,7 +31,9 @@ const SRC = join(ROOT, 'src');
 const watch = process.argv.includes('--watch');
 const outIndex = process.argv.indexOf('--out');
 const OUT = resolve(ROOT, outIndex === -1 ? 'dist' : (process.argv[outIndex + 1] ?? 'dist'));
-const TARGET = 'es2020';
+/** The newest ECMAScript edition the browser files use, for esbuild's `target` and terser's `ecma`. */
+const ECMA = 2020;
+const TARGET = `es${String(ECMA)}`;
 const BYTES_PER_KB = 1024;
 const GZIP_LEVEL = 9;
 
@@ -44,6 +47,35 @@ const graphqlPlugin: esbuild.Plugin = {
       contents: minifyGraphqlTemplates(await readFile(args.path, 'utf8'), args.path),
       loader: 'ts',
     }));
+  },
+};
+
+/**
+ * Minifies a minified `<script>` file again with terser, whose compression and renaming esbuild's minifier lacks, and
+ * writes it and its source map, which terser chains onto esbuild's so it still maps to src/: a build with this plugin
+ * runs with `write: false`. Terser emits nothing newer than `ECMA` and uses none of its unsafe rewrites.
+ */
+const terserPlugin: esbuild.Plugin = {
+  name: 'tether-terser',
+  setup(build) {
+    build.onEnd(async (result) => {
+      const outputs = result.outputFiles ?? [];
+      const script = outputs.find((file) => file.path.endsWith('.js'));
+      if (result.errors.length || !script) return;
+      const map = outputs.find((file) => file.path === `${script.path}.map`);
+      const minified = await terser(script.text, {
+        ecma: ECMA,
+        compress: { passes: 3 },
+        mangle: true,
+        format: { comments: false },
+        ...(map && {
+          sourceMap: { content: map.text, url: basename(map.path), includeSources: true, asObject: true },
+        }),
+      });
+      if (minified.code === undefined) throw new Error(`terser wrote no code for ${script.path}`);
+      await writeFile(script.path, minified.code);
+      if (map) await writeFile(map.path, JSON.stringify(minified.map));
+    });
   },
 };
 
@@ -155,7 +187,8 @@ const partBuild = (
   format: 'iife',
   minify,
   outfile: join(out, `tether.${name}${minify ? '.min' : ''}.js`),
-  plugins: [partPlugin(exportsByFile), graphqlPlugin],
+  write: !minify,
+  plugins: [partPlugin(exportsByFile), graphqlPlugin, ...(minify ? [terserPlugin] : [])],
 });
 
 /** @returns The optional parts, which the core's builds depend on. */
@@ -180,8 +213,9 @@ function scriptCoreBuilds(out: string): esbuild.BuildOptions[] {
       ...iife,
       outfile: join(out, 'tether.min.js'),
       minify: true,
-      sourcemap: true,
-      plugins: [iifeLazyPlugin, partIntegrityPlugin(out, true), graphqlPlugin],
+      sourcemap: 'external',
+      write: false,
+      plugins: [iifeLazyPlugin, partIntegrityPlugin(out, true), graphqlPlugin, terserPlugin],
     },
   ];
 }

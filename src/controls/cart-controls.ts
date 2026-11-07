@@ -5,12 +5,10 @@
  */
 import { cfg, reportError } from '../config.ts';
 import { Cart, trapFocus } from '../cart.ts';
-import { sel, busy, INTEGER_TEXT } from '../dom.ts';
+import { sel, busy, INTEGER_TEXT, isElement } from '../dom.ts';
 
 /** @returns The attribute a rendered cart line carries its line id in. */
 const lineKeyAttribute = (): string => `data-${cfg.prefix}-key`;
-
-const isElement = (target: EventTarget | null): target is Element => target instanceof window.Element;
 
 /** @returns The rendered cart line `target` is in, with its line id. */
 function lineOf(target: Element): { line: Element; id: string } | null {

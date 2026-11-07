@@ -4,18 +4,11 @@
  * truncated or hand-written entry, or an answer missing fields, would otherwise fail deep inside a render instead of
  * being skipped or refused.
  */
-import { matches, orNull, shaped } from './client.ts';
+import { matches } from './client.ts';
 import { field, isRecord } from '../server/src/shared/json.ts';
 import type { ShapeOf } from './client.ts';
 import type { Product } from './fragments.ts';
 import type { Money } from './shopify-values.ts';
-import type { Collection, PageInfo } from './loader.ts';
-
-/** A page of a GraphQL connection of products. */
-export interface ProductConnection {
-  nodes: Product[];
-  pageInfo: PageInfo;
-}
 
 /** A Storefront API `MoneyV2`. */
 export const MONEY = { amount: 'string', currencyCode: 'string' } as const satisfies ShapeOf<Money>;
@@ -35,12 +28,6 @@ export const PRODUCT = {
   variants: { nodes: [{ id: 'string', price: MONEY, selectedOptions: ['object'] }] },
 } as const satisfies ShapeOf<Product>;
 
-/** A page of products, with the `pageInfo` paging reads. */
-const PRODUCT_CONNECTION = {
-  nodes: [PRODUCT],
-  pageInfo: { hasNextPage: 'boolean' },
-} as const satisfies ShapeOf<ProductConnection>;
-
 /** True for a value with the structure of `PRODUCT` and a non-empty id and handle. */
 export const isProductShape = (value: unknown): value is Product =>
   field(value, 'id') !== '' && field(value, 'handle') !== '' && matches(value, PRODUCT);
@@ -51,12 +38,3 @@ export const isProductShape = (value: unknown): value is Product =>
  */
 export const PRODUCT_NODE = (node: unknown): node is Product | { id?: undefined } =>
   isRecord(node) && (node['id'] === undefined || matches(node, PRODUCT));
-
-/** A collection's answer: `null` for a handle the store doesn't have. Its other fields are written as text. */
-export const isCollectionAnswer = shaped<{ collection: (Collection & { products: ProductConnection }) | null }>({
-  collection: orNull({ handle: 'string', products: PRODUCT_CONNECTION }),
-});
-export const isSearchAnswer = shaped<{ products: ProductConnection }>({ products: PRODUCT_CONNECTION });
-export const isRecommendationsAnswer = shaped<{ productRecommendations: Product[] | null }>({
-  productRecommendations: orNull([PRODUCT]),
-});
