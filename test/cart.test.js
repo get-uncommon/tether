@@ -117,7 +117,7 @@ test('status: unknown before the first load, empty without a saved cart', async 
   assert.equal(calls.length, 0, 'no request without a saved cart');
 });
 
-test('status: ready with the saved cart; error (cart kept) when Shopify cannot be reached', async () => {
+test('status: ready with the saved cart; error, with the cart, when Shopify cannot be reached, and without once it has no cart', async () => {
   localStorage.setItem(KEY, 'gid://shopify/Cart/abc');
   answers['TetherCart'] = () => ({ data: { cart: oneLine(2) } });
   await Cart.init();
@@ -129,9 +129,15 @@ test('status: ready with the saved cart; error (cart kept) when Shopify cannot b
   await Cart.init();
   assert.equal(Cart.status.kind, 'error');
   assert.match(String(Cart.lastError), /Internal error/);
-  assert.equal(Cart.state, null);
+  assert.equal(Cart.count, 2, 'the cart as Shopify last sent it');
   assert.equal(Cart.id(), 'gid://shopify/Cart/abc', 'the saved cart is probably fine');
   assert.equal(reported.at(-1)?.context, 'cart load failed');
+
+  answers['TetherCart'] = () => ({ errors: [{ message: 'The specified cart does not exist.' }] });
+  await Cart.init();
+  assert.match(String(Cart.lastError), /does not exist/);
+  assert.equal(Cart.state, null, 'Shopify no longer has the cart');
+  assert.equal(Cart.id(), null);
 });
 
 test('status: a failed change shows cart-error and keeps the cart; the next success clears it', async () => {

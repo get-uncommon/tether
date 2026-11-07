@@ -200,6 +200,33 @@ test('a hook that throws gets its fallback and is reported, whatever it throws; 
   }
 });
 
+test('a hook reported once per message stops remembering messages after 100, and reports new ones each time', () => {
+  /** @type {string[]} */
+  const reported = [];
+  const { warn } = console;
+  console.warn = () => {};
+  configure({
+    domain: 'shop.test',
+    token: 't',
+    onError: (error) => reported.push(error instanceof Error ? error.message : String(error)),
+  });
+  // A message carrying data, as `formatMoney` failing for each price.
+  const messages = Array.from({ length: 150 }, (_, index) => `bad amount ${index}`);
+  try {
+    for (const message of [...messages, ...messages]) {
+      callHook('onValueChange', () => {
+        throw new Error(message);
+      });
+    }
+    const count = (/** @type {string} */ message) => reported.filter((each) => each === message).length;
+    assert.equal(count('bad amount 0'), 1, 'remembered');
+    assert.equal(count('bad amount 149'), 2, 'past the limit, reported each time');
+  } finally {
+    console.warn = warn;
+    configure({ domain: 'shop.test', token: 't' });
+  }
+});
+
 test('configure replaces the shared config in place', () => {
   const shared = cfg;
   quietly(() => configure({ domain: 'a.test', token: 't', prefix: 'wfs' }));

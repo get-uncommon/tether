@@ -566,11 +566,15 @@ export function reportError(error: unknown, context: string): void {
 /** The hook failures reported so far, as `<hook>: <message>`. */
 const reportedHookFailures = new Set<string>();
 
+/** A message can carry data (an amount, an id): past this many, a new one is reported each time instead of kept. */
+const MAX_REMEMBERED_HOOK_FAILURES = 100;
+
 /**
  * Calls one of the site's hooks. A bug in it is reported under `name`, and `fallback` answers instead, so the site's
  * code never fails the render, or the cart change Shopify already applied, that called it. A thrown `Error` is reported
- * once per page load for each message (a `formatMoney` runs for every price on every render). Anything else thrown is
- * reported each time: it has no message, and turning it into text can throw too.
+ * once per page load for each message (a `formatMoney` runs for every price on every render), for the first
+ * `MAX_REMEMBERED_HOOK_FAILURES` messages. Anything else thrown is reported each time: it has no message, and turning
+ * it into text can throw too.
  */
 export function callHook(name: string, hook: () => unknown): void;
 export function callHook<T>(name: string, hook: () => T, fallback: () => T): T;
@@ -580,7 +584,7 @@ export function callHook(name: string, hook: () => unknown, fallback?: () => unk
   } catch (error) {
     const failure = error instanceof Error && `${name}: ${error.message}`;
     if (!failure || !reportedHookFailures.has(failure)) {
-      if (failure) reportedHookFailures.add(failure);
+      if (failure && reportedHookFailures.size < MAX_REMEMBERED_HOOK_FAILURES) reportedHookFailures.add(failure);
       reportError(error, name);
     }
     return fallback?.();

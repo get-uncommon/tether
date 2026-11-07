@@ -292,3 +292,37 @@ test('checkout: without any checkout URL the failure is reported and nothing ope
     ['checkout failed'],
   );
 });
+
+test('checkout: when the visitor closed the _blank tab before its URL came, this page stays', async () => {
+  await loadSaved(oneLine());
+  const url = deferred();
+  answers['TetherCheckout'] = async () => {
+    await url.promise;
+    return { data: { cart: { checkoutUrl: 'https://shop.test/checkouts/1' } } };
+  };
+  let navigated = 0;
+  const onNavigation = (/** @type {Error} */ error) => {
+    if (error.message.includes('navigation')) navigated++;
+  };
+  dom.virtualConsole.on('jsdomError', onNavigation);
+  /** @type {string[]} */
+  const checkouts = [];
+  const onCheckout = (/** @type {Event} */ event) => checkouts.push(String(detailOf(event)['url']));
+  document.addEventListener('tether:checkout', onCheckout);
+  const tab = new JSDOM('', { url: 'https://site.test/' }).window;
+  const open = window.open.bind(window);
+  Object.assign(window, { open: () => tab });
+  try {
+    const checkout = Cart.checkout('_blank');
+    Object.defineProperty(tab, 'closed', { value: true });
+    url.resolve();
+    assert.equal(await checkout, null);
+    assert.equal(navigated, 0, 'this page did not go to checkout');
+    assert.deepEqual(checkouts, []);
+    assert.equal(reported.length, 0);
+  } finally {
+    Object.assign(window, { open });
+    document.removeEventListener('tether:checkout', onCheckout);
+    dom.virtualConsole.off('jsdomError', onNavigation);
+  }
+});
