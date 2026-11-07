@@ -18,13 +18,15 @@ import * as esbuild from 'esbuild';
 import ts from 'typescript';
 import { minify as terser } from 'terser';
 import { existsSync } from 'node:fs';
-import { readFile, readdir, writeFile, mkdir } from 'node:fs/promises';
+import { readFile, readdir, writeFile, mkdir, rename, rm } from 'node:fs/promises';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { gzipSync, brotliCompressSync } from 'node:zlib';
 import { createHash } from 'node:crypto';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, join, basename, resolve } from 'node:path';
 import { minifyGraphqlTemplates } from './graphql-minify.ts';
 import { replaceFolder } from './replace-folder.ts';
+import { rebuildUntilCurrent, type PartHashes } from './watch-core.ts';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const SRC = join(ROOT, 'src');
@@ -47,6 +49,54 @@ const graphqlPlugin: esbuild.Plugin = {
       contents: minifyGraphqlTemplates(await readFile(args.path, 'utf8'), args.path),
       loader: 'ts',
     }));
+  },
+};
+
+/** The suffix of the temporary file `writeAtomically` writes, `<file>.tmp-<pid>`. */
+const TEMPORARY_SUFFIX = /\.tmp-\d+$/;
+
+/** The codes Windows fails a rename with while another handle has the file it replaces open. */
+const BUSY_CODES: ReadonlySet<unknown> = new Set(['EPERM', 'EACCES', 'EBUSY']);
+const RENAME_ATTEMPTS = 20;
+const RENAME_RETRY_MS = 50;
+
+/**
+ * Writes a file through a temporary file beside it, renamed into its place, so neither a core that hashes a part file
+ * in `--watch` nor a browser loading one reads it half written. On Windows the rename fails while anything reads the
+ * file, the core's own hashing included, so a busy file is retried, for up to about 10 seconds. An interrupted run
+ * leaves the temporary file, which the next build's folder check counts as the build's own (`isBuildEntry`) and the
+ * build's folder swap removes.
+ *
+ * @throws The rename's error when it fails otherwise, or the file stays busy.
+ */
+async function writeAtomically(file: string, contents: string | Uint8Array): Promise<void> {
+  const temporary = `${file}.tmp-${String(process.pid)}`;
+  await writeFile(temporary, contents);
+  try {
+    for (let attempt = 1; ; attempt += 1) {
+      try {
+        await rename(temporary, file);
+        return;
+      } catch (error) {
+        const busy = error instanceof Error && 'code' in error && BUSY_CODES.has(error.code);
+        if (!busy || attempt === RENAME_ATTEMPTS) throw error;
+        await sleep(RENAME_RETRY_MS * attempt);
+      }
+    }
+  } finally {
+    // Gone after the rename; what a failed rename left otherwise.
+    await rm(temporary, { force: true });
+  }
+}
+
+/** Writes a build's files with `writeAtomically`: a build with this plugin runs with `write: false`. */
+const atomicWritePlugin: esbuild.Plugin = {
+  name: 'tether-atomic-write',
+  setup(build) {
+    build.onEnd(async (result) => {
+      if (result.errors.length) return;
+      for (const file of result.outputFiles ?? []) await writeAtomically(file.path, file.contents);
+    });
   },
 };
 
@@ -73,8 +123,8 @@ const terserPlugin: esbuild.Plugin = {
         }),
       });
       if (minified.code === undefined) throw new Error(`terser wrote no code for ${script.path}`);
-      await writeFile(script.path, minified.code);
-      if (map) await writeFile(map.path, JSON.stringify(minified.map));
+      await writeAtomically(script.path, minified.code);
+      if (map) await writeAtomically(map.path, JSON.stringify(minified.map));
     });
   },
 };
@@ -84,20 +134,22 @@ const terserPlugin: esbuild.Plugin = {
  * each time the core builds, so a core always carries the hashes of the parts built before it.
  *
  * @param minified Which parts: a core loads the parts of its own kind (tether.min.js the .min ones).
+ * @param onEmbed Called with the hashes each build of the core embeds.
  */
-function partIntegrityPlugin(out: string, minified: boolean): esbuild.Plugin {
+function partIntegrityPlugin(out: string, minified: boolean, onEmbed?: (hashes: PartHashes) => void): esbuild.Plugin {
   return {
     name: 'tether-part-integrity',
     setup(build) {
-      build.onLoad({ filter: /[/\\]src[/\\]part-integrity\.ts$/ }, async () => ({
-        contents: `export const PART_INTEGRITY = ${JSON.stringify(await partHashes(out, minified))};\n`,
-        loader: 'js',
-      }));
+      build.onLoad({ filter: /[/\\]src[/\\]part-integrity\.ts$/ }, async () => {
+        const hashes = await partHashes(out, minified);
+        onEmbed?.(hashes);
+        return { contents: `export const PART_INTEGRITY = ${JSON.stringify(hashes)};\n`, loader: 'js' };
+      });
     },
   };
 }
 
-/** @returns The `sha384-…` hash of each built part file, by file name. */
+/** @returns The `sha384-…` hash of each built part file of one kind, by file name. */
 async function partHashes(out: string, minified: boolean): Promise<Record<string, string>> {
   const integrity: Record<string, string> = {};
   for (const file of PARTS.map((name) => `tether.${name}${minified ? '.min' : ''}.js`)) {
@@ -187,37 +239,36 @@ const partBuild = (
   format: 'iife',
   minify,
   outfile: join(out, `tether.${name}${minify ? '.min' : ''}.js`),
-  write: !minify,
-  plugins: [partPlugin(exportsByFile), graphqlPlugin, ...(minify ? [terserPlugin] : [])],
+  write: false,
+  plugins: [partPlugin(exportsByFile), graphqlPlugin, minify ? terserPlugin : atomicWritePlugin],
 });
 
-/** @returns The optional parts, which the core's builds depend on. */
-async function partBuilds(out: string): Promise<esbuild.BuildOptions[]> {
+/** Whether a `<script>` file is minified: the core and each part are built both ways. */
+const SCRIPT_KINDS = [false, true];
+
+/** @returns The optional parts of one kind, which the core of that kind depends on. */
+async function partBuilds(out: string, minified: boolean): Promise<esbuild.BuildOptions[]> {
   const exportsByFile = await coreExports();
-  return PARTS.flatMap((name) => [
-    partBuild(out, exportsByFile, name, false),
-    partBuild(out, exportsByFile, name, true),
-  ]);
+  return PARTS.map((name) => partBuild(out, exportsByFile, name, minified));
 }
 
-/** @returns The `<script>` cores, which carry the hashes of the parts built before them. */
-function scriptCoreBuilds(out: string): esbuild.BuildOptions[] {
+/**
+ * @param onEmbed Called with the part hashes each build embeds (`partIntegrityPlugin`).
+ * @returns The `<script>` core of one kind, which carries the hashes of the parts of its kind built before it.
+ */
+function scriptCoreBuild(out: string, minified: boolean, onEmbed?: (hashes: PartHashes) => void): esbuild.BuildOptions {
   const iife: esbuild.BuildOptions = { ...common, entryPoints: [join(SRC, 'index.ts')], format: 'iife' };
-  return [
-    {
-      ...iife,
-      outfile: join(out, 'tether.js'),
-      plugins: [iifeLazyPlugin, partIntegrityPlugin(out, false), graphqlPlugin],
-    },
-    {
-      ...iife,
-      outfile: join(out, 'tether.min.js'),
-      minify: true,
-      sourcemap: 'external',
-      write: false,
-      plugins: [iifeLazyPlugin, partIntegrityPlugin(out, true), graphqlPlugin, terserPlugin],
-    },
-  ];
+  const integrity = partIntegrityPlugin(out, minified, onEmbed);
+  if (!minified)
+    return { ...iife, outfile: join(out, 'tether.js'), plugins: [iifeLazyPlugin, integrity, graphqlPlugin] };
+  return {
+    ...iife,
+    outfile: join(out, 'tether.min.js'),
+    minify: true,
+    sourcemap: 'external',
+    write: false,
+    plugins: [iifeLazyPlugin, integrity, graphqlPlugin, terserPlugin],
+  };
 }
 
 /** @returns The ES modules for bundlers and the Barba preset. */
@@ -326,12 +377,14 @@ const PART_FILE = /^tether\.([\w-]+?)(?:\.min)?\.js$/;
 
 /**
  * @returns Whether `entry` is a file a build writes, `entries` being the output folder's: one of this build's
- *   (`BUILD_ENTRIES`), a file the OS writes (`OS_FILES`), or a part a build of older source wrote, known by its other
- *   kind beside it, since a build writes every part both plain and minified. A site's own `tether.config.js` is none.
+ *   (`BUILD_ENTRIES`), a file the OS writes (`OS_FILES`), a part a build of older source wrote, known by its other kind
+ *   beside it, since a build writes every part both plain and minified, or the temporary file of any of those that an
+ *   interrupted run left (`writeAtomically`). A site's own `tether.config.js` is none.
  */
 function isBuildEntry(entry: string, entries: readonly string[]): boolean {
-  if (BUILD_ENTRIES.has(entry) || OS_FILES.has(entry)) return true;
-  const part = PART_FILE.exec(entry)?.[1];
+  const written = entry.replace(TEMPORARY_SUFFIX, '');
+  if (BUILD_ENTRIES.has(written) || OS_FILES.has(written)) return true;
+  const part = PART_FILE.exec(written)?.[1];
   return part !== undefined && entries.includes(`tether.${part}.js`) && entries.includes(`tether.${part}.min.js`);
 }
 
@@ -355,8 +408,10 @@ async function buildInto(out: string): Promise<void> {
   );
   await buildTypes(out);
   // The parts first: the cores read their hashes from the built files.
-  await Promise.all((await partBuilds(out)).map((options) => esbuild.build(options)));
-  await Promise.all([...scriptCoreBuilds(out), ...moduleBuilds(out)].map((options) => esbuild.build(options)));
+  const parts = await Promise.all(SCRIPT_KINDS.map((minified) => partBuilds(out, minified)));
+  await Promise.all(parts.flat().map((options) => esbuild.build(options)));
+  const cores = SCRIPT_KINDS.map((minified) => scriptCoreBuild(out, minified));
+  await Promise.all([...cores, ...moduleBuilds(out)].map((options) => esbuild.build(options)));
 }
 
 /**
@@ -370,24 +425,36 @@ async function build(): Promise<void> {
 }
 
 /**
- * Watches the sources, rebuilding into the output folder itself. A part that rebuilds rebuilds the `<script>` cores
- * too, so they carry its new hash.
+ * Watches the sources, rebuilding into the output folder itself. A part that rebuilds rebuilds the `<script>` core of
+ * its kind too, until the core carries the hashes of the part files as they are then (`rebuildUntilCurrent`).
  */
 async function watchAll(): Promise<void> {
   for (const options of moduleBuilds(OUT)) await (await esbuild.context(options)).watch();
-  const cores = await Promise.all(scriptCoreBuilds(OUT).map((options) => esbuild.context(options)));
-  for (const core of cores) await core.watch();
-  const rebuildCores: esbuild.Plugin = {
-    name: 'tether-rebuild-cores',
-    setup(build) {
-      build.onEnd(async (result) => {
-        if (!result.errors.length) await Promise.all(cores.map((core) => core.rebuild()));
-      });
-    },
-  };
-  for (const options of await partBuilds(OUT)) {
-    const context = await esbuild.context({ ...options, plugins: [...(options.plugins ?? []), rebuildCores] });
-    await context.watch();
+  for (const minified of SCRIPT_KINDS) {
+    let embedded: PartHashes | undefined;
+    const core = await esbuild.context(
+      scriptCoreBuild(OUT, minified, (hashes) => {
+        embedded = hashes;
+      }),
+    );
+    await core.watch();
+    const rebuildCore: esbuild.Plugin = {
+      name: 'tether-rebuild-core',
+      setup(build) {
+        build.onEnd(async (result) => {
+          if (result.errors.length) return;
+          await rebuildUntilCurrent(
+            () => core.rebuild(),
+            () => embedded,
+            () => partHashes(OUT, minified),
+          );
+        });
+      },
+    };
+    for (const options of await partBuilds(OUT, minified)) {
+      const context = await esbuild.context({ ...options, plugins: [...(options.plugins ?? []), rebuildCore] });
+      await context.watch();
+    }
   }
 }
 

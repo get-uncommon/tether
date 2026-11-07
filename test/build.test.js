@@ -1,13 +1,11 @@
 // The real <script> build (npm test builds it into .test-dist/), loaded like a browser would: core + optional parts as files.
 import { test, before } from 'node:test';
 import assert from 'node:assert/strict';
-import { JSDOM, VirtualConsole } from 'jsdom';
 import { spawn } from 'node:child_process';
 import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { connect, createServer } from 'node:net';
 import { tmpdir } from 'node:os';
-import { pathToFileURL, fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 import {
   builtTether,
   find,
@@ -18,9 +16,9 @@ import {
   partsOf,
   product,
 } from './fixtures.js';
+import { assertLoadedWithIntegrity, builtPage, DIST } from './built-page.js';
 import { fieldOf, waitFor, within } from '../server/test/mocks.js';
 
-const DIST = join(dirname(fileURLToPath(import.meta.url)), '..', '.test-dist');
 const PART_FILE = /^tether\.[\w-]+(\.min)?\.js$/;
 /** The files `PART_FILE` matches that are no optional part. */
 const CORES = new Set(['tether.min.js', 'tether.esm.js']);
@@ -33,70 +31,61 @@ const ops = [];
 
 before(
   async () => {
-    const html = `<!doctype html><html lang="de"><head>
-    <script>window.TETHER_CONFIG = { domain: 'shop.test', token: 't', autoMount: true };</script>
-    <script src="${pathToFileURL(join(DIST, 'tether.min.js')).href}"></script>
-  </head><body>
+    const body = `
     <div tether-product="coffee-box"><h1 tether-bind="title"></h1><span id="price" tether-bind="price"></span></div>
     <select id="cs" tether-country-select></select>
     <div id="list" tether-collection="tea">
       <h2 tether-collection-bind="title"></h2>
       <div tether-list><div><span tether-bind="title"></span><span tether-bind="price"></span></div></div>
-    </div>
-  </body></html>`;
-    const virtualConsole = new VirtualConsole();
-    const dom = new JSDOM(html, {
-      url: 'https://site.test/',
-      runScripts: 'dangerously',
-      resources: 'usable',
-      virtualConsole,
-      beforeParse(window) {
-        window.fetch = async (_url, init) => {
-          const { query, variables } = graphqlRequest(init);
-          const op = operationName(query);
-          ops.push({ op, query });
-          const data = {
-            TetherProducts: () =>
-              Object.fromEntries(
-                Object.keys(variables)
-                  .filter((key) => key.startsWith('h'))
-                  .map((key) => [key, variables[key] === 'coffee-box' ? product : null]),
-              ),
-            TetherCollection: () => ({
-              collection: {
-                id: 'gid://shopify/Collection/1',
-                handle: 'tea',
-                title: 'Tea',
-                description: '',
-                descriptionHtml: '',
-                image: null,
-                seo: { title: null, description: null },
-                products: { nodes: [teaBox], pageInfo: { hasNextPage: false, endCursor: null } },
-              },
-            }),
-            TetherLocalization: () => ({
-              localization: {
-                country: { isoCode: 'NL', name: 'Netherlands', currency: { isoCode: 'EUR', symbol: '€' } },
-                availableCountries: [
-                  { isoCode: 'NL', name: 'Netherlands', currency: { isoCode: 'EUR', symbol: '€' } },
-                  { isoCode: 'DE', name: 'Germany', currency: { isoCode: 'EUR', symbol: '€' } },
-                ],
-              },
-            }),
-            TetherDiagnose: () => ({
-              shop: {
-                name: 'Shop',
-                primaryDomain: { url: 'https://shop.test' },
-                paymentSettings: { currencyCode: 'EUR' },
-              },
-            }),
-          }[op];
-          if (!data) throw new Error(`unexpected ${op}`);
-          return jsonResponse({ data: data() });
-        };
+    </div>`;
+    win = builtPage(
+      "{ domain: 'shop.test', token: 't', autoMount: true }",
+      body,
+      'https://site.test/',
+      async (_url, init) => {
+        const { query, variables } = graphqlRequest(init);
+        const op = operationName(query);
+        ops.push({ op, query });
+        const data = {
+          TetherProducts: () =>
+            Object.fromEntries(
+              Object.keys(variables)
+                .filter((key) => key.startsWith('h'))
+                .map((key) => [key, variables[key] === 'coffee-box' ? product : null]),
+            ),
+          TetherCollection: () => ({
+            collection: {
+              id: 'gid://shopify/Collection/1',
+              handle: 'tea',
+              title: 'Tea',
+              description: '',
+              descriptionHtml: '',
+              image: null,
+              seo: { title: null, description: null },
+              products: { nodes: [teaBox], pageInfo: { hasNextPage: false, endCursor: null } },
+            },
+          }),
+          TetherLocalization: () => ({
+            localization: {
+              country: { isoCode: 'NL', name: 'Netherlands', currency: { isoCode: 'EUR', symbol: '€' } },
+              availableCountries: [
+                { isoCode: 'NL', name: 'Netherlands', currency: { isoCode: 'EUR', symbol: '€' } },
+                { isoCode: 'DE', name: 'Germany', currency: { isoCode: 'EUR', symbol: '€' } },
+              ],
+            },
+          }),
+          TetherDiagnose: () => ({
+            shop: {
+              name: 'Shop',
+              primaryDomain: { url: 'https://shop.test' },
+              paymentSettings: { currencyCode: 'EUR' },
+            },
+          }),
+        }[op];
+        if (!data) throw new Error(`unexpected ${op}`);
+        return jsonResponse({ data: data() });
       },
-    });
-    win = dom.window;
+    );
     await pageLoaded(win, 'the page with the built script');
     await waitFor(
       () => Boolean(partsOf(win)?.markets) && (win.document.querySelector('select')?.options.length ?? 0) > 1,
@@ -126,22 +115,15 @@ test('the markets part loads from its own file when the page has a country selec
 });
 
 test('a part beside the core loads with the integrity hash of the file built with it', async () => {
-  const { createHash } = await import('node:crypto');
+  await assertLoadedWithIntegrity(win, 'tether.markets.min.js');
   const script = [...win.document.scripts].find((element) => element.src.endsWith('tether.markets.min.js'));
-  assert.ok(script, 'the markets part has a script');
-  const file = await readFile(join(DIST, 'tether.markets.min.js'));
-  assert.equal(script.integrity, `sha384-${createHash('sha384').update(file).digest('base64')}`);
-  assert.equal(script.crossOrigin, 'anonymous', 'the core is on another origin (file:) than the page');
+  assert.equal(script?.crossOrigin, 'anonymous', 'the core is on another origin (file:) than the page');
 });
 
 test('a list loads the lists part from its own file, and its cards mount from the products it cached', async () => {
-  const { createHash } = await import('node:crypto');
   const list = find('#list', win.document);
   await waitFor(() => list.getAttribute('tether-state') === 'ready', 'the list to render', 30_000);
-  const script = [...win.document.scripts].find((element) => element.src.endsWith('tether.lists.min.js'));
-  assert.ok(script, 'the lists part has a script');
-  const file = await readFile(join(DIST, 'tether.lists.min.js'));
-  assert.equal(script.integrity, `sha384-${createHash('sha384').update(file).digest('base64')}`);
+  await assertLoadedWithIntegrity(win, 'tether.lists.min.js');
   assert.ok(partsOf(win)?.lists, 'registered');
   assert.equal(find('[tether-collection-bind="title"]', list).textContent, 'Tea');
   const card = find('[tether-product="tea-box"]', list);
@@ -380,10 +362,18 @@ test(
     const { VERSION } = await import('../src/version.ts');
     const again = await mkdtemp(join(tmpdir(), 'tether-build-'));
     try {
-      // An earlier build's output, with a part and a preset this source no longer has, and the files Finder and
-      // Explorer leave in a folder.
+      // An earlier build's output, with a part and a preset this source no longer has, the temporary files of an
+      // interrupted --watch, and the files Finder and Explorer leave in a folder.
       await mkdir(join(again, 'presets'));
-      const stale = ['tether.min.js', 'tether.oldpart.js', 'tether.oldpart.min.js', 'presets/old.esm.js'];
+      const stale = [
+        'tether.min.js',
+        'tether.oldpart.js',
+        'tether.oldpart.min.js',
+        'presets/old.esm.js',
+        'tether.search.min.js.tmp-4242',
+        'tether.min.js.map.tmp-4242',
+        'tether.oldpart.js.tmp-4242',
+      ];
       for (const file of [...stale, '.DS_Store', 'Thumbs.db', 'desktop.ini']) await writeFile(join(again, file), '');
       await promisify(execFile)(process.execPath, ['--experimental-strip-types', 'scripts/build.ts', '--out', again], {
         cwd: join(DIST, '..'),
