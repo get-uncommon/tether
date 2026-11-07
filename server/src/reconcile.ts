@@ -14,6 +14,10 @@
  * goes on waits for the next. A product whose item index can't be listed within the budget stops the run without
  * costing an attempt.
  *
+ * A failing product is retried on the next run, then less often, and given up on once it has failed for a day, so an
+ * outage of Webflow or Shopify that lasts hours loses nothing, and a product that can't sync stops costing requests
+ * and writes. The list is written only in a run that changes it.
+ *
  * Cloudflare allows a Worker invocation 1,000 KV operations; {@link maxReconcileKvOperations} counts a run's.
  */
 import { PublishError, flushPublish, removeProduct, syncProduct } from './sync-product.ts';
@@ -28,7 +32,7 @@ import {
   readRetryInbox,
   readSince,
 } from './sync-state.ts';
-import { numericId, productGid } from './util.ts';
+import { numericId, productGid, stableStringify } from './util.ts';
 import { messageOf } from './shared/error-message.ts';
 
 import type { Product } from './product.ts';
@@ -94,9 +98,23 @@ interface Run {
   newest: string;
 }
 
-/** Attempts before a failing product is dropped from the retry list. */
-const MAX_ATTEMPTS = 5;
 const MS_PER_MINUTE = 60000;
+/**
+ * The wait after a product's first, second, third failure and so on, in minutes; the last applies from then on. Each
+ * attempt that fails rewrites the retry list, so a product failing all day costs about 25 writes.
+ */
+const RETRY_DELAYS_MINUTES = [0, 10, 30, 60];
+/**
+ * A cron run takes a retry due this soon: runs come every 10 minutes, and one that starts seconds before a retry is due
+ * would put it off by a whole run.
+ */
+const RETRY_EARLY_MS = 5 * MS_PER_MINUTE;
+/**
+ * A product failing this long, after at least {@link MIN_ATTEMPTS} attempts, is given up on at its next failure. The
+ * attempts matter for a queued failure the reconcile takes in late, behind a big backlog.
+ */
+const GIVE_UP_AFTER_MS = 24 * 60 * MS_PER_MINUTE;
+const MIN_ATTEMPTS = 5;
 
 /** Cloudflare's limit on one Worker invocation, on every plan; a KV call past it throws. */
 export const KV_OPERATIONS_PER_INVOCATION = 1000;
@@ -109,16 +127,35 @@ export const KV_OPERATIONS_PER_INVOCATION = 1000;
 const RUN_KV_OPERATIONS = 18;
 /** A product's state read, the write of a created item before its publish and the write after the publish. */
 const KV_OPERATIONS_PER_PRODUCT = 3;
+/** A change in the window, whose state read the window's products already count: the two writes. */
+const KV_WRITES_PER_CHANGE = 2;
+
+/**
+ * Where a run's changes go: Webflow, with or without a deploy hook, sends a request for each; deploy-only stores the
+ * state and marks a build, with no request.
+ */
+export type ReconcileTarget = 'webflow' | 'deploy-only';
 
 /**
  * The most KV operations a Worker reconcile run can use. Each product of the window costs a state read. A product
- * writes only after a Webflow request, and a retry asks Shopify for its product first, so the subrequests bound how
- * many do more than read: a product starts only while the reserve is left.
+ * starts only while the reserve of subrequests is left, so the subrequests bound how many make a request (a retry asks
+ * Shopify for its product, a Webflow write is one): each of those costs 3. A deploy-only change makes no request, so
+ * `maxChangesPerRun` bounds those instead.
  */
-export function maxReconcileKvOperations(settings: ReconcileSettings, subrequests: number): number {
+export function maxReconcileKvOperations(
+  settings: ReconcileSettings,
+  subrequests: number,
+  target: ReconcileTarget,
+): number {
   const requesting = Math.max(0, subrequests - settings.reserveSubrequests + 1);
+  const unrequestedChanges =
+    target === 'deploy-only' ? Math.min(settings.maxChangesPerRun, settings.maxProductsPerRun) : 0;
   return (
-    RUN_KV_OPERATIONS + RETRY_INBOX_KV_OPERATIONS + settings.maxProductsPerRun + KV_OPERATIONS_PER_PRODUCT * requesting
+    RUN_KV_OPERATIONS +
+    RETRY_INBOX_KV_OPERATIONS +
+    settings.maxProductsPerRun +
+    KV_OPERATIONS_PER_PRODUCT * requesting +
+    KV_WRITES_PER_CHANGE * unrequestedChanges
   );
 }
 
@@ -133,19 +170,46 @@ interface RunDeps {
   shopify: ProductSource;
   outOfBudget: () => boolean;
   limits: { maxChanges: number; maxProducts: number; maxPages: number };
-  /** The ids on the retry list. The retries run first, so the window skips them. */
+  /** The ids on the retry list. Each is retried first or waits for its time, so the window skips them. */
   retried: ReadonlySet<string>;
 }
 
-/** Products that failed before, in webhooks or earlier runs. Returns those left for the next run. */
+function retryDelayMs(attempts: number): number {
+  const minutes = RETRY_DELAYS_MINUTES[Math.min(attempts, RETRY_DELAYS_MINUTES.length) - 1] ?? 0;
+  return minutes * MS_PER_MINUTE;
+}
+
+/**
+ * The retry entry after a failed attempt, or `null` when the sync gives up on the product, which is logged.
+ *
+ * @param previous The product's entry on the retry list, if it has one.
+ */
+function failedAttempt(
+  ctx: SyncContext,
+  id: string,
+  error: string,
+  previous: RetryEntry | undefined,
+): RetryEntry | null {
+  const now = ctx.now();
+  const attempts = (previous?.attempts ?? 0) + 1;
+  const failingSince = previous?.failingSince ?? now;
+  if (attempts >= MIN_ATTEMPTS && now - failingSince >= GIVE_UP_AFTER_MS) {
+    ctx.log.error(`giving up on product ${id} after a day of failures: ${error}`);
+    return null;
+  }
+  return { id, attempts, error, failingSince, retryAt: now + retryDelayMs(attempts) };
+}
+
+/** Products that failed before, in webhooks or earlier runs, whose retry is due. Returns those left for later runs. */
 async function runRetries(
   { ctx, shopify, outOfBudget, limits }: RunDeps,
   run: Run,
   retry: RetryEntry[],
 ): Promise<RetryEntry[]> {
   const left: RetryEntry[] = [];
+  const dueBy = ctx.now() + RETRY_EARLY_MS;
   for (const entry of retry) {
-    if (outOfBudget() || run.changes >= limits.maxChanges) {
+    if (entry.retryAt > dueBy || outOfBudget() || run.changes >= limits.maxChanges) {
       left.push(entry);
       continue;
     }
@@ -160,9 +224,8 @@ async function runRetries(
         left.push(entry);
         continue;
       }
-      if (entry.attempts < MAX_ATTEMPTS)
-        run.failures.push({ id: entry.id, attempts: entry.attempts + 1, error: messageOf(err) });
-      else ctx.log.error(`giving up on product ${entry.id}: ${messageOf(err)}`);
+      const failure = failedAttempt(ctx, entry.id, messageOf(err), entry);
+      if (failure) run.failures.push(failure);
     }
   }
   return left;
@@ -199,7 +262,8 @@ async function runPage(deps: RunDeps, run: Run, page: ProductPage): Promise<void
         }
         ctx.stats.failed++;
         ctx.log.error(`sync ${product.handle} failed: ${messageOf(err)}`);
-        run.failures.push({ id, attempts: 1, error: messageOf(err) });
+        const failure = failedAttempt(ctx, id, messageOf(err), undefined);
+        if (failure) run.failures.push(failure);
       }
     }
     if (product.updatedAt > run.newest) run.newest = product.updatedAt;
@@ -238,20 +302,26 @@ async function runPages(deps: RunDeps, run: Run, start: string): Promise<void> {
 /**
  * Puts the products a publish left unconfirmed on the retry list.
  *
- * @param attemptsBefore The attempts of the products that came from the retry list, by id.
+ * @param retried The entries of the products that came from the retry list, by id.
  */
 function retryUnpublished(
   ctx: SyncContext,
   run: Run,
   error: PublishError,
-  attemptsBefore: ReadonlyMap<string, number>,
+  retried: ReadonlyMap<string, RetryEntry>,
 ): void {
   for (const { id } of error.products) {
-    const before = attemptsBefore.get(id) ?? 0;
-    // A publish call that failed as a whole says nothing about the product, so it costs no attempt.
-    const attempts = error.refused ? before + 1 : Math.max(before, 1);
-    if (attempts > MAX_ATTEMPTS) ctx.log.error(`giving up on product ${id}: ${error.message}`);
-    else run.failures.push({ id, attempts, error: error.message });
+    const previous = retried.get(id);
+    if (error.refused) {
+      const failure = failedAttempt(ctx, id, error.message, previous);
+      if (failure) run.failures.push(failure);
+      continue;
+    }
+    // A publish call that failed as a whole says nothing about the product: it costs no attempt, and never a give-up.
+    const now = ctx.now();
+    const attempts = previous?.attempts ?? 1;
+    const failingSince = previous?.failingSince ?? now;
+    run.failures.push({ id, attempts, error: error.message, failingSince, retryAt: now + retryDelayMs(attempts) });
   }
 }
 
@@ -267,8 +337,8 @@ interface Position {
 }
 
 interface Retries {
-  /** The list the run started with, queued failures included. */
-  retry: RetryEntry[];
+  /** The list as KV held it at the run's start. */
+  stored: unknown;
   /** The retries the budget deferred. */
   retryLeft: RetryEntry[];
   /** The inbox keys the run took into `retry`. */
@@ -282,13 +352,13 @@ interface Retries {
 async function savePosition(
   ctx: SyncContext,
   { run, listingStopped, start, storedSince, resume, restart }: Position,
-  { retry, retryLeft, inboxKeys }: Retries,
+  { stored, retryLeft, inboxKeys }: Retries,
 ): Promise<void> {
   const { store } = ctx;
   const failed = run.failures.filter((failure): failure is RetryEntry => failure.id !== null);
   // A product both failed and deferred, or both failed and left unpublished, is retried once.
   const nextRetry = [...new Map([...retryLeft, ...failed].map((entry) => [entry.id, entry])).values()];
-  if (nextRetry.length || retry.length) await store.put(RETRY_KEY, nextRetry);
+  if (stableStringify(nextRetry) !== stableStringify(stored ?? [])) await store.put(RETRY_KEY, nextRetry);
   for (const key of inboxKeys) await store.delete(key);
   if (!listingStopped) {
     if (storedSince !== run.newest) await store.put(SINCE_KEY, run.newest);
@@ -296,6 +366,19 @@ async function savePosition(
   } else if (resume?.since !== start || resume.after !== run.after || resume.newest !== run.newest) {
     await store.put(PAGE_KEY, { since: start, after: run.after, newest: run.newest });
   }
+}
+
+/**
+ * The retry list with the queued failures in. A product on both keeps the later failure's entry: a webhook that failed
+ * after the listed failure was for a newer change or a deletion, which gets a day of retries of its own.
+ */
+function withInbox(listed: RetryEntry[], queued: RetryEntry[]): RetryEntry[] {
+  const byId = new Map(listed.map((entry) => [entry.id, entry]));
+  for (const entry of queued) {
+    const known = byId.get(entry.id);
+    if (!known || entry.failingSince > known.failingSince) byId.set(entry.id, entry);
+  }
+  return [...byId.values()];
 }
 
 /** @param outOfBudget Whether the Worker run's subrequests are down to the reserve. */
@@ -330,9 +413,9 @@ export async function reconcile(
     after: resumed ? resumed.after : null,
     newest: resumed ? resumed.newest : start,
   };
-  const listed = await readRetries(store);
-  const inbox = await readRetryInbox(store, new Set(listed.map((entry) => entry.id)));
-  const retry = [...listed, ...inbox.entries];
+  const listed = await readRetries(store, now());
+  const inbox = await readRetryInbox(store, now());
+  const retry = withInbox(listed.entries, inbox.entries);
   const deps: RunDeps = {
     ctx,
     shopify,
@@ -349,12 +432,12 @@ export async function reconcile(
   } catch (err) {
     if (!(err instanceof PublishError)) throw err;
     ctx.log.error(err.message);
-    retryUnpublished(ctx, run, err, new Map(retry.map((entry) => [entry.id, entry.attempts])));
+    retryUnpublished(ctx, run, err, new Map(retry.map((entry) => [entry.id, entry])));
     run.stopped ??= 'publish';
   }
   if (!ctx.dryRun) {
     const position = { run, listingStopped, start, storedSince, resume, restart: Boolean(sinceOverride) };
-    await savePosition(ctx, position, { retry, retryLeft, inboxKeys: inbox.keys });
+    await savePosition(ctx, position, { stored: listed.stored, retryLeft, inboxKeys: inbox.keys });
   }
   const { changes, processed, pages, stopped, failures, newest } = run;
   return {

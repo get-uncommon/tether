@@ -308,7 +308,8 @@ export async function queueRetry(
   const queued = queuedKeys.get(shopifyId);
   if (!deletion && queued !== undefined && (await ctx.store.get(queued)) !== null) return;
   const key = retryInboxKey(shopifyId);
-  const entry: RetryEntry = { id: shopifyId, attempts: 1, error: retryReason(error) };
+  const now = ctx.now();
+  const entry: RetryEntry = { id: shopifyId, attempts: 1, error: retryReason(error), failingSince: now, retryAt: now };
   await ctx.store.put(key, entry, { expirationTtl: RETRY_INBOX_TTL_SECONDS });
   queuedKeys.delete(shopifyId);
   queuedKeys.set(shopifyId, key);

@@ -2,10 +2,23 @@
 // item index too big for one run.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createApp, memoryStore, createWorker, kvStore, normalizeConfig, signShopify } from '../src/index.ts';
+import { createApp, memoryStore, createWorker, kvStore, normalizeConfig } from '../src/index.ts';
 import { KV_OPERATIONS_PER_INVOCATION, maxReconcileKvOperations } from '../src/reconcile.ts';
 import { RETRY_INBOX_TTL_SECONDS } from '../src/sync-state.ts';
-import { createMockApis, shopifyProduct, baseConfig, env, instantSleep, asList, parseJson, kvList } from './mocks.js';
+import { runCheck } from '../src/check.ts';
+import {
+  createMockApis,
+  shopifyProduct,
+  baseConfig,
+  env,
+  instantSleep,
+  asList,
+  parseJson,
+  kvList,
+  urlOf,
+  checkStep,
+  deliverWebhook,
+} from './mocks.js';
 
 /**
  * A KV namespace over a map of the JSON texts it holds. After `invocation()` it allows that Worker invocation 1,000
@@ -56,34 +69,6 @@ function kvNamespace() {
 const handMadeItems = (count) =>
   Array.from({ length: count }, (_, i) => ({ id: `hand${i}`, fieldData: { name: `Hand ${i}`, slug: `hand-${i}` } }));
 
-/**
- * Delivers a signed product webhook to the Worker and waits for its work.
- *
- * @param {ReturnType<typeof createWorker>} worker
- * @param {Record<string, unknown>} wenv
- * @param {string} topic
- * @param {number} id
- */
-async function deliver(worker, wenv, topic, id) {
-  /** @type {Promise<unknown>[]} */
-  const tasks = [];
-  const body = JSON.stringify({ id });
-  await worker.fetch(
-    new Request('https://w.test/webhooks/shopify', {
-      method: 'POST',
-      body,
-      headers: {
-        'x-shopify-topic': topic,
-        'x-shopify-hmac-sha256': await signShopify(body, 'whsec'),
-        'x-shopify-shop-domain': 'shop.myshopify.com',
-      },
-    }),
-    wenv,
-    { waitUntil: (/** @type {Promise<unknown>} */ promise) => tasks.push(promise) },
-  );
-  await Promise.all(tasks);
-}
-
 const INBOX = 'tether-sync:reconcile:retry:';
 
 test('a product failing on every webhook is queued once until a reconcile takes it in, and expires in 30 days', async () => {
@@ -92,14 +77,14 @@ test('a product failing on every webhook is queued once until a reconcile takes 
   const worker = createWorker(baseConfig, { fetch: apis.fetch, sleep: instantSleep });
   const wenv = { ...env, TETHER_SYNC };
   const queued = () => [...kv.keys()].filter((key) => key.startsWith(INBOX));
-  for (let webhook = 0; webhook < 5; webhook++) await deliver(worker, wenv, 'products/update', 1);
+  for (let webhook = 0; webhook < 5; webhook++) await deliverWebhook(worker, wenv, 'products/update', 1);
   assert.equal(queued().length, 1);
   assert.deepEqual([...ttls.values()], [RETRY_INBOX_TTL_SECONDS]);
 
   kv.set('tether-sync:reconcile:since', JSON.stringify('2026-12-01T00:00:00Z'));
   await worker.scheduled({}, wenv, { waitUntil() {} });
   assert.deepEqual(queued(), [], 'the reconcile took it in');
-  await deliver(worker, wenv, 'products/update', 1);
+  await deliverWebhook(worker, wenv, 'products/update', 1);
   assert.equal(queued().length, 1, 'a failure after that is queued again');
 });
 
@@ -134,7 +119,7 @@ test('an inbox of 3,000 queued failures drains over runs, each within 1,000 KV o
   const worker = createWorker(baseConfig, { fetch: apis.fetch, sleep: instantSleep });
   const queued = () => [...kv.keys()].filter((key) => key.startsWith(INBOX)).length;
   const retries = () => asList(parseJson(kv.get('tether-sync:reconcile:retry') ?? '[]'), 'the retry list').length;
-  const bound = maxReconcileKvOperations(normalizeConfig(baseConfig).reconcile, 45);
+  const bound = maxReconcileKvOperations(normalizeConfig(baseConfig).reconcile, 45, 'webflow');
   /** @type {number[]} */
   const operations = [];
   for (let run = 0; run < 60 && (queued() || retries()); run++) {
@@ -148,12 +133,80 @@ test('an inbox of 3,000 queued failures drains over runs, each within 1,000 KV o
   assert.ok(most <= bound, `KV operations per run: ${operations.join(', ')}`);
 });
 
-test('a default Worker reconcile run uses at most 533 KV operations, well under the 1,000 allowed', () => {
+test('a default Worker reconcile run uses at most 533 KV operations with Webflow, 573 deploy-only', () => {
   // 18 for the cursor, position, retry list, index, token, deploy hook and webhooks; 201 for a page of 100 inbox keys;
   // a state read for each of the 200 products; and 3 for each of the 38 products the 45 subrequests can take further.
-  const bound = maxReconcileKvOperations(normalizeConfig(baseConfig).reconcile, 45);
-  assert.ok(bound < KV_OPERATIONS_PER_INVOCATION);
-  assert.equal(bound, 533);
+  // Deploy-only, each of the 20 changes writes twice more without a request.
+  const settings = normalizeConfig(baseConfig).reconcile;
+  assert.equal(maxReconcileKvOperations(settings, 45, 'webflow'), 533);
+  assert.equal(maxReconcileKvOperations(settings, 45, 'deploy-only'), 573);
+});
+
+const DEPLOY_HOOK = 'https://api.pages.test/deploy_hooks/abc';
+
+/**
+ * Runs one deploy-only cron reconcile (a deploy hook, no Webflow) over `count` products none of which the sync has
+ * written yet, each a change.
+ *
+ * @param {NonNullable<import('../src/mapping.ts').RawConfig['reconcile']>} reconcile
+ * @param {number} count
+ * @returns {Promise<{ used: number, synced: number }>} The run's KV operations, and the products it stored.
+ */
+async function deployOnlyRun(reconcile, count) {
+  const products = Array.from({ length: count }, (_, i) =>
+    shopifyProduct(i + 1, { updatedAt: '2026-11-01T00:00:00Z' }),
+  );
+  const apis = createMockApis({ products });
+  /** @type {typeof globalThis.fetch} */
+  const fetchWithHook = async (url, init) => (urlOf(url) === DEPLOY_HOOK ? new Response('{}') : apis.fetch(url, init));
+  const { kv, TETHER_SYNC, invocation, used } = kvNamespace();
+  kv.set('tether-sync:reconcile:since', JSON.stringify('2026-01-01T00:00:00Z'));
+  const worker = createWorker({ ...baseConfig, reconcile }, { fetch: fetchWithHook, sleep: instantSleep });
+  const deployOnlyEnv = {
+    SHOPIFY_ADMIN_TOKEN: env.SHOPIFY_ADMIN_TOKEN,
+    SHOPIFY_WEBHOOK_SECRET: env.SHOPIFY_WEBHOOK_SECRET,
+    DEPLOY_HOOK_URL: DEPLOY_HOOK,
+    TETHER_SYNC,
+  };
+  invocation();
+  await worker.scheduled({}, deployOnlyEnv, { waitUntil() {} });
+  const synced = [...kv.keys()].filter((key) => key.startsWith('tether-sync:p:')).length;
+  return { used: used(), synced };
+}
+
+test('a deploy-only reconcile run stays within the KV operations its bound allows, maxChangesPerRun included', async () => {
+  const configs = [
+    { maxChangesPerRun: 300, maxProductsPerRun: 300, maxPagesPerRun: 40 },
+    { maxChangesPerRun: 100, maxProductsPerRun: 300, maxPagesPerRun: 40 },
+    { maxChangesPerRun: 250, maxProductsPerRun: 200, maxPagesPerRun: 40 },
+    {},
+  ];
+  for (const reconcile of configs) {
+    const { used, synced } = await deployOnlyRun(reconcile, 300);
+    const settings = normalizeConfig({ ...baseConfig, reconcile }).reconcile;
+    assert.equal(synced, Math.min(settings.maxChangesPerRun, settings.maxProductsPerRun), JSON.stringify(reconcile));
+    const bound = maxReconcileKvOperations(settings, 45, 'deploy-only');
+    assert.ok(bound >= used, `${JSON.stringify(reconcile)}: bound ${String(bound)}, used ${String(used)}`);
+  }
+});
+
+test('the setup check warns when a deploy-only reconcile run can pass 1,000 KV operations through its changes', async () => {
+  const shopifyEnv = {
+    SHOPIFY_DOMAIN: 'shop.myshopify.com',
+    SHOPIFY_ADMIN_TOKEN: 'shpat_token',
+    DEPLOY_HOOK_URL: DEPLOY_HOOK,
+  };
+  /** @param {NonNullable<import('../src/mapping.ts').RawConfig['reconcile']>} reconcile */
+  const check = (reconcile) => runCheck({ ...baseConfig, reconcile }, shopifyEnv, { deep: false, worker: true });
+  const usual = await check({});
+  assert.ok(!usual.steps.some((step) => step.title === 'Reconcile budget'));
+  const busy = checkStep(
+    await check({ maxChangesPerRun: 400, maxProductsPerRun: 400, maxPagesPerRun: 40 }),
+    'Reconcile budget',
+  );
+  assert.equal(busy.level, 'warn');
+  assert.match(busy.message, /up to 1533 KV operations, more than the 1000/);
+  assert.match(busy.fix ?? '', /reconcile\.maxChangesPerRun/);
 });
 
 test('an item index listed over several runs is finished however short match.indexTtlMinutes is', async () => {

@@ -29,6 +29,8 @@ const setup = (opts = {}, config = baseConfig) => {
   return { ...apis, store, app, sync: app.sync };
 };
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
 /** A KV namespace over a map of the JSON texts it holds. */
 function kvNamespace() {
   /** @type {Map<string, string>} */
@@ -318,7 +320,7 @@ test('reconcile: a failed publish leaves every product of the run for the next o
   assert.deepEqual(await store.get('reconcile:retry'), []);
 });
 
-test('reconcile: a product Webflow refuses to publish is retried, and given up after the attempts', async () => {
+test('reconcile: a product Webflow refuses to publish is retried, and given up on after a day', async () => {
   const { sync, store, wf, flags } = setup({ products: [shopifyProduct(1), shopifyProduct(2)] });
   await store.put('reconcile:since', '2026-11-01T00:00:00Z');
   flags.refusePublishFor = 'product-2';
@@ -334,25 +336,22 @@ test('reconcile: a product Webflow refuses to publish is retried, and given up a
   assert.deepEqual(await retries(), [['2', 1]]);
   await sync.reconcile();
   assert.deepEqual(await retries(), [['2', 2]], 'each refusal costs an attempt');
-  await store.put('reconcile:retry', [{ id: '2', attempts: 5, error: 'refused' }]);
+  const failingSince = Date.now() - DAY_MS;
+  await store.put('reconcile:retry', [{ id: '2', attempts: 5, error: 'refused', failingSince, retryAt: 0 }]);
   await store.put('reconcile:since', '2026-11-02T00:00:00Z');
   await sync.reconcile();
-  assert.deepEqual(await retries(), [], 'dropped after the fifth attempt');
+  assert.deepEqual(await retries(), [], 'given up on after a day of failures');
 });
 
-test('reconcile: a retried product in the window is synced once, and its attempts still run out', async () => {
+test('reconcile: a retried product in the window is synced once, and is still given up on', async () => {
   const { sync, store, calls } = setup({ products: [shopifyProduct(1, { handle: 'bad' })], failCreateFor: 'bad' });
   await store.put('reconcile:since', '2026-11-01T00:00:00Z');
-  await store.put('reconcile:retry', [{ id: '1', attempts: 4, error: 'webhook failed' }]);
+  const failingSince = Date.now() - DAY_MS;
+  await store.put('reconcile:retry', [{ id: '1', attempts: 4, error: 'webhook failed', failingSince, retryAt: 0 }]);
   const creates = () => calls.filter((call) => call.method === 'POST' && call.path.endsWith('/items')).length;
   await sync.reconcile();
   assert.equal(creates(), 1, 'one create, from the retry');
-  assert.deepEqual(
-    asList(await store.get('reconcile:retry'), 'the retry list').map((entry) => fieldOf(entry, 'attempts')),
-    [5],
-  );
-  await sync.reconcile();
-  assert.deepEqual(await store.get('reconcile:retry'), [], 'dropped after the fifth attempt');
+  assert.deepEqual(await store.get('reconcile:retry'), [], 'given up on after its fifth attempt in a day');
 });
 
 test('reconcile: products edited between two runs of a window are neither skipped nor lost', async () => {
