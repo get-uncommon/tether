@@ -131,6 +131,9 @@ test('a jsDelivr version alias in the core URL becomes the release the core was 
     `${gh}@main/dist/`,
     `${npm}@0.8.0/dist/`,
     'https://site.test/assets/tether/',
+    // A local server, like the browser tests' (test/e2e/serve.mjs), and a site's own domain with a range-like folder.
+    'http://127.0.0.1:4399/plain/dist/',
+    'https://shop.example/js/tether@0.8/dist/',
     'https://unpkg.com/@occluze/tether@0.8/dist/',
   ]) {
     assert.equal(exactReleaseFolder(folder), folder);
