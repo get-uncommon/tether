@@ -16,7 +16,10 @@ export declare function getProduct(rawKey: string | number | null | undefined): 
  *   read.
  */
 export declare const withProductFragment: (operation: string) => QueryText;
-/** Forgets every product, for a new market: requests already sent no longer fill the cache. */
+/**
+ * Forgets every product, for a new market: requests already sent no longer fill the cache. A product still queued
+ * stays, since its request goes out in the new market.
+ */
 export declare function clearProductCache(): void;
 /**
  * Uses products the server rendered, unless the page loaded the same product live in the last `FRESH_MS` (an earlier

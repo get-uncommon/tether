@@ -1648,10 +1648,9 @@
   var MISS_CACHE_MS = 1e4;
   var FRESH_MS = 6e4;
   var productCache = /* @__PURE__ */ new Map();
-  var waiting = /* @__PURE__ */ new Map();
   var stale = /* @__PURE__ */ new Set();
   var freshAt = /* @__PURE__ */ new Map();
-  var pending = [];
+  var queued = /* @__PURE__ */ new Map();
   var flushScheduled = false;
   var generation = 0;
   var isGid = (key) => key.startsWith("gid://");
@@ -1668,8 +1667,7 @@
     const cached = productCache.get(key);
     if (cached) return cached;
     const loading = new Promise((resolve, reject) => {
-      waiting.set(key, { resolve, reject });
-      pending.push(key);
+      queued.set(key, { resolve, reject });
       if (!flushScheduled) {
         flushScheduled = true;
         setTimeout(() => void flush(), 0);
@@ -1698,11 +1696,6 @@
     const query2 = withProductFragment(`query TetherProducts(${definitions.join(",")}){${selections.join(" ")}}`);
     return { query: query2, variables, handles };
   }
-  function settleWaiting(key, settle) {
-    const waiter = waiting.get(key);
-    waiting.delete(key);
-    if (waiter) settle(waiter);
-  }
   function forgetMissLater(key, batchGeneration) {
     if (batchGeneration !== generation) return;
     const miss = productCache.get(key);
@@ -1718,19 +1711,18 @@
   async function flush() {
     flushScheduled = false;
     const batchGeneration = generation;
-    const keys = pending.splice(0);
-    if (!keys.length) return;
+    const batch = [...queued];
+    queued.clear();
+    const keys = batch.map(([key]) => key);
     const { query: query2, variables, handles } = batchQuery(keys);
     log("fetch products", keys);
     let data;
     try {
       data = await gql(query2, variables, isBatchData);
     } catch (error) {
-      keys.forEach((key) => {
-        settleWaiting(key, (waiter) => {
-          if (batchGeneration === generation) productCache.delete(key);
-          waiter.reject(error);
-        });
+      batch.forEach(([key, waiter]) => {
+        if (batchGeneration === generation) productCache.delete(key);
+        waiter.reject(error);
       });
       return;
     }
@@ -1741,25 +1733,23 @@
       if (product) found.set(handle, product);
     });
     const now = Date.now();
-    keys.forEach((key) => {
-      settleWaiting(key, (waiter) => {
-        const product = found.get(key);
-        if (!product) {
-          forgetMissLater(key, batchGeneration);
-          waiter.reject(new TetherError(`Product not found: ${key}`, { code: "NOT_FOUND" }));
-          return;
-        }
-        if (batchGeneration === generation) {
-          primeProduct(product);
-          freshAt.set(product.handle, now);
-          freshAt.set(product.id, now);
-        }
-        waiter.resolve(product);
-      });
+    batch.forEach(([key, waiter]) => {
+      const product = found.get(key);
+      if (!product) {
+        forgetMissLater(key, batchGeneration);
+        waiter.reject(new TetherError(`Product not found: ${key}`, { code: "NOT_FOUND" }));
+        return;
+      }
+      if (batchGeneration === generation) {
+        primeProduct(product);
+        freshAt.set(product.handle, now);
+        freshAt.set(product.id, now);
+      }
+      waiter.resolve(product);
     });
   }
   function clearProductCache() {
-    productCache.clear();
+    for (const key of productCache.keys()) if (!queued.has(key)) productCache.delete(key);
     generation += 1;
     stale.clear();
     freshAt.clear();
@@ -1948,7 +1938,7 @@
 
   // src/cart/render.ts
   var DEFAULT_TITLE = "Default Title";
-  var quantityOf = (line, pending2) => pending2.get(line.id)?.quantity ?? line.quantity;
+  var quantityOf = (line, pending) => pending.get(line.id)?.quantity ?? line.quantity;
   var numericId = (gid) => gid.split("/").pop() ?? gid;
   function lineUrl(line) {
     const variant = line.merchandise;
@@ -2009,9 +1999,9 @@
     node.classList.toggle("is-subscription", isSubscription);
     const warning = view.warnings.find((candidate) => candidate.target === line.id);
     node.classList.toggle("is-warning", Boolean(warning));
-    const pending2 = view.pending.has(line.id);
-    node.classList.toggle("is-busy", pending2);
-    if (pending2) node.setAttribute("aria-busy", "true");
+    const pending = view.pending.has(line.id);
+    node.classList.toggle("is-busy", pending);
+    if (pending) node.setAttribute("aria-busy", "true");
     else node.removeAttribute("aria-busy");
     qsa(node, sel("line", "warning")).forEach((el) => {
       setTextTracked(el, warning?.message ?? "");
@@ -3326,8 +3316,9 @@
       if (!this.variant?.availableForSale) return null;
       const line = this.getLine();
       if (!line || line.quantity < 1) return null;
+      const added = { product: this.product, variant: this.variant, line };
       const cart = await Cart.add(line);
-      emit("product-added", { product: this.product, variant: this.variant, line }, this.root);
+      emit("product-added", added, this.root);
       return cart;
     }
     /** Learns the markup's option names when they are the product's, then writes the product. */
@@ -3616,7 +3607,7 @@
   }
 
   // src/part-integrity.ts
-  var PART_INTEGRITY = { "tether.diagnose.js": "sha384-CqtXzvWbLD8aIgyTM43+KMXEFA7r7lhG+0XyQAw3Sp7B5qrzPsxlA9QfzBjoPqZz", "tether.markets.js": "sha384-4UK4+noZOE06Ra3Eyin9kAUXz/bbvcbq3gvdwNBItnPCQzmPyD398YoM0P1aTL0Q", "tether.search.js": "sha384-fLQ7eKc5XOv0Cg2FfrZyeFAkRR4wDMjUWFpwvKrfPRnT2NvTuhKg80+KVu8Qce/G", "tether.lists.js": "sha384-C+ibx3RT6OStQI+eq0K+ai44lQsHeI4iueLoZaW/+AqVZ7D+gcjoHiohd0CFyNUd", "tether.extras.js": "sha384-qx7paZ/rjwtn1Yy9TgszulmBuJsIQ9y4eZ590AArnZ+IDB8IzwJ5dNOFJ+yMHPdb", "tether.account.js": "sha384-A5LC6eOq1My82IYPD0qA/NKhefGuBvA+9vwY7l/t0S40/SwIjWCBXJIO3YNyYGPc", "tether.account-pages.js": "sha384-ND3kIaRypgnHG3QMDb8CqDxt7fuukDCdHsIAHoOUUsz3+FjvBqXgRDV4Mjp6x8jr", "tether.analytics.js": "sha384-jnLesn/+edWBSPuXLj7VX1kSAGwEqtb0VbHjuU//ofqgxkndHlDFsS8Bc8htlGt8" };
+  var PART_INTEGRITY = { "tether.diagnose.js": "sha384-CqtXzvWbLD8aIgyTM43+KMXEFA7r7lhG+0XyQAw3Sp7B5qrzPsxlA9QfzBjoPqZz", "tether.markets.js": "sha384-4UK4+noZOE06Ra3Eyin9kAUXz/bbvcbq3gvdwNBItnPCQzmPyD398YoM0P1aTL0Q", "tether.search.js": "sha384-GFNVj/nTFbLQTYb/7YCWuRFmg3G2r+UevIBkc+7a6AdU6FQGFiakGNoaYKDZHqpM", "tether.lists.js": "sha384-C+ibx3RT6OStQI+eq0K+ai44lQsHeI4iueLoZaW/+AqVZ7D+gcjoHiohd0CFyNUd", "tether.extras.js": "sha384-qx7paZ/rjwtn1Yy9TgszulmBuJsIQ9y4eZ590AArnZ+IDB8IzwJ5dNOFJ+yMHPdb", "tether.account.js": "sha384-A5LC6eOq1My82IYPD0qA/NKhefGuBvA+9vwY7l/t0S40/SwIjWCBXJIO3YNyYGPc", "tether.account-pages.js": "sha384-ND3kIaRypgnHG3QMDb8CqDxt7fuukDCdHsIAHoOUUsz3+FjvBqXgRDV4Mjp6x8jr", "tether.analytics.js": "sha384-jnLesn/+edWBSPuXLj7VX1kSAGwEqtb0VbHjuU//ofqgxkndHlDFsS8Bc8htlGt8" };
 
   // src/part-registry.ts
   function isTetherInternals(value) {
@@ -3624,7 +3615,7 @@
   }
 
   // src/version.ts
-  var VERSION = "0.9.9";
+  var VERSION = "0.9.10";
 
   // src/lazy-iife.ts
   var coreModules = {
@@ -4201,17 +4192,17 @@
   function startObserver() {
     if (observer || typeof MutationObserver === "undefined") return;
     let timer;
-    const queued = /* @__PURE__ */ new Set();
+    const queued2 = /* @__PURE__ */ new Set();
     observer = new MutationObserver((mutations) => {
       mutations.forEach((mutation) => {
         mutation.addedNodes.forEach((node) => {
-          if (node instanceof window.Element) queued.add(node);
+          if (node instanceof window.Element) queued2.add(node);
         });
       });
       clearTimeout(timer);
       timer = setTimeout(() => {
-        const added = [...queued];
-        queued.clear();
+        const added = [...queued2];
+        queued2.clear();
         mountAdded(added);
       }, OBSERVE_DEBOUNCE_MS);
     });

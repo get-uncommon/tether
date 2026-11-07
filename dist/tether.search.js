@@ -73,7 +73,7 @@
       __publicField(this, "searchNumber", 0);
       __publicField(this, "timer");
       __publicField(this, "lastTerm", "");
-      /** Results per term, for typing back and forth. */
+      /** Results per market and term, for typing back and forth: prices and names follow the market. */
       __publicField(this, "cache", /* @__PURE__ */ new Map());
       /**
        * Removes the box's listeners once its root has left the page. The window's own controller: a page's
@@ -162,10 +162,11 @@
       return qsa(this.results, '[role="option"]');
     }
     async fetchResults(term) {
-      const cached = this.cache.get(term);
+      const key = `${String(cfg.country)} ${String(cfg.language)} ${term}`;
+      const cached = this.cache.get(key);
       if (cached) return cached;
       const data = await gql(QUERY, { q: term, limit: this.limit }, isSearchAnswer);
-      this.cache.set(term, data.predictiveSearch);
+      this.cache.set(key, data.predictiveSearch);
       return data.predictiveSearch;
     }
     async search(term) {

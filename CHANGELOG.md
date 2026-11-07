@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.9.10 (2026-11-07)
+
+- Fix: `tether:product-added` names the product and variant that were added, also when the visitor
+  picks another variant while the cart updates.
+- Fix: a product asked for again after `clearProductCache()` or a country switch, while its first
+  request was queued or on its way, no longer leaves the first caller waiting forever, which could
+  keep `html.tether-market-pending` on the page; each caller gets the product.
+- Fix: search as you type sends a term again after a country or language switch, instead of showing
+  the results, and prices, cached for it in the previous market.
+
 ## 0.9.9 (2026-11-07)
 
 - Fix: Checkout with `checkoutTarget: '_blank'` on a page without a cart, while the cart is loaded
