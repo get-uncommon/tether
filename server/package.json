@@ -1,6 +1,6 @@
 {
   "name": "@occluze/tether-sync",
-  "version": "0.9.0",
+  "version": "0.9.1",
   "private": true,
   "description": "Shopify -> Webflow CMS sync for Tether: webhooks, reconcile cron and initial import. Runs as a Cloudflare Worker or a Node CLI.",
   "type": "module",

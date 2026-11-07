@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.9.1 (unreleased)
+## 0.9.1 (2026-11-07)
 
 - Fix: a retry waits at most 30 seconds, however many retries came before; the doubling wait passed
   the longest delay a timer keeps after 22 retries and then fired at once. `retries` goes up to 10:

@@ -340,10 +340,15 @@
       dropped(name, value);
     }
   }
-  var DELAY_OPTIONS = /* @__PURE__ */ new Set(["requestTimeout", "searchDelay"]);
   var MAX_TIMER_MS = 2147483647;
+  var MAX_RETRIES = 10;
+  var COUNT_MAXIMUMS = {
+    requestTimeout: MAX_TIMER_MS,
+    searchDelay: MAX_TIMER_MS,
+    retries: MAX_RETRIES
+  };
   function countOption(name, value) {
-    const maximum = DELAY_OPTIONS.has(name) ? MAX_TIMER_MS : Number.POSITIVE_INFINITY;
+    const maximum = COUNT_MAXIMUMS[name] ?? Number.POSITIVE_INFINITY;
     if (typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= maximum) return value;
     return invalidOption(name, value, DEFAULTS[name]);
   }
@@ -491,6 +496,7 @@
   }
   var RETRY_BACKOFF_MS = 300;
   var THROTTLE_BACKOFF_MS = 500;
+  var MAX_BACKOFF_MS = 3e4;
   var SECURITY_REJECTION = 430;
   var MS_PER_SECOND = 1e3;
   var INVENTORY_FIELD = "quantityAvailable";
@@ -620,7 +626,7 @@
           storesWithoutInventory.add(store);
           break;
         case "retry":
-          await sleep(outcome.backoffMs * 2 ** retries);
+          await sleep(Math.min(outcome.backoffMs * 2 ** retries, MAX_BACKOFF_MS));
           retries += 1;
           log("retry", retries);
           break;
@@ -827,6 +833,7 @@
     if (cleaned === "") element.removeAttribute("style");
     else element.setAttribute("style", cleaned);
   }
+  var SAME_TAB_TARGETS = /* @__PURE__ */ new Set(["", "_self", "_parent", "_top"]);
   function hardenEmbedsAndLinks(element) {
     if (element.localName === "iframe") {
       const allow = allowedFeatures(element.getAttribute("allow") ?? "");
@@ -836,7 +843,9 @@
       element.setAttribute("referrerpolicy", IFRAME_REFERRER_POLICY);
       return;
     }
-    if (element.localName !== "a" || element.getAttribute("target")?.toLowerCase() !== "_blank") return;
+    if (element.localName !== "a") return;
+    const target = element.getAttribute("target");
+    if (target === null || SAME_TAB_TARGETS.has(target.toLowerCase())) return;
     const rel = new Set((element.getAttribute("rel") ?? "").split(/\s+/).filter(Boolean));
     rel.add("noopener");
     rel.add("noreferrer");
@@ -3435,7 +3444,7 @@
   }
 
   // src/version.ts
-  var VERSION = "0.9.0";
+  var VERSION = "0.9.1";
 
   // src/lazy-iife.ts
   var coreModules = {
