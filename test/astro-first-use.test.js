@@ -123,7 +123,8 @@ test('cart warnings: less stock than asked is shown, and subscribe reports loade
     return realFetch(url, init);
   };
   try {
-    document.body.innerHTML = '<p id="w" tether-show="cart-warning" hidden><span tether-cart-warning></span></p>';
+    document.body.innerHTML =
+      '<p id="w" tether-show="cart-warning" hidden><span tether-cart-warning></span></p><p id="own" tether-cart-warning role="alert"></p>';
     /** @type {CartMeta[]} */
     const metas = [];
     const off = Tether.cart.subscribe((_cart, meta) => metas.push(meta));
@@ -135,6 +136,8 @@ test('cart warnings: less stock than asked is shown, and subscribe reports loade
     assert.equal(meta.warnings[0]?.code, 'MERCHANDISE_NOT_ENOUGH_STOCK');
     assert.notEqual(window.getComputedStyle(find('#w')).display, 'none');
     assert.equal(find('[tether-cart-warning]').textContent, 'Only 1 left');
+    assert.equal(find('[tether-cart-warning]').getAttribute('role'), 'status', 'a live region, so it is announced');
+    assert.equal(find('#own').getAttribute('role'), 'alert', "the site's own role stays");
   } finally {
     globalThis.fetch = realFetch;
   }

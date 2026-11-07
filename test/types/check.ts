@@ -75,10 +75,13 @@ const config: TetherConfig = {
   country: 'NL',
   markets: { detect: true, locales: { de: { country: 'DE' } } },
   searchDelay: 200,
+  emptyQuery: 'none',
   account: { server: '/_tether/account', navigate: (url) => console.log(url) },
   onError: (e, ctx) => console.log((e as TetherError).code, ctx),
 };
 init({ ...config, ...barbaPreset({ lenis: () => null }) });
+// @ts-expect-error: a url: list's empty search lists all products or none
+init({ emptyQuery: 'some' });
 // The hooks the preset always sets are typed as set.
 barbaPreset().onCartOpen([]);
 

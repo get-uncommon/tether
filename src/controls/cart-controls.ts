@@ -3,9 +3,10 @@
  * clear and checkout buttons, a line's +, - and remove buttons, its quantity input and plan select, the cart note, and
  * the keyboard of the open drawer (Escape closes it, Tab stays inside it).
  */
-import { cfg, reportError } from '../config.ts';
+import { cfg, reportError, reportFailure } from '../config.ts';
 import { Cart, trapFocus } from '../cart.ts';
-import { sel, busy, INTEGER_TEXT, isElement } from '../dom.ts';
+import { sel, busy, INTEGER_TEXT, isElement, isField, isInput } from '../dom.ts';
+import { isSelect } from '../product-render.ts';
 
 /** @returns The attribute a rendered cart line carries its line id in. */
 const lineKeyAttribute = (): string => `data-${cfg.prefix}-key`;
@@ -15,12 +16,6 @@ function lineOf(target: Element): { line: Element; id: string } | null {
   const line = target.closest(`[${lineKeyAttribute()}]`);
   const id = line?.getAttribute(lineKeyAttribute());
   return line && id ? { line, id } : null;
-}
-
-function reportFailure(change: Promise<unknown>, context: string): void {
-  change.catch((error: unknown) => {
-    reportError(error, context);
-  });
 }
 
 /** A line's remove, + and - buttons. */
@@ -104,19 +99,14 @@ function onChange(event: Event): void {
   const { target } = event;
   if (!isElement(target)) return;
   const found = lineOf(target);
-  if (found && target instanceof window.HTMLInputElement && target.matches(sel('line', 'quantity'))) {
+  if (found && isInput(target) && target.matches(sel('line', 'quantity'))) {
     onQuantityInput(target, found);
-  } else if (found && target instanceof window.HTMLSelectElement && target.matches(sel('line-plan'))) {
+  } else if (found && isSelect(target) && target.matches(sel('line-plan'))) {
     showLineBusy(found.line, Cart.updateLine(found.id, { sellingPlanId: target.value || null }), 'cart line plan');
-  } else if (hasValue(target) && target.matches(sel('cart-note'))) {
+  } else if (isField(target) && target.matches(sel('cart-note'))) {
     reportFailure(Cart.setNote(target.value), 'cart note');
   }
 }
-
-const hasValue = (target: Element): target is HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement =>
-  target instanceof window.HTMLInputElement ||
-  target instanceof window.HTMLTextAreaElement ||
-  target instanceof window.HTMLSelectElement;
 
 function onKeydown(event: KeyboardEvent): void {
   if (!Cart.isOpen()) return;

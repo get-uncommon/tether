@@ -81,14 +81,15 @@ function lineAttributeValue(el: HTMLElement): string | null {
 }
 
 export class ProductScope {
-  readonly root: HTMLElement;
-  product: Product;
-  plans: PlanInGroup[];
-  selected: Selection;
+  // `declare`: the constructor assigns every field, in this order, so the build defines none beforehand.
+  declare readonly root: HTMLElement;
+  declare product: Product;
+  declare plans: PlanInGroup[];
+  declare selected: Selection;
   /** How the visitor buys; `setPurchase` and `selectPlan` change it. */
-  purchase: Purchase;
-  variant: ProductVariant | null;
-  quantity: number;
+  declare purchase: Purchase;
+  declare variant: ProductVariant | null;
+  declare quantity: number;
 
   constructor(root: HTMLElement, product: Product) {
     this.root = root;

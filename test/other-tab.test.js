@@ -29,13 +29,17 @@ globalThis.fetch = async () => assert.fail('no request');
 const { default: Tether } = await import('../src/index.ts');
 /** @type {string[]} */
 const reported = [];
-await Tether.init({
+const options = {
   domain: 'shop.test',
   token: 't',
   autoMount: false,
   country: 'NL',
-  onError: (_error, context) => reported.push(context),
-});
+  /** @type {(error: unknown, context: string) => void} */
+  onError: (_error, context) => {
+    reported.push(context);
+  },
+};
+await Tether.init(options);
 
 const MARKET_KEY = 'tether:market:shop.test';
 /** @param {string} newValue What the other tab stored. */
@@ -239,5 +243,32 @@ test('checkout without a saved cart while a reload for another tab is queued ope
     globalThis.fetch = fetch;
     window.open = open;
     localStorage.clear();
+  }
+});
+
+test('a cart under a storageKey of its own follows other tabs, and localStorage.clear() there reloads it', async () => {
+  const { fetch } = globalThis;
+  const cart = cartFrom([{ merchandiseId: product.variants.nodes[0]?.id ?? '', quantity: 1 }]);
+  let loads = 0;
+  /** @type {typeof fetch} */
+  globalThis.fetch = async (_url, init) => {
+    assert.equal(operationName(graphqlRequest(init).query), 'TetherCart');
+    loads++;
+    return jsonResponse({ data: { cart } });
+  };
+  localStorage.setItem('mycart', cart.id);
+  try {
+    await Tether.init({ ...options, storageKey: 'mycart' });
+    loads = 0;
+    window.dispatchEvent(new window.StorageEvent('storage', { key: 'mycart' }));
+    await waitFor(() => loads === 1, 'the reload for the custom key');
+    window.dispatchEvent(new window.StorageEvent('storage', { key: 'mycart:seen' }));
+    await waitFor(() => loads === 2, 'the reload for its saved count');
+    window.dispatchEvent(new window.StorageEvent('storage', { key: null }));
+    await waitFor(() => loads === 3, 'the reload for a cleared storage');
+  } finally {
+    globalThis.fetch = fetch;
+    localStorage.clear();
+    await Tether.init(options);
   }
 });

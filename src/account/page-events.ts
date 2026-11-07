@@ -48,14 +48,17 @@ function customerMessage(error: unknown): string {
 
 /**
  * Runs one change for `el`; a second one while it is on its way (Enter, a double click) is ignored. The failure is
- * shown in `el` (`tether-form-error`), the place the customer looks.
+ * shown in `errorBoxes`, by default those in `el` (`tether-form-error`), the place the customer looks.
  */
-async function act(el: HTMLElement, change: () => Promise<void>): Promise<'saved' | 'error' | 'busy'> {
+async function act(
+  el: HTMLElement,
+  change: () => Promise<void>,
+  errorBoxes = qsa(el, sel('form-error')),
+): Promise<'saved' | 'error' | 'busy'> {
   if (el.getAttribute('aria-busy') === 'true') return 'busy';
   el.classList.add('is-busy');
   el.setAttribute('aria-busy', 'true');
   el.setAttribute(attr('form-state'), 'pending');
-  const errorBoxes = qsa(el, sel('form-error'));
   errorBoxes.forEach((box) => {
     // A live region from before the message is written, so screen readers announce it; the site's own role stays.
     if (!box.hasAttribute('role')) box.setAttribute('role', 'alert');
@@ -104,7 +107,8 @@ function onSubmit(event: SubmitEvent): void {
     const isDefault = box instanceof window.HTMLInputElement && box.checked;
     void act(form, async () => {
       await saveAddress(fieldsOf(form), { id, isDefault });
-      addressFormReset(form);
+      // Edit on another address while this one saved filled the form with that one, which stays to be saved.
+      if (form.dataset['tetherAddressId'] === id) addressFormReset(form);
       await renderAddresses(document);
     });
   }
@@ -129,6 +133,15 @@ function editAddress(id: string): void {
   form.scrollIntoView({ block: 'nearest' });
 }
 
+/**
+ * Where a failed delete or make-default on `row` is shown: the row's own `tether-form-error`, or else the address
+ * form's, as an address row in the documented markup has none.
+ */
+function addressErrorBoxes(row: HTMLElement): HTMLElement[] {
+  const own = qsa(row, sel('form-error'));
+  return own.length ? own : qsa(document.querySelector(sel('address-form')), sel('form-error'));
+}
+
 /** @returns True when the click was on an address button. */
 function onAddressClick(event: MouseEvent, target: Element): boolean {
   const row = target.closest('[data-tether-address]');
@@ -143,16 +156,24 @@ function onAddressClick(event: MouseEvent, target: Element): boolean {
   if (deleteButton) {
     event.preventDefault();
     if (!confirmed(deleteButton)) return true;
-    void act(row, async () => {
-      await deleteAddress(id);
-      await renderAddresses(document);
-    });
+    void act(
+      row,
+      async () => {
+        await deleteAddress(id);
+        await renderAddresses(document);
+      },
+      addressErrorBoxes(row),
+    );
   } else if (target.closest(sel('address-default'))) {
     event.preventDefault();
-    void act(row, async () => {
-      await saveAddress(null, { id, isDefault: true });
-      await renderAddresses(document);
-    });
+    void act(
+      row,
+      async () => {
+        await saveAddress(null, { id, isDefault: true });
+        await renderAddresses(document);
+      },
+      addressErrorBoxes(row),
+    );
   } else if (target.closest(sel('address-edit'))) {
     event.preventDefault();
     editAddress(id);

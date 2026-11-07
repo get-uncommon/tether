@@ -4,14 +4,14 @@
  * extras part, loaded on the first submit. A code Shopify refuses marks the form `is-invalid` (and the input
  * `aria-invalid`) until the visitor types again.
  */
-import { reportError } from '../config.ts';
+import { reportFailure } from '../config.ts';
 import { Cart } from '../cart.ts';
-import { attr, sel, busy, isElement } from '../dom.ts';
+import { attr, sel, busy, isElement, isInput } from '../dom.ts';
 import { loadPart } from '../lazy.ts';
 
 function codeInputOf(form: Element): HTMLInputElement | null {
   const input = form.querySelector(sel('discount-input')) ?? form.querySelector('input');
-  return input instanceof window.HTMLInputElement ? input : null;
+  return input && isInput(input) ? input : null;
 }
 
 function onSubmit(event: SubmitEvent): void {
@@ -22,10 +22,9 @@ function onSubmit(event: SubmitEvent): void {
   const input = codeInputOf(form);
   const code = input?.value.trim();
   if (!code) return;
-  busy(form, () => loadPart('extras').then((part) => part.applyDiscountCode(form, input, code))).catch(
-    (error: unknown) => {
-      reportError(error, 'discount');
-    },
+  reportFailure(
+    busy(form, () => loadPart('extras').then((part) => part.applyDiscountCode(form, input, code))),
+    'discount',
   );
 }
 
@@ -45,9 +44,7 @@ function onClick(event: MouseEvent): void {
   event.preventDefault();
   const code = remove.closest(sel('discount-code'))?.getAttribute(attr('discount-code'));
   if (!code) return;
-  Cart.removeDiscount(code).catch((error: unknown) => {
-    reportError(error, 'discount');
-  });
+  reportFailure(Cart.removeDiscount(code), 'discount');
 }
 
 /** Binds the document-wide listeners, once per page load of the script. */

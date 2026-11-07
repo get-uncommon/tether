@@ -197,6 +197,7 @@ account: {
     <button tether-address-edit>Edit</button>
     <button tether-address-default tether-address-show="not-default">Make default</button>
     <button tether-address-delete tether-confirm="Delete this address?">Delete</button>
+    <p tether-form-error role="alert"></p>
   </li>
 </ul>
 <p tether-show="addresses-empty" hidden>No addresses yet.</p>
@@ -213,8 +214,10 @@ account: {
 
 `tether-address-bind`: `formatted`, `name`, `company`, `address1`, `address2`, `city`, `zip`,
 `province`, `country`, `phone`. Forms get `tether-form-state="pending|saved|error"`, and Shopify's
-message (e.g. "Zip is invalid") goes in `tether-form-error`. Tether gives a `tether-form-error`
-without a `role` of its own `role="alert"`, so screen readers announce the message.
+message (e.g. "Zip is invalid") goes in `tether-form-error`. A failed delete or make-default shows
+in the address's own `tether-form-error`, or in the address form's when the address has none. Tether
+gives a `tether-form-error` without a `role` of its own `role="alert"`, so screen readers announce
+the message.
 
 **Subscriptions** (Shopify Subscriptions or any app that uses Shopify's subscription contracts):
 

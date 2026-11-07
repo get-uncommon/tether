@@ -2,7 +2,7 @@
  * The product scopes and lists on the page: mounting a product root, the live roots a country switch re-renders, and
  * the products the server rendered into the page. Shared by `index.ts` and the optional markets part.
  */
-import { cfg, log, warn, reportError } from './config.ts';
+import { cfg, log, warn, reportError, reportFailure } from './config.ts';
 import { ProductScope, scopes, rememberOptionNames } from './product.ts';
 import { listSelector } from './collection.ts';
 import { getProduct, takeStale, refreshProduct, hydrateProducts } from './loader.ts';
@@ -161,13 +161,12 @@ function flushRefresh() {
   const keys = [...refreshQueue];
   refreshQueue = new Set();
   keys.forEach((key) => {
-    refreshProduct(key)
-      .then((fresh) => {
+    reportFailure(
+      refreshProduct(key).then((fresh) => {
         applyRefresh(key, fresh);
-      })
-      .catch((error: unknown) => {
-        reportError(error, `refresh ${key}`);
-      });
+      }),
+      `refresh ${key}`,
+    );
   });
 }
 

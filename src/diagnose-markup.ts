@@ -110,7 +110,7 @@ const ATTRIBUTES = new Set(
   always-enabled bind cart-checkout-charge cart-clear cart-close cart-count cart-discounts cart-drawer cart-label cart-lines
   cart-note cart-open cart-subtotal cart-total cart-warning checkout code collection collection-bind countries country
   country-bind country-label country-select default-plan default-purchase discount discount-code discount-form discount-input
-  discount-remove display error group group-add hide-single language limit line line-attribute line-attributes line-id
+  discount-remove display empty-query error group group-add hide-single language limit line line-attribute line-attributes line-id
   line-minus line-plan line-plus line-remove line-show list load-more market-pending one-time-label option option-list
   option-selected option-value order order-bind order-line order-lines order-line-show order-show order-state order-fulfillments
   fulfillment-bind order-return return-quantity return-reason return-note orders profile-form address-form addresses address-bind

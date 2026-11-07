@@ -51,14 +51,22 @@ test("analytics: Astro's page-load for the landing page publishes no second page
     },
   });
   const analytics = await import('../src/analytics.ts');
+  /** @type {WeakMap<Event, HTMLElement>} */
+  const bodies = new WeakMap();
+  /** @returns {Event} An `astro:page-load` on the body the page has now, as the core's queue keeps it. */
+  const pageLoad = () => {
+    const event = new window.Event('astro:page-load');
+    bodies.set(event, document.body);
+    return event;
+  };
   /** @type {Event[]} */
-  const queue = [new window.Event('astro:page-load')];
-  await analytics.startAnalytics(queue);
+  const queue = [pageLoad()];
+  await analytics.startAnalytics(queue, bodies, document.body);
   assert.deepEqual(published, ['page_viewed']);
-  queue.push(new window.Event('astro:page-load'));
+  queue.push(pageLoad());
   assert.deepEqual(published, ['page_viewed'], 'the same body again');
   document.body.replaceWith(document.createElement('body'));
-  queue.push(new window.Event('astro:page-load'));
+  queue.push(pageLoad());
   assert.deepEqual(published, ['page_viewed', 'page_viewed'], 'a client-side navigation');
   setShopify(undefined);
 });

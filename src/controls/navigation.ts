@@ -3,7 +3,7 @@
  * `astro:before-swap`) mounts each new page in its market and closes the cart while leaving; back online, what failed
  * to load loads again. The markets part follows the country selects it fills.
  */
-import { cfg, reportError } from '../config.ts';
+import { cfg, reportError, reportFailure } from '../config.ts';
 import { attr } from '../dom.ts';
 import { liveLists, retryFailed } from '../mounting.ts';
 import { marketForArrival, setCountry } from '../page-market.ts';
@@ -44,9 +44,7 @@ async function onPageLoad(hooks: PageHooks): Promise<void> {
 
 function bindAstroRouter(hooks: PageHooks): void {
   document.addEventListener('astro:page-load', () => {
-    onPageLoad(hooks).catch((error: unknown) => {
-      reportError(error, 'page mount');
-    });
+    reportFailure(onPageLoad(hooks), 'page mount');
   });
   document.addEventListener('astro:before-swap', () => {
     mountedBody = null;

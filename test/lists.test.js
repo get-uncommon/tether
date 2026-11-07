@@ -1,4 +1,5 @@
-// Product lists: tether-load-more pages, a reload a "load more" can't race, and tether-sort checked per source.
+// Product lists: tether-load-more pages, a reload a "load more" can't race, tether-sort checked per source, and what a
+// url: list without its search shows.
 import { test, before, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
@@ -171,4 +172,50 @@ test('tether-sort takes the sort keys of its source; another key warns once and 
     ['newest', 'manual'].map((id) => find(`#${id}`).getAttribute('tether-state')),
     ['ready', 'ready'],
   );
+});
+
+test('a url: list without its parameter lists every product, or none unasked with emptyQuery or tether-empty-query', async () => {
+  const { configure } = await import('../src/config.ts');
+  answer = () =>
+    jsonResponse({
+      data: { products: { nodes: productsOf(['a']), pageInfo: { hasNextPage: false, endCursor: null } } },
+    });
+  const markup = (attribute = '') => `
+    <div id="list" tether-products="url:q" ${attribute}>
+      <div tether-list><div class="card"></div></div>
+      <p id="empty" tether-show="list-empty" hidden>Type a search</p>
+    </div>`;
+  /** @param {string} attribute @returns {Promise<(string | null)[]>} */
+  const shown = async (attribute = '') => {
+    document.body.innerHTML = markup(attribute);
+    await loadList(find('#list'));
+    return cards();
+  };
+  try {
+    assert.deepEqual(await shown(), ['a'], 'every product by default');
+    assert.equal(calls.length, 1);
+    configure({ domain: 'shop.test', token: 't', retries: 0, emptyQuery: 'none' });
+    assert.deepEqual(await shown(), [], 'none with emptyQuery');
+    assert.equal(calls.length, 1, 'and nothing asked');
+    assert.equal(find('#list').getAttribute('tether-state'), 'ready');
+    assert.notEqual(find('#empty').style.display, 'none', 'the empty state shows');
+    assert.deepEqual(await shown('tether-empty-query="all"'), ['a'], 'the attribute over the config');
+    assert.deepEqual(await shown('tether-empty-query="nothing"'), [], 'an unknown value: the config');
+    assert.deepEqual(
+      warnings.map((args) => args[1]),
+      ['tether-empty-query "nothing" is not all or none: using none'],
+    );
+    window.history.replaceState(null, '', '/search?q=');
+    assert.deepEqual(await shown(), [], 'an empty parameter is none too');
+    assert.equal(calls.length, 2);
+    window.history.replaceState(null, '', '/search?q=latte');
+    await loadList(find('#list'));
+    assert.deepEqual(cards(), ['a'], 'a load with a search lists it');
+    assert.equal(calls.at(-1)?.variables['query'], 'latte');
+    configure({ domain: 'shop.test', token: 't', retries: 0, emptyQuery: 'some' });
+    assert.equal(warnings.at(-1)?.[1], 'invalid emptyQuery "some": using "all"');
+  } finally {
+    window.history.replaceState(null, '', '/');
+    configure({ domain: 'shop.test', token: 't', retries: 0 });
+  }
 });

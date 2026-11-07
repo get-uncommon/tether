@@ -18,7 +18,7 @@ test("analytics: Tether's own events become GA4 dataLayer events (view_item, add
   cfg.analytics = { dataLayer: true };
   /** @type {Event[]} */
   const queue = [];
-  await analytics.startAnalytics(queue);
+  await analytics.startAnalytics(queue, new WeakMap(), document.body);
   Tether.clearProductCache();
   Tether.primeProduct(product);
   document.body.innerHTML = '<div tether-product="coffee-box"></div>';
@@ -66,25 +66,6 @@ const TEE_ORDER = {
     ],
   },
 };
-
-test('analytics: when the part fails to load, the queued events are dropped and no more are queued', async () => {
-  const { queueAnalyticsEvents } = await import('../src/analytics-queue.ts');
-  /** @type {(error: Error) => void} */
-  let failLoad = () => {};
-  const queue = queueAnalyticsEvents(
-    () =>
-      new Promise((_resolve, reject) => {
-        failLoad = reject;
-      }),
-  );
-  document.dispatchEvent(new window.CustomEvent('tether:cart-updated', { detail: { cart: null } }));
-  document.dispatchEvent(new window.Event('astro:page-load'));
-  assert.equal(queue.length, 2, 'queued while the part loads');
-  failLoad(new Error('blocked by the page'));
-  await waitFor(() => queue.length === 0, 'the queue to be emptied');
-  document.dispatchEvent(new window.CustomEvent('tether:product-ready', { detail: {} }));
-  assert.deepEqual(queue, []);
-});
 
 test('customer accounts: no token in the browser, the Worker does the work', async () => {
   const account = await import('../src/account.ts');
@@ -211,12 +192,13 @@ const socksSubscription = (status) => ({
  * The Worker's account routes behind the account pages, recording what the page posts.
  *
  * @param {typeof globalThis.fetch} realFetch Answers everything outside the account routes.
+ * @param {Record<string, () => Response | Promise<Response>>} overrides A test's own answers, by route.
  */
-function accountPagesWorker(realFetch) {
+function accountPagesWorker(realFetch, overrides) {
   /** @type {{ path: string, body: unknown }[]} */
   const posts = [];
   let status = 'ACTIVE';
-  /** @type {Record<string, () => Response>} */
+  /** @type {Record<string, () => Response | Promise<Response>>} */
   const answers = {
     '/me': () => jsonResponse({ loggedIn: true, customer: { firstName: 'Ada', lastName: 'L', email: 'ada@x.test' } }),
     '/orders': () =>
@@ -244,6 +226,7 @@ function accountPagesWorker(realFetch) {
     '/address': () => jsonResponse({ error: 'City is required', userErrors: [{ message: 'City is required' }] }, 400),
     '/return': () => jsonResponse({ ok: true, return: { id: 'gid://shopify/Return/1', status: 'REQUESTED' } }),
     '/profile': () => jsonResponse({ ok: true, customer: { firstName: 'Ada' } }),
+    ...overrides,
   };
   /** @type {typeof globalThis.fetch} */
   const fetch = async (url, init = {}) => {
@@ -277,7 +260,8 @@ const ACCOUNT_PAGES = `
   <div tether-subscriptions><div><span tether-subscription-bind="status"></span> <span tether-subscription-bind="interval"></span>
     <button id="pause" tether-subscription-action="pause">Pause</button><button id="resume" tether-subscription-action="resume">Resume</button>
     <span tether-subscription-show="paused" hidden>Paused</span></div></div>
-  <ul tether-addresses><li><span tether-address-bind="formatted"></span><b tether-address-show="default" hidden>Default</b></li></ul>
+  <ul tether-addresses><li><span tether-address-bind="formatted"></span><b tether-address-show="default" hidden>Default</b>
+    <button tether-address-edit>Edit</button><button tether-address-delete>Delete</button></li></ul>
   <form tether-address-form><input name="address1" value="x"><p tether-form-error></p><p id="own-role" tether-form-error role="status"></p><button>Save</button></form>
   <form tether-profile-form><input name="firstName"><input name="lastName"></form>`;
 
@@ -309,8 +293,9 @@ const isMountAccount = (value) => typeof value === 'function';
  * Mounts the account pages on an order page, with `check` run while the page is up.
  *
  * @param {(posts: { path: string, body: unknown }[]) => Promise<void>} check Given what the page posted so far.
+ * @param {Record<string, () => Response | Promise<Response>>} [answers] The Worker's answers this test changes.
  */
-async function onAccountPages(check) {
+async function onAccountPages(check, answers = {}) {
   // A fresh instance, as an earlier test logged out; tsc can't resolve the query string, so its export is checked.
   const freshAccount = '../src/account.ts?pages';
   const mountAccount = asRecord(await import(freshAccount), 'the fresh account module')['mountAccount'];
@@ -321,7 +306,7 @@ async function onAccountPages(check) {
     subscriptionsUrl: 'https://shopify.com/1/account/pages/subs',
   };
   const realFetch = globalThis.fetch;
-  const worker = accountPagesWorker(realFetch);
+  const worker = accountPagesWorker(realFetch, answers);
   globalThis.fetch = worker.fetch;
   try {
     window.history.replaceState(null, '', '/account/order?id=7');
@@ -413,4 +398,59 @@ test('account pages: addresses with the default, a Shopify error in the form, th
     );
     assert.equal(input('[tether-profile-form] [name="firstName"]').value, 'Ada');
   });
+});
+
+/** @param {string} id The address's numeric id. */
+const addressAt = (id) => ({
+  id: `gid://shopify/CustomerAddress/${id}`,
+  address1: `Street ${id}`,
+  formatted: [`Street ${id}`],
+});
+
+test('account pages: Edit on another address while a save is on its way keeps that address in the form', async () => {
+  /** @type {() => void} */
+  let answerSave = () => {};
+  const saveAnswered = new Promise((resolve) => {
+    answerSave = () => {
+      resolve(undefined);
+    };
+  });
+  const answers = {
+    '/addresses': () => jsonResponse({ ok: true, addresses: [addressAt('1'), addressAt('2')] }),
+    '/address': async () => {
+      await saveAnswered;
+      return jsonResponse({ ok: true, address: addressAt('1') });
+    },
+  };
+  await onAccountPages(async () => {
+    const [editFirst, editSecond] = [...document.querySelectorAll('[tether-address-edit]')];
+    assert.ok(editFirst instanceof window.HTMLElement && editSecond instanceof window.HTMLElement);
+    const form = find('[tether-address-form]');
+    assert.ok(form instanceof window.HTMLFormElement);
+    editFirst.click();
+    form.dispatchEvent(new window.Event('submit', { cancelable: true, bubbles: true }));
+    editSecond.click();
+    answerSave();
+    await waitFor(() => form.getAttribute('tether-form-state') === 'saved', 'the first address saved');
+    assert.equal(form.dataset['tetherAddressId'], 'gid://shopify/CustomerAddress/2');
+    assert.equal(input('[tether-address-form] [name="address1"]').value, 'Street 2');
+  }, answers);
+});
+
+test("account pages: a failed delete shows in the address form's error box when the row has none", async () => {
+  const refused = () =>
+    jsonResponse({ error: 'Address is in use', userErrors: [{ message: 'Address is in use' }] }, 400);
+  await onAccountPages(
+    async () => {
+      find('[tether-address-delete]').click();
+      await waitFor(
+        () => find('[tether-addresses] li').getAttribute('tether-form-state') === 'error',
+        'the refused delete',
+      );
+      const box = find('[tether-address-form] [tether-form-error]');
+      assert.equal(box.textContent, 'Address is in use');
+      assert.equal(box.getAttribute('role'), 'alert', 'announced');
+    },
+    { '/address/delete': refused },
+  );
 });

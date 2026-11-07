@@ -7,7 +7,8 @@
  * With page transitions (Barba, Swup): set `autoMount: false`, call `Tether.init()` once and
  * `Tether.mount(container)` after every page enter.
  */
-import { cfg, configView, configure, isConfigured, log, warn, reportError } from './config.ts';
+import { cfg, configure, isConfigured, log, warn, reportError, reportFailure } from './config.ts';
+import { configView } from './config-view.ts';
 import { query, TetherError, withContext } from './client.ts';
 import { Cart } from './cart.ts';
 import { scopes } from './product.ts';
@@ -15,9 +16,9 @@ import { listSelector, mountedList } from './collection.ts';
 import { getProduct, clearProductCache, primeProduct, normalizeProductKey } from './loader.ts';
 import * as plans from './selling-plans.ts';
 import { resolveProductKey } from './status.ts';
-import { sel, emit, isOwnEvent, formatMoney, imageUrl, pageGlobal } from './dom.ts';
+import { sel, emit, isElement, isOwnEvent, formatMoney, imageUrl, pageGlobal } from './dom.ts';
 import { loadPart, coreModules } from './lazy.ts';
-import { queueAnalyticsEvents } from './analytics-queue.ts';
+import { PAGE_TRANSITION, queueAnalyticsEvents } from './analytics-queue.ts';
 import { VERSION } from './version.ts';
 import {
   mountedLists,
@@ -115,6 +116,12 @@ let observer: MutationObserver | null = null;
 /** The analytics part's queue, created once by the first `init()` with `analytics`. */
 let analyticsQueue: Event[] | null = null;
 
+/**
+ * Set by `unmount()`: a page transition then mounts the next page's container, a new page in the same body. Astro's
+ * navigation closes the cart without it, as its `astro:page-load` starts the page view.
+ */
+let pageLeft = false;
+
 /** The document-wide listeners are bound once, by the first configured `init()`. */
 let controlsBound = false;
 
@@ -171,13 +178,16 @@ function mountWithin(root: Document | Element): number {
 }
 
 /**
- * Mounts every product scope and product list inside `root`. Safe to call repeatedly.
+ * Mounts every product scope and product list inside `root`. Safe to call repeatedly. The first container mounted
+ * after `unmount()` is a new page for analytics.
  *
  * @returns The scopes and lists newly mounted.
  */
 export function mount(root: Document | Element = document): number {
   if (!isConfigured()) return 0;
   if (root === document) rememberDocumentMount();
+  else if (pageLeft) analyticsQueue?.push(new Event(PAGE_TRANSITION));
+  pageLeft = false;
   // Page transitions detach old roots: they aren't kept alive.
   pruneLive();
   hydrateFromPage(root.ownerDocument ?? document);
@@ -209,8 +219,9 @@ function mountAdded(added: readonly Element[]): void {
   log(`mounted ${count} scope(s) in ${roots.length} added element(s)`);
 }
 
-/** Call before a page transition removes the page: closes the cart drawer. */
+/** Call before a page transition removes the page: closes the cart drawer; the next page's `mount()` is a new page. */
 export function unmount(): void {
+  pageLeft = true;
   Cart.close();
 }
 
@@ -226,7 +237,7 @@ function bindControls() {
   bindCartControls();
   bindDiscountControls();
   bindExtrasControls();
-  bindNavigation({ ready: () => initPromise ?? Promise.resolve(null), mount, unmount });
+  bindNavigation({ ready: () => initPromise ?? Promise.resolve(null), mount, unmount: Cart.close });
 }
 
 /**
@@ -280,7 +291,7 @@ function startObserver() {
   observer = new MutationObserver((mutations) => {
     mutations.forEach((mutation) => {
       mutation.addedNodes.forEach((node) => {
-        if (node instanceof window.Element) queued.add(node);
+        if (isElement(node)) queued.add(node);
       });
     });
     clearTimeout(timer);
@@ -387,11 +398,10 @@ function autoStart() {
   const config = pageGlobal('TETHER_CONFIG');
   if (!config || field(config, 'autoMount') === false || pageGlobal('TETHER_INTEGRATION')) return;
   const start = () => {
-    init()
-      .then(() => mount(document))
-      .catch((error: unknown) => {
-        reportError(error, 'init');
-      });
+    reportFailure(
+      init().then(() => mount(document)),
+      'init',
+    );
   };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start, { once: true });
   else start();
