@@ -49,7 +49,7 @@ function renderOptionStates(scope: RenderScope, view: ProductView): void {
       const value = get(node, 'option-value') ?? '';
       setSelected(node, view.selected[name] === value);
       const unavailable = !isValueAvailable(product, view.selected, name, value);
-      setUnavailable(node, unavailable);
+      setUnavailable(node, unavailable, 'picks-closest');
       node.setAttribute('data-unavailable', unavailable ? 'true' : 'false');
     });
   });
@@ -73,12 +73,16 @@ function renderPurchaseStates(scope: RenderScope, view: ProductView): void {
     }
     const mode = get(el, 'purchase');
     setSelected(el, mode === purchase.kind);
-    setUnavailable(el, mode === 'subscription' ? !view.subscriptionAvailable : scope.product.requiresSellingPlan);
+    setUnavailable(
+      el,
+      mode === 'subscription' ? !view.subscriptionAvailable : scope.product.requiresSellingPlan,
+      'does-nothing',
+    );
   });
   scope.$(sel('plan-value')).forEach((node) => {
     const planId = get(node, 'plan-value') ?? '';
     setSelected(node, line.kind === 'subscription' && planId === line.planId);
-    setUnavailable(node, !allocationFor(variant, planId));
+    setUnavailable(node, !allocationFor(variant, planId), 'does-nothing');
     const plan = scope.plans.find((candidate) => candidate.id === planId);
     const texts = planBindTexts(variant, planId, plan, FORMAT);
     qsa(node, sel('plan-bind')).forEach((el) => {

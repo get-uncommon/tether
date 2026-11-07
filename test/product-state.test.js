@@ -223,8 +223,8 @@ for (const { name, product: item, server: options, browser, expected } of CASES)
         const unavailable = initial.isUnavailable(option.name, value);
         assert.equal(button.classList.contains('is-unavailable'), unavailable, `${value} unavailable`);
         assert.equal(
-          button.getAttribute('aria-disabled'),
-          String(unavailable),
+          button.getAttribute('aria-describedby'),
+          unavailable ? 'tether-unavailable' : null,
           `${value} unavailable to a screen reader`,
         );
         assert.equal(button.getAttribute('aria-pressed'), String(initial.selected[option.name] === value));
@@ -250,7 +250,7 @@ test('option elements get a chosen and unavailable state their role allows; role
     <label id="label"><input type="radio"></label><div id="listitem" role="listitem"></div>`;
   for (const el of findAll('body > *')) {
     setSelected(el, true);
-    setUnavailable(el, true);
+    setUnavailable(el, true, 'does-nothing');
   }
   /** @param {string} id */
   const aria = (id) =>
@@ -277,8 +277,32 @@ test('option elements get a chosen and unavailable state their role allows; role
   for (const el of findAll('body > *'))
     assert.ok(el.classList.contains('is-selected') && el.classList.contains('is-unavailable'));
   setSelected(find('#link'), false);
-  setUnavailable(find('#link'), false);
+  setUnavailable(find('#link'), false, 'does-nothing');
   assert.deepEqual(aria('link'), { role: 'button', 'aria-pressed': 'false', 'aria-disabled': 'false' });
+});
+
+test('an option value that picks the closest variant is described as unavailable, never disabled', async () => {
+  const { setUnavailable } = await import('../src/dom.ts');
+  document.body.innerHTML = `<a id="link" href="?size=1" aria-describedby="hint"></a>
+    <label id="label"><input type="radio"></label><span id="hint">Ships in a week</span>`;
+  setUnavailable(find('#link'), true, 'picks-closest');
+  setUnavailable(find('#label'), true, 'picks-closest');
+  const note = document.getElementById('tether-unavailable');
+  assert.ok(note?.hidden, 'the note is hidden: nothing changes on screen');
+  assert.equal(note.textContent, 'Unavailable');
+  assert.equal(find('#link').getAttribute('aria-describedby'), 'hint tether-unavailable', "keeps the site's own ids");
+  assert.equal(find('#label input').getAttribute('aria-describedby'), 'tether-unavailable');
+  assert.ok(!document.querySelector('[aria-disabled]'), 'still operable, so not aria-disabled');
+  setUnavailable(find('#link'), true, 'picks-closest');
+  assert.equal(find('#link').getAttribute('aria-describedby'), 'hint tether-unavailable', 'described once');
+  setUnavailable(find('#link'), false, 'picks-closest');
+  setUnavailable(find('#label'), false, 'picks-closest');
+  assert.equal(find('#link').getAttribute('aria-describedby'), 'hint');
+  assert.equal(find('#label input').getAttribute('aria-describedby'), null);
+
+  document.body.innerHTML = '<span id="tether-unavailable" hidden>Ausverkauft</span><a id="link"></a>';
+  setUnavailable(find('#link'), true, 'picks-closest');
+  assert.equal(findAll('#tether-unavailable').length, 1, "the site's own note, in its language, is the one used");
 });
 
 test('initialState() keeps its shape: plain data plus isUnavailable()', () => {

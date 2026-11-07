@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- Fix: an option value no available variant has is described as unavailable to screen readers
+  (`aria-describedby="tether-unavailable"`, a `hidden` note Tether adds), not `aria-disabled`:
+  choosing it still works, picking the closest variant that has it. A page's own element with
+  `id="tether-unavailable"` says it in the store's language.
+- Fix: an `onCartOpen` or `onCartClose` that throws is reported (`onError`): the add that opened the
+  cart still succeeds, and `tether:cart-toggled` still fires.
+- Fix: `Tether.cart.applyDiscount('')` (or a code of only spaces) rejects as `INVALID_DISCOUNT`
+  without sending anything, instead of sending two mutations and making a cart for a visitor who had
+  none.
+- Fix: `Object.getOwnPropertyDescriptor(Tether.config, key)` gives the same read-only view a read
+  does, so no write can skip the validation `Tether.init()` does.
+
 ## 0.9.5 (2026-11-07)
 
 - **Fix: 0.9.4's checkout could hang.** When a checkout resolver changes the cart during checkout

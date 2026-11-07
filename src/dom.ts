@@ -181,15 +181,42 @@ export function setSelected(el: Element, selected: boolean): void {
 }
 
 /**
- * Marks an option element the visitor can't buy: `is-unavailable`, and `aria-disabled` on the control assistive
- * technology reads, the element itself or the radio/checkbox inside it. It stays clickable: choosing it picks the
- * closest variant that has it.
+ * The id of the note an option value the visitor can't buy is described by. A site writes its own element with this id
+ * to say it in the store's language; Tether adds a `hidden` English one to a page without.
  */
-export function setUnavailable(el: Element, unavailable: boolean): void {
+const UNAVAILABLE_NOTE = 'tether-unavailable';
+
+/**
+ * Describes `control` as unavailable, or no longer, through `aria-describedby`, keeping the ids the site gave it. A
+ * description is read from hidden text and every major screen reader announces it, so nothing changes on screen.
+ */
+function describeUnavailable(control: Element, unavailable: boolean): void {
+  if (unavailable && !document.getElementById(UNAVAILABLE_NOTE)) {
+    const note = document.createElement('span');
+    note.id = UNAVAILABLE_NOTE;
+    note.hidden = true;
+    note.textContent = 'Unavailable';
+    document.body.append(note);
+  }
+  const ids = (control.getAttribute('aria-describedby') ?? '').split(' ').filter((id) => id && id !== UNAVAILABLE_NOTE);
+  if (unavailable) ids.push(UNAVAILABLE_NOTE);
+  if (ids.length) control.setAttribute('aria-describedby', ids.join(' '));
+  else control.removeAttribute('aria-describedby');
+}
+
+/**
+ * Marks an option element the visitor can't buy: `is-unavailable`, and the state assistive technology reads on the
+ * control, the element itself or the radio/checkbox inside it. A plan or purchase toggle the variant can't use does
+ * nothing when chosen, so it is `aria-disabled`. An option value still works, choosing it picks the closest variant
+ * that has it, so it isn't disabled: it is described as unavailable (`describeUnavailable`).
+ */
+export function setUnavailable(el: Element, unavailable: boolean, choosing: 'does-nothing' | 'picks-closest'): void {
   el.classList.toggle('is-unavailable', unavailable);
   const isControl = chosenState(el) !== null || isInput(el);
   const control = isControl ? el : el.querySelector(CHECKABLE);
-  control?.setAttribute('aria-disabled', String(unavailable));
+  if (!control) return;
+  if (choosing === 'picks-closest') describeUnavailable(control, unavailable);
+  else control.setAttribute('aria-disabled', String(unavailable));
 }
 
 let layoutTimer: ReturnType<typeof setTimeout> | undefined;

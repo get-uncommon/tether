@@ -323,11 +323,13 @@ export const Cart = {
   /**
    * Adds a code. A code Shopify doesn't accept is removed again, so it doesn't warn on every later change.
    *
-   * @throws {TetherError} `INVALID_DISCOUNT` (rejected) when Shopify doesn't accept the code.
+   * @throws {TetherError} `INVALID_DISCOUNT` (rejected) when Shopify doesn't accept the code, or it is blank.
    */
   async applyDiscount(typed: string): Promise<ShopifyCart | null> {
     // Shopify is sent the code trimmed (`discountCodesFrom`), so it is looked up and removed trimmed too.
     const code = typed.trim();
+    // Shopify has no blank code; asking it would cost two mutations, and a cart for a visitor who had none.
+    if (!code) throw new TetherError('No discount code', { code: 'INVALID_DISCOUNT' });
     const cart = await Cart.setDiscountCodes((current) => [...new Set([...current, code])]);
     const wanted = code.toLowerCase();
     const applied = (cart?.discountCodes ?? []).find((discount) => discount.code.toLowerCase() === wanted);

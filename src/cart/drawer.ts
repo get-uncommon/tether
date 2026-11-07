@@ -4,7 +4,7 @@
  * site, with the open class, and Tether follows the class. A page without a drawer (a cart built in React, Svelte or
  * Vue) still has an open state, for `Tether.cart.subscribe`.
  */
-import { cfg } from '../config.ts';
+import { cfg, reportError } from '../config.ts';
 import { sel, get, qsa, emit } from '../dom.ts';
 
 const FOCUSABLE =
@@ -24,6 +24,15 @@ let returnFocus: HTMLElement | null = null;
 
 /** Follows the open class on each drawer, so a `manual` drawer the site opens or closes itself is announced. */
 let classWatcher: MutationObserver | null = null;
+
+/** Calls the site's `onCartOpen` or `onCartClose`: a bug in it is reported, and the cart still opens or closes. */
+function callHook(hook: ((drawers: HTMLElement[]) => void) | null, drawers: HTMLElement[], name: string): void {
+  try {
+    hook?.(drawers);
+  } catch (error) {
+    reportError(error, name);
+  }
+}
 
 const isFocusable = (el: Element | null): el is HTMLElement => el !== null && 'focus' in el;
 
@@ -97,7 +106,7 @@ function announceOpen(opened: HTMLElement[]): void {
       focusInto(first);
     }, FOCUS_AFTER_OPEN_MS);
   }
-  cfg.onCartOpen?.(opened);
+  callHook(cfg.onCartOpen, opened, 'onCartOpen');
   emit('cart-toggled', { open: true });
 }
 
@@ -107,7 +116,7 @@ function announceClosed(all: HTMLElement[], hadFocus: boolean): void {
   syncDrawerAria();
   if (hadFocus && returnFocus?.isConnected) returnFocus.focus({ preventScroll: true });
   returnFocus = null;
-  cfg.onCartClose?.(all);
+  callHook(cfg.onCartClose, all, 'onCartClose');
   emit('cart-toggled', { open: false });
 }
 
