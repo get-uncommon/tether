@@ -66,6 +66,8 @@ test('integration: server-only options stay out of the page silently, unknown on
     pageSize: 50,
     // @ts-expect-error -- a misspelt option
     opneCart: true,
+    // A name Object.prototype has, which is no option either.
+    ...Object.fromEntries([['toString', 'x']]),
   }).hooks['astro:config:setup']({
     injectScript: (_stage, code) => scripts.push(code),
     command: 'build',
@@ -75,8 +77,11 @@ test('integration: server-only options stay out of the page silently, unknown on
   const page = scripts.find((code) => code.includes('TETHER_CONFIG'));
   assert.ok(page, 'the page script');
   assert.match(page, /"domain":"a\.myshopify\.com"/);
-  assert.doesNotMatch(page, /siteUrl|pageSize|opneCart/);
-  assert.deepEqual(warnings, ['opneCart is not a Tether option: left out of the page.']);
+  assert.doesNotMatch(page, /siteUrl|pageSize|opneCart|toString/);
+  assert.deepEqual(warnings, [
+    'opneCart is not a Tether option: left out of the page.',
+    'toString is not a Tether option: left out of the page.',
+  ]);
 });
 
 test('integration: injects the page script with .env values, drops functions with a warning', async (t) => {

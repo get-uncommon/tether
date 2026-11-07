@@ -34,22 +34,35 @@ cart, and log out; only from your site's address, and changes need a header othe
 
 ## Setup
 
+First pick where the Worker answers, because the callback URI and `account.server` follow from
+it. Browsers only send the login cookie to your own domain, so it has to be your shop's domain or
+a subdomain of it, and the Worker builds its callback from the host it answers on:
+
+| Setup                                                                     | Callback URI (step 1)                                    | `account.server` (step 3)                         |
+| ------------------------------------------------------------------------- | -------------------------------------------------------- | ------------------------------------------------- |
+| **Recommended:** a route on your shop's domain, `your-shop.com/_tether/*` | `https://your-shop.com/_tether/account/callback`         | `'/_tether/account'`                              |
+| The Worker's own custom domain, e.g. `account.your-shop.com`              | `https://account.your-shop.com/_tether/account/callback` | `'https://account.your-shop.com/_tether/account'` |
+
+The JavaScript origin and the logout URI are your site in both setups: after logging out, Shopify
+sends the customer back to the page they were on.
+
 ### 1. Shopify
 
 1. Settings → Customer accounts → choose **Customer accounts** (the new ones).
 2. Sales channels → **Headless** → your storefront → **Customer Account API**:
    - Client type: **Confidential** (best: the Worker keeps the client secret) or Public.
-   - Callback URI: `https://your-shop.com/_tether/account/callback`
+   - Callback URI: `https://your-shop.com/_tether/account/callback`, or with a custom domain
+     `https://account.your-shop.com/_tether/account/callback` (the table above)
    - JavaScript origin: `https://your-shop.com`
    - Logout URI: `https://your-shop.com/`
 3. Copy the **Client ID** (and the secret for a Confidential client).
 
 ### 2. The Worker on your shop's domain
 
-Browsers only send the login cookie to your own domain, so the Worker has to answer there:
 Cloudflare → Workers & Pages → **tether-sync** → Settings → **Domains & Routes** → Add →
-**Route** `your-shop.com/_tether/*` (your domain's DNS must be on Cloudflare; free). Or a custom
-domain such as `account.your-shop.com`.
+**Route** `your-shop.com/_tether/*` (your domain's DNS must be on Cloudflare; free). With a custom
+domain instead, Add → **Custom domain** `account.your-shop.com`, and register its callback URI in
+step 1.
 
 Then the Worker's secrets (Settings → Variables and Secrets):
 
@@ -71,7 +84,8 @@ whether the Worker answers on your domain, and which URLs to register in Shopify
 ```js
 window.TETHER_CONFIG = {
   …,
-  account: { server: '/_tether/account' },   // or the full URL: 'https://your-shop.com/_tether/account'
+  account: { server: '/_tether/account' },   // a route on your shop's domain
+  // account: { server: 'https://account.your-shop.com/_tether/account' },   // the Worker's own custom domain
 };
 ```
 

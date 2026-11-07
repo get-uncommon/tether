@@ -21,6 +21,7 @@ import {
   notifyLayoutChanged,
   busy,
   show,
+  integerAttribute,
 } from './dom.ts';
 import { collectionFields } from './fragments.ts';
 import { normalizeProductKey, primeProduct, withProductFragment } from './loader.ts';
@@ -28,6 +29,7 @@ import { isCollectionAnswer, isRecommendationsAnswer, isSearchAnswer } from './p
 import { setScopeStatus, isNotFound, resolveProductKey } from './status.ts';
 import { listSelector } from './collection.ts';
 import type { Product } from './fragments.ts';
+import { MAX_CONNECTION_SIZE } from './shopify-values.ts';
 import type { ProductRef, RecommendationIntent } from './shopify-values.ts';
 import type { Collection, PageInfo, ProductPage, ProductQuery } from './loader.ts';
 
@@ -121,11 +123,9 @@ export async function getRecommendations(
 
 const isElement = (target: EventTarget | null): target is Element => target instanceof window.Element;
 
-/**
- * @param raw A `tether-limit`.
- * @returns The limit; `undefined` for none, zero or not a number.
- */
-const toLimit = (raw: string | null): number | undefined => parseInt(raw ?? '', 10) || undefined;
+/** @returns The list's `tether-limit`: how many products it shows, `fallback` without one. */
+const listLimit = (root: Element, fallback: number): number =>
+  integerAttribute(root, 'limit', { min: 1, max: MAX_CONNECTION_SIZE, fallback });
 
 /**
  * @param raw A `tether-intent`.
@@ -159,9 +159,10 @@ class ListScope {
   /** The collection or search query of the list's attributes. */
   options(): ProductQuery {
     const { root } = this;
-    const query: ProductQuery = { reverse: get(root, 'reverse') === 'true' };
-    const first = toLimit(get(root, 'limit'));
-    if (first) query.first = first;
+    const query: ProductQuery = {
+      reverse: get(root, 'reverse') === 'true',
+      first: listLimit(root, cfg.collectionFirst),
+    };
     const sortKey = get(root, 'sort');
     if (sortKey) query.sortKey = sortKey;
     if (has(root, 'collection')) {
@@ -197,8 +198,7 @@ class ListScope {
       if (has(this.root, 'recommendations')) {
         const recommendations = await this.loadRecommendations();
         if (stale()) return;
-        const limit = toLimit(get(this.root, 'limit'));
-        this.products = limit ? recommendations.slice(0, limit) : recommendations;
+        this.products = recommendations.slice(0, listLimit(this.root, recommendations.length));
       } else {
         const page = await getProducts({ ...this.options(), after: more ? (this.pageInfo?.endCursor ?? null) : null });
         if (stale()) return;

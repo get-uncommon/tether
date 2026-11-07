@@ -17,6 +17,7 @@ import {
   get,
   has,
   hasTemplate,
+  integerAttribute,
   isOwnEvent,
   notifyLayoutChanged,
   parseJSONAttr,
@@ -40,7 +41,7 @@ import { listSelector } from './collection.ts';
 import { liveLists, liveProducts, mountedProducts, mountProduct, pruneLive, within } from './mounting.ts';
 import { toCountry, toLanguage } from './market-codes.ts';
 import { setCountry } from './page-market.ts';
-import { isHttpsUrl } from './shopify-values.ts';
+import { isHttpsUrl, MAX_CONNECTION_SIZE } from './shopify-values.ts';
 import { PART_INTEGRITY } from './part-integrity.ts';
 import { isTetherInternals } from './part-registry.ts';
 import { VERSION } from './version.ts';
@@ -73,6 +74,7 @@ export const coreModules = {
       get,
       has,
       hasTemplate,
+      integerAttribute,
       isOwnEvent,
       notifyLayoutChanged,
       parseJSONAttr,
@@ -118,7 +120,7 @@ export const coreModules = {
     return [setCountry];
   },
   get 'shopify-values.ts'() {
-    return [isHttpsUrl];
+    return [isHttpsUrl, MAX_CONNECTION_SIZE];
   },
   // Parts that load other parts (account → account-pages) use this same loader.
   get 'lazy.ts'() {

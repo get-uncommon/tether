@@ -40,7 +40,8 @@ const versionIn = async (folder) => fieldOf(parseJson(await readFile(join(folder
  * - v0.8.0: also removes the managed entries a release doesn't ship, refuses a release without the files the
  *   workflow runs after an update, and writes the minor of the release it installed, not its own, into a copy
  *   without a `TETHER_VERSION`;
- * - v0.9.1: gives up on a GitHub request or download that stalls, after a time limit, with the update's error.
+ * - v0.9.1: gives up on a GitHub request or download that stalls, after a time limit, with the update's error;
+ * - v0.9.2: also stops `gh attestation verify` after a time limit.
  *
  * A test below fails when a release tag's updater or workflow is none of these.
  *
@@ -57,6 +58,7 @@ const OLD_UPDATERS = [
   { tag: 'v0.7.2', route: 'asset' },
   { tag: 'v0.8.0', route: 'asset' },
   { tag: 'v0.9.1', route: 'asset' },
+  { tag: 'v0.9.2', route: 'asset' },
 ];
 /**
  * The first release whose updater can update a copy: the ones before it replace `.github/`, which GitHub refuses.

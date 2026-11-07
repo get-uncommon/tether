@@ -16,6 +16,7 @@
  */
 import { isRecord } from './shared/json.ts';
 import { messageOf } from './shared/error-message.ts';
+import { metafieldIdentifierOf } from './shared/metafield-ref.ts';
 import { SyncError, scalarText } from './util.ts';
 import { DEFAULT_API_VERSION } from './shopify.ts';
 
@@ -121,12 +122,32 @@ function isOneOf<T extends string>(value: string, allowed: readonly T[]): value 
   return allowed.some((item) => item === value);
 }
 
-/** The `namespace.key` references the mapping reads, added to the configured ones: they are fetched automatically. */
+/** The problem with a `namespace.key` reference, which the product query's text holds; `null` for none. */
+const metafieldRefProblem = (ref: string): string | null =>
+  metafieldIdentifierOf(ref)
+    ? null
+    : `${JSON.stringify(ref)} is not a metafield reference: write namespace.key, e.g. custom.material`;
+
+/** The problem with a field source when it is a `metafield:` one; `null` for none. */
+const metafieldSourceProblem = (source: string): string | null =>
+  source.startsWith(METAFIELD_PREFIX) ? metafieldRefProblem(source.slice(METAFIELD_PREFIX.length)) : null;
+
+/**
+ * The `namespace.key` references the mapping reads, added to the configured ones: they are fetched automatically.
+ *
+ * @throws {SyncError} Naming the first reference, configured or mapped, that is not a valid one.
+ */
 function metafieldsFor(configured: readonly string[], fields: Record<string, FieldSource>): string[] {
+  for (const ref of configured) {
+    const problem = metafieldRefProblem(ref);
+    if (problem) throw new SyncError(`shopify.metafields: ${problem}`);
+  }
   const refs = [...configured];
-  for (const source of Object.values(fields)) {
+  for (const [slug, source] of Object.entries(fields)) {
     if (typeof source !== 'string' || !source.startsWith(METAFIELD_PREFIX)) continue;
     const ref = source.slice(METAFIELD_PREFIX.length);
+    const problem = metafieldRefProblem(ref);
+    if (problem) throw new SyncError(`fields.${slug}: ${problem}`);
     if (!refs.includes(ref)) refs.push(ref);
   }
   return refs;
@@ -185,10 +206,16 @@ export function normalizeConfig(raw: RawConfig = {}): SyncConfig {
  *
  * @param slug The field the value is mapped to, for the error.
  * @param value Any JSON value but `null`.
- * @throws {SyncError} `FIELD_MAP` for anything `JSON.parse` does not yield.
+ * @throws {SyncError} `FIELD_MAP` for anything `JSON.parse` does not yield, and for a `metafield:` source that names
+ *   no valid metafield.
  */
 function fieldSourceFromJson(slug: string, value: unknown): FieldSource {
-  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return value;
+  if (typeof value === 'string') {
+    const problem = metafieldSourceProblem(value);
+    if (problem) throw new SyncError(`FIELD_MAP "${slug}": ${problem}`, { code: 'FIELD_MAP' });
+    return value;
+  }
+  if (typeof value === 'number' || typeof value === 'boolean') return value;
   if (Array.isArray(value)) {
     const list: readonly unknown[] = value;
     return list;

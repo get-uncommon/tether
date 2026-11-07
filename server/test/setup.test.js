@@ -58,6 +58,36 @@ test('cleanEnv treats none/-/empty as unset; applyEnv merges FIELD_MAP and WEBFL
   assert.throws(() => applyEnv(defaultConfig, { FIELD_MAP: '{oops' }), /FIELD_MAP is not valid JSON/);
 });
 
+test('a metafield reference without a namespace or key is refused where the config is read, naming its entry', async () => {
+  assert.throws(() => applyEnv(defaultConfig, { FIELD_MAP: '{"material":"metafield:material"}' }), {
+    code: 'FIELD_MAP',
+    message: 'FIELD_MAP "material": "material" is not a metafield reference: write namespace.key, e.g. custom.material',
+  });
+  assert.throws(
+    () => normalizeConfig({ fields: { teaser: 'metafield:custom.' } }),
+    /^SyncError: fields\.teaser: "custom\."/,
+  );
+  assert.throws(
+    () => normalizeConfig({ shopify: { metafields: ['custom.ok', 'bad key'] } }),
+    /^SyncError: shopify\.metafields: "bad key"/,
+  );
+  assert.deepEqual(normalizeConfig({ shopify: { metafields: ['$app:reviews.rating'] } }).shopify.metafields, [
+    '$app:reviews.rating',
+  ]);
+
+  const report = await runCheck(
+    defaultConfig,
+    { ...deployEnv, FIELD_MAP: '{"material":"metafield:.material"}' },
+    {
+      deep: false,
+    },
+  );
+  const step = checkStep(report, 'Config');
+  assert.equal(step.level, 'error');
+  assert.match(step.message, /^FIELD_MAP "material": "\.material" is not a metafield reference/);
+  assert.equal(step.fix, 'Fix FIELD_MAP, or set it to "none".');
+});
+
 test('default config + env (what the Deploy button provides) syncs a standard collection', async () => {
   const apis = createMockApis({ products: [shopifyProduct(1)] });
   const app = createApp(defaultConfig, deployEnv, { store: memoryStore(), fetch: apis.fetch, sleep: instantSleep });

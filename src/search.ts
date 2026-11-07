@@ -16,11 +16,24 @@
  *
  * Each list's first child is the template. The root gets is-open while there are results (or none) to show, and
  * tether-search-state="idle|loading|ready|empty|error". Arrow keys move through the results, Escape closes.
- * tether-search-limit (default 6), tether-search-min (characters, default 2).
+ * tether-search-limit (results of each type, 1 to 10, default 6), tether-search-min (characters, default 2).
  */
 import { cfg, log, reportError } from './config.ts';
 import { gql, orNull, shaped } from './client.ts';
-import { attr, sel, get, qsa, setText, setImage, repeat, show, formatMoney, productUrl, emit } from './dom.ts';
+import {
+  attr,
+  sel,
+  get,
+  qsa,
+  setText,
+  setImage,
+  repeat,
+  show,
+  formatMoney,
+  productUrl,
+  emit,
+  integerAttribute,
+} from './dom.ts';
 import { within } from './mounting.ts';
 import type { Money } from './shopify-values.ts';
 
@@ -74,16 +87,13 @@ const QUERY = `query TetherPredictive($q: String!, $limit: Int!) {
 }`;
 
 const DEFAULT_LIMIT = 6;
+/** The most results of each type `predictiveSearch(limit:)` takes: a larger limit fails the search. */
+const MAX_LIMIT = 10;
 const DEFAULT_MIN_CHARACTERS = 2;
 const DEFAULT_ACTION = '/search';
 
 const mounted = new WeakSet<Element>();
 let searchBoxCount = 0;
-
-/** @returns The attribute as an integer; `fallback` when it is missing, zero or not a number. */
-function integerAttribute(el: Element, name: string, fallback: number): number {
-  return parseInt(get(el, name) || '', 10) || fallback;
-}
 
 /** @returns `node` when it is a link, else its first link. */
 const linkIn = (node: Element): Element | null => (node.tagName === 'A' ? node : node.querySelector('a'));
@@ -125,8 +135,8 @@ class SearchBox {
     this.root = root;
     this.input = input;
     this.results = results;
-    this.limit = integerAttribute(root, 'search-limit', DEFAULT_LIMIT);
-    this.minCharacters = integerAttribute(root, 'search-min', DEFAULT_MIN_CHARACTERS);
+    this.limit = integerAttribute(root, 'search-limit', { min: 1, max: MAX_LIMIT, fallback: DEFAULT_LIMIT });
+    this.minCharacters = integerAttribute(root, 'search-min', { min: 1, fallback: DEFAULT_MIN_CHARACTERS });
     if (!results.id) {
       searchBoxCount += 1;
       results.id = `${cfg.prefix}-search-${searchBoxCount}`;

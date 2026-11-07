@@ -5,6 +5,7 @@
  * through `invalid`), never used. `config.ts` resolves the rest.
  */
 import { isRecord } from '../server/src/shared/json.ts';
+import { isMetafieldIdentifier, metafieldIdentifierOf } from '../server/src/shared/metafield-ref.ts';
 import type { AccountConfig, AnalyticsConfig, MarketsConfig, MetafieldIdentifier, MetafieldRef } from './config.ts';
 
 /** Warns that an option was dropped. */
@@ -15,13 +16,6 @@ export type ShopDomain = string & { readonly __brand: 'ShopDomain' };
 type LocaleMarket = NonNullable<MarketsConfig['locales']>[string];
 type ShopifyAnalyticsOptions = Exclude<NonNullable<AnalyticsConfig['shopify']>, boolean>;
 
-/**
- * Metafield identifiers are written into the product fragment's text: a GraphQL fragment can't declare variables, so
- * they can't be sent as variables. Only these characters are let through, which covers Shopify's namespaces and keys.
- */
-const METAFIELD_PART = /^[A-Za-z0-9_.-]+$/;
-/** A namespace is the same, or an app-reserved one: `$app` or `$app:<name>`. */
-const METAFIELD_NAMESPACE = /^(\$app(:[A-Za-z0-9_-]+)?|[A-Za-z0-9_.-]+)$/;
 /** A DNS name: labels of letters, digits and inner hyphens. No port, user or path. */
 const HOSTNAME = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/i;
 /** A cookie name, as RFC 6265 allows it. */
@@ -129,18 +123,12 @@ export function embedOriginsOption(value: unknown, invalid: Invalid): string[] {
 
 /** @returns The identifier of `'namespace.key'` or `{ namespace, key }`, when both parts are valid identifiers. */
 export function toMetafieldIdentifier(ref: unknown): MetafieldIdentifier | null {
-  let namespace: unknown;
-  let key: unknown;
-  if (typeof ref === 'string') {
-    const dot = ref.indexOf('.');
-    namespace = dot > 0 ? ref.slice(0, dot) : '';
-    key = ref.slice(dot + 1);
-  } else if (typeof ref === 'object' && ref !== null) {
-    namespace = Reflect.get(ref, 'namespace');
-    key = Reflect.get(ref, 'key');
-  }
+  if (typeof ref === 'string') return metafieldIdentifierOf(ref);
+  if (typeof ref !== 'object' || ref === null) return null;
+  const namespace: unknown = Reflect.get(ref, 'namespace');
+  const key: unknown = Reflect.get(ref, 'key');
   if (typeof namespace !== 'string' || typeof key !== 'string') return null;
-  return METAFIELD_NAMESPACE.test(namespace) && METAFIELD_PART.test(key) ? { namespace, key } : null;
+  return isMetafieldIdentifier(namespace, key) ? { namespace, key } : null;
 }
 
 /** @returns The refs that name a valid identifier, as written; each other one is skipped with a warning. */

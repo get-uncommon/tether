@@ -4,7 +4,7 @@
  */
 import { cfg, reportError } from '../config.ts';
 import { isHttpsUrl } from '../shopify-values.ts';
-import { formatDate, formatMoney, get, qsa, repeat, sel, setImage, setText } from '../dom.ts';
+import { formatDate, formatMoney, get, integerAttribute, qsa, repeat, sel, setImage, setText } from '../dom.ts';
 import { ownValue, showIn } from './markup.ts';
 import { fillLines } from './order-lines.ts';
 import type { AccountOrder } from '../../server/src/shared/account-orders.ts';
@@ -18,14 +18,9 @@ export const MAX_ORDER_COUNT = 50;
 export const isOrderCount = (value: unknown): value is number =>
   typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= MAX_ORDER_COUNT;
 
-/**
- * @param limit The list's `tether-limit`.
- * @returns How many orders the list shows: the limit, kept within what one request can ask for.
- */
-function listLimit(limit: string | null): number {
-  const asked = Number.parseInt(limit || String(DEFAULT_ORDER_COUNT), 10) || DEFAULT_ORDER_COUNT;
-  return Math.min(Math.max(asked, 1), MAX_ORDER_COUNT);
-}
+/** @returns How many orders the list shows: its `tether-limit`, kept within what one request can ask for. */
+const listLimit = (list: Element): number =>
+  integerAttribute(list, 'limit', { min: 1, max: MAX_ORDER_COUNT, fallback: DEFAULT_ORDER_COUNT });
 
 /**
  * @param gid `gid://shopify/Order/123`, possibly with a query.
@@ -91,7 +86,7 @@ export async function renderOrderList(
   const first = lists[0];
   if (!first) return;
   showIn(root, 'show', { 'orders-loading': true, 'orders-empty': false });
-  const limit = listLimit(get(first, 'limit'));
+  const limit = listLimit(first);
   /** `null` after a failure. */
   let orders: AccountOrder[] | null;
   try {

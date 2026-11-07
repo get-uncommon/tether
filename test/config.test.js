@@ -64,6 +64,40 @@ test('retries above ten are capped at ten, and a count that is no non-negative i
   }
 });
 
+test("a connection size takes 1 to Shopify's 250: a larger one is capped, a smaller one uses the default", () => {
+  const names = /** @type {const} */ ([
+    'imagesFirst',
+    'variantsFirst',
+    'sellingPlanGroupsFirst',
+    'sellingPlansFirst',
+    'collectionFirst',
+  ]);
+  const capped = quietly(() => resolveConfig(Object.fromEntries(names.map((name) => [name, 300]))));
+  assert.deepEqual(
+    capped.warned,
+    names.map((name) => `[tether] ${name} 300 is more than its maximum: using 250`),
+  );
+  const empty = quietly(() => resolveConfig(Object.fromEntries(names.map((name) => [name, 0]))));
+  assert.equal(empty.warned.length, names.length);
+  for (const name of names) {
+    assert.equal(capped.result[name], 250);
+    assert.equal(empty.result[name], DEFAULTS[name], `${name}: 0 asks for nothing`);
+    assert.equal(resolveConfig({ [name]: 250 })[name], 250);
+    assert.equal(resolveConfig({ [name]: 1 })[name], 1);
+  }
+});
+
+test('cartDrawerOpenClass is one class token: an empty one or one with whitespace uses is-open', () => {
+  for (const cartDrawerOpenClass of ['', 'is-open active', ' open', 3]) {
+    const { result, warned } = quietly(() => resolveConfig({ cartDrawerOpenClass }));
+    assert.equal(result.cartDrawerOpenClass, 'is-open');
+    assert.deepEqual(warned, [
+      `[tether] invalid cartDrawerOpenClass ${JSON.stringify(cartDrawerOpenClass)}: using "is-open"`,
+    ]);
+  }
+  assert.equal(resolveConfig({ cartDrawerOpenClass: 'drawer--open' }).cartDrawerOpenClass, 'drawer--open');
+});
+
 test('prefix, checkoutTarget and defaultPurchase fall back to their defaults', () => {
   const { result, warned } = quietly(() =>
     resolveConfig({ prefix: 'x"] *', checkoutTarget: '_top', defaultPurchase: 'subscription' }),
@@ -206,6 +240,11 @@ test('an unknown or misspelt option warns and never reaches the config', () => {
   assert.equal('openCartOnAd' in result, false);
   assert.equal(result.openCartOnAdd, true);
   assert.deepEqual(warned, ['[tether] unknown option "openCartOnAd": ignored']);
+  const inherited = quietly(() => resolveConfig({ constructor: 1, toString: 2 }));
+  assert.deepEqual(inherited.warned, [
+    '[tether] unknown option "constructor": ignored',
+    '[tether] unknown option "toString": ignored',
+  ]);
 });
 
 test('partsUrl must be https or on the site, checked when the config is resolved', () => {

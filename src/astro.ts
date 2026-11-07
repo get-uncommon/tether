@@ -221,7 +221,7 @@ function dropFunctions(config: PageConfig, logger: AstroLogger) {
 /** @param config Changed in place: only browser options are written into the page. */
 function keepBrowserOptions(config: PageConfig, logger: AstroLogger) {
   for (const key of Object.keys(config)) {
-    if (key in DEFAULTS) continue;
+    if (Object.hasOwn(DEFAULTS, key)) continue;
     Reflect.deleteProperty(config, key);
     if (!SERVER_OPTIONS.has(key)) logger.warn(`${key} is not a Tether option: left out of the page.`);
   }
