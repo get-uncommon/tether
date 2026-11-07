@@ -79,6 +79,27 @@
 
   // src/lists.ts
   var URL_QUERY_SOURCE = "url:";
+  var COLLECTION_SORT_KEYS = /* @__PURE__ */ new Set([
+    "BEST_SELLING",
+    "COLLECTION_DEFAULT",
+    "CREATED",
+    "ID",
+    "MANUAL",
+    "PRICE",
+    "RELEVANCE",
+    "TITLE"
+  ]);
+  var SEARCH_SORT_KEYS = /* @__PURE__ */ new Set([
+    "BEST_SELLING",
+    "CREATED_AT",
+    "ID",
+    "PRICE",
+    "PRODUCT_TYPE",
+    "RELEVANCE",
+    "TITLE",
+    "UPDATED_AT",
+    "VENDOR"
+  ]);
   var COLLECTION_QUERY = `query TetherCollection($handle:String!,$first:Int!,$after:String,$sortKey:ProductCollectionSortKeys,$reverse:Boolean,$filters:[ProductFilter!]){collection(handle:$handle){${collectionFields()} products(first:$first,after:$after,sortKey:$sortKey,reverse:$reverse,filters:$filters){nodes{...TetherProduct}pageInfo{hasNextPage endCursor}}}}`;
   var SEARCH_QUERY = `query TetherSearch($first:Int!,$after:String,$query:String,$sortKey:ProductSortKeys,$reverse:Boolean){products(first:$first,after:$after,query:$query,sortKey:$sortKey,reverse:$reverse){nodes{...TetherProduct}pageInfo{hasNextPage endCursor}}}`;
   async function getProducts({
@@ -142,12 +163,20 @@
       __publicField(this, "collection", null);
       /** Counts loads, so only the latest one renders. */
       __publicField(this, "loadToken", 0);
+      /**
+       * The `loadToken` of the load in flight that replaces the products, `null` without one. A "load more" click during
+       * it does nothing: its page would follow the products being replaced, which can be another market's.
+       */
+      __publicField(this, "replacingToken", null);
+      /** Whether the list has warned about its `tether-sort`, so a list that reloads warns once. */
+      __publicField(this, "warnedSort", false);
       this.root = root;
       root.addEventListener("click", (event) => {
         if (!isElement(event.target)) return;
         const more = event.target.closest(sel("load-more"));
         if (more?.closest(listSelector()) !== root) return;
         event.preventDefault();
+        if (this.replacingToken !== null) return;
         void busy(more, () => this.load(true));
       });
     }
@@ -161,15 +190,31 @@
         reverse: get(root, "reverse") === "true",
         first: listLimit(root, cfg.collectionFirst)
       };
-      const sortKey = get(root, "sort");
+      const isCollection = has(root, "collection");
+      const sortKey = this.sortKey(isCollection);
       if (sortKey) query.sortKey = sortKey;
-      if (has(root, "collection")) {
+      if (isCollection) {
         query.collection = get(root, "collection") ?? "";
         return query;
       }
       const raw = get(root, "products") ?? "";
       query.query = raw.startsWith(URL_QUERY_SOURCE) ? new URL(window.location.href).searchParams.get(raw.slice(URL_QUERY_SOURCE.length)) || "" : raw;
       return query;
+    }
+    /**
+     * @returns The list's `tether-sort`, `undefined` (Shopify's default order) without one or, with a warning, for a key
+     *   its source doesn't take: Shopify would fail the whole list. A search takes `CREATED` as `CREATED_AT`.
+     */
+    sortKey(isCollection) {
+      const raw = get(this.root, "sort")?.trim();
+      if (!raw) return void 0;
+      if (isCollection ? COLLECTION_SORT_KEYS.has(raw) : SEARCH_SORT_KEYS.has(raw)) return raw;
+      if (!isCollection && raw === "CREATED") return "CREATED_AT";
+      if (!this.warnedSort) {
+        warn(`${attr("sort")} ${JSON.stringify(raw)} is not a sort key of this list: using the default`, this.root);
+      }
+      this.warnedSort = true;
+      return void 0;
     }
     /**
      * The product of a recommendations list: a handle, `url:…` (one dynamic product page), or empty inside a product
@@ -188,6 +233,7 @@
       this.loadToken += 1;
       const token = this.loadToken;
       const stale = () => token !== this.loadToken;
+      if (!more) this.replacingToken = token;
       try {
         if (has(this.root, "recommendations")) {
           const recommendations = await this.loadRecommendations();
@@ -208,6 +254,8 @@
         if (!more) setScopeStatus(this.root, isNotFound(error) ? "not-found" : "error", error);
         if (!(isNotFound(error) && has(this.root, "recommendations"))) reportError(error, "list load failed");
         emit("error", { error, context: "list" }, this.root);
+      } finally {
+        if (this.replacingToken === token) this.replacingToken = null;
       }
     }
     render() {

@@ -3,7 +3,7 @@ import type { CartLineInput } from './cart/mutations.js';
 import type { CartWarning } from './config.js';
 import type { Product, ProductVariant } from './fragments.js';
 import type { Collection } from './loader.js';
-import type { ProductScope } from './product.js';
+import type { ReadonlyProductScope } from './product.js';
 import type { Purchase } from './product-state.js';
 import type { SearchResults } from './search.js';
 /** @returns The prefixed attribute name: `product` → `tether-product`. */
@@ -32,11 +32,11 @@ export interface TetherEvents {
     };
     'product-ready': {
         product: Product;
-        scope: ProductScope;
+        scope: ReadonlyProductScope;
     };
     'product-updated': {
         product: Product;
-        scope: ProductScope;
+        scope: ReadonlyProductScope;
     };
     /** `key` is null when the scope names no product; `source` is what it named. */
     'product-not-found': {

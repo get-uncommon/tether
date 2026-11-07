@@ -9,7 +9,7 @@ import { setCountry } from './page-market.js';
 import { addGroup } from './controls/extras.js';
 import type { TetherConfig, TetherOptions, MarketsConfig } from './config.js';
 import type { ShopifyCart } from './cart/store.js';
-import type { ProductScope } from './product.js';
+import type { ReadonlyProductScope } from './product.js';
 import type { DiagnoseOptions } from './diagnose.js';
 import type { TetherEvents } from './markup.js';
 import type { ProductQuery } from './loader.js';
@@ -22,7 +22,7 @@ export type { PlanInGroup as ShopifySellingPlan, PlanAdjustment, ProductWithPlan
 export type { CartStatus, CartUpdateReason, CartVariant as ShopifyCartVariant, ShopifyCart, ShopifyCartLine, } from './cart/store.js';
 export type { Attributes, LineSpec as LineInput } from './cart/mutations.js';
 export type { TetherError, TetherErrorCode, GraphQLError, UserError } from './client.js';
-export type { ProductScope } from './product.js';
+export type { ReadonlyProductScope as ProductScope } from './product.js';
 export type { Purchase } from './product-state.js';
 export type { ProductPage, ProductQuery } from './loader.js';
 export type { DetectedMarket, Localization, MarketSource } from './markets.js';
@@ -44,7 +44,7 @@ export declare function mount(root?: Document | Element): number;
 /** Call before a page transition removes the page: closes the cart drawer. */
 export declare function unmount(): void;
 /** @returns The product scope `el` is in. */
-export declare function getScope(el: Element | null | undefined): ProductScope | null;
+export declare function getScope(el: Element | null | undefined): ReadonlyProductScope | null;
 /**
  * Configures Tether (`window.TETHER_CONFIG` with `overrides` over it), applies the visitor's market and loads the
  * cart. A second call without overrides returns the first one's promise.

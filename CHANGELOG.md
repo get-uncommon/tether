@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.10.0 (2026-11-07)
+
+- **Breaking (types):** the `ProductScope` type, which `Tether.getScope()` and the `product-ready`
+  and `product-updated` events give, has read-only fields (`purchase`, `selected`, `variant`,
+  `quantity`, `product`, `plans`), as documented. **Upgrade:** code that assigned one calls the
+  scope's method instead (`select`, `selectVariant`, `setPurchase`, `selectPlan`, `setQuantity`).
+  Nothing changes at runtime.
+- Fix: switching country through `select[tether-country-select]` or `Tether.setCountry(code)` to a
+  country whose `markets.locales` entry has another language shows the country names, in the select
+  and in `tether-country-bind="name"`, in that language instead of the previous one.
+- Fix: "Load more" clicked while a list reloads (after a country switch) does nothing, instead of
+  appending the old market's next page to the reloaded list.
+- Fix: A `tether-sort` key the list's source doesn't take warns and uses Shopify's default order,
+  instead of failing the whole list. A `tether-products` search takes `CREATED` as `CREATED_AT`.
+- Fix (sync Worker): a product on the retry list that is also in the reconcile's window is synced
+  once per run instead of twice, and a product that keeps failing is given up after its five
+  attempts instead of staying on the retry list.
+- Fix: Enter in a search box whose results were closed (Escape, or a click outside) submits the form
+  again, instead of opening the result last highlighted with the arrow keys.
+- Fix: A search term without results is not sent to Shopify again when it is typed again.
+- Fix: Search suggestions (`tether-search-queries`) are options of the results listbox, so the arrow
+  keys and screen readers reach them like products and collections.
+- Docs: the reference's Accessibility paragraph says unavailable option values get
+  `aria-describedby="tether-unavailable"`, as they do, instead of `aria-disabled`.
+- Repository: the folder the test build writes beside `.test-dist/` is named
+  `.test-dist-building-…`, as the ignore files expect, not `..test-dist-building-…`, so ESLint and
+  Prettier no longer read a test build that is being written or was interrupted.
+
 ## 0.9.10 (2026-11-07)
 
 - Fix: `tether:product-added` names the product and variant that were added, also when the visitor

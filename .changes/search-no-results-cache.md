@@ -1,1 +1,0 @@
-- Fix: A search term without results is not sent to Shopify again when it is typed again.

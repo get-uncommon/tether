@@ -301,6 +301,7 @@
     const nextLocale = ownLocale || cfg.locale;
     const nextLanguage = languageFor(language, entry);
     const changed = country !== cfg.country || nextLanguage !== cfg.language || nextLocale !== cfg.locale;
+    const previousLanguage = cfg.language;
     cfg.country = country;
     cfg.language = nextLanguage || void 0;
     cfg.locale = nextLocale;
@@ -309,7 +310,7 @@
       void renderCountrySelects();
       return Cart.state;
     }
-    if (language !== void 0) clearLocalization();
+    if (cfg.language !== previousLanguage) clearLocalization();
     const jobs = rerenderInMarket(country);
     void renderCountrySelects();
     emit("country-changed", { country, language: cfg.language });

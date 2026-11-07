@@ -63,4 +63,9 @@ export declare class ProductScope {
     /** Derives the view of the current choice, keeps its variant, selection and purchase, and writes it. */
     renderVariant(): void;
 }
+/**
+ * A product scope as a site sees it (`Tether.getScope()`, the `product-ready` and `product-updated` events): its fields
+ * change only through its methods, which keep the page in step with them.
+ */
+export type ReadonlyProductScope = Readonly<ProductScope>;
 export {};
