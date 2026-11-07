@@ -348,9 +348,13 @@
     retries: MAX_RETRIES
   };
   function countOption(name, value) {
-    const maximum = COUNT_MAXIMUMS[name] ?? Number.POSITIVE_INFINITY;
-    if (typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= maximum) return value;
-    return invalidOption(name, value, DEFAULTS[name]);
+    if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
+      return invalidOption(name, value, DEFAULTS[name]);
+    }
+    const maximum = COUNT_MAXIMUMS[name];
+    if (maximum === void 0 || value <= maximum) return value;
+    warn(`${name} ${String(value)} is more than its maximum: using ${String(maximum)}`);
+    return maximum;
   }
   function switchOption(name, value) {
     return typeof value === "boolean" ? value : invalidOption(name, value, DEFAULTS[name]);
@@ -3444,7 +3448,7 @@
   }
 
   // src/version.ts
-  var VERSION = "0.9.1";
+  var VERSION = "0.9.2";
 
   // src/lazy-iife.ts
   var coreModules = {

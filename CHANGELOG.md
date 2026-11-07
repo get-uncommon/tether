@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.9.2 (unreleased)
+## 0.9.2 (2026-11-07)
 
 - Fix: a count option above its maximum warns and uses the maximum instead of the default: `retries`
   above 10 uses 10 (a site with `retries: 15`, valid in 0.9.0, got 2 in 0.9.1), and `requestTimeout`

@@ -27,7 +27,7 @@ interface ServerOptions {
      * stalled request through that signal, and a request that ignores it is never ended.
      */
     fetch?: typeof fetch;
-    /** Products per request for `allProducts()` (default 25). */
+    /** Products per request for `allProducts()`: an integer from 1 to 250 (default 25). */
     pageSize?: number;
     /** The site's address, for product URLs in `jsonLd()` without `url`. */
     siteUrl?: string;
@@ -39,7 +39,10 @@ interface ServerOptions {
 type StorefrontOptions = TetherOptions & ServerOptions & StoreEnv;
 /** The environment names that give the domain and the token. */
 type StoreEnv = Partial<Record<(typeof STORE_ENV_NAMES)['domain' | 'token'][number], string>>;
-type ServerConfig = TetherConfig & ServerOptions;
+/** The options as parsed: `pageSize` always set. */
+type ServerConfig = TetherConfig & Omit<ServerOptions, 'pageSize'> & {
+    pageSize: number;
+};
 interface HydrateOptions {
     card?: boolean;
     images?: number;
