@@ -5,6 +5,7 @@
  * storage keys never reach the code that uses them unchecked.
  */
 import { STOREFRONT_API_VERSION } from '../server/src/shared/api-versions.ts';
+import { messageOf } from '../server/src/shared/error-message.ts';
 import { isQuarterlyVersion } from './api-version.ts';
 import {
   accountOption,
@@ -563,9 +564,13 @@ export function reportError(error: unknown, context: string): void {
   }
 }
 
+/** The hook failures reported so far, as `<hook>: <message>`. */
+const reportedHookFailures = new Set<string>();
+
 /**
- * Calls one of the site's hooks. A bug in it is reported under `name`, and `fallback` answers instead, so the site's
- * code never fails the render, or the cart change Shopify already applied, that called it.
+ * Calls one of the site's hooks. A bug in it is reported under `name`, once per page load for each message
+ * (a `formatMoney` runs for every price on every render), and `fallback` answers instead, so the site's code never fails
+ * the render, or the cart change Shopify already applied, that called it.
  */
 export function callHook(name: string, hook: () => unknown): void;
 export function callHook<T>(name: string, hook: () => T, fallback: () => T): T;
@@ -573,7 +578,11 @@ export function callHook(name: string, hook: () => unknown, fallback?: () => unk
   try {
     return hook();
   } catch (error) {
-    reportError(error, name);
+    const failure = `${name}: ${messageOf(error)}`;
+    if (!reportedHookFailures.has(failure)) {
+      reportedHookFailures.add(failure);
+      reportError(error, name);
+    }
     return fallback?.();
   }
 }

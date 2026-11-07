@@ -32,7 +32,6 @@ import {
   show,
 } from './dom.ts';
 import { clearProductCache, getProduct, normalizeProductKey, primeProduct, withProductFragment } from './loader.ts';
-import { collectionFields } from './fragments.ts';
 import { allPlans } from './selling-plans.ts';
 import { boundary, isNotFound, resolveProductKey, setScopeStatus } from './status.ts';
 import { Cart } from './cart.ts';
@@ -91,9 +90,6 @@ export const coreModules = {
   },
   get 'loader.ts'() {
     return [clearProductCache, getProduct, normalizeProductKey, primeProduct, withProductFragment];
-  },
-  get 'fragments.ts'() {
-    return [collectionFields];
   },
   get 'selling-plans.ts'() {
     return [allPlans];

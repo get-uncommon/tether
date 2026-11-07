@@ -45,6 +45,25 @@ test('a release commit changes dist/ with the version files; a commit that chang
   assert.deepEqual(distProblems(base, release, history), []);
 });
 
+test('a release commit deletes the note files it wrote into CHANGELOG.md, and adds none', async (t) => {
+  const { git, commit, pkg, history } = await scratchRepository(t);
+  const notes = await commit('Fix the cart', { '.changes/cart.md': '- Fix: the cart.\n' });
+  git('rm', '--quiet', '.changes/cart.md');
+  const release = await commit('Tether 0.9.2', {
+    'package.json': pkg('0.9.2'),
+    'CHANGELOG.md': '## 0.9.2',
+    'dist/tether.js': 'two',
+  });
+  assert.deepEqual(distProblems(notes, release, history), []);
+
+  const adding = await commit('Tether 0.9.3', {
+    'package.json': pkg('0.9.3'),
+    '.changes/next.md': '- Fix: next.\n',
+    'dist/tether.js': 'three',
+  });
+  assert.deepEqual(reasons(distProblems(release, adding, history)), ['Tether 0.9.3: it also changes .changes/next.md']);
+});
+
 test('a commit titled as a release is not one when it changes other files or leaves the version', async (t) => {
   const { commit, pkg, base, history } = await scratchRepository(t);
   await commit('Tether 0.9.2', { 'package.json': pkg('0.9.2'), 'dist/tether.js': 'two', 'src/cart.ts': 'b' });

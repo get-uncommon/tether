@@ -1,7 +1,5 @@
 # Changelog
 
-## Unreleased
-
 ## 0.9.7 (2026-11-07)
 
 - Fix: a `warningText` or `formatMoney` that throws is reported (`onError`) and no longer fails a

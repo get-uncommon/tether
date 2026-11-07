@@ -3,12 +3,13 @@
  * `Tether.account`, whose functions load it on first call. Every function returns a promise, the part's own sync ones
  * (`isLoggedIn`) too, because the part may still have to load.
  */
-import { cfg, reportError } from './config.ts';
+import { cfg } from './config.ts';
 import { attr } from './dom.ts';
 import { loadPart } from './lazy.ts';
 import { within } from './mounting.ts';
 import { hintKey, isLoginOutcome } from './account-marks.ts';
 import { getStored } from './storage.ts';
+import { withPart } from './part-use.ts';
 import type { Parts } from './lazy.ts';
 
 type AccountPart = Parts['account'];
@@ -56,11 +57,7 @@ export function mountAccountIfUsed(root: ParentNode): void {
     isLoginOutcome(new URLSearchParams(window.location.search).get('account')) ||
     hasLoginHint();
   if (!needed) return;
-  loadPart('account')
-    .then((part) => part.mountAccount(root))
-    .catch((error: unknown) => {
-      reportError(error, 'account');
-    });
+  withPart('account', (part) => part.mountAccount(root));
 }
 
 /** @returns `name` of the account part, called once the part has loaded. */

@@ -7,7 +7,7 @@ import { TetherError } from '../client.ts';
 import { isHttpsUrl } from '../shopify-values.ts';
 import { emit } from '../dom.ts';
 import { fetchCheckoutUrl } from './mutations.ts';
-import { currentCart, runInOrder, savedCartId } from './store.ts';
+import { currentCart, mayFill, runInOrder, savedCartId } from './store.ts';
 import type { CheckoutTarget } from '../config.ts';
 
 type CheckoutUrlAnswer = { kind: 'url'; url: string | null } | { kind: 'failed'; error: unknown };
@@ -82,13 +82,13 @@ function cartToCheckOut(): string | null {
 
 /**
  * Goes to Shopify's checkout, with the cart as the changes already queued leave it. With `_blank` the tab opens inside
- * the click (Safari blocks `window.open` after an await) and gets its URL once there is one.
+ * the click (Safari blocks `window.open` after an await) and gets its URL once there is one, so a queued change that
+ * empties the cart closes the tab again.
  *
  * @returns The checkout URL, `null` with nothing to check out or after a reported failure.
  */
 export async function checkout(target: CheckoutTarget = cfg.checkoutTarget): Promise<string | null> {
-  // A queued change can still fill an empty cart, or create one.
-  if (runInOrder.idle() && !cartToCheckOut()) return null;
+  if (!cartToCheckOut() && !mayFill()) return null;
   const tab = target === '_blank' ? window.open('', '_blank') : null;
   if (tab) detachOpenerIfAllowed(tab);
   try {

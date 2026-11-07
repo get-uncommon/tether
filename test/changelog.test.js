@@ -1,12 +1,13 @@
-// CHANGELOG.md's sections: the notes under `## Unreleased`, each release's section as its tag has it, and a
-// maintenance release's section, which the release script adds to main's CHANGELOG.md.
+// CHANGELOG.md's sections: each release's section as its tag has it, the section a release writes from the note files
+// in .changes/, and a maintenance release's section, which the release script adds to main's CHANGELOG.md.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { headingProblems, sectionOf, withSection } from '../scripts/changelog.ts';
+import { headingProblems, noteProblems, releaseSection, sectionOf, withSection } from '../scripts/changelog.ts';
+import { readNotes } from '../scripts/release-version.ts';
 import { compareVersions, parseVersion } from '../server/src/release-range.ts';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -24,10 +25,6 @@ const GIT_TIMEOUT_MS = 60_000;
 
 const MAIN = `# Changelog
 
-## Unreleased
-
-- New: a feature.
-
 ## 0.7.1 (2026-11-10)
 
 - Fix: one.
@@ -38,8 +35,6 @@ const MAIN = `# Changelog
 `;
 
 const BRANCH = `# Changelog
-
-## Unreleased
 
 ## 0.7.2 (2026-11-20)
 
@@ -81,18 +76,16 @@ function checkedTags() {
   }
 }
 
-test('a section runs from its heading to the next one, the notes under "## Unreleased" included', () => {
+test('a section runs from its heading to the next one', () => {
   assert.equal(sectionOf(BRANCH, '0.7.2'), '## 0.7.2 (2026-11-20)\n\n- Fix: three.\n\n  Upgrade note.');
   assert.equal(sectionOf(BRANCH, '0.7.1'), '## 0.7.1 (2026-11-10)\n\n- Fix: one.');
   assert.equal(sectionOf(BRANCH, '0.7.3'), null);
-  assert.equal(sectionOf(BRANCH, 'Unreleased'), '## Unreleased', 'no notes yet');
-  assert.equal(sectionOf(MAIN, 'Unreleased'), '## Unreleased\n\n- New: a feature.');
 });
 
 test("a maintenance release's section goes into main's CHANGELOG.md in version order, once", () => {
   const section = sectionOf(BRANCH, '0.7.2') ?? '';
   const merged = withSection(MAIN, section, '0.7.2');
-  assert.ok(merged.includes(`- New: a feature.\n\n${section}\n\n## 0.7.1 `), 'between its neighbours');
+  assert.ok(merged.startsWith(`# Changelog\n\n${section}\n\n## 0.7.1 `), 'above the older ones');
   assert.equal(withSection(merged, section, '0.7.2'), merged, 'a section main already has is not added again');
 
   const oldest = withSection(MAIN, '## 0.6.1 (2026-10-01)\n\n- Fix: four.', '0.6.1');
@@ -102,21 +95,66 @@ test("a maintenance release's section goes into main's CHANGELOG.md in version o
   );
 });
 
-test('"## Unreleased" comes first, and every other heading is a release with its date', () => {
+test('every heading is a release with its date', () => {
   assert.deepEqual(headingProblems(MAIN), []);
   assert.deepEqual(headingProblems(BRANCH), []);
-  assert.deepEqual(headingProblems(MAIN.replace('## Unreleased', '## 0.8.0 (unreleased)')), [
-    '"## Unreleased" is not the first section',
-  ]);
-  assert.deepEqual(headingProblems(`${MAIN}\n## Unreleased\n\n## 0.6.7\n`), [
-    '"## Unreleased" is not "## X.Y.Z (YYYY-MM-DD)"',
-    '"## 0.6.7" is not "## X.Y.Z (YYYY-MM-DD)"',
-  ]);
-  assert.deepEqual(headingProblems('# Changelog\n'), ['"## Unreleased" is not the first section']);
+  assert.deepEqual(headingProblems('# Changelog\n'), []);
+  assert.deepEqual(
+    headingProblems(`# Changelog\n\n## Unreleased\n\n- New.\n\n${MAIN.slice('# Changelog\n\n'.length)}`),
+    ['"## Unreleased" is not "## X.Y.Z (YYYY-MM-DD)"'],
+  );
+  assert.deepEqual(headingProblems(`${MAIN}\n## 0.6.7\n`), ['"## 0.6.7" is not "## X.Y.Z (YYYY-MM-DD)"']);
 });
 
 test("CHANGELOG.md's headings are in that shape", async () => {
   assert.deepEqual(headingProblems(await changelogHere()), []);
+});
+
+test("a release's section has the note files by kind, Breaking, Security and Fix first and Repository last, then by name", () => {
+  const notes = [
+    { name: 'b-tooling.md', text: '- Repository: tooling.\n' },
+    { name: 'z-fix.md', text: '- Fix: later by name.\n' },
+    { name: 'types.md', text: '- Types: a type.\n' },
+    { name: 'a-fix.md', text: '- **Fix: a big one.** Act on it.\n- Fix: its second line.\n' },
+    { name: 'a-tooling.md', text: '- Repository: more tooling.\n' },
+    { name: 'npm.md', text: '- **Breaking (npm):** an export goes.\n\n  Upgrade note.\n' },
+    { name: 'hmac.md', text: '- Security: a check.\n' },
+    { name: 'docs.md', text: '- Docs: a page.\n' },
+  ];
+  const section = [
+    '## 0.8.0 (2026-12-01)',
+    '',
+    '- **Breaking (npm):** an export goes.',
+    '',
+    '  Upgrade note.',
+    '- Security: a check.',
+    '- **Fix: a big one.** Act on it.',
+    '- Fix: its second line.',
+    '- Fix: later by name.',
+    '- Docs: a page.',
+    '- Types: a type.',
+    '- Repository: more tooling.',
+    '- Repository: tooling.',
+  ].join('\n');
+  assert.equal(releaseSection('0.8.0', '2026-12-01', notes), section);
+  assert.equal(releaseSection('0.8.0', '2026-12-01', notes.toReversed()), section, 'whatever order they come in');
+  assert.equal(releaseSection('0.8.0', '2026-12-01', []), '## 0.8.0 (2026-12-01)', 'no notes: the heading alone');
+});
+
+test('a note file holds CHANGELOG bullets and no heading', () => {
+  assert.deepEqual(noteProblems({ name: 'fix.md', text: '- Fix: one.\n  More.\n- Fix: two.\n' }), []);
+  assert.deepEqual(noteProblems({ name: 'fix.txt', text: 'Fixed it.\n' }), [
+    "fix.txt: a note file's name ends in .md",
+    'fix.txt: a note starts with a "- " bullet',
+  ]);
+  assert.deepEqual(noteProblems({ name: 'fix.md', text: '## 0.8.0 (2026-12-01)\n\n- Fix: one.\n' }), [
+    'fix.md: a note starts with a "- " bullet',
+    'fix.md: a note has no heading; the release writes it',
+  ]);
+});
+
+test('the note files in .changes/ are notes', async () => {
+  assert.deepEqual((await readNotes(ROOT)).flatMap(noteProblems), []);
 });
 
 // A merge can put a branch's notes into a section that is already released, without a conflict. The tag keeps the
@@ -137,5 +175,5 @@ test("every released section in CHANGELOG.md reads as at the release's tag", asy
     // A branch that hasn't merged the release yet has no section for it.
     return released !== null && here !== null && here !== released;
   });
-  assert.deepEqual(changed, [], 'move the lines added to these sections under "## Unreleased"');
+  assert.deepEqual(changed, [], 'move the lines added to these sections into note files in .changes/');
 });

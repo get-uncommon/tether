@@ -125,6 +125,18 @@ function fillCountries(selects: HTMLSelectElement[], binds: HTMLElement[], local
   });
 }
 
+/** Whether the document's `change` listener for the country selects is bound: once, with the first select. */
+let followingSelects = false;
+
+/** A country the visitor chose in a `select[tether-country-select]` becomes the market. */
+function onCountrySelectChange(event: Event): void {
+  const { target } = event;
+  if (!(target instanceof window.HTMLSelectElement) || !target.matches(sel('country-select')) || !target.value) return;
+  setCountry(target.value).catch((error: unknown) => {
+    reportError(error, 'country');
+  });
+}
+
 /**
  * Fills `select[tether-country-select]` with the countries the store sells to (Shopify Markets), and
  * `tether-country-bind="name|code|currency|symbol"` with the current country. `tether-country-label` sets the option
@@ -134,6 +146,10 @@ export function renderCountrySelects(root: ParentNode = document): Promise<void>
   // The selector matches `select` elements only.
   const selects = within(root, `select${sel('country-select')}`) as HTMLSelectElement[];
   const binds = within(root, sel('country-bind'));
+  if (selects.length && !followingSelects) {
+    followingSelects = true;
+    document.addEventListener('change', onCountrySelectChange);
+  }
   if (!selects.length && !binds.length) return Promise.resolve();
   return getLocalization()
     .then((localization) => {

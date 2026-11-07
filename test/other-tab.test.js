@@ -99,3 +99,39 @@ test('a reload for another tab’s cart change waits for the change in flight he
     document.body.innerHTML = '';
   }
 });
+
+test('a burst of cart changes in another tab reloads the cart here once, behind the change in flight', async () => {
+  const { fetch } = globalThis;
+  const variant = product.variants.nodes[0]?.id ?? '';
+  const cart = cartFrom([{ merchandiseId: variant, quantity: 1 }]);
+  /** @type {string[]} */
+  const operations = [];
+  /** @type {typeof fetch} */
+  globalThis.fetch = async (_url, init) => {
+    const operation = operationName(graphqlRequest(init).query);
+    operations.push(operation);
+    if (operation === 'TetherCart') return jsonResponse({ data: { cart } });
+    if (operation === 'Tether_cartLinesAdd') await new Promise((resolve) => setTimeout(resolve, 20));
+    const mutation = operation.replace('Tether_', '');
+    return jsonResponse({ data: { [mutation]: { cart, userErrors: [], warnings: [] } } });
+  };
+  localStorage.setItem('tether:cart:shop.test', cart.id);
+  /** @param {string} key */
+  const otherTabWrote = (key) => window.dispatchEvent(new window.StorageEvent('storage', { key }));
+  try {
+    await Tether.cart.init();
+    operations.length = 0;
+    const add = Tether.cart.add(variant);
+    otherTabWrote('tether:cart:shop.test');
+    otherTabWrote('tether:cart:shop.test:seen');
+    otherTabWrote('tether:cart:shop.test:seen');
+    await add;
+    await waitFor(() => operations.length === 2, 'the reload');
+    // Anything queued after the add has had its turn once a new task's turn comes.
+    await Tether.cart.setNote('');
+    assert.deepEqual(operations, ['Tether_cartLinesAdd', 'TetherCart', 'Tether_cartNoteUpdate']);
+  } finally {
+    globalThis.fetch = fetch;
+    localStorage.clear();
+  }
+});

@@ -4,7 +4,8 @@
  * Workers: no DOM, no shared config.
  */
 import { orNull, request, shaped, TetherError } from '../client.ts';
-import { productFragment, collectionFields } from '../fragments.ts';
+import { productFragment } from '../fragments.ts';
+import { collectionFields } from '../shopify-fields.ts';
 import { productKey } from '../shopify-values.ts';
 import {
   PRODUCT,

@@ -416,3 +416,28 @@ test(
     }
   },
 );
+
+test("the build refuses an output folder that holds files a build doesn't write, and leaves it as it was", async () => {
+  const { execFile } = await import('node:child_process');
+  const { promisify } = await import('node:util');
+  const parent = await mkdtemp(join(tmpdir(), 'tether-build-'));
+  const assets = join(parent, 'js');
+  try {
+    // A site's own asset folder, which self-hosts the script beside its own files.
+    await mkdir(assets);
+    await writeFile(join(assets, 'tether.min.js'), 'self-hosted');
+    await writeFile(join(assets, 'site.js'), 'mine');
+    await assert.rejects(
+      promisify(execFile)(process.execPath, ['--experimental-strip-types', 'scripts/build.ts', '--out', assets], {
+        cwd: join(DIST, '..'),
+        timeout: 60_000,
+      }),
+      /isn't a build's output folder \(it holds site\.js\): not replacing it/,
+    );
+    assert.deepEqual((await readdir(assets)).sort(), ['site.js', 'tether.min.js']);
+    assert.equal(await readFile(join(assets, 'tether.min.js'), 'utf8'), 'self-hosted');
+    assert.deepEqual(await readdir(parent), ['js'], 'no build folder left next to it');
+  } finally {
+    await rm(parent, { recursive: true, force: true });
+  }
+});

@@ -23,7 +23,7 @@ import {
   show,
   integerAttribute,
 } from './dom.ts';
-import { collectionFields } from './fragments.ts';
+import { collectionFields } from './shopify-fields.ts';
 import { normalizeProductKey, primeProduct, withProductFragment } from './loader.ts';
 import { isCollectionAnswer, isRecommendationsAnswer, isSearchAnswer } from './product-shape.ts';
 import { setScopeStatus, isNotFound, resolveProductKey } from './status.ts';
