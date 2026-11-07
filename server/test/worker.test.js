@@ -261,7 +261,7 @@ test('the Worker and the browser script are released with one version', async (c
   const rootVersion = fieldOf(root, 'version');
   assert.equal(fieldOf(server, 'version'), rootVersion, 'server/package.json and the root package.json');
   const browserVersion = /export const VERSION = '([^']+)'/.exec(
-    await readFile(new URL('../../src/index.ts', import.meta.url), 'utf8'),
+    await readFile(new URL('../../src/version.ts', import.meta.url), 'utf8'),
   )?.[1];
-  assert.equal(browserVersion, rootVersion, 'src/index.ts and the root package.json');
+  assert.equal(browserVersion, rootVersion, 'src/version.ts and the root package.json');
 });

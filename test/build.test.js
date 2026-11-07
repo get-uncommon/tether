@@ -2,13 +2,17 @@
 import { test, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM, VirtualConsole } from 'jsdom';
-import { readdir, readFile } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { builtTether, find, graphqlRequest, jsonResponse, operationName, partsOf, product } from './fixtures.js';
 import { fieldOf, waitFor } from '../server/test/mocks.js';
 
 const DIST = join(dirname(fileURLToPath(import.meta.url)), '..', '.test-dist');
+const PART_FILE = /^tether\.[\w-]+(\.min)?\.js$/;
+/** The files `PART_FILE` matches that are no optional part. */
+const CORES = new Set(['tether.min.js', 'tether.esm.js']);
 /** @type {import('jsdom').DOMWindow} */
 let win;
 /** @type {{ op: string, query: string }[]} */
@@ -203,7 +207,7 @@ test('the release installs dependencies only in a job that can read the reposito
   const workflow = await readFile(new URL('../.github/workflows/release.yml', import.meta.url), 'utf8');
   assert.match(workflow, /^permissions: \{\}$/m, 'no job gets a permission it does not name');
   const jobs = workflowJobs(workflow);
-  assert.deepEqual([...jobs.keys()], ['check', 'server-asset', 'channel', 'github-release', 'npm']);
+  assert.deepEqual([...jobs.keys()], ['check', 'server-asset', 'channel', 'github-release', 'npm', 'purge-cdn']);
   const check = jobs.get('check') ?? '';
   assert.match(check, /permissions:\n {6}contents: read\n {4}steps:/, 'the check job only reads');
   assert.match(check, /- run: npm ci\n/);
@@ -279,3 +283,47 @@ test('only the newest release tag is marked latest, on GitHub and on npm', async
   assert.match(jobs.get('github-release') ?? '', /LATEST: \$\{\{ needs\.channel\.outputs\.latest \}\}/);
   assert.match(jobs.get('npm') ?? '', /NPM_TAG: \$\{\{ needs\.channel\.outputs\.npm-tag \}\}/);
 });
+
+test('after npm, the release purges the jsDelivr aliases this release moves, and only warns when that fails', async () => {
+  const purge =
+    workflowJobs(await readFile(new URL('../.github/workflows/release.yml', import.meta.url), 'utf8')).get(
+      'purge-cdn',
+    ) ?? '';
+  assert.match(purge, /needs: \[npm, channel\]/, 'once both the Release and npm serve this version');
+  assert.match(purge, /permissions:\n {6}contents: read\n {4}steps:/, 'no token: the purge API is public');
+  assert.match(purge, /LATEST: \$\{\{ needs\.channel\.outputs\.latest \}\}/);
+  assert.match(purge, /aliases=\("@\$\{V%\.\*\}"\)\n/, 'every release purges its own @X.Y');
+  assert.match(purge, /if \[ "\$LATEST" = true \]; then aliases\+=\("@\$\{V%%\.\*\}" "@latest" ""\); fi/);
+  assert.match(purge, /for package in "gh\/\$GITHUB_REPOSITORY" "npm\/@occluze\/tether"; do/);
+  assert.match(purge, /"https:\/\/purge\.jsdelivr\.net\/\$package\$alias\/\$file"/);
+  assert.match(purge, /find dist -type f -not -path 'dist\/types\/\*'/, 'every file a browser loads from dist/');
+  assert.match(purge, /curl -fsS --max-time 30 [^\n]*\|\|\n\s*echo "::warning::/, 'a failed purge warns');
+});
+
+test(
+  "a part is the same bytes in every build and carries no version, so a release keeps an unchanged part's hash",
+  {
+    timeout: 60_000,
+  },
+  async () => {
+    const { execFile } = await import('node:child_process');
+    const { promisify } = await import('node:util');
+    const { VERSION } = await import('../src/version.ts');
+    const again = await mkdtemp(join(tmpdir(), 'tether-build-'));
+    try {
+      await promisify(execFile)(process.execPath, ['--experimental-strip-types', 'scripts/build.ts', '--out', again], {
+        cwd: join(DIST, '..'),
+        timeout: 60_000,
+      });
+      const parts = (await readdir(DIST)).filter((file) => PART_FILE.test(file) && !CORES.has(file));
+      assert.ok(parts.includes('tether.diagnose.min.js') && parts.includes('tether.diagnose.js'), 'both kinds of part');
+      for (const part of parts) {
+        const built = await readFile(join(DIST, part));
+        assert.ok(built.equals(await readFile(join(again, part))), `${part} is the same in both builds`);
+        assert.ok(!built.includes(VERSION), `${part} does not say the version`);
+      }
+    } finally {
+      await rm(again, { recursive: true, force: true });
+    }
+  },
+);
