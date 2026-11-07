@@ -20,7 +20,7 @@
 
   // tether-core:client.ts
   var m2 = window.Tether.__core["client.ts"];
-  var [endpoint, gql, matches, orNull, shaped, TetherError] = m2;
+  var [endpoint, gql, matches, orNull, shaped, TetherError, withTimeout] = m2;
 
   // tether-core:cart.ts
   var m3 = window.Tether.__core["cart.ts"];

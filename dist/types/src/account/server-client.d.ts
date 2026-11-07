@@ -21,7 +21,8 @@ export interface ServerRequest {
  * cross-site forms.
  *
  * @throws {TetherError} `NOT_CONFIGURED` without `account.server`, `INVALID` for refused input, `HTTP_<status>` for
- *   any other failure but a 401, with the Worker's `userErrors`; `NETWORK` when the Worker can't be reached.
+ *   any other failure but a 401, with the Worker's `userErrors`; `NETWORK` when the Worker can't be reached or takes
+ *   longer than `requestTimeout`.
  */
 export declare function serverFetch(path: string, { method, body }?: ServerRequest): Promise<ServerAnswer>;
 /**

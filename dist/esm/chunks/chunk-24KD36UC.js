@@ -1,1 +1,0 @@
-import{a as n}from"./chunk-SJNNEEDX.js";import{g as r}from"./chunk-LSB7RVRZ.js";import{m as e}from"./chunk-A6BZFYZY.js";import{F as i}from"./chunk-PZERNTCD.js";var d=()=>`${e("collection")},${e("products")},${e("recommendations")}`;function a(t){return r(t,"loading"),{root:t,load:()=>n("lists").then(o=>o.loadList(t)).catch(o=>{r(t,"error",o),i(o,"lists")})}}export{d as a,a as b};

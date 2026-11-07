@@ -313,22 +313,29 @@
     debug: false
   };
   var cfg = { ...DEFAULTS };
-  function readOnlyView(target) {
-    const refuse = (key) => {
-      warn(`Tether.config is read-only (${String(key)}): pass options to Tether.init() instead`);
-      return false;
-    };
-    return new Proxy(target, {
-      get(object, key) {
-        const value = Reflect.get(object, key);
-        return typeof value === "object" && value !== null ? readOnlyView(value) : value;
-      },
-      set: (_object, key) => refuse(key),
-      deleteProperty: (_object, key) => refuse(key),
-      defineProperty: (_object, key) => refuse(key)
-    });
+  function refuseChange(key) {
+    warn(`Tether.config is read-only (${String(key)}): pass options to Tether.init() instead`);
+    return false;
   }
-  var configView = readOnlyView(cfg);
+  var readOnlyViews = /* @__PURE__ */ new WeakMap();
+  var READ_ONLY = {
+    get(object, key) {
+      const value = Reflect.get(object, key);
+      return typeof value === "object" && value !== null ? readOnlyView(value) : value;
+    },
+    set: (_object, key) => refuseChange(key),
+    deleteProperty: (_object, key) => refuseChange(key),
+    defineProperty: (_object, key) => refuseChange(key)
+  };
+  function readOnlyView(target) {
+    let view = readOnlyViews.get(target);
+    if (!view) {
+      view = new Proxy(target, READ_ONLY);
+      readOnlyViews.set(target, view);
+    }
+    return view;
+  }
+  var configView = new Proxy(cfg, READ_ONLY);
   var PREFIX = /^[a-z][a-z0-9-]*$/;
   var SWITCH_OPTIONS = [
     "revalidate",
@@ -1168,12 +1175,32 @@
     }
     el.style.display = "none";
   }
+  var CHECKABLE = 'input[type="radio"],input[type="checkbox"]';
+  var CHECKED_ROLES = ["radio", "checkbox", "switch", "menuitemradio", "menuitemcheckbox"];
+  var BUTTON_INPUTS = ["button", "submit", "reset"];
+  function chosenState(el) {
+    const role = el.getAttribute("role");
+    if (role === "button") return "aria-pressed";
+    if (role && CHECKED_ROLES.includes(role)) return "aria-checked";
+    if (role === "option" || role === "tab") return "aria-selected";
+    if (role) return null;
+    if (isInput(el)) return BUTTON_INPUTS.includes(el.type) ? "aria-pressed" : null;
+    return el.querySelector(CHECKABLE) ? null : "aria-pressed";
+  }
   function setSelected(el, selected) {
     el.classList.toggle("is-selected", selected);
-    el.setAttribute("aria-pressed", selected ? "true" : "false");
-    if (isInput(el) && (el.type === "radio" || el.type === "checkbox")) el.checked = selected;
-    const input = el.querySelector('input[type="radio"],input[type="checkbox"]');
+    const state = chosenState(el);
+    if (state === "aria-pressed" && el.tagName !== "BUTTON" && !isInput(el)) el.setAttribute("role", "button");
+    if (state) el.setAttribute(state, String(selected));
+    if (isInput(el) && el.matches(CHECKABLE)) el.checked = selected;
+    const input = el.querySelector(CHECKABLE);
     if (input && isInput(input)) input.checked = selected;
+  }
+  function setUnavailable(el, unavailable) {
+    el.classList.toggle("is-unavailable", unavailable);
+    const isControl = chosenState(el) !== null || isInput(el);
+    const control = isControl ? el : el.querySelector(CHECKABLE);
+    control?.setAttribute("aria-disabled", String(unavailable));
   }
   var layoutTimer;
   var pageGlobal = (name) => Reflect.get(window, name);
@@ -1475,28 +1502,43 @@
   var FOCUSABLE = 'a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
   var FOCUS_AFTER_OPEN_MS = 60;
   var openWithoutDrawer = false;
+  var announcedOpen = false;
   var returnFocus = null;
+  var classWatcher = null;
   var isFocusable = (el) => el !== null && "focus" in el;
   var focusables = (drawer) => qsa(drawer, FOCUSABLE).filter((el) => el.offsetParent !== null || el === document.activeElement);
   var drawers = () => qsa(document, sel("cart-drawer"));
   var isOpenDrawer = (drawer) => drawer.classList.contains(cfg.cartDrawerOpenClass);
+  var hasFocusInside = (all) => all.some((drawer) => drawer.contains(document.activeElement));
+  var isManual = (drawer) => get(drawer, "cart-drawer") === "manual";
   function isOpen() {
     const all = drawers();
     return all.length ? all.some(isOpenDrawer) : openWithoutDrawer;
   }
-  function syncDrawerAria(open) {
+  function watchOpenClass(drawer) {
+    classWatcher ?? (classWatcher = new MutationObserver(() => {
+      const open = isOpen();
+      if (open === announcedOpen) return;
+      const all = drawers();
+      if (open) announceOpen(all.filter(isOpenDrawer));
+      else announceClosed(all, hasFocusInside(all));
+    }));
+    classWatcher.observe(drawer, { attributes: true, attributeFilter: ["class"] });
+  }
+  function syncDrawerAria() {
     qsa(document, sel("cart-open")).forEach((button) => {
-      button.setAttribute("aria-expanded", String(open));
+      button.setAttribute("aria-expanded", String(isOpen()));
     });
     drawers().forEach((drawer) => {
       if (!drawer.hasAttribute("role")) drawer.setAttribute("role", "dialog");
       if (!drawer.hasAttribute("aria-label") && !drawer.hasAttribute("aria-labelledby")) {
         drawer.setAttribute("aria-label", get(drawer, "cart-label") || "Cart");
       }
+      const open = isOpenDrawer(drawer);
       drawer.setAttribute("aria-modal", String(open));
-      if (isOpenDrawer(drawer)) return;
-      drawer.setAttribute("aria-hidden", "true");
-      if (cfg.cartFocus) drawer.inert = true;
+      drawer.setAttribute("aria-hidden", String(!open));
+      drawer.inert = !open;
+      watchOpenClass(drawer);
     });
   }
   function focusInto(drawer) {
@@ -1504,16 +1546,9 @@
     if (target === drawer && !drawer.hasAttribute("tabindex")) drawer.tabIndex = -1;
     target.focus({ preventScroll: true });
   }
-  function openCart() {
-    if (isOpen()) return;
-    openWithoutDrawer = true;
-    const opened = drawers().filter((drawer) => get(drawer, "cart-drawer") !== "manual");
-    opened.forEach((drawer) => {
-      drawer.inert = false;
-      drawer.classList.add(cfg.cartDrawerOpenClass);
-      drawer.setAttribute("aria-hidden", "false");
-    });
-    syncDrawerAria(true);
+  function announceOpen(opened) {
+    announcedOpen = true;
+    syncDrawerAria();
     const [first] = opened;
     if (cfg.cartFocus && first) {
       returnFocus = isFocusable(document.activeElement) ? document.activeElement : null;
@@ -1524,21 +1559,34 @@
     cfg.onCartOpen?.(opened);
     emit("cart-toggled", { open: true });
   }
-  function closeCart() {
-    if (!isOpen()) return;
-    openWithoutDrawer = false;
-    const all = drawers();
-    const hadFocus = all.some((drawer) => drawer.contains(document.activeElement));
-    all.forEach((drawer) => {
-      drawer.classList.remove(cfg.cartDrawerOpenClass);
-      drawer.setAttribute("aria-hidden", "true");
-      if (cfg.cartFocus) drawer.inert = true;
-    });
-    syncDrawerAria(false);
+  function announceClosed(all, hadFocus) {
+    announcedOpen = false;
+    syncDrawerAria();
     if (hadFocus && returnFocus?.isConnected) returnFocus.focus({ preventScroll: true });
     returnFocus = null;
     cfg.onCartClose?.(all);
     emit("cart-toggled", { open: false });
+  }
+  function openCart() {
+    if (isOpen()) return;
+    const all = drawers();
+    const opened = all.filter((drawer) => !isManual(drawer));
+    if (all.length && !opened.length) return;
+    openWithoutDrawer = true;
+    opened.forEach((drawer) => {
+      drawer.classList.add(cfg.cartDrawerOpenClass);
+    });
+    announceOpen(opened);
+  }
+  function closeCart() {
+    if (!isOpen()) return;
+    openWithoutDrawer = false;
+    const all = drawers();
+    const hadFocus = hasFocusInside(all);
+    all.forEach((drawer) => {
+      drawer.classList.remove(cfg.cartDrawerOpenClass);
+    });
+    announceClosed(all, hadFocus);
   }
   function toggleCart() {
     if (isOpen()) closeCart();
@@ -2010,7 +2058,7 @@
   function renderCart(view) {
     const { cart } = view;
     const money = (key) => cart ? formatMoney2(cart.cost[key]) : "";
-    syncDrawerAria(isOpen());
+    syncDrawerAria();
     qsa(document, sel("cart-count")).forEach((el) => {
       setTextTracked(el, cart?.totalQuantity ?? 0);
     });
@@ -2323,14 +2371,23 @@
     } catch {
     }
   }
-  async function checkout(target = cfg.checkoutTarget) {
-    const cartId = savedCartId();
+  function cartToCheckOut() {
     const cart = currentCart();
-    if (!cartId || cart && !cart.totalQuantity) return null;
+    return cart && !cart.totalQuantity ? null : savedCartId();
+  }
+  async function checkout(target = cfg.checkoutTarget) {
+    if (!cartToCheckOut()) return null;
     const tab = target === "_blank" ? window.open("", "_blank") : null;
     if (tab) detachOpenerIfAllowed(tab);
     try {
-      const url2 = await checkoutUrl(cartId);
+      const url2 = await runInOrder(async () => {
+        const cartId = cartToCheckOut();
+        return cartId && checkoutUrl(cartId);
+      });
+      if (!url2) {
+        tab?.close();
+        return null;
+      }
       if (!isHttpsUrl(url2)) throw new TetherError("The checkout URL is not https: not opened");
       emit("checkout", { url: url2, cart: currentCart() });
       if (tab && !tab.closed) tab.location.href = url2;
@@ -2573,7 +2630,8 @@
      *
      * @throws {TetherError} `INVALID_DISCOUNT` (rejected) when Shopify doesn't accept the code.
      */
-    async applyDiscount(code) {
+    async applyDiscount(typed) {
+      const code = typed.trim();
       const cart = await Cart.setDiscountCodes((current) => [.../* @__PURE__ */ new Set([...current, code])]);
       const wanted = code.toLowerCase();
       const applied = (cart?.discountCodes ?? []).find((discount) => discount.code.toLowerCase() === wanted);
@@ -2586,7 +2644,7 @@
       throw new TetherError(`Discount code not valid: ${code}`, { code: "INVALID_DISCOUNT" });
     },
     removeDiscount(code) {
-      const unwanted = code.toLowerCase();
+      const unwanted = code.trim().toLowerCase();
       return Cart.setDiscountCodes((current) => current.filter((existing) => existing.toLowerCase() !== unwanted));
     },
     /**
@@ -2844,7 +2902,7 @@
         const value = get(node, "option-value") ?? "";
         setSelected(node, view.selected[name] === value);
         const unavailable = !isValueAvailable(product, view.selected, name, value);
-        node.classList.toggle("is-unavailable", unavailable);
+        setUnavailable(node, unavailable);
         node.setAttribute("data-unavailable", unavailable ? "true" : "false");
       });
     });
@@ -2864,13 +2922,12 @@
       }
       const mode = get(el, "purchase");
       setSelected(el, mode === purchase.kind);
-      const unavailable = mode === "subscription" ? !view.subscriptionAvailable : scope.product.requiresSellingPlan;
-      el.classList.toggle("is-unavailable", unavailable);
+      setUnavailable(el, mode === "subscription" ? !view.subscriptionAvailable : scope.product.requiresSellingPlan);
     });
     scope.$(sel("plan-value")).forEach((node) => {
       const planId = get(node, "plan-value") ?? "";
       setSelected(node, line.kind === "subscription" && planId === line.planId);
-      node.classList.toggle("is-unavailable", !allocationFor(variant, planId));
+      setUnavailable(node, !allocationFor(variant, planId));
       const plan = scope.plans.find((candidate) => candidate.id === planId);
       const texts = planBindTexts(variant, planId, plan, FORMAT);
       qsa(node, sel("plan-bind")).forEach((el) => {
@@ -3264,7 +3321,12 @@
   function applyPageTitle(el, product) {
     const template = get(el, "page-title");
     if (!template || typeof document === "undefined") return;
-    document.title = template.replace(/\{title\}/g, product.title).replace(/\{vendor\}/g, product.vendor || "").replace(/\{type\}/g, product.productType || "");
+    const fields = /* @__PURE__ */ new Map([
+      ["title", product.title],
+      ["vendor", product.vendor || ""],
+      ["type", product.productType || ""]
+    ]);
+    document.title = template.replace(/\{(\w+)\}/g, (placeholder, name) => fields.get(name) ?? placeholder);
   }
   function mountWithoutKey(el, { fromUrl, raw }) {
     if (fromUrl) {
@@ -3481,7 +3543,7 @@
   }
 
   // src/part-integrity.ts
-  var PART_INTEGRITY = { "tether.diagnose.js": "sha384-V4pclvaqH/qR/arn2rEkiL09rESoS1Z5AEE01ZSaFNlDU+sXXpOhKprwno6MT998", "tether.markets.js": "sha384-5wg1XGIKHX3Q4SX9E1xoYiJT653F0uCs7WCJ36Rf+YX6o1VJhuK6m59ZuUuqgxXw", "tether.search.js": "sha384-KMmZKdaQq6+LzU7kFva2DYZ7dh425RhHClXfVPHp8dNDGn1eG2UEMuPooowJOQtt", "tether.lists.js": "sha384-L/+3bMN1EifET4EcFWBk5IAFywRaC0uilAX3eYLeGqmX9zkPFjS/SvVSklpRwSSA", "tether.extras.js": "sha384-/SMjz6qCFAOV0wwvEVNhQxtT/1pyx4hRxDJHOxHB6M3uclAvItSULKZqJvaehH+i", "tether.account.js": "sha384-CVXd+K/5Wc9mSdfMM6cE1BYN4kjFWCXpEfoLq/jU0zy1C+V4SXfyTCyXloVFMMs7", "tether.account-pages.js": "sha384-bUUsp/0dKGSGzjctzF1FgLcCvgBGh+wQw95IhbjU+ckMo78vzetzlI2+QuNQugaI", "tether.analytics.js": "sha384-DBXy5gOU7crMr0xSS4TjnZN1Q8Slz3h18Ih/jLBjwYRVFE1fGzdR9PBuHnKOxc0E" };
+  var PART_INTEGRITY = { "tether.diagnose.js": "sha384-CqtXzvWbLD8aIgyTM43+KMXEFA7r7lhG+0XyQAw3Sp7B5qrzPsxlA9QfzBjoPqZz", "tether.markets.js": "sha384-WjowbRhM7OzzZOrCPZWSZqN7EjIiiR7u9cGmdI+9kgFVgmEQS8lVGWjgx+8jILOf", "tether.search.js": "sha384-fLQ7eKc5XOv0Cg2FfrZyeFAkRR4wDMjUWFpwvKrfPRnT2NvTuhKg80+KVu8Qce/G", "tether.lists.js": "sha384-l2uyr96zTetjo2WWhGsBamd1ZYkC3OB3G3+OScLEvxdok0c8k9GXLAh1WRALUr4S", "tether.extras.js": "sha384-/SMjz6qCFAOV0wwvEVNhQxtT/1pyx4hRxDJHOxHB6M3uclAvItSULKZqJvaehH+i", "tether.account.js": "sha384-XUPSX/7R9chq2KlQ1RzLiV7jYcWGe7o5tj4rLZMnf8MEa2aDOOCW2269Bj/ZkbmX", "tether.account-pages.js": "sha384-ND3kIaRypgnHG3QMDb8CqDxt7fuukDCdHsIAHoOUUsz3+FjvBqXgRDV4Mjp6x8jr", "tether.analytics.js": "sha384-jnLesn/+edWBSPuXLj7VX1kSAGwEqtb0VbHjuU//ofqgxkndHlDFsS8Bc8htlGt8" };
 
   // src/part-registry.ts
   function isTetherInternals(value) {
@@ -3489,7 +3551,7 @@
   }
 
   // src/version.ts
-  var VERSION = "0.9.3";
+  var VERSION = "0.9.4";
 
   // src/lazy-iife.ts
   var coreModules = {
@@ -3497,7 +3559,7 @@
       return [cfg, isConfigured, log, MARKET_SOURCES, parseMarkets, reportError, warn];
     },
     get "client.ts"() {
-      return [endpoint, gql, matches, orNull, shaped, TetherError];
+      return [endpoint, gql, matches, orNull, shaped, TetherError, withTimeout];
     },
     get "dom.ts"() {
       return [
@@ -3647,6 +3709,23 @@
     };
   }
 
+  // src/analytics-queue.ts
+  function queueAnalyticsEvents(load) {
+    const queue = [];
+    const listening = new window.AbortController();
+    const options = { signal: listening.signal };
+    ANALYTICS_EVENTS.forEach((name) => {
+      document.addEventListener(`${cfg.prefix}:${name}`, (event) => queue.push(event), options);
+    });
+    document.addEventListener("astro:page-load", (event) => queue.push(event), options);
+    load().then((part) => part.startAnalytics(queue)).catch((error) => {
+      listening.abort();
+      queue.length = 0;
+      reportError(error, "analytics");
+    });
+    return queue;
+  }
+
   // src/account-marks.ts
   var hintKey = () => `${cfg.prefix}:account-hint:${cfg.domain}`;
   function removeFromBothAreas(key) {
@@ -3777,12 +3856,21 @@
     line.setAttribute("aria-busy", "true");
     reportFailure(change, context);
   }
+  function onQuantityInput(input, { line, id }) {
+    const typed = input.value.trim();
+    if (INTEGER_TEXT.test(typed)) {
+      showLineBusy(line, Cart.updateLine(id, Number(typed)), "cart line");
+      return;
+    }
+    const current = Cart.lines.find((candidate) => candidate.id === id);
+    if (current) input.value = String(Cart.quantityOf(current));
+  }
   function onChange2(event) {
     const { target } = event;
     if (!isElement2(target)) return;
     const found = lineOf(target);
     if (found && target instanceof window.HTMLInputElement && target.matches(sel("line", "quantity"))) {
-      showLineBusy(found.line, Cart.updateLine(found.id, parseInt(target.value, 10) || 0), "cart line");
+      onQuantityInput(target, found);
     } else if (found && target instanceof window.HTMLSelectElement && target.matches(sel("line-plan"))) {
       showLineBusy(found.line, Cart.updateLine(found.id, { sellingPlanId: target.value || null }), "cart line plan");
     } else if (hasValue(target) && target.matches(sel("cart-note"))) {
@@ -4033,17 +4121,6 @@
     bindExtrasControls();
     bindNavigation({ ready: () => initPromise ?? Promise.resolve(null), mount, unmount });
   }
-  function startAnalyticsQueue() {
-    const queue = [];
-    analyticsQueue = queue;
-    ANALYTICS_EVENTS.forEach((name) => {
-      document.addEventListener(`${cfg.prefix}:${name}`, (event) => queue.push(event));
-    });
-    document.addEventListener("astro:page-load", (event) => queue.push(event));
-    loadPart("analytics").then((part) => part.startAnalytics(queue)).catch((error) => {
-      reportError(error, "analytics");
-    });
-  }
   async function cartInPageMarket(cart) {
     const country = cfg.country;
     const cartCountry = cart?.buyerIdentity.countryCode;
@@ -4066,7 +4143,7 @@
     forgetBrowserModeTokens();
     bindControls();
     if (cfg.observe) startObserver();
-    if (cfg.analytics && !analyticsQueue) startAnalyticsQueue();
+    if (cfg.analytics) analyticsQueue ?? (analyticsQueue = queueAnalyticsEvents(() => loadPart("analytics")));
     initPromise = applyStartMarket(overrides).then(() => Cart.init()).then(cartInPageMarket).then((cart) => {
       emit("ready", { cart });
       return api;

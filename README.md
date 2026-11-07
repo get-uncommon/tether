@@ -17,7 +17,7 @@ Script tag, for Webflow or any page without a build step:
 <script src="https://cdn.jsdelivr.net/gh/ravi-klaassens/tether@0.9/dist/tether.min.js" defer></script>
 ```
 
-`@0.9` gets every 0.9.x fix automatically (recommended), `@v0.9.3` pins one release, `@latest`
+`@0.9` gets every 0.9.x fix automatically (recommended), `@v0.9.4` pins one release, `@latest`
 always takes the newest ([versions and self-hosting](docs/webflow.md#versions-and-self-hosting)).
 
 npm, for Astro, Vite or another bundler or framework (TypeScript types included):

@@ -7,8 +7,8 @@ type CheckoutResolver = () => Promise<string | null>;
 /** Sets the account part's checkout URL, or clears it with `null`. A URL it answers opens checkout logged in. */
 export declare function setCheckoutResolver(resolver: CheckoutResolver | null): void;
 /**
- * Goes to Shopify's checkout. With `_blank` the tab opens inside the click (Safari blocks `window.open` after an
- * await) and gets its URL once there is one.
+ * Goes to Shopify's checkout, with the cart as the changes already queued leave it. With `_blank` the tab opens inside
+ * the click (Safari blocks `window.open` after an await) and gets its URL once there is one.
  *
  * @returns The checkout URL, `null` with nothing to check out or after a reported failure.
  */

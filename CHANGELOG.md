@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.9.4 (2026-11-07)
+
 - Fix: a `tether-cart-drawer="manual"` drawer the site opens, by adding the open class, is usable:
   Tether follows the class, so the open drawer is no longer `inert` and `aria-hidden`, focus moves
   in, and `Tether.cart.isOpen()`, `tether:cart-toggled` and `subscribe` see it. Esc,

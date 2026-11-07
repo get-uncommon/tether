@@ -84,7 +84,7 @@ export declare const Cart: {
      *
      * @throws {TetherError} `INVALID_DISCOUNT` (rejected) when Shopify doesn't accept the code.
      */
-    applyDiscount(code: string): Promise<ShopifyCart | null>;
+    applyDiscount(typed: string): Promise<ShopifyCart | null>;
     removeDiscount(code: string): Promise<ShopifyCart | null>;
     /**
      * Sets who is buying; a country changes the cart's currency and prices to that market's.

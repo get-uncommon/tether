@@ -27,7 +27,7 @@ export interface SearchResults {
     queries: SearchQuery[];
 }
 /**
- * Sets up every `[tether-search]` in `root` (and `root` itself) once.
+ * Sets up every `[tether-search]` in `root` (and `root` itself) once, and stops the boxes no longer on the page.
  */
 export declare function mountSearch(root?: ParentNode & Partial<Pick<Element, 'matches'>>): void;
 export {};
