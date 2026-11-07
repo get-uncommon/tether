@@ -138,40 +138,38 @@ function createCart(input: Record<string, unknown>): Promise<ShopifyCart | null>
   return send('cartCreate', '$input: CartInput!', 'input: $input', { input: withIdentity });
 }
 
-/** A mutation on the saved cart. */
+/** A mutation on the saved cart, with one variable besides `$cartId`. */
 interface CartMutation {
   /** The mutation, e.g. `cartLinesAdd`. */
   name: string;
-  /** Its variable definitions besides `$cartId`. */
-  args: string;
-  /** Its arguments besides `cartId`. */
-  inner: string;
-  variables: Record<string, unknown>;
+  /** The variable, named like the mutation's argument and like the `CartInput` field `create` sets. */
+  variable: string;
+  /** The variable's GraphQL type. */
+  type: string;
+  value: unknown;
   /**
-   * The `CartInput` of a new cart that does what the mutation asks, when there is no cart (or Shopify no longer has
-   * it); `null` leaves the visitor without a cart instead.
+   * Whether, when there is no cart (or Shopify no longer has it), a new cart is made with the value, which does what
+   * the mutation asks; without it the visitor is left without a cart.
    */
-  createInput: Record<string, unknown> | null;
+  create: boolean;
 }
 
 /**
- * Runs a mutation on the saved cart, or creates a cart from `createInput` when there is none to change.
+ * Runs a mutation on the saved cart, or creates a cart with its value (`create`) when there is none to change.
  *
- * @returns The changed cart; `null` without a cart and without a `createInput`.
+ * @returns The changed cart; `null` without a cart and without `create`.
  * @throws {TetherError} For a failed request or Shopify's user errors; also when the cart is gone and there is no
- *   `createInput` (the saved cart is forgotten first).
+ *   `create` (the saved cart is forgotten first).
  */
-export async function mutateCart({
-  name,
-  args,
-  inner,
-  variables,
-  createInput,
-}: CartMutation): Promise<ShopifyCart | null> {
+export async function mutateCart({ name, variable, type, value, create }: CartMutation): Promise<ShopifyCart | null> {
+  const createInput = create ? { [variable]: value } : null;
   const cartId = savedCartId();
   if (!cartId) return createInput ? createCart(createInput) : null;
   try {
-    return await send(name, `$cartId: ID!, ${args}`, `cartId: $cartId, ${inner}`, { ...variables, cartId });
+    return await send(name, `$cartId: ID!, $${variable}: ${type}`, `cartId: $cartId, ${variable}: $${variable}`, {
+      [variable]: value,
+      cartId,
+    });
   } catch (error) {
     if (!isCartGone(error)) throw error;
     forgetSavedCart();
@@ -228,19 +226,19 @@ export function toLineUpdate(lineId: string, patch: number | LinePatch): Record<
 export const updateLines = (lines: Record<string, unknown>[]): Promise<ShopifyCart | null> =>
   mutateCart({
     name: 'cartLinesUpdate',
-    args: '$lines: [CartLineUpdateInput!]!',
-    inner: 'lines: $lines',
-    variables: { lines },
-    createInput: null,
+    variable: 'lines',
+    type: '[CartLineUpdateInput!]!',
+    value: lines,
+    create: false,
   });
 
 export const removeLines = (lineIds: string[]): Promise<ShopifyCart | null> =>
   mutateCart({
     name: 'cartLinesRemove',
-    args: '$lineIds: [ID!]!',
-    inner: 'lineIds: $lineIds',
-    variables: { lineIds },
-    createInput: null,
+    variable: 'lineIds',
+    type: '[ID!]!',
+    value: lineIds,
+    create: false,
   });
 
 /** @returns The cart once `lineId` has `target` (0 removes it). */
