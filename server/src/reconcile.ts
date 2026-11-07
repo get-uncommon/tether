@@ -91,6 +91,8 @@ interface RunDeps {
   shopify: ProductSource;
   outOfBudget: () => boolean;
   limits: { maxChanges: number; maxProducts: number; maxPages: number };
+  /** The ids on the retry list. The retries run first, so the window skips them. */
+  retried: ReadonlySet<string>;
 }
 
 /** Products that failed before, in webhooks or earlier runs. Returns those left for the next run. */
@@ -137,13 +139,17 @@ async function runPage(deps: RunDeps, run: Run, page: ProductPage): Promise<void
       run.stopped = stop;
       return;
     }
-    run.processed++;
-    try {
-      if (isChange(await syncProduct(ctx, product, { publishNow: false }))) run.changes++;
-    } catch (err) {
-      ctx.stats.failed++;
-      ctx.log.error(`sync ${product.handle} failed: ${messageOf(err)}`);
-      run.failures.push({ id: numericId(product.id), attempts: 1, error: messageOf(err) });
+    const id = numericId(product.id);
+    // A failure here too would reset the retry's count of attempts to 1, so they would never run out.
+    if (!deps.retried.has(id)) {
+      run.processed++;
+      try {
+        if (isChange(await syncProduct(ctx, product, { publishNow: false }))) run.changes++;
+      } catch (err) {
+        ctx.stats.failed++;
+        ctx.log.error(`sync ${product.handle} failed: ${messageOf(err)}`);
+        run.failures.push({ id, attempts: 1, error: messageOf(err) });
+      }
     }
     if (product.updatedAt > run.newest) run.newest = product.updatedAt;
     run.after = cursor;
@@ -263,14 +269,15 @@ export async function reconcile(
     newest: resumed ? resumed.newest : start,
   };
   const reserve = cfg.reconcile.reserveSubrequests;
+  const retry = await readRetries(store);
   const deps: RunDeps = {
     ctx,
     shopify,
     outOfBudget: () => budget !== null && budget.left() < reserve,
     limits: { maxChanges, maxProducts, maxPages },
+    retried: new Set(retry.map((entry) => entry.id)),
   };
 
-  const retry = await readRetries(store);
   const retryLeft = await runRetries(deps, run, retry);
   await runPages(deps, run, start);
   const listingStopped = run.stopped !== null;

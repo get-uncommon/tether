@@ -233,6 +233,21 @@ test('reconcile: a product Webflow refuses to publish is retried, and given up a
   assert.deepEqual(await retries(), [], 'dropped after the fifth attempt');
 });
 
+test('reconcile: a retried product in the window is synced once, and its attempts still run out', async () => {
+  const { sync, store, calls } = setup({ products: [shopifyProduct(1, { handle: 'bad' })], failCreateFor: 'bad' });
+  await store.put('reconcile:since', '2026-11-01T00:00:00Z');
+  await store.put('reconcile:retry', [{ id: '1', attempts: 4, error: 'webhook failed' }]);
+  const creates = () => calls.filter((call) => call.method === 'POST' && call.path.endsWith('/items')).length;
+  await sync.reconcile();
+  assert.equal(creates(), 1, 'one create, from the retry');
+  assert.deepEqual(
+    asList(await store.get('reconcile:retry'), 'the retry list').map((entry) => fieldOf(entry, 'attempts')),
+    [5],
+  );
+  await sync.reconcile();
+  assert.deepEqual(await store.get('reconcile:retry'), [], 'dropped after the fifth attempt');
+});
+
 test('reconcile: products edited between two runs of a window are neither skipped nor lost', async () => {
   const products = Array.from({ length: 4 }, (_, i) => shopifyProduct(i + 1));
   const { sync, store, shop, wf } = setup({ products, maxFirst: 4 });
