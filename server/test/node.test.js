@@ -127,7 +127,10 @@ test('file store: of the waiters that find one lock stale, only the first takes 
   const [marker] = (await readdir(dir)).filter((name) => name.startsWith('state.json.lock.taken-'));
   assert.ok(marker, 'the takeover leaves a marker');
   await utimes(join(dir, marker), longAgo, longAgo);
-  await utimes(lockPath, longAgo, longAgo);
+  // A later lock goes stale at another time. Linux may give the new file the freed inode back, so with the same mtime
+  // it would name the same marker as the first lock.
+  const laterStale = new Date(longAgo.getTime() - 60e3);
+  await utimes(lockPath, laterStale, laterStale);
   await takeOverStaleLock(lockPath, await stat(lockPath));
   assert.equal((await readdir(dir)).includes(marker), false, 'the next takeover removes an old marker');
 });

@@ -48,8 +48,11 @@ export async function takeOverStaleLock(lockPath: string, held: Stats): Promise<
   try {
     await (await open(`${lockPath}${TAKEOVER_MARKER}${String(held.ino)}-${String(held.mtimeMs)}`, 'wx')).close();
   } catch (err) {
-    if (hasCode(err, 'EEXIST')) return; // another waiter took this lock over
-    throw err;
+    if (!hasCode(err, 'EEXIST')) throw err;
+    // Another waiter took this lock over, unless the marker is itself old: then a new lock happens to carry an old
+    // lock's inode and mtime, and removing the old markers lets the next try take it over.
+    await removeOldMarkers(lockPath);
+    return;
   }
   await rm(lockPath, { force: true });
   await removeOldMarkers(lockPath);

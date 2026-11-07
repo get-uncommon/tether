@@ -36,6 +36,8 @@ jobs:
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: ${{ matrix.node }}
+          # No dependency cache: CI also runs on main and release/** pushes, whose cache a pull request could poison.
+          package-manager-cache: false
       # test/upgrade-from-released.test.js installs this tree into copies made from release tags, and fails when a
       # release's updater is not among them: every release tag, so a new one can't be left out here.
       - run: git fetch --depth=1 --no-tags origin '+refs/tags/v*:refs/tags/v*'
