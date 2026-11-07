@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { asRecord, listAt, numberAt, parseJson, recordAt, recordsAt, stringAt } from '../server/test/mocks.js';
+import { asRecord, listAt, numberAt, parseJson, recordAt, recordsAt, stringAt, within } from '../server/test/mocks.js';
 import { isTetherInternals } from '../src/part-registry.ts';
 
 /**
@@ -346,6 +346,24 @@ export function builtTether(window) {
   const tether = tetherOf(window);
   assert.ok(isCoreTether(tether), "window.Tether is the core script's");
   return tether;
+}
+
+/**
+ * Waits for a jsdom page's `load`: its scripts, and the parts they added before it, have run. A page that already
+ * loaded counts, since its `load` event won't come again.
+ *
+ * @param {import('jsdom').DOMWindow} window
+ * @param {string} what The page, named in the failure.
+ */
+export function pageLoaded(window, what) {
+  if (window.document.readyState === 'complete') return Promise.resolve();
+  return within(
+    60_000,
+    new Promise((resolve) => {
+      window.addEventListener('load', resolve, { once: true });
+    }),
+    `${what} to load`,
+  );
 }
 
 /**

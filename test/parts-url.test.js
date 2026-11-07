@@ -7,7 +7,8 @@ import { readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { builtTether, graphqlRequest, jsonResponse, operationName, partsOf } from './fixtures.js';
+import { builtTether, graphqlRequest, jsonResponse, operationName, pageLoaded, partsOf } from './fixtures.js';
+import { within } from '../server/test/mocks.js';
 
 const DIST = join(dirname(fileURLToPath(import.meta.url)), '..', '.test-dist');
 const PART_FILE = /^https:\/\/(?:cdn|site)\.test\/[\w/]*\/(tether\.[\w.-]+\.js)$/;
@@ -61,9 +62,7 @@ async function pageWithCore(partsUrl) {
     beforeParse: storefront,
   });
   const win = dom.window;
-  await new Promise((resolve) => {
-    win.addEventListener('load', resolve);
-  });
+  await pageLoaded(win, `the page with the built core and partsUrl ${partsUrl}`);
   return win;
 }
 
@@ -74,7 +73,11 @@ async function pageWithCore(partsUrl) {
  */
 async function loadDiagnoseFrom(partsUrl) {
   const win = await pageWithCore(partsUrl);
-  const result = await builtTether(win).diagnose({ silent: true });
+  const result = await within(
+    30_000,
+    builtTether(win).diagnose({ silent: true }),
+    `the diagnose part from ${partsUrl}`,
+  );
   const script = [...win.document.scripts].find((element) => element.src.endsWith('tether.diagnose.min.js'));
   assert.ok(script, 'the diagnose part has a script');
   return { win, script, result };
@@ -107,9 +110,10 @@ test('a part rejects its load when another script replaced window.Tether, instea
   const win = await pageWithCore('https://cdn.test/tether/');
   const tether = builtTether(win);
   win['Tether'] = { version: 'another script' };
-  await assert.rejects(tether.diagnose({ silent: true }), {
+  await assert.rejects(within(30_000, tether.diagnose({ silent: true }), 'the diagnose part to reject'), {
     message: /tether\.diagnose\.min\.js can't register: window\.Tether is no longer this Tether script's/,
   });
   win['Tether'] = tether;
-  assert.equal((await tether.diagnose({ silent: true })).config['domain'], 'shop.test', 'the next use tries again');
+  const again = await within(30_000, tether.diagnose({ silent: true }), 'the diagnose part on the next use');
+  assert.equal(again.config['domain'], 'shop.test', 'the next use tries again');
 });

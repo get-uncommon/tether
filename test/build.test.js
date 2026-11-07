@@ -2,11 +2,22 @@
 import { test, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM, VirtualConsole } from 'jsdom';
+import { spawn } from 'node:child_process';
 import { readdir, readFile } from 'node:fs/promises';
+import { connect, createServer } from 'node:net';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { builtTether, find, graphqlRequest, jsonResponse, operationName, partsOf, product } from './fixtures.js';
-import { fieldOf, waitFor } from '../server/test/mocks.js';
+import {
+  builtTether,
+  find,
+  graphqlRequest,
+  jsonResponse,
+  operationName,
+  pageLoaded,
+  partsOf,
+  product,
+} from './fixtures.js';
+import { fieldOf, waitFor, within } from '../server/test/mocks.js';
 
 const DIST = join(dirname(fileURLToPath(import.meta.url)), '..', '.test-dist');
 /** @type {import('jsdom').DOMWindow} */
@@ -14,63 +25,65 @@ let win;
 /** @type {{ op: string, query: string }[]} */
 const ops = [];
 
-before(async () => {
-  const html = `<!doctype html><html lang="de"><head>
+before(
+  async () => {
+    const html = `<!doctype html><html lang="de"><head>
     <script>window.TETHER_CONFIG = { domain: 'shop.test', token: 't', autoMount: true };</script>
     <script src="${pathToFileURL(join(DIST, 'tether.min.js')).href}"></script>
   </head><body>
     <div tether-product="coffee-box"><h1 tether-bind="title"></h1><span id="price" tether-bind="price"></span></div>
     <select id="cs" tether-country-select></select>
   </body></html>`;
-  const virtualConsole = new VirtualConsole();
-  const dom = new JSDOM(html, {
-    url: 'https://site.test/',
-    runScripts: 'dangerously',
-    resources: 'usable',
-    virtualConsole,
-    beforeParse(window) {
-      window.fetch = async (_url, init) => {
-        const { query, variables } = graphqlRequest(init);
-        const op = operationName(query);
-        ops.push({ op, query });
-        const data = {
-          TetherProducts: () =>
-            Object.fromEntries(
-              Object.keys(variables)
-                .filter((key) => key.startsWith('h'))
-                .map((key) => [key, variables[key] === 'coffee-box' ? product : null]),
-            ),
-          TetherLocalization: () => ({
-            localization: {
-              country: { isoCode: 'NL', name: 'Netherlands', currency: { isoCode: 'EUR', symbol: '€' } },
-              availableCountries: [
-                { isoCode: 'NL', name: 'Netherlands', currency: { isoCode: 'EUR', symbol: '€' } },
-                { isoCode: 'DE', name: 'Germany', currency: { isoCode: 'EUR', symbol: '€' } },
-              ],
-            },
-          }),
-          TetherDiagnose: () => ({
-            shop: {
-              name: 'Shop',
-              primaryDomain: { url: 'https://shop.test' },
-              paymentSettings: { currencyCode: 'EUR' },
-            },
-          }),
-        }[op];
-        if (!data) throw new Error(`unexpected ${op}`);
-        return jsonResponse({ data: data() });
-      };
-    },
-  });
-  win = dom.window;
-  await new Promise((resolve) => {
-    win.addEventListener('load', resolve);
-  });
-  await waitFor(
-    () => Boolean(partsOf(win)?.markets) && (win.document.querySelector('select')?.options.length ?? 0) > 1,
-    'the markets part (its own file) to fill the country select',
-  );
-});
+    const virtualConsole = new VirtualConsole();
+    const dom = new JSDOM(html, {
+      url: 'https://site.test/',
+      runScripts: 'dangerously',
+      resources: 'usable',
+      virtualConsole,
+      beforeParse(window) {
+        window.fetch = async (_url, init) => {
+          const { query, variables } = graphqlRequest(init);
+          const op = operationName(query);
+          ops.push({ op, query });
+          const data = {
+            TetherProducts: () =>
+              Object.fromEntries(
+                Object.keys(variables)
+                  .filter((key) => key.startsWith('h'))
+                  .map((key) => [key, variables[key] === 'coffee-box' ? product : null]),
+              ),
+            TetherLocalization: () => ({
+              localization: {
+                country: { isoCode: 'NL', name: 'Netherlands', currency: { isoCode: 'EUR', symbol: '€' } },
+                availableCountries: [
+                  { isoCode: 'NL', name: 'Netherlands', currency: { isoCode: 'EUR', symbol: '€' } },
+                  { isoCode: 'DE', name: 'Germany', currency: { isoCode: 'EUR', symbol: '€' } },
+                ],
+              },
+            }),
+            TetherDiagnose: () => ({
+              shop: {
+                name: 'Shop',
+                primaryDomain: { url: 'https://shop.test' },
+                paymentSettings: { currencyCode: 'EUR' },
+              },
+            }),
+          }[op];
+          if (!data) throw new Error(`unexpected ${op}`);
+          return jsonResponse({ data: data() });
+        };
+      },
+    });
+    win = dom.window;
+    await pageLoaded(win, 'the page with the built script');
+    await waitFor(
+      () => Boolean(partsOf(win)?.markets) && (win.document.querySelector('select')?.options.length ?? 0) > 1,
+      'the markets part (its own file) to fill the country select',
+      30_000,
+    );
+  },
+  { timeout: 120_000 },
+);
 
 test('the built script renders a product (and its GraphQL is minified but valid-looking)', () => {
   assert.equal(find('h1', win.document).textContent, 'Coffee Box');
@@ -101,7 +114,7 @@ test('a part beside the core loads with the integrity hash of the file built wit
 
 test('the diagnose part loads on first call and shares the core (same config, same cache)', async () => {
   assert.ok(![...win.document.scripts].some((script) => script.src.includes('diagnose')), 'not loaded up front');
-  const report = await builtTether(win).diagnose({ silent: true });
+  const report = await within(30_000, builtTether(win).diagnose({ silent: true }), 'the diagnose part to report');
   assert.equal(report.reachable, true);
   assert.equal(report.config['domain'], 'shop.test');
   assert.equal(fieldOf(report.products[0], 'title'), 'Coffee Box');
@@ -124,54 +137,118 @@ test('parts are small and the core is under budget', async () => {
   assert.ok((await gz('tether.analytics.min.js')) < 3.5 * 1024);
 });
 
-test('e2e static server: stays inside its folders and listens on loopback only', async () => {
-  const { spawn } = await import('node:child_process');
-  const { connect } = await import('node:net');
-  const port = 40000 + Math.floor(Math.random() * 20000);
-  const child = spawn(process.execPath, ['test/e2e/serve.mjs'], {
-    env: { ...process.env, PORT: String(port) },
-    stdio: 'ignore',
-  });
-  /**
-   * @param {string} path
-   * @returns {Promise<string>} The raw HTTP answer, or `ERR` when the server isn't listening.
-   */
-  const get = (path) =>
-    new Promise((resolve) => {
-      const socket = connect(port, '127.0.0.1', () =>
-        socket.write(`GET ${path} HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n`),
-      );
-      let out = '';
-      socket.on('data', (chunk) => {
-        out += String(chunk);
-      });
-      socket.on('end', () => {
-        resolve(out);
-      });
-      socket.on('error', () => {
-        resolve('ERR');
-      });
+/**
+ * Sends one HTTP request over a raw socket, so a path the URL parser would normalize reaches the server as written.
+ *
+ * @param {number} port
+ * @param {string} path
+ * @param {number} [idleMs] How long the server may stay silent before the request fails.
+ * @returns {Promise<string>} The raw HTTP answer.
+ */
+const rawGet = (port, path, idleMs = 10_000) =>
+  new Promise((resolve, reject) => {
+    const socket = connect(port, '127.0.0.1', () =>
+      socket.write(`GET ${path} HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n`),
+    );
+    let out = '';
+    socket.setTimeout(idleMs, () => {
+      socket.destroy(new Error(`timed out after ${String(idleMs / 1000)}s waiting for the answer to GET ${path}`));
     });
+    socket.on('data', (chunk) => {
+      out += String(chunk);
+    });
+    socket.on('end', () => {
+      resolve(out);
+    });
+    socket.on('error', reject);
+  });
+
+/**
+ * Starts test/e2e/serve.mjs and waits until it listens, reading the port from what it prints, so the requests go to it
+ * and not to whatever else holds a port: on Windows, the RPC ports of lsass and svchost listen on every interface and
+ * take a connection without ever answering it.
+ *
+ * @param {string} port What `PORT` asks for: `0` lets the system pick a free port.
+ * @returns {Promise<{ child: import('node:child_process').ChildProcess, port: number }>}
+ */
+async function startStaticServer(port) {
+  const child = spawn(process.execPath, ['test/e2e/serve.mjs'], {
+    env: { ...process.env, PORT: port },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  /** @type {Promise<number>} */
+  const listening = new Promise((resolve, reject) => {
+    let out = '';
+    let errors = '';
+    child.stdout.on('data', (chunk) => {
+      out += String(chunk);
+      const address = /^listening on http:\/\/127\.0\.0\.1:(\d+)\//m.exec(out);
+      if (address) resolve(Number(address[1]));
+    });
+    child.stderr.on('data', (chunk) => {
+      errors += String(chunk);
+    });
+    child.on('exit', (code) => {
+      reject(new Error(`test/e2e/serve.mjs exited (${String(code)}) before it listened: ${errors}`));
+    });
+  });
   try {
-    let first = 'ERR';
-    for (let i = 0; i < 40 && first === 'ERR'; i++) {
-      await new Promise((resolve) => setTimeout(resolve, 50));
-      first = await get('/plain/');
-    }
+    return { child, port: await within(30_000, listening, 'test/e2e/serve.mjs to listen') };
+  } catch (error) {
+    child.kill();
+    throw error;
+  }
+}
+
+test('e2e static server: stays inside its folders and listens on loopback only', { timeout: 60_000 }, async () => {
+  const { child, port } = await startStaticServer('0');
+  try {
+    assert.match(await rawGet(port, '/plain/'), /^HTTP\/1\.1 /);
     for (const path of [
       '/plain/..%2F..%2Fpackage.json',
       '/..%2F..%2F..%2Fpackage.json',
       '/plain/dist/..%2F..%2Fpackage.json',
     ]) {
-      const answer = await get(path);
+      const answer = await rawGet(port, path);
       assert.doesNotMatch(answer, /@occluze\/tether/, `${path} must not leave the served folder`);
       assert.match(answer, /^HTTP\/1\.1 (403|404)/);
     }
-    assert.match(await get('/%E0%A4%A'), /^HTTP\/1\.1 400/, 'a malformed path is answered, not a crash');
+    assert.match(await rawGet(port, '/%E0%A4%A'), /^HTTP\/1\.1 400/, 'a malformed path is answered, not a crash');
   } finally {
     child.kill();
   }
 });
+
+test(
+  'e2e static server: a port another process holds fails the start, and a server that never answers fails the request',
+  { timeout: 60_000 },
+  async () => {
+    // Accepts connections and never answers, as the Windows RPC ports do.
+    const silent = createServer(() => {});
+    await within(
+      10_000,
+      new Promise((resolve) => {
+        silent.listen(0, '127.0.0.1', () => {
+          resolve(undefined);
+        });
+      }),
+      'the silent server to listen',
+    );
+    const address = silent.address();
+    assert.ok(address && typeof address === 'object');
+    try {
+      await assert.rejects(
+        startStaticServer(String(address.port)),
+        /serve\.mjs exited \(1\) before it listened: [^]*EADDRINUSE/,
+      );
+      await assert.rejects(rawGet(address.port, '/plain/', 200), {
+        message: 'timed out after 0.2s waiting for the answer to GET /plain/',
+      });
+    } finally {
+      silent.close();
+    }
+  },
+);
 
 test('the release attests the server asset the sync Worker updater installs, by the same name', async () => {
   const { releaseAssetName } = await import('../server/scripts/release-asset.ts');

@@ -36,6 +36,8 @@ const UPDATE_JOB = 'update';
 const KEEP_ALIVE = { job: 'keep-alive', step: 'Keep the weekly schedule alive' };
 
 const run = promisify(execFile);
+// Each child process has a deadline: execFileSync blocks the event loop, so no test timeout can end one that hangs.
+const CHILD_TIMEOUT_MS = 120_000;
 
 /**
  * Drops the environment variables that tie a git command to a repository (GIT_DIR, GIT_INDEX_FILE, GIT_WORK_TREE, …,
@@ -43,7 +45,10 @@ const run = promisify(execFile);
  * copies would `git init`, commit and configure this repository instead of their own.
  */
 export function forgetHookRepository() {
-  const names = execFileSync('git', ['rev-parse', '--local-env-vars'], { encoding: 'utf8' }).split('\n');
+  const names = execFileSync('git', ['rev-parse', '--local-env-vars'], {
+    encoding: 'utf8',
+    timeout: CHILD_TIMEOUT_MS,
+  }).split('\n');
   for (const name of names.filter(Boolean)) Reflect.deleteProperty(process.env, name);
 }
 
@@ -59,7 +64,7 @@ const PATH_NAME = Object.keys(process.env).find((key) => key.toUpperCase() === '
 const BASH =
   process.platform === 'win32'
     ? join(
-        execFileSync('git', ['--exec-path'], { encoding: 'utf8' }).trim(),
+        execFileSync('git', ['--exec-path'], { encoding: 'utf8', timeout: CHILD_TIMEOUT_MS }).trim(),
         '..',
         '..',
         '..',
@@ -238,6 +243,7 @@ async function deployedRepository(deployed, work) {
       cwd,
       env: { ...process.env, ...env },
       encoding: 'utf8',
+      timeout: CHILD_TIMEOUT_MS,
     }).trim();
   git(deployed, ['init', '--quiet', '--initial-branch=main']);
   // Every later command commits, configures or pushes: refuse to go on unless they act on the copy's own repository.
@@ -303,6 +309,7 @@ async function runScript(script, shell, { label, file, cwd, env }) {
     cwd,
     env: { ...env, GITHUB_OUTPUT: slashed(output) },
     maxBuffer: 16 * 1024 * 1024,
+    timeout: CHILD_TIMEOUT_MS,
   }).catch((/** @type {unknown} */ error) =>
     assert.fail(`${label} failed:
 ${String(fieldOf(error, 'stdout'))}${String(fieldOf(error, 'stderr'))}`),
