@@ -35,7 +35,8 @@ const versionIn = async (folder) => fieldOf(parseJson(await readFile(join(folder
  * - v0.6.8: downloads it from codeload by commit, after checking the commit is on the default branch;
  * - v0.7.0: installs only the release's signed asset, after `gh attestation verify` has checked it against GitHub;
  * - v0.7.1: skips a tag whose Release doesn't carry the asset yet, for the newest one that does;
- * - v0.7.2: the v0.7.1 updater, in the newest release's copy.
+ * - v0.7.2: the v0.7.1 updater, in a 0.7 copy;
+ * - v0.8.0: removes managed entries a release dropped, and records the minor it installed in TETHER_VERSION.
  *
  * A test below fails when a release tag's updater or workflow is none of these.
  *
@@ -50,6 +51,7 @@ const OLD_UPDATERS = [
   { tag: 'v0.7.0', route: 'asset' },
   { tag: 'v0.7.1', route: 'asset' },
   { tag: 'v0.7.2', route: 'asset' },
+  { tag: 'v0.8.0', route: 'asset' },
 ];
 /**
  * The first release whose updater can update a copy: the ones before it replace `.github/`, which GitHub refuses.
