@@ -41,24 +41,27 @@ test('counts must be whole numbers of 0 or more', () => {
   assert.equal(warned.length, 4);
 });
 
-test('a delay longer than setTimeout keeps falls back to its default instead of firing at once', () => {
+test('a delay longer than setTimeout keeps is capped at the longest one instead of firing at once', () => {
   const { result, warned } = quietly(() =>
     resolveConfig({ requestTimeout: 1e10, searchDelay: Number.MAX_SAFE_INTEGER }),
   );
-  assert.equal(result.requestTimeout, DEFAULTS.requestTimeout);
-  assert.equal(result.searchDelay, DEFAULTS.searchDelay);
+  assert.equal(result.requestTimeout, 2_147_483_647);
+  assert.equal(result.searchDelay, 2_147_483_647);
   assert.deepEqual(warned, [
-    '[tether] invalid requestTimeout 10000000000: using 15000',
-    '[tether] invalid searchDelay 9007199254740991: using 150',
+    '[tether] requestTimeout 10000000000 is more than its maximum: using 2147483647',
+    '[tether] searchDelay 9007199254740991 is more than its maximum: using 2147483647',
   ]);
   assert.equal(resolveConfig({ requestTimeout: 2_147_483_647 }).requestTimeout, 2_147_483_647);
 });
 
-test('retries above ten fall back to the default', () => {
-  const { result, warned } = quietly(() => resolveConfig({ retries: 11 }));
-  assert.equal(result.retries, DEFAULTS.retries);
-  assert.deepEqual(warned, ['[tether] invalid retries 11: using 2']);
+test('retries above ten are capped at ten, and a count that is no non-negative integer falls back to the default', () => {
+  const { result, warned } = quietly(() => resolveConfig({ retries: 15 }));
+  assert.equal(result.retries, 10);
+  assert.deepEqual(warned, ['[tether] retries 15 is more than its maximum: using 10']);
   assert.equal(resolveConfig({ retries: 10 }).retries, 10);
+  for (const retries of [-1, 1.5, Number.POSITIVE_INFINITY, '3']) {
+    assert.equal(quietly(() => resolveConfig({ retries })).result.retries, DEFAULTS.retries);
+  }
 });
 
 test('prefix, checkoutTarget and defaultPurchase fall back to their defaults', () => {

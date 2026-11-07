@@ -392,7 +392,8 @@ and the markup, and tells you what to fix.
 | `query(graphql, variables)`                                          | any Storefront API query, in the configured market; answers its `data` as an `object` you check                                                           |
 
 Besides the [config options](reference.md#config), `createStorefront()` takes `siteUrl` (for
-`jsonLd()` without `url`), `pageSize` (products per request of `allProducts()`, default 25) and
+`jsonLd()` without `url`), `pageSize` (products per request of `allProducts()`, an integer from 1 to 250, Shopify's
+limit; default 25) and
 `fetch`, which replaces the global `fetch` (a cache, a test double). A `fetch` you pass must hand
 `init.signal` on to the request it makes: `requestTimeout` ends a stalled request through that
 signal, so a `fetch` that drops it waits as long as the connection does.

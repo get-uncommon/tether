@@ -4,17 +4,25 @@
 
 - Fix: a retry waits at most 30 seconds, however many retries came before; the doubling wait passed
   the longest delay a timer keeps after 22 retries and then fired at once. `retries` goes up to 10:
-  a larger value warns and uses the default, 2.
+  a larger number warns and uses 10. `requestTimeout` and `searchDelay` above the longest delay a
+  timer keeps (2147483647 ms) warn and use that, instead of the default.
+- Fix: `createStorefront({ pageSize })` takes an integer from 1 to 250, Shopify's limit for one
+  request; anything else warns and uses 25. A larger value used to fail every `allProducts()` call.
 - Fix: a link in a product description that opens in a named window or tab (`target="promo"`), not
   only `_blank`, gets `rel="noopener noreferrer"`, so the page it opens can't navigate the shop's.
 - Fix (sync Worker): the updater's requests to GitHub give up after 60 seconds, so a stalled
   connection fails the update with its `::error` annotation instead of running until the workflow's
-  timeout. A copy gets this with the release after the one that ships it, since it updates with the
-  updater it has.
+  timeout, and its `gh attestation verify` is stopped after 2 minutes the same way. A copy gets this
+  with the release after the one that ships it, since it updates with the updater it has.
 - Releases: `npm run release` also needs the `release-rehearsal` run of the newest change it tests
   to have passed, on its pull request; a change pushed without one is rehearsed by hand and released
   with `--rehearsed`. When main moves while `--push` waits for npm, the Astro starter is locked on
   top of the new main, and a starter that can't be locked no longer fails a release that is done.
+- Repository: contributors never commit `dist/`, which only a release commit changes; CI fails a
+  pull request with a commit that changes it. `npm run smoke` builds into `.test-dist/`, as
+  `npm test` does, instead of rewriting `dist/`. `npm run release` refuses to start when
+  node_modules doesn't match package-lock.json, and says that its own push runs the pre-push hook's
+  whole gate.
 - Repository: `npm run e2e:build` works on Windows. The pre-push hook runs only the starter's
   version test and Prettier for a push whose every commit changes only the starter's package files.
 - Repository: a commit-msg hook checks each message against the history's style (a capitalised

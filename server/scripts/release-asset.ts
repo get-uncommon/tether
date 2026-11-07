@@ -79,10 +79,26 @@ export function releaseAssetName(version: string): string {
   return `tether-server-${version}.tar.gz`;
 }
 
-export function runCommand(command: string, args: string[]): CommandResult {
-  const result = spawnSync(command, args, { encoding: 'utf8' });
+/**
+ * How long a command may run. `gh attestation verify` fetches the attestations from GitHub and the trust root from
+ * Sigstore, so a stalled connection there would hang the update like a stalled `fetch`.
+ */
+const COMMAND_TIMEOUT_MS = 2 * GITHUB_TIMEOUT_MS;
+
+/**
+ * @throws An error naming the command when it ran longer than `timeoutMs` and was killed, and any other error
+ *   starting it but a missing program.
+ */
+export function runCommand(command: string, args: string[], timeoutMs = COMMAND_TIMEOUT_MS): CommandResult {
+  const result = spawnSync(command, args, { encoding: 'utf8', timeout: timeoutMs });
   if (result.error) {
     if ('code' in result.error && result.error.code === 'ENOENT') return { kind: 'missing' };
+    if ('code' in result.error && result.error.code === 'ETIMEDOUT') {
+      const limit = `${String(timeoutMs / MS_PER_SECOND)} s`;
+      throw new Error(`${[command, ...args].join(' ')}: no answer within ${limit}, so it was stopped`, {
+        cause: result.error,
+      });
+    }
     throw result.error;
   }
   return { kind: 'exited', status: result.status ?? 1, output: `${result.stdout}${result.stderr}`.trim() };
