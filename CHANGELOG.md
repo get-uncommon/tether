@@ -2,17 +2,6 @@
 
 ## Unreleased
 
-- Fix: an option value no available variant has is described as unavailable to screen readers
-  (`aria-describedby="tether-unavailable"`, a `hidden` note Tether adds), not `aria-disabled`:
-  choosing it still works, picking the closest variant that has it. A page's own element with
-  `id="tether-unavailable"` says it in the store's language.
-- Fix: an `onCartOpen` or `onCartClose` that throws is reported (`onError`): the add that opened the
-  cart still succeeds, and `tether:cart-toggled` still fires.
-- Fix: `Tether.cart.applyDiscount('')` (or a code of only spaces) rejects as `INVALID_DISCOUNT`
-  without sending anything, instead of sending two mutations and making a cart for a visitor who had
-  none.
-- Fix: `Object.getOwnPropertyDescriptor(Tether.config, key)` gives the same read-only view a read
-  does, so no write can skip the validation `Tether.init()` does.
 - Fix: a `warningText` or `formatMoney` that throws is reported (`onError`) and no longer fails a
   cart change Shopify already applied: the change resolves, its cart (a new one included) is kept,
   and the page shows Shopify's warning text or Tether's own money format instead.
@@ -27,6 +16,20 @@
 - Repository: the build empties its output folder first, so a part or preset the source no longer
   has can't stay in `dist/` (and ship with a release) or in the test build. The docs' part sizes are
   tested against the built parts.
+
+## 0.9.6 (2026-11-07)
+
+- Fix: an option value no available variant has is described as unavailable to screen readers
+  (`aria-describedby="tether-unavailable"`, a `hidden` note Tether adds), not `aria-disabled`:
+  choosing it still works, picking the closest variant that has it. A page's own element with
+  `id="tether-unavailable"` says it in the store's language.
+- Fix: an `onCartOpen` or `onCartClose` that throws is reported (`onError`): the add that opened the
+  cart still succeeds, and `tether:cart-toggled` still fires.
+- Fix: `Tether.cart.applyDiscount('')` (or a code of only spaces) rejects as `INVALID_DISCOUNT`
+  without sending anything, instead of sending two mutations and making a cart for a visitor who had
+  none.
+- Fix: `Object.getOwnPropertyDescriptor(Tether.config, key)` gives the same read-only view a read
+  does, so no write can skip the validation `Tether.init()` does.
 
 ## 0.9.5 (2026-11-07)
 

@@ -82,7 +82,7 @@ export declare const Cart: {
     /**
      * Adds a code. A code Shopify doesn't accept is removed again, so it doesn't warn on every later change.
      *
-     * @throws {TetherError} `INVALID_DISCOUNT` (rejected) when Shopify doesn't accept the code.
+     * @throws {TetherError} `INVALID_DISCOUNT` (rejected) when Shopify doesn't accept the code, or it is blank.
      */
     applyDiscount(typed: string): Promise<ShopifyCart | null>;
     removeDiscount(code: string): Promise<ShopifyCart | null>;

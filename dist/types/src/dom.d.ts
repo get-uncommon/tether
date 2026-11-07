@@ -41,11 +41,12 @@ export declare function show(el: HTMLElement, visible: boolean): void;
  */
 export declare function setSelected(el: Element, selected: boolean): void;
 /**
- * Marks an option element the visitor can't buy: `is-unavailable`, and `aria-disabled` on the control assistive
- * technology reads, the element itself or the radio/checkbox inside it. It stays clickable: choosing it picks the
- * closest variant that has it.
+ * Marks an option element the visitor can't buy: `is-unavailable`, and the state assistive technology reads on the
+ * control, the element itself or the radio/checkbox inside it. A plan or purchase toggle the variant can't use does
+ * nothing when chosen, so it is `aria-disabled`. An option value still works, choosing it picks the closest variant
+ * that has it, so it isn't disabled: it is described as unavailable (`describeUnavailable`).
  */
-export declare function setUnavailable(el: Element, unavailable: boolean): void;
+export declare function setUnavailable(el: Element, unavailable: boolean, choosing: 'does-nothing' | 'picks-closest'): void;
 /**
  * A global the page's own scripts set on `window`: `TETHER_CONFIG`, the site's config, `TETHER_INTEGRATION`, set by a
  * framework integration (Astro) that starts Tether itself, and GSAP's `ScrollTrigger`. Another script wrote it, so it
