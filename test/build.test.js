@@ -356,3 +356,58 @@ test('only the newest release tag is marked latest, on GitHub and on npm', async
   assert.match(jobs.get('github-release') ?? '', /LATEST: \$\{\{ needs\.channel\.outputs\.latest \}\}/);
   assert.match(jobs.get('npm') ?? '', /NPM_TAG: \$\{\{ needs\.channel\.outputs\.npm-tag \}\}/);
 });
+
+test('the release rehearsal runs the gate at the next minor and patch versions, on pull requests that change code', async () => {
+  const workflow = await readFile(new URL('../.github/workflows/release-rehearsal.yml', import.meta.url), 'utf8');
+  const [, trigger = ''] = /\non:\n([^]*?)\n\S/.exec(workflow) ?? [];
+  assert.match(trigger, /^ {2}pull_request:\n {4}paths:\n/, 'pull requests only, by the files they change');
+  for (const path of ['src/**', 'server/**', 'scripts/**', 'test/**', 'package.json', 'package-lock.json']) {
+    assert.ok(trigger.includes(`- '${path}'`), `a change to ${path} runs it`);
+  }
+  assert.doesNotMatch(trigger, /push:/, 'not on every push to main');
+  assert.match(workflow, /^permissions:\n {2}contents: read\n/m, 'it only reads');
+  const jobs = workflowJobs(workflow);
+  assert.deepEqual([...jobs.keys()], ['rehearsal']);
+  const job = jobs.get('rehearsal') ?? '';
+  assert.match(job, /bump: \[minor, patch\]/);
+  for (const [, action] of job.matchAll(/uses: (\S+)/g))
+    assert.match(action ?? '', /@[0-9a-f]{40}$/, 'pinned by commit');
+  assert.match(job, /persist-credentials: false/);
+  assert.ok(job.includes('next="$major.$((minor + 1)).0"; else next="$major.$minor.$((patch + 1))"'));
+  // The rewrite is release.ts's own, into a worktree, and the gate runs there.
+  const rewrite = job.indexOf('scripts/release.ts --rewrite-only "$next" "$RUNNER_TEMP/next"');
+  assert.ok(job.indexOf('git worktree add --detach "$RUNNER_TEMP/next" HEAD') < rewrite && rewrite !== -1);
+  assert.match(job, /- run: npm ci\n {8}working-directory: \$\{\{ runner\.temp \}\}\/next\n/);
+  assert.match(job, /- run: npm run check\n {8}working-directory: \$\{\{ runner\.temp \}\}\/next\n/);
+  assert.ok(job.indexOf('release.ts --rewrite-only') < job.indexOf('- run: npm ci'), 'installed at the new version');
+});
+
+test('the release relies on the ci run of the commit it releases, which runs on main and the release branches', async () => {
+  const ci = await readFile(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8');
+  assert.match(ci, /\n {2}push:\n {4}branches: \[main, 'release\/\*\*'\]\n/);
+  const release = await readFile(new URL('../scripts/release.ts', import.meta.url), 'utf8');
+  assert.ok(release.includes("'--workflow=ci.yml', `--commit=${sha}`"), 'asks GitHub for the ci runs of HEAD');
+  assert.doesNotMatch(release, /run\('npm', \['run', 'check'\]\)/, 'the release leaves the whole gate to CI');
+});
+
+test("the package exports its entry points and the browser scripts in dist/, and none of Tether's internal modules", () => {
+  for (const entry of [
+    '@occluze/tether',
+    '@occluze/tether/server',
+    '@occluze/tether/astro',
+    '@occluze/tether/presets/barba',
+    '@occluze/tether/dist/tether.min.js',
+    '@occluze/tether/dist/tether.search.min.js',
+    '@occluze/tether/dist/tether.esm.js',
+  ]) {
+    assert.ok(import.meta.resolve(entry), entry);
+  }
+  for (const internal of [
+    '@occluze/tether/dist/esm/index.js',
+    '@occluze/tether/dist/types/src/cart/store.d.ts',
+    '@occluze/tether/dist/types/server/src/shared/json.d.ts',
+    '@occluze/tether/dist/presets/barba.esm.js',
+  ]) {
+    assert.throws(() => import.meta.resolve(internal), { code: 'ERR_PACKAGE_PATH_NOT_EXPORTED' }, internal);
+  }
+});

@@ -2,12 +2,19 @@
 /**
  * One-step release, run by the owner:
  *
- *   npm run release -- 0.4.0            set the version, build, run the gate, commit, tag
+ *   npm run release -- 0.4.0            set the version, build, run a sanity check and the smoke test, commit, tag
  *   npm run release -- 0.4.0 --push     ...and push (GitHub Actions then creates the GitHub Release and publishes
  *                                       to npm with provenance), wait for npm to have it, then lock the Astro starter
  *                                       on it and push that too
  *   npm run release -- 0.4.0 --starter  only lock the Astro starter on 0.4.0, which npm must have, and commit
  *                                       (with --push, push)
+ *   node scripts/release.ts --rewrite-only 0.4.0 <folder>
+ *                                       only write 0.4.0 into the tree at <folder> as a release does, for the
+ *                                       `release-rehearsal` workflow
+ *
+ * The release doesn't run the whole gate: it needs HEAD's `ci` run on GitHub to have passed, and the release commit to
+ * change only what the version rewrite changes. A test that fails only at a new version is caught before that, on the
+ * pull request, by the rehearsal, which runs the gate at the next minor and patch versions.
  *
  * The starter's package.json and lockfile change together, by npm, and only to a version npm has: a release commit
  * leaves them on the previous release, so `npm ci` in the starter, and in every project `npm create astro` makes from
@@ -20,25 +27,25 @@
  *
  * A version on main's minor line or a newer one is released from main. An older minor line gets a maintenance release
  * from its branch `release/X.Y`, made once from that line's last tag (`git push origin vX.Y.Z:refs/heads/release/X.Y`);
- * the branch needs this script and `.github/workflows/release.yml` from main first, since a tag runs the workflow at
- * its own commit. Deployed Worker copies install only a tag whose commit is on main, so the script also records the
+ * the branch needs this script, `release-version.ts`, `.github/workflows/release.yml` and `ci.yml` from main first,
+ * since a tag runs the workflow at its own commit and a push to the branch runs its own `ci.yml`. Deployed Worker copies install only a tag whose commit is on main, so the script also records the
  * maintenance commit in main's history, by a merge commit that keeps main's files as they are but for CHANGELOG.md,
  * which gets the release's section. The branch, main and the tag are pushed in one atomic push: all of them land, or
  * none does.
  */
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
-import { join, dirname } from 'node:path';
+import { join, dirname, resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { compareVersions, parseVersion } from '../server/src/release-range.ts';
 import { field } from '../server/src/shared/json.ts';
 import { sectionOf, withSection } from './changelog.ts';
-import { packageVersion, syncVersions } from './versions.ts';
+import { RELEASE_FILES, applyReleaseVersion, editFile } from './release-version.ts';
+import { packageVersion } from './versions.ts';
 import type { Version } from '../server/src/release-range.ts';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const PACKAGE_VERSION = /"version": "\d+\.\d+\.\d+"/;
 const MAIN = 'main';
 const NPM_PACKAGE = '@occluze/tether';
 const STARTER = 'examples/astro';
@@ -50,8 +57,8 @@ const NPM_POLL_MS = 30_000;
 /** The branch a release goes on, and whether it is main. */
 type Line = { kind: 'main' } | { kind: 'maintenance'; branch: string };
 
-function run(command: string, args: string[]): void {
-  execFileSync(...spawnable(command, args), { cwd: ROOT, stdio: 'inherit', shell: needsShell(command) });
+function run(command: string, args: string[], cwd = ROOT): void {
+  execFileSync(...spawnable(command, args), { cwd, stdio: 'inherit', shell: needsShell(command) });
 }
 
 /**
@@ -92,17 +99,6 @@ function branchOf(line: Line): string {
 }
 
 /**
- * Rewrites `file` with `change`; fails when nothing changed, unless `optional`.
- */
-async function edit(file: string, change: (text: string) => string, { optional = false } = {}): Promise<void> {
-  const path = join(ROOT, file);
-  const before = await readFile(path, 'utf8');
-  const after = change(before);
-  if (after === before && !optional) fail(`${file}: nothing to change (pattern not found?)`);
-  await writeFile(path, after);
-}
-
-/**
  * Main for a version on main's minor line or newer, `release/X.Y` for an older line.
  *
  * @param mainVersion The version main is on.
@@ -128,6 +124,47 @@ function checkHeadIs(branch: string): void {
 }
 
 /**
+ * Exits unless the newest run of the `ci` workflow for `sha` on GitHub passed. The release runs only a sanity check
+ * itself: the whole gate ran in CI on this commit, and at the next versions in the `release-rehearsal` workflow on the
+ * pull requests that led to it.
+ */
+function checkCiPassed(sha: string): void {
+  let listed: string;
+  try {
+    listed = output('gh', ['run', 'list', '--workflow=ci.yml', `--commit=${sha}`, '--json=status,conclusion,url']);
+  } catch {
+    fail(`could not ask GitHub for the ci runs of ${sha} (is gh installed and logged in?)`);
+  }
+  const runs: unknown = JSON.parse(listed);
+  // gh lists the newest run first.
+  const newest: unknown = Array.isArray(runs) ? runs[0] : undefined;
+  if (newest === undefined) fail(`GitHub has no ci run for HEAD (${sha}): push it and wait for CI`);
+  const url = String(field(newest, 'url'));
+  if (field(newest, 'status') !== 'completed') fail(`CI is still running on HEAD (${sha}): wait for ${url}`);
+  if (field(newest, 'conclusion') !== 'success') fail(`CI did not pass on HEAD (${sha}): ${url}`);
+}
+
+/**
+ * Exits when the working tree changed anything but what the version rewrite changes: the files `applyReleaseVersion`
+ * writes, the lockfile's copy of the version and the rebuilt dist/. CI passed on HEAD, so the release commit is that
+ * tree with only the new version in it.
+ */
+function checkOnlyVersionChanged(): void {
+  const allowed = new Set([...RELEASE_FILES, 'package-lock.json']);
+  const changed = [
+    ...output('git', ['diff', '--name-only', 'HEAD']).split('\n'),
+    ...output('git', ['ls-files', '--others', '--exclude-standard']).split('\n'),
+  ].filter((file) => file && !allowed.has(file) && !file.startsWith('dist/'));
+  if (changed.length > 0) fail(`the release would change more than the version: ${changed.join(', ')}`);
+}
+
+/** Writes `version` into the tree at `root` as a release does: the files (`applyReleaseVersion`), then the lockfile. */
+async function rewrite(root: string, version: string): Promise<void> {
+  await applyReleaseVersion(root, version);
+  run('npm', ['install', '--package-lock-only', '--ignore-scripts', '--no-audit', '--no-fund', '--silent'], root);
+}
+
+/**
  * Exits when the version, the working tree, the branch or CHANGELOG.md isn't ready for `version`.
  *
  * @returns The branch the release goes on.
@@ -143,6 +180,7 @@ async function checkReady(text: string): Promise<Line> {
   const branch = branchOf(line);
   if (line.kind === 'maintenance') run('git', ['fetch', '--quiet', 'origin', branch]);
   checkHeadIs(branch);
+  checkCiPassed(output('git', ['rev-parse', 'HEAD']));
   const current = versionOrFail(await packageVersion(ROOT), `${branch}'s version`);
   if (compareVersions(version, current) <= 0) fail(`${text} is not newer than ${current.join('.')}`);
   if (line.kind === 'maintenance' && (current[0] !== version[0] || current[1] !== version[1])) {
@@ -153,32 +191,6 @@ async function checkReady(text: string): Promise<Line> {
     fail(`add a "## ${text}" section to CHANGELOG.md first`);
   }
   return line;
-}
-
-async function bump(text: string): Promise<void> {
-  const [major, minor] = versionOrFail(text, 'the version');
-  const packageJson = (json: string): string => json.replace(PACKAGE_VERSION, `"version": "${text}"`);
-  await edit('package.json', packageJson);
-  await syncVersions(ROOT);
-  // The heading the notes were written under becomes the release's, dated in UTC.
-  const date = new Date().toISOString().slice(0, 10);
-  await edit(
-    'CHANGELOG.md',
-    (changelog) => changelog.replace(`\n## ${text} (unreleased)\n`, `\n## ${text} (${date})\n`),
-    {
-      optional: true,
-    },
-  );
-  // Pinned examples in the README; ranges like @0.3 follow the minor version.
-  await edit(
-    'README.md',
-    (readme) =>
-      readme
-        .replace(/@v\d+\.\d+\.\d+/g, `@v${text}`)
-        .replace(/@\d+\.\d+\/dist/g, `@${major}.${minor}/dist`)
-        .replace(/`@\d+\.\d+` gets every \d+\.\d+\.x fix/, `\`@${major}.${minor}\` gets every ${major}.${minor}.x fix`),
-    { optional: true },
-  );
 }
 
 /**
@@ -264,9 +276,14 @@ async function lockStarter(text: string, push: boolean): Promise<void> {
   }
   if (!isOnNpm(text)) fail(`npm has no ${text} yet: run this again once the release workflow has published it`);
   const range = `^${String(major)}.${String(minor)}.0`;
-  await edit(`${STARTER}/package.json`, (json) => json.replace(STARTER_RANGE, `"${NPM_PACKAGE}": "${range}"`), {
-    optional: true,
-  });
+  await editFile(
+    ROOT,
+    `${STARTER}/package.json`,
+    (json) => json.replace(STARTER_RANGE, `"${NPM_PACKAGE}": "${range}"`),
+    {
+      optional: true,
+    },
+  );
   run('npm', [
     'update',
     NPM_PACKAGE,
@@ -293,13 +310,15 @@ async function lockStarter(text: string, push: boolean): Promise<void> {
 
 async function release(version: string, push: boolean): Promise<void> {
   const line = await checkReady(version);
-  await bump(version);
-  run('npm', ['install', '--package-lock-only', '--no-audit', '--no-fund', '--silent']);
+  await rewrite(ROOT, version);
   // npm and the Release ship the committed dist/, which carries the version: release.yml refuses a tag whose dist/
   // differs from a fresh build.
   run('npm', ['run', 'build']);
-  // The whole gate, as release.yml runs it on the tag: a tag the workflow refuses would stay without its Release.
-  run('npm', ['run', 'check']);
+  checkOnlyVersionChanged();
+  // Not the whole gate, which ran in CI on HEAD and at the next versions in the rehearsal: a check that every copy says
+  // the new version, and the live smoke test, which release.yml runs on the tag too, so an API change found here
+  // doesn't leave a tag without its Release.
+  run(process.execPath, ['--experimental-strip-types', '--test', 'test/versions.test.js']);
   run('npm', ['run', 'smoke']);
   run('git', ['add', '-A']);
   run('git', ['commit', '-q', '-m', `Tether ${version}`]);
@@ -326,7 +345,10 @@ async function release(version: string, push: boolean): Promise<void> {
   else console.log(`npm doesn't have ${version} yet. ${lockLater}`);
 }
 
-const [version = ''] = process.argv.slice(2).filter((arg) => !arg.startsWith('--'));
+const [version = '', folder] = process.argv.slice(2).filter((arg) => !arg.startsWith('--'));
 const push = process.argv.includes('--push');
-if (process.argv.includes('--starter')) await lockStarter(version, push);
+if (process.argv.includes('--rewrite-only')) {
+  if (folder === undefined) fail('usage: node scripts/release.ts --rewrite-only X.Y.Z <folder>');
+  await rewrite(resolve(folder), versionOrFail(version, 'the version').join('.'));
+} else if (process.argv.includes('--starter')) await lockStarter(version, push);
 else await release(version, push);

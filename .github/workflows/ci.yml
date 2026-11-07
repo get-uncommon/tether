@@ -1,6 +1,8 @@
 # The gate (`npm run check`: Prettier, ESLint, tsc, Knip, dependency-cruiser, the tests) on every pull request and
-# every push to main, on the oldest Node the package supports (`engines`) and the current one. lefthook runs it
-# locally too, but a hook can be skipped and a pull request from a fork never runs it.
+# every push to main or a `release/X.Y` branch, on the oldest Node the package supports (`engines`) and the current
+# one. lefthook runs it locally too, but a hook can be skipped and a pull request from a fork never runs it.
+# `npm run release` needs this workflow to have passed on the commit it releases, and runs only a sanity check itself;
+# `release-rehearsal.yml` runs the gate at the next versions on pull requests.
 #
 # The `workflows` job lints Tether's own workflows and the one the sync Worker ships with actionlint and zizmor, both
 # at an exact version whose download is checked against its sha256. The v0.6.8 workflow in test/workflows/ is a
@@ -10,7 +12,7 @@ name: ci
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [main, 'release/**']
 
 permissions:
   contents: read
