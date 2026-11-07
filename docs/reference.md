@@ -433,6 +433,7 @@ Tether.cart.warnings;                             // [{ code, message, target }]
 Tether.cart.open(); Tether.cart.checkout();      // open/close also work without a drawer; checkout() answers the URL
 Tether.cart.subscribe((cart, { count, open, loaded, warnings }) => {});  // your own cart UI
 Tether.cart.setCheckoutResolver(async () => url);  // a logged-in checkout URL (the account part sets it); null clears
+await Tether.cart.init();                         // load the saved cart again, after the changes already queued
 
 const p = await Tether.getProduct('coffee-box');  // batched + cached
 const { products, pageInfo } = await Tether.getProducts({ collection: 'coffee', first: 12 });
@@ -515,15 +516,15 @@ server helpers (`createStorefront()`, and `shop.config.js` with [Astro](astro.md
 | `partsUrl`                 | `null`                     | The folder of the optional parts when you host them yourself: https or on your own site (see **Pinning a release** below). Without it they load beside the core                                                           |
 | `analytics`                | `null`                     | GA4/GTM, Shopify's and your own analytics ([analytics](analytics.md), and the `analytics.*` rows below)                                                                                                                   |
 | `account`                  | `null`                     | Customer accounts through the Worker ([accounts](accounts.md), and the `account.*` rows below)                                                                                                                            |
-| `warningText`              | `null`                     | `(warning) => text`: your text for one of Shopify's cart warnings, translated by `warning.code` for instance; returning nothing keeps Shopify's                                                                           |
-| `formatMoney`              | `null`                     | `(money, locale) => text`: your money format, in place of `Intl` with `locale`                                                                                                                                            |
-| `onLayoutChange`           | `null`                     | `(reason) => {}` after renders changed the page's height; without it, `ScrollTrigger.refresh()` when GSAP's ScrollTrigger is on the page                                                                                  |
+| `warningText`              | `null`                     | `(warning) => text`: your text for one of Shopify's cart warnings, translated by `warning.code` for instance; returning nothing keeps Shopify's, and so does an error it throws, which goes to `onError`                  |
+| `formatMoney`              | `null`                     | `(money, locale) => text`: your money format, in place of `Intl` with `locale`; an error it throws goes to `onError` and the price shows in that built-in format                                                          |
+| `onLayoutChange`           | `null`                     | `(reason) => {}` after renders changed the page's height; without it, `ScrollTrigger.refresh()` when GSAP's ScrollTrigger is on the page. An error it throws goes to `onError`                                            |
 | `onCartOpen`               | `null`                     | `(drawers) => {}` after the cart drawer opened; an error it throws goes to `onError`, and the cart still opens                                                                                                            |
 | `onCartClose`              | `null`                     | `(drawers) => {}` after it closed; an error it throws goes to `onError`, and the cart still closes                                                                                                                        |
-| `onLineEnter`              | `null`                     | `(node) => {}` for a new cart line, to animate it in                                                                                                                                                                      |
-| `onLineLeave`              | `null`                     | `(node, done) => {}` for a removed cart line: animate it out, then call `done()`                                                                                                                                          |
-| `onValueChange`            | `null`                     | `(element, previousText) => {}` when a bound value's text changes, to animate it                                                                                                                                          |
-| `onError`                  | `null`                     | `(error, context) => {}` for every failure that reaches the visitor                                                                                                                                                       |
+| `onLineEnter`              | `null`                     | `(node) => {}` for a new cart line, to animate it in; an error it throws goes to `onError`                                                                                                                                |
+| `onLineLeave`              | `null`                     | `(node, done) => {}` for a removed cart line: animate it out, then call `done()`; an error it throws goes to `onError`, and the line is removed                                                                           |
+| `onValueChange`            | `null`                     | `(element, previousText) => {}` when a bound value's text changes, to animate it; an error it throws goes to `onError`                                                                                                    |
+| `onError`                  | `null`                     | `(error, context) => {}` for every failure that reaches the visitor; an error one of the hooks above throws is reported once per page load for each message                                                               |
 | `debug`                    | `false`                    | Logs Tether's steps, such as retries, in the console                                                                                                                                                                      |
 | `markets.detect`           | the saved choice only      | `true` reads every source, a list (`['saved', 'server', 'webflow']`) only those, `false` none                                                                                                                             |
 | `markets.locales`          | none                       | Webflow locale (subdirectory or `<html lang>`) to `{ country, language, locale }`                                                                                                                                         |
@@ -683,19 +684,22 @@ TETHER_API_VERSION=2026-10 npm run smoke                        # try a newer Sh
 node scripts/api-version.ts --next                             # the next quarterly version
 ```
 
-**Releases:** the notes of the next release are under `## Unreleased` at the top of
-`CHANGELOG.md`, where every pull request adds its lines. Then
+**Releases:** the notes of the next release are note files in `.changes/`, one per change, which
+each pull request adds: `.changes/<short-slug>.md`, holding that change's CHANGELOG bullets and no
+heading. `CHANGELOG.md` itself has only released sections. Then
 
 ```bash
 npm run release -- X.Y.Z --push
 ```
 
 It first checks that the `ci` workflow passed on GitHub for the commit it releases (through `gh`,
-which must be logged in), and that `## Unreleased` has notes. It bumps the version everywhere
+which must be logged in), and that `.changes/` has note files. It bumps the version everywhere
 (packages, `VERSION`, the sync, README pins, `server/TETHER_VERSION` for a new minor), moves the
-notes into a `## X.Y.Z (YYYY-MM-DD)` section, dated with the day on the release machine's clock in
-its own time zone, under a new, empty `## Unreleased`, builds, refuses a release commit that changes
-anything else, runs the versions test and the live smoke test, commits, tags and pushes. The push
+note files into a new `## X.Y.Z (YYYY-MM-DD)` section at the top of `CHANGELOG.md`, dated with the
+day on the release machine's clock in its own time zone, and deletes them. The section lists the
+files by the first word of each one's first bullet (Breaking, then Security, then Fix, then every
+other kind, then Repository), and by file name within a kind; a file's bullets stay together. It
+then builds, refuses a release commit that changes anything else, runs the versions test and the live smoke test, commits, tags and pushes. The push
 goes through the pre-push hook, which for a push with a new tag runs `npm run check` and
 `npm run lint:workflows` locally: a release takes as long as that gate, and when the hook fails,
 nothing is pushed and the release says so. The release itself doesn't run the gate at the new
@@ -721,11 +725,9 @@ cd - && npm run release -- X.Y.Z --push --rehearsed
 A released section stays as its tag has it, since the GitHub Release's notes are cut from the tag:
 `test/changelog.test.js` fails when a section in `CHANGELOG.md` differs from the same section in
 `git show vX.Y.Z:CHANGELOG.md`, for every release tag in the checkout (CI fetches them all), and when
-a heading other than the first `## Unreleased` isn't `## X.Y.Z (YYYY-MM-DD)`. A branch that was
-open across a release and merges it gets a conflict when its new lines start right under
-`## Unreleased`, where the release put the new section; lines it added further down merge into the
-released section without one, and that test then fails until they are moved back under
-`## Unreleased`.
+a heading isn't `## X.Y.Z (YYYY-MM-DD)`. A branch that was open across a release merges it
+cleanly: the release deleted only the note files it released, and the branch's own note files are
+other files, so they stay in `.changes/` for the next release.
 
 The `release` workflow then runs on the tag, in this order:
 
@@ -761,7 +763,8 @@ and given `scripts/release.ts`, `scripts/release-version.ts`, `scripts/changelog
 `.github/workflows/release.yml`, `.github/workflows/ci.yml` and
 `.github/workflows/release-rehearsal.yml` from main, since a tag runs the workflow at its own commit and a push to
 the branch runs its own `ci.yml`, whose passing run the release needs. Check out
-`origin/release/X.Y`, put the notes under its `## Unreleased` and run the same command. The script also
+`origin/release/X.Y`, put the notes in its `.changes/` (and remove the `## Unreleased` heading that a
+branch made from an older tag has) and run the same command. The script also
 records the release commit in main's history, by a merge commit that changes only main's
 `CHANGELOG.md`, and pushes the branch, main and the tag together. The release isn't GitHub's latest
 release, and goes to npm under the `latest-X.Y` dist-tag instead of `latest`.

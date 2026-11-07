@@ -5,6 +5,7 @@
  */
 import { cfg } from './config.ts';
 import { toMetafieldIdentifier } from './config-sections.ts';
+import { IMAGE_FIELDS } from './shopify-fields.ts';
 import type { TetherConfig, MetafieldIdentifier } from './config.ts';
 import type { Money } from './shopify-values.ts';
 import type { StoreAccess } from './client.ts';
@@ -115,7 +116,6 @@ const FULL_ACCESS: StoreAccess = { inventory: true };
 
 /** The stock field, for a token that may read inventory. */
 const inventoryField = (access: StoreAccess): string => (access.inventory ? 'quantityAvailable' : '');
-const IMAGE = 'url altText width height';
 
 /**
  * The `metafields(identifiers:)` field. A fragment can't declare variables, so the identifiers are written into the
@@ -133,7 +133,7 @@ function metafieldsField(metafields: ProductFragmentConfig['metafields']) {
     .join(', ');
   return `metafields(identifiers: [${list}]) {
     namespace key type value
-    reference { ... on MediaImage { image { ${IMAGE} } } }
+    reference { ... on MediaImage { image { ${IMAGE_FIELDS} } } }
   }`;
 }
 
@@ -172,9 +172,9 @@ fragment TetherProduct on Product {
   id handle title description descriptionHtml productType vendor tags
   availableForSale publishedAt onlineStoreUrl requiresSellingPlan
   seo { title description }
-  featuredImage { ${IMAGE} }
-  images(first: ${o.imagesFirst}) { nodes { ${IMAGE} } }
-  options { name optionValues { name swatch { color image { previewImage { ${IMAGE} } } } } }
+  featuredImage { ${IMAGE_FIELDS} }
+  images(first: ${o.imagesFirst}) { nodes { ${IMAGE_FIELDS} } }
+  options { name optionValues { name swatch { color image { previewImage { ${IMAGE_FIELDS} } } } } }
   priceRange { minVariantPrice { ${MONEY} } maxVariantPrice { ${MONEY} } }
   compareAtPriceRange { minVariantPrice { ${MONEY} } maxVariantPrice { ${MONEY} } }
   ${metafieldsField(o.metafields)}
@@ -189,7 +189,7 @@ fragment TetherProduct on Product {
     nodes {
       id title availableForSale currentlyNotInStock ${inventoryField(access)} sku barcode
       selectedOptions { name value }
-      image { ${IMAGE} }
+      image { ${IMAGE_FIELDS} }
       price { ${MONEY} }
       compareAtPrice { ${MONEY} }
       unitPrice { ${MONEY} }
@@ -234,11 +234,11 @@ fragment TetherCart on Cart {
       merchandise {
         ... on ProductVariant {
           id title sku availableForSale requiresShipping ${inventoryField(access)}
-          image { ${IMAGE} }
+          image { ${IMAGE_FIELDS} }
           price { ${MONEY} }
           compareAtPrice { ${MONEY} }
           selectedOptions { name value }
-          product { id title handle vendor featuredImage { ${IMAGE} } }
+          product { id title handle vendor featuredImage { ${IMAGE_FIELDS} } }
         }
       }
       ... on ComponentizableCartLine {
@@ -250,12 +250,4 @@ fragment TetherCart on Cart {
     }
   }
 }`;
-}
-
-/** The collection fields Tether renders, for inside a `collection { }` selection. */
-export function collectionFields(): string {
-  return `
-  id handle title description descriptionHtml
-  image { ${IMAGE} }
-  seo { title description }`;
 }

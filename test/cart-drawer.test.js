@@ -202,6 +202,37 @@ test('a drawer the site closed itself, then took off the page, leaves the cart c
   assert.deepEqual(toggles, [true, false, true], 'opening on the page without a drawer is announced');
 });
 
+test('an open drawer taken off the page is announced closed; a manual drawer the site opens afterwards is usable', async () => {
+  let closes = 0;
+  configure({
+    ...CONFIG,
+    onCartClose: () => {
+      closes++;
+    },
+  });
+  /** @type {boolean[]} */
+  const opens = [];
+  const unsubscribe = Cart.subscribe((_cart, meta) => opens.push(meta.open));
+  document.body.innerHTML =
+    '<button id="opener" tether-cart-open>Cart</button><div id="drawer" tether-cart-drawer></div>';
+  Cart.open();
+  find('#drawer').remove();
+  await classChangeSeen();
+  unsubscribe();
+  assert.equal(Cart.isOpen(), false);
+  assert.deepEqual(toggles, [true, false]);
+  assert.equal(closes, 1);
+  assert.equal(opens.at(-1), false, 'subscribe hears the close');
+  assert.equal(find('#opener').getAttribute('aria-expanded'), 'false');
+
+  document.body.insertAdjacentHTML('beforeend', '<div id="m" tether-cart-drawer="manual"><button>y</button></div>');
+  Cart.render();
+  find('#m').classList.add('is-open');
+  await classChangeSeen();
+  assert.deepEqual(stateOf('#m'), OPEN, 'usable: neither inert nor hidden');
+  assert.deepEqual(toggles, [true, false, true]);
+});
+
 test('a throwing onCartOpen or onCartClose is reported: the add still succeeds, and cart-toggled still fires', async () => {
   document.body.innerHTML = '';
   const merchandiseId = product.variants.nodes[0]?.id ?? '';
@@ -272,14 +303,18 @@ test('a throwing warningText is reported: the add Shopify applied resolves, and 
   assert.deepEqual(reported, ['warningText']);
 });
 
-test('a throwing formatMoney is reported: the add resolves, and amounts show in the built-in format', async () => {
-  document.body.innerHTML = '<span id="subtotal" tether-cart-subtotal></span>';
+test('a throwing formatMoney is reported once: the add resolves, and amounts show in the built-in format', async () => {
+  document.body.innerHTML =
+    '<span id="subtotal" tether-cart-subtotal></span><span tether-cart-total></span><span tether-cart-total></span>';
   const formatMoney = () => {
     throw new TypeError('site formatter bug');
   };
   const { reported, cart } = await addWithHooks({ formatMoney, locale: 'en-US' });
   assert.equal(find('#subtotal').textContent, builtInFormat(cart.cost.subtotalAmount, 'en-US'));
-  assert.ok(reported.length > 0 && reported.every((context) => context === 'formatMoney'));
+  configure({ ...CONFIG, formatMoney, onError: (_error, context) => reported.push(context) });
+  Cart.render();
+  Cart.render();
+  assert.deepEqual(reported, ['formatMoney'], 'not once for each price on each render');
 });
 
 test('money: amounts compare as decimals, so a line is on sale only when it is', () => {

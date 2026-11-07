@@ -1,10 +1,10 @@
 /**
  * How the page follows the visitor across pages and markets: Astro's ClientRouter (`astro:page-load`,
- * `astro:before-swap`) mounts each new page in its market and closes the cart while leaving; a country select
- * switches the market; back online, what failed to load loads again.
+ * `astro:before-swap`) mounts each new page in its market and closes the cart while leaving; back online, what failed
+ * to load loads again. The markets part follows the country selects it fills.
  */
 import { cfg, reportError } from '../config.ts';
-import { attr, sel } from '../dom.ts';
+import { attr } from '../dom.ts';
 import { liveLists, retryFailed } from '../mounting.ts';
 import { marketForArrival, setCountry } from '../page-market.ts';
 
@@ -54,15 +54,6 @@ function bindAstroRouter(hooks: PageHooks): void {
   });
 }
 
-function onChange(event: Event): void {
-  const { target } = event;
-  if (!(target instanceof window.HTMLSelectElement) || !target.matches(sel('country-select'))) return;
-  if (!target.value) return;
-  setCountry(target.value).catch((error: unknown) => {
-    reportError(error, 'country');
-  });
-}
-
 /** Loads the failed products and lists again. */
 function onOnline() {
   retryFailed();
@@ -74,6 +65,5 @@ function onOnline() {
 /** Binds the document-wide listeners, once per page load of the script. */
 export function bindNavigation(hooks: PageHooks): void {
   if (cfg.astro) bindAstroRouter(hooks);
-  document.addEventListener('change', onChange);
   window.addEventListener('online', onOnline);
 }

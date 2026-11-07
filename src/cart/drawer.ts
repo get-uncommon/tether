@@ -22,8 +22,11 @@ let announcedOpen = false;
 /** Where focus was before the cart opened. */
 let returnFocus: HTMLElement | null = null;
 
-/** Follows the open class on each drawer, so a `manual` drawer the site opens or closes itself is announced. */
-let classWatcher: MutationObserver | null = null;
+/**
+ * Follows the page from its first cart render on: a `manual` drawer the site opens or closes itself with the open
+ * class, and an open drawer the site takes off the page, are announced.
+ */
+let pageWatcher: MutationObserver | null = null;
 
 const isFocusable = (el: Element | null): el is HTMLElement => el !== null && 'focus' in el;
 
@@ -47,16 +50,13 @@ export function isOpen(): boolean {
   return all.length ? all.some(isOpenDrawer) : openWithoutDrawer;
 }
 
-function watchOpenClass(drawer: HTMLElement): void {
-  classWatcher ??= new MutationObserver(() => {
-    const open = isOpen();
-    if (open === announcedOpen) return;
-    const all = drawers();
-    if (open) announceOpen(all.filter(isOpenDrawer));
-    else announceClosed(all, hasFocusInside(all));
-  });
-  // Observing a drawer again only replaces the options.
-  classWatcher.observe(drawer, { attributes: true, attributeFilter: ['class'] });
+/** Announces an open state the page changed without Tether. */
+function announceChange(): void {
+  const open = isOpen();
+  if (open === announcedOpen) return;
+  const all = drawers();
+  if (open) announceOpen(all.filter(isOpenDrawer));
+  else announceClosed(all, hasFocusInside(all));
 }
 
 /**
@@ -77,7 +77,15 @@ export function syncDrawerAria(): void {
     drawer.setAttribute('aria-modal', String(open));
     drawer.setAttribute('aria-hidden', String(!open));
     drawer.inert = !open;
-    watchOpenClass(drawer);
+  });
+  if (pageWatcher) return;
+  pageWatcher = new MutationObserver(announceChange);
+  // The whole document, not the body: a router can replace the body element.
+  pageWatcher.observe(document.documentElement, {
+    attributes: true,
+    attributeFilter: ['class'],
+    childList: true,
+    subtree: true,
   });
 }
 
@@ -104,6 +112,7 @@ function announceOpen(opened: HTMLElement[]): void {
 /** @param hadFocus Whether focus was inside a drawer as it closed, so it goes back to where it was before. */
 function announceClosed(all: HTMLElement[], hadFocus: boolean): void {
   announcedOpen = false;
+  openWithoutDrawer = false;
   syncDrawerAria();
   if (hadFocus && returnFocus?.isConnected) returnFocus.focus({ preventScroll: true });
   returnFocus = null;
@@ -131,7 +140,6 @@ export function openCart(): void {
 /** Closes every open drawer, `manual` ones included. */
 export function closeCart(): void {
   if (!isOpen()) return;
-  openWithoutDrawer = false;
   const all = drawers();
   const hadFocus = hasFocusInside(all);
   all.forEach((drawer) => {

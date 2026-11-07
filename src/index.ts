@@ -31,6 +31,7 @@ import {
 } from './mounting.ts';
 import { applyStartMarket, setCountry } from './page-market.ts';
 import { accountApi, mountAccountIfUsed } from './account-api.ts';
+import { withPart } from './part-use.ts';
 import { forgetBrowserModeTokens } from './account-marks.ts';
 import { bindCartControls } from './controls/cart-controls.ts';
 import { bindDiscountControls } from './controls/discount.ts';
@@ -144,21 +145,13 @@ function mountLists(root: ParentNode): number {
  */
 function mountParts(root: ParentNode): void {
   if (within(root, `${sel('country-select')},${sel('country-bind')}`).length) {
-    loadPart('markets')
-      .then((part) => part.renderCountrySelects(root))
-      .catch((error: unknown) => {
-        reportError(error, 'markets');
-      });
+    withPart('markets', (part) => part.renderCountrySelects(root));
   }
   mountAccountIfUsed(root);
   if (within(root, sel('search')).length) {
-    loadPart('search')
-      .then((part) => {
-        part.mountSearch(root);
-      })
-      .catch((error: unknown) => {
-        reportError(error, 'search');
-      });
+    withPart('search', (part) => {
+      part.mountSearch(root);
+    });
   }
 }
 
@@ -242,7 +235,7 @@ function bindControls() {
 async function cartInPageMarket(cart: ShopifyCart | null): Promise<ShopifyCart | null> {
   const country = cfg.country;
   const cartCountry = cart?.buyerIdentity.countryCode;
-  if (!cart || !country || !cartCountry || cartCountry === country) return cart;
+  if (!country || !cartCountry || cartCountry === country) return cart;
   try {
     return await Cart.setBuyerIdentity({ countryCode: country }, { create: false });
   } catch (error) {

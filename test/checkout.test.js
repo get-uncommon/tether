@@ -1,7 +1,7 @@
 // Checkout: the cart queue it waits in, the account's checkout URL and the cart's own.
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { JSDOM } from 'jsdom';
+import { JSDOM, VirtualConsole } from 'jsdom';
 import {
   cancelTimersAfterTests,
   captureTetherWarnings,
@@ -213,6 +213,73 @@ for (const [start, saved] of /** @type {const} */ ([
     assert.equal(await Cart.checkout('_self'), 'https://shop.test/checkouts/1');
     await add;
     assert.equal(reported.length, 0);
+  });
+}
+
+/**
+ * Stands in for `window.open` while `run` runs: each tab is a jsdom window, whose navigation jsdom reports as not
+ * implemented.
+ *
+ * @param {(tabs: { opened: number }) => Promise<void>} run Gets the counts so far.
+ * @returns {Promise<{ opened: number, closed: number, navigated: number }>}
+ */
+async function withTabs(run) {
+  const tabs = { opened: 0, closed: 0, navigated: 0 };
+  const open = window.open.bind(window);
+  const openTab = () => {
+    tabs.opened++;
+    const tabConsole = new VirtualConsole();
+    tabConsole.on('jsdomError', (error) => {
+      if (error.message.includes('navigation')) tabs.navigated++;
+    });
+    const tab = new JSDOM('', { url: 'https://site.test/', virtualConsole: tabConsole }).window;
+    tab.close = () => {
+      tabs.closed++;
+    };
+    return tab;
+  };
+  // A jsdom window isn't typed as the DOM's `Window`: it is assigned the way the setup above assigns the globals.
+  Object.assign(window, { open: openTab });
+  try {
+    await run(tabs);
+  } finally {
+    Object.assign(window, { open });
+  }
+  return tabs;
+}
+
+for (const [start, saved] of /** @type {const} */ ([
+  ['no cart yet', null],
+  ['an empty saved cart', cartFrom([])],
+])) {
+  test(`checkout: with ${start} and a change that adds no line queued, _blank opens no tab`, async () => {
+    if (saved) await loadSaved(saved);
+    else await Cart.init();
+    answers['Tether_cartCreate'] = () => payload('cartCreate', cartFrom([]));
+    answers['Tether_cartNoteUpdate'] = () => payload('cartNoteUpdate', cartFrom([]));
+    const tabs = await withTabs(async () => {
+      const note = Cart.setNote('Gift');
+      assert.equal(await Cart.checkout('_blank'), null);
+      await note;
+    });
+    assert.deepEqual(tabs, { opened: 0, closed: 0, navigated: 0 });
+    assert.equal(reported.length, 0);
+  });
+
+  test(`checkout: with ${start} and an add queued, _blank opens the tab inside the click`, async () => {
+    if (saved) await loadSaved(saved);
+    else await Cart.init();
+    answers['Tether_cartCreate'] = () => payload('cartCreate', oneLine(1));
+    answers['Tether_cartLinesAdd'] = () => payload('cartLinesAdd', oneLine(1));
+    answers['TetherCheckout'] = () => ({ data: { cart: { checkoutUrl: 'https://shop.test/checkouts/1' } } });
+    const tabs = await withTabs(async (tabsSoFar) => {
+      const add = Cart.add(VARIANT);
+      const checkout = Cart.checkout('_blank');
+      assert.equal(tabsSoFar.opened, 1, 'opened before any await: Safari blocks window.open after one');
+      assert.equal(await checkout, 'https://shop.test/checkouts/1');
+      await add;
+    });
+    assert.deepEqual(tabs, { opened: 1, closed: 0, navigated: 1 }, 'the tab goes to checkout');
   });
 }
 

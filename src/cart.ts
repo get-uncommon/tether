@@ -30,6 +30,7 @@ import {
   keepQuietly,
   pendingQuantities,
   pendingQuantityOf,
+  queueFilling,
   render,
   runInOrder,
   savedCartId,
@@ -151,9 +152,25 @@ async function load(): Promise<ShopifyCart | null> {
   return currentCart();
 }
 
+/** A load queued behind other tasks that hasn't started: an `init()` meanwhile shares it instead of queueing another. */
+let queuedLoad: Promise<ShopifyCart | null> | null = null;
+
+/**
+ * Loads the saved cart in the queue, so a change Shopify answers meanwhile isn't replaced by an older answer. Calls
+ * before the load starts (another tab writing the cart's keys in a burst) share it.
+ */
+function reload(): Promise<ShopifyCart | null> {
+  queuedLoad ??= queueFilling(() =>
+    runInOrder(() => {
+      queuedLoad = null;
+      return load();
+    }),
+  );
+  return queuedLoad;
+}
+
 export const Cart = {
-  /** Loads the saved cart in the queue, so a change Shopify answers meanwhile isn't replaced by an older answer. */
-  init: () => runInOrder(load),
+  init: reload,
   /** The saved cart's id. */
   id: savedCartId,
 
@@ -224,21 +241,23 @@ export const Cart = {
     const lines: CartLineInput[] = (Array.isArray(input) ? input : [input]).map((line) =>
       toLineInput(line, quantity, options),
     );
-    return runChange(async () => {
-      const cart = await mutateCart({
-        name: 'cartLinesAdd',
-        args: '$lines: [CartLineInput!]!',
-        inner: 'lines: $lines',
-        variables: { lines },
-        createInput: { lines },
-      });
-      // A mutation answers without a cart only beside user errors, which reject above; an add always has one.
-      if (!cart) throw new TetherError('Shopify answered the add without a cart');
-      commit(cart, 'add');
-      emit('added', { cart, lines });
-      if (cfg.openCartOnAdd) openCart();
-      return cart;
-    });
+    return queueFilling(() =>
+      runChange(async () => {
+        const cart = await mutateCart({
+          name: 'cartLinesAdd',
+          args: '$lines: [CartLineInput!]!',
+          inner: 'lines: $lines',
+          variables: { lines },
+          createInput: { lines },
+        });
+        // A mutation answers without a cart only beside user errors, which reject above; an add always has one.
+        if (!cart) throw new TetherError('Shopify answered the add without a cart');
+        commit(cart, 'add');
+        emit('added', { cart, lines });
+        if (cfg.openCartOnAdd) openCart();
+        return cart;
+      }),
+    );
   },
 
   /**

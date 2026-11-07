@@ -23,11 +23,14 @@ export interface ServerRequest {
   body?: Record<string, unknown>;
 }
 
-/** The Worker's `/me` answer, until a change of the customer's data or a logout. */
-let known: ServerLogin | null = null;
+/**
+ * What this page knows of the login: nothing yet, a `/me` request on its way, or the Worker's answer, kept until a
+ * change of the customer's data or a logout (`forgetServerLogin`). Forgetting during a request drops its answer.
+ */
+type LoginState =
+  { kind: 'unknown' } | { kind: 'asking'; request: Promise<ServerLogin> } | { kind: 'known'; login: ServerLogin };
 
-/** The `/me` request `known` comes from; `forgetServerLogin` and the logout drop it, so its answer is not kept. */
-let asking: Promise<ServerLogin> | null = null;
+let loginState: LoginState = { kind: 'unknown' };
 
 /**
  * @returns The Worker's account routes, without a trailing slash. `account.server` is a full URL or a path on this
@@ -128,28 +131,31 @@ async function askWhoIsLoggedIn(): Promise<ServerLogin> {
  * @throws {TetherError} When the Worker can't be reached or fails: that says nothing about the login.
  */
 export async function serverLogin(): Promise<ServerLogin> {
-  const request = (asking ??= askWhoIsLoggedIn());
+  if (loginState.kind === 'known') return loginState.login;
+  if (loginState.kind === 'unknown') loginState = { kind: 'asking', request: askWhoIsLoggedIn() };
+  const { request } = loginState;
+  const isCurrent = () => loginState.kind === 'asking' && loginState.request === request;
   let login: ServerLogin;
   try {
     login = await request;
   } catch (error) {
     // The next call asks again.
-    if (asking === request) asking = null;
+    if (isCurrent()) loginState = { kind: 'unknown' };
     throw error;
   }
-  if (asking !== request) return serverLogin();
-  known = login;
+  // Forgotten meanwhile, or another caller of the same request kept its answer already.
+  if (!isCurrent()) return serverLogin();
+  loginState = { kind: 'known', login };
   setLoginHint(login.loggedIn);
   return login;
 }
 
 /** @returns True when the Worker last said a customer is logged in. */
-export const isServerLoggedIn = (): boolean => known?.loggedIn === true;
+export const isServerLoggedIn = (): boolean => loginState.kind === 'known' && loginState.login.loggedIn;
 
 /** Asks the Worker again on the next `serverLogin()`, after a change of the customer's data. */
 export function forgetServerLogin(): void {
-  known = null;
-  asking = null;
+  loginState = { kind: 'unknown' };
 }
 
 /** Goes to the Worker's (or Shopify's) pages, through `account.navigate` when the site replaces the redirect. */
