@@ -1,5 +1,6 @@
 /**
- * Builds dist/, or the folder after `--out`, which the tests use so the committed dist/ only changes in a release:
+ * Builds dist/, or the folder after `--out`, which the tests use so the committed dist/ only changes in a release. The
+ * folder is emptied first and then holds exactly these files:
  *
  *   tether.min.js (+ .map), tether.js     the <script> build (IIFE)
  *   tether.<part>(.min).js                the optional parts, loaded on first use (`PARTS`); built first, so the
@@ -15,7 +16,7 @@
  */
 import * as esbuild from 'esbuild';
 import ts from 'typescript';
-import { readFile, writeFile, mkdir, rm } from 'node:fs/promises';
+import { readFile, readdir, writeFile, mkdir, rm } from 'node:fs/promises';
 import { gzipSync, brotliCompressSync } from 'node:zlib';
 import { createHash } from 'node:crypto';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -261,9 +262,23 @@ async function report(): Promise<void> {
   console.log(rows.join('\n'));
 }
 
-await rm(join(OUT, 'esm'), { recursive: true, force: true });
-await rm(join(OUT, 'types'), { recursive: true, force: true });
-await mkdir(OUT, { recursive: true });
+/**
+ * Empties the output folder, so it holds exactly this build's files: a part or preset the source no longer has can't
+ * stay in dist/, where the release's fresh-build check sees it as a deletion. Only a folder that is missing, empty or a
+ * build's (it has `tether.min.js`) is emptied, so a mistyped `--out` can't remove sources.
+ *
+ * @throws {Error} When the folder holds files and no build.
+ */
+async function emptyOut(): Promise<void> {
+  await mkdir(OUT, { recursive: true });
+  const files = await readdir(OUT);
+  if (files.length && !files.includes('tether.min.js'))
+    throw new Error(`${OUT} isn't a build's output folder (no tether.min.js): not emptying it`);
+  await rm(OUT, { recursive: true, force: true });
+  await mkdir(OUT, { recursive: true });
+}
+
+await emptyOut();
 await writeFile(
   join(OUT, 'tether.esm.js'),
   "export * from './esm/index.js';\nexport { default } from './esm/index.js';\n",

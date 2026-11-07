@@ -127,7 +127,7 @@ Logging out unlinks the cart.
 
 ## On your own site: order pages, profile, addresses, subscriptions, returns
 
-Everything the Customer Account API allows runs on your pages (their own part, about 9 KB, loaded only
+Everything the Customer Account API allows runs on your pages (their own part, about 6 KB gzipped, loaded only
 where these attributes are). Only what has to stay with Shopify does: the login itself, checkout
 and payment, and changing a saved card.
 

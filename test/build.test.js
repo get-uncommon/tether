@@ -3,7 +3,7 @@ import { test, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM, VirtualConsole } from 'jsdom';
 import { spawn } from 'node:child_process';
-import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { connect, createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { pathToFileURL, fileURLToPath } from 'node:url';
@@ -169,9 +169,7 @@ test('parts are small and the core is under budget', async () => {
   const gz = async (file) => gzipSync(await readFile(join(DIST, file)), { level: 9 }).length;
   // Each budget is a ceiling a build must stay under, with no headroom promised: growth past one is a decision, made by
   // moving code into a part or by raising the budget in the change that needs it. The build, not golfed source, keeps
-  // the files small. The core's went from 29.5 to 29.75 KB for about 180 bytes of fixes (site hooks that throw, a blank
-  // discount code, unavailable options described rather than disabled, `Tether.config`'s descriptors); moving the
-  // description sanitizer into a part instead would render descriptions after the rest of the product.
+  // the files small.
   assert.ok((await gz('tether.min.js')) < 29.75 * 1024, 'core gzip budget');
   assert.ok((await gz('tether.search.min.js')) < 3 * 1024);
   assert.ok((await gz('tether.lists.min.js')) < 2.75 * 1024, 'lists part budget');
@@ -196,6 +194,39 @@ test("the README's size badge and claims are the core's gzipped size", async () 
     const decimals = claim.split('.')[1]?.length ?? 0;
     const actual = kilobytes.toFixed(decimals);
     assert.equal(claim, actual, `the README says ${claim} KB; the core is ${kilobytes.toFixed(2)} KB: write ${actual}`);
+  }
+});
+
+test("the docs' part sizes are each part's gzipped size", async () => {
+  const { gzipSync } = await import('node:zlib');
+  // The part each `N KB` in a doc names, in the order the doc says them: a new claim is added here.
+  /** @type {Record<string, string[]>} */
+  const claimed = {
+    'accounts.md': ['account', 'account-pages'],
+    'analytics.md': ['analytics'],
+    'reference.md': ['lists', 'search'],
+  };
+  const docs = join(DIST, '..', 'docs');
+  for (const doc of await readdir(docs)) {
+    const claims = [...(await readFile(join(docs, doc), 'utf8')).matchAll(/(\d+(?:\.\d+)?) KB/g)].map(
+      ([, n]) => n ?? '',
+    );
+    const parts = claimed[doc] ?? [];
+    assert.equal(
+      claims.length,
+      parts.length,
+      `${doc} has ${String(claims.length)} size claims; this test names ${String(parts.length)}`,
+    );
+    for (const [i, claim] of claims.entries()) {
+      const part = `tether.${parts[i] ?? ''}.min.js`;
+      const kilobytes = gzipSync(await readFile(join(DIST, part)), { level: 9 }).length / 1024;
+      const actual = kilobytes.toFixed(claim.split('.')[1]?.length ?? 0);
+      assert.equal(
+        claim,
+        actual,
+        `${doc} says ${claim} KB for ${part}; it is ${kilobytes.toFixed(2)} KB: write ${actual}`,
+      );
+    }
   }
 });
 
@@ -339,7 +370,7 @@ test("the package exports its entry points and the browser scripts in dist/, and
 });
 
 test(
-  "a part is the same bytes in every build and carries no version, so a release keeps an unchanged part's hash",
+  "a build holds only its own files, and a part is the same bytes in every build and carries no version, so a release keeps an unchanged part's hash",
   {
     timeout: 60_000,
   },
@@ -349,10 +380,30 @@ test(
     const { VERSION } = await import('../src/version.ts');
     const again = await mkdtemp(join(tmpdir(), 'tether-build-'));
     try {
+      // An earlier build's output, with a part and a preset this source no longer has.
+      await mkdir(join(again, 'presets'));
+      for (const stale of ['tether.min.js', 'tether.oldpart.min.js', 'presets/old.esm.js'])
+        await writeFile(join(again, stale), '');
       await promisify(execFile)(process.execPath, ['--experimental-strip-types', 'scripts/build.ts', '--out', again], {
         cwd: join(DIST, '..'),
         timeout: 60_000,
       });
+      const names = (await readdir(join(DIST, '..', 'src', 'parts'))).map((file) => file.replace(/\.ts$/, ''));
+      assert.deepEqual(
+        [...(await readdir(again)), ...(await readdir(join(again, 'presets'))).map((file) => `presets/${file}`)].sort(),
+        [
+          'esm',
+          'presets',
+          'presets/barba.esm.js',
+          'tether.esm.js',
+          'tether.js',
+          'tether.min.js',
+          'tether.min.js.map',
+          'types',
+          ...names.flatMap((name) => [`tether.${name}.js`, `tether.${name}.min.js`]),
+        ].sort(),
+        'the build holds exactly its own files',
+      );
       const parts = (await readdir(DIST)).filter((file) => PART_FILE.test(file) && !CORES.has(file));
       assert.ok(parts.includes('tether.diagnose.min.js') && parts.includes('tether.diagnose.js'), 'both kinds of part');
       for (const part of parts) {
