@@ -51,7 +51,7 @@ Site settings → Custom code → **Head**: the config, then the script tag. The
 `@X.Y` gets every X.Y.x fix automatically (recommended), `@vX.Y.Z` pins one release (add its
 [`integrity`](reference.md#config) hash to pin exactly what runs), `@latest` always takes the newest.
 Hosting the file yourself? Put the optional parts next to it (`tether.markets.min.js`,
-`tether.search.min.js`, `tether.account.min.js`, `tether.account-pages.min.js`,
+`tether.search.min.js`, `tether.lists.min.js`, `tether.account.min.js`, `tether.account-pages.min.js`,
 `tether.analytics.min.js`, `tether.extras.min.js`, `tether.diagnose.min.js`): each loads only when a
 page uses it. More on pinning and `partsUrl` in the [reference](reference.md#config).
 

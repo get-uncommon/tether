@@ -32,7 +32,7 @@ const BYTES_PER_KB = 1024;
 const GZIP_LEVEL = 9;
 
 /** The optional parts, each `src/parts/<name>.ts` built into `tether.<name>(.min).js`. */
-const PARTS = ['diagnose', 'markets', 'search', 'extras', 'account', 'account-pages', 'analytics'];
+const PARTS = ['diagnose', 'markets', 'search', 'lists', 'extras', 'account', 'account-pages', 'analytics'];
 
 const graphqlPlugin: esbuild.Plugin = {
   name: 'tether-graphql',

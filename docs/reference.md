@@ -313,6 +313,8 @@ empty inside a `tether-product`: that product). `tether-products=""` lists all p
 syntax caveat: Shopify matches words loosely, so `handle:a OR handle:b` can return other products, and
 search only covers the store's default language. `tether-sort` takes the Shopify
 sort keys (`BEST_SELLING`, `PRICE`, `CREATED`, `TITLE`, …), with `tether-reverse="true"`.
+Lists, and `Tether.getProducts()` and `Tether.getRecommendations()`, are an optional part (2 KB) that
+loads with a page's first list.
 
 Using Webflow CMS lists instead? Put `tether-product` on each CMS item, bound to the handle.
 

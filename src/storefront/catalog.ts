@@ -6,8 +6,13 @@
 import { orNull, request, shaped } from '../client.ts';
 import { productFragment, collectionFields } from '../fragments.ts';
 import { productKey } from '../shopify-values.ts';
-import { PRODUCT, PRODUCT_NODE } from '../product-shape.ts';
-import { isCollectionAnswer, isRecommendationsAnswer, isSearchAnswer } from '../loader.ts';
+import {
+  PRODUCT,
+  PRODUCT_NODE,
+  isCollectionAnswer,
+  isRecommendationsAnswer,
+  isSearchAnswer,
+} from '../product-shape.ts';
 import type { DataCheck, StorefrontConfig } from '../client.ts';
 import type { ProductFragmentConfig, Product } from '../fragments.ts';
 import type { Collection, PageInfo, ProductPage } from '../loader.ts';

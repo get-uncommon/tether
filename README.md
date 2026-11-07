@@ -68,7 +68,7 @@ in the markup.
 - **With or without the CMS:** bind products to CMS items, or let one page show any product from the URL.
 - **Markets:** local prices and currency, a country selector, Webflow Localization.
 - **Optional CMS sync:** a Webflow CMS item per Shopify product, kept up to date automatically by your own free Cloudflare Worker.
-- **Search as you type, customer accounts, analytics:** optional parts that load only where you use them.
+- **Product lists, search as you type, customer accounts, analytics:** optional parts that load only where you use them.
 - **Astro too:** build-time product pages with live prices and cart, View Transitions included.
 - **Hand-over ready:** loading, error and not-found states, `Tether.diagnose()`, error reporting.
 - **Free and open source:** an alternative to Smootify and Storesynk (formerly Shopyflow). One script tag, no monthly fee, no dependencies.

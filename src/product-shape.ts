@@ -4,12 +4,12 @@
  * truncated or hand-written entry, or an answer missing fields, would otherwise fail deep inside a render instead of
  * being skipped or refused.
  */
-import { matches } from './client.ts';
+import { matches, orNull, shaped } from './client.ts';
 import { field, isRecord } from '../server/src/shared/json.ts';
 import type { ShapeOf } from './client.ts';
 import type { Product } from './fragments.ts';
 import type { Money } from './shopify-values.ts';
-import type { PageInfo } from './loader.ts';
+import type { Collection, PageInfo } from './loader.ts';
 
 /** A page of a GraphQL connection of products. */
 export interface ProductConnection {
@@ -36,7 +36,7 @@ export const PRODUCT = {
 } as const satisfies ShapeOf<Product>;
 
 /** A page of products, with the `pageInfo` paging reads. */
-export const PRODUCT_CONNECTION = {
+const PRODUCT_CONNECTION = {
   nodes: [PRODUCT],
   pageInfo: { hasNextPage: 'boolean' },
 } as const satisfies ShapeOf<ProductConnection>;
@@ -51,3 +51,12 @@ export const isProductShape = (value: unknown): value is Product =>
  */
 export const PRODUCT_NODE = (node: unknown): node is Product | { id?: undefined } =>
   isRecord(node) && (node['id'] === undefined || matches(node, PRODUCT));
+
+/** A collection's answer: `null` for a handle the store doesn't have. Its other fields are written as text. */
+export const isCollectionAnswer = shaped<{ collection: (Collection & { products: ProductConnection }) | null }>({
+  collection: orNull({ handle: 'string', products: PRODUCT_CONNECTION }),
+});
+export const isSearchAnswer = shaped<{ products: ProductConnection }>({ products: PRODUCT_CONNECTION });
+export const isRecommendationsAnswer = shaped<{ productRecommendations: Product[] | null }>({
+  productRecommendations: orNull([PRODUCT]),
+});
