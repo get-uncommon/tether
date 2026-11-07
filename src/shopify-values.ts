@@ -77,6 +77,12 @@ export function productUrl(productPath: string, handle: string | null | undefine
     .replace(/\{id\}/g, encodeURIComponent(numericId));
 }
 
+/** A product to recommend for: the product itself, or its handle, numeric id or gid. */
+export type ProductRef = string | number | { id: string };
+
+/** Shopify's `ProductRecommendationIntent`. */
+export type RecommendationIntent = 'RELATED' | 'COMPLEMENTARY';
+
 /**
  * The key Tether loads a product by: a handle, or a product gid.
  *

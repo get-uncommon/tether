@@ -4,14 +4,13 @@
  * (`tether/server` `hydrate()`) are used at once and refreshed once in the background.
  */
 import { cfg, log } from './config.ts';
-import { gql, matches, orNull, shaped, TetherError } from './client.ts';
-import { productFragment, collectionFields } from './fragments.ts';
+import { gql, matches, orNull, TetherError } from './client.ts';
+import { productFragment } from './fragments.ts';
 import { productKey } from './shopify-values.ts';
 import { isRecord } from '../server/src/shared/json.ts';
-import { PRODUCT, PRODUCT_CONNECTION, PRODUCT_NODE } from './product-shape.ts';
+import { PRODUCT, PRODUCT_NODE } from './product-shape.ts';
 import type { Product, Image } from './fragments.ts';
 import type { QueryText } from './client.ts';
-import type { ProductConnection } from './product-shape.ts';
 
 /**
  * A product request that missed is remembered this long, so one page asking twice sends one request, and a product
@@ -82,7 +81,7 @@ export function getProduct(rawKey: string | number | null | undefined): Promise<
  * @returns The operation with the product fragment (which starts on its own line), written for what the token may
  *   read.
  */
-const withProductFragment =
+export const withProductFragment =
   (operation: string): QueryText =>
   (access) =>
     `${operation}${productFragment(cfg, access)}`;
@@ -267,97 +266,4 @@ export interface ProductQuery {
   reverse?: boolean;
   /** `ProductFilter` values, for a collection. */
   filters?: unknown[];
-}
-
-/** A collection's answer: `null` for a handle the store doesn't have. Its other fields are written as text. */
-export const isCollectionAnswer = shaped<{ collection: (Collection & { products: ProductConnection }) | null }>({
-  collection: orNull({ handle: 'string', products: PRODUCT_CONNECTION }),
-});
-export const isSearchAnswer = shaped<{ products: ProductConnection }>({ products: PRODUCT_CONNECTION });
-export const isRecommendationsAnswer = shaped<{ productRecommendations: Product[] | null }>({
-  productRecommendations: orNull([PRODUCT]),
-});
-
-const COLLECTION_QUERY = `query TetherCollection($handle: String!, $first: Int!, $after: String, $sortKey: ProductCollectionSortKeys, $reverse: Boolean, $filters: [ProductFilter!]) {
-  collection(handle: $handle) {
-    ${collectionFields()}
-    products(first: $first, after: $after, sortKey: $sortKey, reverse: $reverse, filters: $filters) {
-      nodes { ...TetherProduct }
-      pageInfo { hasNextPage endCursor }
-    }
-  }
-}`;
-
-const SEARCH_QUERY = `query TetherSearch($first: Int!, $after: String, $query: String, $sortKey: ProductSortKeys, $reverse: Boolean) {
-  products(first: $first, after: $after, query: $query, sortKey: $sortKey, reverse: $reverse) {
-    nodes { ...TetherProduct }
-    pageInfo { hasNextPage endCursor }
-  }
-}`;
-
-/**
- * A page of products from a collection (by handle) or from a search. Every product on it is cached.
- *
- * @throws {TetherError} `NOT_FOUND` for a collection the store doesn't have.
- */
-export async function getProducts({
-  collection,
-  query,
-  first = cfg.collectionFirst,
-  after = null,
-  sortKey,
-  reverse = false,
-  filters,
-}: ProductQuery = {}): Promise<ProductPage> {
-  if (collection) {
-    const data = await gql(
-      withProductFragment(COLLECTION_QUERY),
-      {
-        handle: collection,
-        first,
-        after,
-        sortKey: sortKey || undefined,
-        reverse,
-        filters: filters ?? undefined,
-      },
-      isCollectionAnswer,
-    );
-    if (!data.collection) throw new TetherError(`Collection not found: ${collection}`, { code: 'NOT_FOUND' });
-    const { products, ...rest } = data.collection;
-    products.nodes.forEach(primeProduct);
-    return { collection: rest, products: products.nodes, pageInfo: products.pageInfo };
-  }
-
-  const data = await gql(
-    withProductFragment(SEARCH_QUERY),
-    { first, after, query: query || undefined, sortKey: sortKey || undefined, reverse },
-    isSearchAnswer,
-  );
-  data.products.nodes.forEach(primeProduct);
-  return { collection: null, products: data.products.nodes, pageInfo: data.products.pageInfo };
-}
-
-/**
- * Shopify's recommendations for a product. Every product in them is cached.
- *
- * @param product A product, or its handle, id or gid.
- */
-export async function getRecommendations(
-  product: string | number | { id: string } | null | undefined,
-  intent: 'RELATED' | 'COMPLEMENTARY' = 'RELATED',
-): Promise<Product[]> {
-  const key = normalizeProductKey(typeof product === 'object' ? product?.id : product);
-  const byId = key?.startsWith('gid://') ?? false;
-  const data = await gql(
-    withProductFragment(
-      `query TetherRecs(${byId ? '$id: ID!' : '$handle: String!'}, $intent: ProductRecommendationIntent) {
-  productRecommendations(${byId ? 'productId: $id' : 'productHandle: $handle'}, intent: $intent) { ...TetherProduct }
-}`,
-    ),
-    byId ? { id: key, intent } : { handle: key, intent },
-    isRecommendationsAnswer,
-  );
-  const list = data.productRecommendations ?? [];
-  list.forEach(primeProduct);
-  return list;
 }

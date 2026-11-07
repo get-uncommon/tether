@@ -43,6 +43,26 @@ test('script tag: optional parts load from their own files (search, extras), var
   expect(parts).not.toContain('account'); // not configured: never loaded
 });
 
+test('script tag: a collection list loads the lists part and its cards mount as products', async ({ page }) => {
+  /** @type {string[]} */
+  const parts = [];
+  page.on('request', (request) => {
+    const part = /tether\.(\w+)\.min\.js/.exec(request.url())?.[1];
+    if (part) parts.push(part);
+  });
+  await page.goto('/plain/?handle=the-h2-snowboard');
+  const list = page.locator('#list');
+  await expect(list).toHaveAttribute('tether-state', 'ready', { timeout: 15000 });
+  await expect(list.locator('[tether-collection-bind="title"]')).toHaveText('Freestyle Collection');
+  const cards = list.locator('[tether-list] > [tether-product]');
+  await expect(cards).toHaveCount(3);
+  await expect(cards.first()).toHaveAttribute('tether-state', 'ready');
+  await expect(cards.first().locator('[tether-bind="price"]')).toContainText('€');
+  await expect(cards.first().locator('a')).toHaveAttribute('href', /^\/plain\/\?handle=[\w-]+$/);
+  await expect(cards.first().locator('a')).not.toBeEmpty();
+  expect(parts).toContain('lists');
+});
+
 test('GA4: dataLayer gets view_item, add_to_cart and begin_checkout in a real browser', async ({ page, isMobile }) => {
   test.skip(isMobile, 'desktop flow');
   await page.goto('/plain/?handle=the-h2-snowboard');

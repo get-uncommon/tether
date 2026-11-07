@@ -14,7 +14,7 @@ import {
   loginFlow,
   sessionKeys,
 } from './account-fixtures.js';
-import { asRecord, fieldOf, jsonOf, urlOf } from './mocks.js';
+import { asRecord, fieldOf, jsonOf, urlOf, within } from './mocks.js';
 
 /** @typedef {typeof globalThis.fetch} Fetch */
 /** @typedef {import('../src/account/kv.ts').MemoryEntries} MemoryEntries */
@@ -181,14 +181,18 @@ test('a refresh in flight when the customer logs out does not bring the session 
   Date.now = () => realNow() + 2 * 3600e3;
   try {
     const me = answer(req('/me', { origin: SITE, cookie }), env, { fetch: slowRefresh, memory });
-    await sent;
+    await within(10_000, sent, 'the refresh to reach Shopify');
     const logout = await answer(req('/logout', { method: 'POST', origin: SITE, cookie, body: {} }), env, {
       fetch: sh.fetch,
       memory,
     });
     assert.equal(fieldOf(await jsonOf(logout), 'loggedOut'), true);
     answerRefresh();
-    assert.equal(fieldOf(await jsonOf(await me), 'loggedIn'), false, 'the request that refreshed is logged out too');
+    assert.equal(
+      fieldOf(await jsonOf(await within(10_000, me, 'the refreshing request to answer')), 'loggedIn'),
+      false,
+      'the request that refreshed is logged out too',
+    );
     assert.equal(sessionKeys(memory).length, 0, 'the refreshed session is not stored');
     const again = await answer(req('/me', { origin: SITE, cookie }), env, { fetch: sh.fetch, memory });
     assert.equal(fieldOf(await jsonOf(again), 'loggedIn'), false);

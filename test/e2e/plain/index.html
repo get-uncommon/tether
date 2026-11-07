@@ -41,6 +41,13 @@
       <button id="add-set" tether-group-add>Add set</button>
     </div>
 
+    <section id="list" tether-collection="freestyle" tether-limit="3">
+      <h2 tether-collection-bind="title"></h2>
+      <div tether-list>
+        <div><a tether-bind="url"></a> <span tether-bind="price"></span></div>
+      </div>
+    </section>
+
     <aside tether-cart-drawer>
       <button tether-cart-close>Close</button>
       <div tether-cart-lines>

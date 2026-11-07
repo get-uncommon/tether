@@ -33,6 +33,23 @@ import {
 
 /** The type-stripping flag this run was started with (Node before 22.18 needs it), passed on to the updater. */
 const NODE_FLAGS = process.execArgv.filter((flag) => flag === '--experimental-strip-types');
+// execFileSync blocks the event loop, so no test timeout can end a child that hangs: each child has its own.
+const CHILD_TIMEOUT_MS = 60_000;
+
+/**
+ * Runs a copy's updater as its workflow does.
+ *
+ * @param {string} copy
+ * @param {string} from The release folder it installs.
+ * @param {NodeJS.ProcessEnv} [env]
+ * @returns What it printed.
+ */
+const runUpdater = (copy, from, env = process.env) =>
+  execFileSync(process.execPath, [...NODE_FLAGS, join(copy, 'scripts', 'update-tether.mjs'), '--from', from], {
+    encoding: 'utf8',
+    env,
+    timeout: CHILD_TIMEOUT_MS,
+  });
 
 const TAGS = ['v0.1.0', 'v0.2.0', 'v0.3.0', 'v0.3.1', 'v0.3.3', 'v0.3.2', 'v0.4.0', 'v1.0.0', 'not-a-version'];
 
@@ -85,13 +102,7 @@ test('updating a copy replaces the code and keeps config, wrangler ids and TETHE
   // The "new" release: this checkout.
   await cp(root, release, { recursive: true, filter: (source) => !source.includes('node_modules') });
 
-  const out = execFileSync(
-    process.execPath,
-    [...NODE_FLAGS, join(copy, 'scripts', 'update-tether.mjs'), '--from', release],
-    {
-      encoding: 'utf8',
-    },
-  );
+  const out = runUpdater(copy, release);
   const version = stringAt(parseJson(await readFile(join(release, 'package.json'), 'utf8')), 'version');
   assert.match(out, new RegExp(`updated=${version.replace(/\./g, '\\.')}`));
   assert.ok(existsSync(join(copy, 'src', 'entry.js')), 'new code in place');
@@ -114,13 +125,7 @@ test('updating a copy replaces the code and keeps config, wrangler ids and TETHE
     'the staging folder is removed',
   );
 
-  const again = execFileSync(
-    process.execPath,
-    [...NODE_FLAGS, join(copy, 'scripts', 'update-tether.mjs'), '--from', release],
-    {
-      encoding: 'utf8',
-    },
-  );
+  const again = runUpdater(copy, release);
   assert.match(again, /up to date/);
   assert.equal(workflowVersion(out), version, 'the workflow reads the new version');
   assert.equal(workflowVersion(again), '', 'an empty version tells every workflow there is nothing to commit');
@@ -138,7 +143,7 @@ test('a copy without TETHER_VERSION takes the minor version it updated to, not t
   await cp(root, release, { recursive: true, filter: (source) => !source.includes('node_modules') });
   const version = stringAt(parseJson(await readFile(join(release, 'package.json'), 'utf8')), 'version');
 
-  execFileSync(process.execPath, [...NODE_FLAGS, join(copy, 'scripts', 'update-tether.mjs'), '--from', release]);
+  runUpdater(copy, release);
   const minor = version.split('.').slice(0, 2).join('.');
   assert.equal(await readFile(join(copy, 'TETHER_VERSION'), 'utf8'), `${minor}\n`);
 });
@@ -168,7 +173,12 @@ function workflowVersion(output) {
 test('a failed update exits non-zero, and --from without a folder is refused', () => {
   const script = fileURLToPath(new URL('../scripts/update-tether.ts', import.meta.url));
   assert.throws(
-    () => execFileSync(process.execPath, [...NODE_FLAGS, script, '--from'], { encoding: 'utf8', stdio: 'pipe' }),
+    () =>
+      execFileSync(process.execPath, [...NODE_FLAGS, script, '--from'], {
+        encoding: 'utf8',
+        stdio: 'pipe',
+        timeout: CHILD_TIMEOUT_MS,
+      }),
     /** @param {Error & import('node:child_process').SpawnSyncReturns<string>} error What execFileSync throws. */
     (error) => error.status === 1 && error.stderr.includes('--from needs the folder'),
   );
@@ -342,7 +352,10 @@ async function releaseArchive(base) {
   await writeFile(join(build, 'tether-server-0.7.1', 'server', 'package.json'), JSON.stringify({ version: '0.7.1' }));
   const archive = join(base, 'built.tgz');
   // Relative paths: Windows' tar reads `C:` in an absolute path as a remote host.
-  execFileSync('tar', ['-czf', 'built.tgz', '-C', 'build', 'tether-server-0.7.1'], { cwd: base });
+  execFileSync('tar', ['-czf', 'built.tgz', '-C', 'build', 'tether-server-0.7.1'], {
+    cwd: base,
+    timeout: CHILD_TIMEOUT_MS,
+  });
   return archive;
 }
 
@@ -444,14 +457,7 @@ test('an update run by its workflow warns when the copy needs the release workfl
   await writeFile(join(release, WORKFLOW_PATH), `# Tether workflow revision: 99\n${copyWorkflow}`);
   const summary = join(base, 'summary.md');
 
-  const out = execFileSync(
-    process.execPath,
-    [...NODE_FLAGS, join(copy, 'scripts', 'update-tether.mjs'), '--from', release],
-    {
-      encoding: 'utf8',
-      env: { ...process.env, GITHUB_STEP_SUMMARY: summary },
-    },
-  );
+  const out = runUpdater(copy, release, { ...process.env, GITHUB_STEP_SUMMARY: summary });
   assert.match(out, /^::warning title=Tether workflow file outdated::/m);
   assert.match(await readFile(summary, 'utf8'), /Update the workflow file once/);
   assert.equal(await readFile(join(copy, WORKFLOW_PATH), 'utf8'), copyWorkflow, 'the workflow file is never touched');
@@ -468,14 +474,7 @@ test('an update run with nothing to install still warns while the copy has an ol
   await writeFile(join(copy, WORKFLOW_PATH), 'name: Update Tether\n');
   const version = stringAt(parseJson(await readFile(join(copy, 'package.json'), 'utf8')), 'version');
 
-  const out = execFileSync(
-    process.execPath,
-    [...NODE_FLAGS, join(copy, 'scripts', 'update-tether.mjs'), '--from', copy],
-    {
-      encoding: 'utf8',
-      env: { ...process.env, GITHUB_STEP_SUMMARY: join(base, 'summary.md') },
-    },
-  );
+  const out = runUpdater(copy, copy, { ...process.env, GITHUB_STEP_SUMMARY: join(base, 'summary.md') });
   assert.match(out, /up to date/);
   assert.ok(
     out.includes(`revision 1, Tether ${version} ships revision ${String(SHIPPED_REVISION)}`),

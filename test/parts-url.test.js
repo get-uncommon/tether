@@ -7,7 +7,8 @@ import { readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { builtTether, graphqlRequest, jsonResponse, operationName, partsOf } from './fixtures.js';
+import { builtTether, graphqlRequest, jsonResponse, operationName, pageLoaded, partsOf } from './fixtures.js';
+import { within } from '../server/test/mocks.js';
 import { exactReleaseFolder } from '../src/lazy-iife.ts';
 import { VERSION } from '../src/version.ts';
 
@@ -63,9 +64,7 @@ async function pageWithCore(partsUrl) {
     beforeParse: storefront,
   });
   const win = dom.window;
-  await new Promise((resolve) => {
-    win.addEventListener('load', resolve);
-  });
+  await pageLoaded(win, `the page with the built core and partsUrl ${partsUrl}`);
   return win;
 }
 
@@ -76,7 +75,11 @@ async function pageWithCore(partsUrl) {
  */
 async function loadDiagnoseFrom(partsUrl) {
   const win = await pageWithCore(partsUrl);
-  const result = await builtTether(win).diagnose({ silent: true });
+  const result = await within(
+    30_000,
+    builtTether(win).diagnose({ silent: true }),
+    `the diagnose part from ${partsUrl}`,
+  );
   const script = [...win.document.scripts].find((element) => element.src.endsWith('tether.diagnose.min.js'));
   assert.ok(script, 'the diagnose part has a script');
   return { win, script, result };
@@ -109,11 +112,13 @@ test('a part rejects its load when another script replaced window.Tether, instea
   const win = await pageWithCore('https://cdn.test/tether/');
   const tether = builtTether(win);
   win['Tether'] = { version: 'another script' };
-  await assert.rejects(tether.diagnose({ silent: true }), {
-    message: /tether\.diagnose\.min\.js can't register: window\.Tether is no longer this Tether script's/,
+  await assert.rejects(within(30_000, tether.diagnose({ silent: true }), 'the diagnose part to reject'), {
+    message:
+      /tether\.diagnose\.min\.js can't register: window\.Tether is no longer this Tether script's, another script replaced it$/,
   });
   win['Tether'] = tether;
-  assert.equal((await tether.diagnose({ silent: true })).config['domain'], 'shop.test', 'the next use tries again');
+  const again = await within(30_000, tether.diagnose({ silent: true }), 'the diagnose part on the next use');
+  assert.equal(again.config['domain'], 'shop.test', 'the next use tries again');
 });
 
 test('a jsDelivr version alias in the core URL becomes the release the core was built as', () => {
@@ -131,6 +136,9 @@ test('a jsDelivr version alias in the core URL becomes the release the core was 
     `${gh}@main/dist/`,
     `${npm}@0.8.0/dist/`,
     'https://site.test/assets/tether/',
+    // A local server, like the browser tests' (test/e2e/serve.mjs), and a site's own domain with a range-like folder.
+    'http://127.0.0.1:4399/plain/dist/',
+    'https://shop.example/js/tether@0.8/dist/',
     'https://unpkg.com/@occluze/tether@0.8/dist/',
   ]) {
     assert.equal(exactReleaseFolder(folder), folder);
@@ -231,6 +239,6 @@ test('a partsUrl is used as given, even at a jsDelivr range', PAGE_TEST, async (
   const { win } = await pageWithMixedCache({ core, exactFolder, minified: true, partsUrl });
   await assert.rejects(builtTether(win).diagnose({ silent: true }), {
     message:
-      /^Could not load https:\/\/cdn\.jsdelivr\.net\/gh\/ravi-klaassens\/tether@0\.8\/dist\/tether\.diagnose\.min\.js,/,
+      /^Could not load https:\/\/cdn\.jsdelivr\.net\/gh\/ravi-klaassens\/tether@0\.8\/dist\/tether\.diagnose\.min\.js, or it is not the file built with this Tether script\. Host the same release's files next to the Tether script or at partsUrl\.$/,
   });
 });

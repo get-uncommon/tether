@@ -115,6 +115,12 @@ export interface TetherConfig {
    * already have applied the change.
    */
   retries: number;
+  /**
+   * Milliseconds a Storefront request may take, its body included, before it counts as a network error (0: no limit;
+   * at most 2147483647, the longest delay a timer keeps). A query is then retried; a mutation isn't, and a cart change
+   * loads the cart again.
+   */
+  requestTimeout: number;
   /** Refresh server-rendered products once in the background. */
   revalidate: boolean;
   /** The localStorage key of the cart id (default `<prefix>:cart:<domain>`). */
@@ -191,6 +197,7 @@ export const DEFAULTS: Readonly<TetherConfig> = {
   sellingPlansFirst: 25,
   collectionFirst: 24,
   retries: 2,
+  requestTimeout: 15_000,
   revalidate: true,
   storageKey: '',
   cartDrawerOpenClass: 'is-open',
@@ -259,6 +266,7 @@ type CountOption =
   | 'sellingPlansFirst'
   | 'collectionFirst'
   | 'retries'
+  | 'requestTimeout'
   | 'maxAge'
   | 'lowStock'
   | 'searchDelay';
@@ -296,6 +304,7 @@ const COUNT_OPTIONS: readonly CountOption[] = [
   'sellingPlansFirst',
   'collectionFirst',
   'retries',
+  'requestTimeout',
   'maxAge',
   'lowStock',
   'searchDelay',
@@ -343,9 +352,16 @@ function setHook<Name extends HookOption>(config: Pick<TetherConfig, Name>, name
   }
 }
 
-/** @returns `value` when it is a non-negative integer, else the default. */
+/** Options passed to `setTimeout` as its delay. */
+const DELAY_OPTIONS: ReadonlySet<CountOption> = new Set(['requestTimeout', 'searchDelay']);
+
+/** The longest delay `setTimeout` keeps: browsers and Node fire a longer one after 1 ms. */
+const MAX_TIMER_MS = 2_147_483_647;
+
+/** @returns `value` when it is a non-negative integer, and for a delay no more than `MAX_TIMER_MS`, else the default. */
 function countOption(name: CountOption, value: unknown): number {
-  if (typeof value === 'number' && Number.isInteger(value) && value >= 0) return value;
+  const maximum = DELAY_OPTIONS.has(name) ? MAX_TIMER_MS : Number.POSITIVE_INFINITY;
+  if (typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= maximum) return value;
   return invalidOption(name, value, DEFAULTS[name]);
 }
 

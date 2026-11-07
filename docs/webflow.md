@@ -13,11 +13,11 @@ step. With Astro, see the [Astro guide](astro.md); with Next.js, SvelteKit, Vite
 | **With the Worker**       | you also want the CMS sync, rebuilds when products change, or customer accounts | either of the above, plus your own free Cloudflare Worker ([Worker](../server/README.md), [accounts](accounts.md)) |
 
 The script tag pinned to one release: `…/tether@vX.Y.Z/dist/tether.min.js`. Its optional parts
-(search, accounts, markets, analytics) load from the core's release folder when a page uses them
-(from `@vX.Y.Z` even when the script tag says `@X.Y`), each checked against a hash built into the
-core. To host them yourself, put the same release's files in one folder
-and set `partsUrl`. Customer accounts need the Worker ([setup](accounts.md#setup)): it keeps the
-customer's tokens, so the browser never holds one.
+(product lists, search, markets, bundles, accounts, analytics, diagnose) load from the core's
+release folder when a page uses them (from `@vX.Y.Z` even when the script tag says `@X.Y`), each
+checked against a hash built into the core. To host them yourself, put the same release's files in
+one folder and set `partsUrl`. Customer accounts need the Worker ([setup](accounts.md#setup)): it
+keeps the customer's tokens, so the browser never holds one.
 
 ## 1. Connect Shopify (5 minutes)
 
@@ -51,7 +51,7 @@ Site settings → Custom code → **Head**: the config, then the script tag. The
 `@X.Y` gets every X.Y.x fix automatically (recommended), `@vX.Y.Z` pins one release (add its
 [`integrity`](reference.md#config) hash to pin exactly what runs), `@latest` always takes the newest.
 Hosting the file yourself? Put the optional parts next to it (`tether.markets.min.js`,
-`tether.search.min.js`, `tether.account.min.js`, `tether.account-pages.min.js`,
+`tether.search.min.js`, `tether.lists.min.js`, `tether.account.min.js`, `tether.account-pages.min.js`,
 `tether.analytics.min.js`, `tether.extras.min.js`, `tether.diagnose.min.js`): each loads only when a
 page uses it. More on pinning and `partsUrl` in the [reference](reference.md#config).
 
@@ -104,8 +104,9 @@ Free on Cloudflare's free plan. It updates itself, and setup takes about 10 minu
 ## Good to know
 
 - **Errors:** send them to Sentry or any other tool with `onError` ([how](reference.md#troubleshooting-and-handover)).
-- **Subscriptions after checkout** (skip, pause, cancel) are handled by your subscription app and
-  Shopify customer accounts, not by Tether.
+- **Subscriptions after checkout:** with [customer accounts](accounts.md) through your Worker, customers skip,
+  pause, resume and cancel on your own pages ([how](accounts.md#on-your-own-site-order-pages-profile-addresses-subscriptions-returns));
+  otherwise your subscription app's portal in Shopify customer accounts handles them. Changing the card always stays with Shopify.
 - **Page transitions** (Barba, Swup) and Lenis/GSAP are supported ([how](reference.md#with-page-transitions-barba-swup-)).
 - **Different markets and languages:** [Markets](reference.md#markets-and-localization).
 - **Testing in a dev store:** checkout sits behind the store password, and payments need test mode.

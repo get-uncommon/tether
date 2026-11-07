@@ -1,6 +1,7 @@
 // configure() parses every option where it arrives: an invalid value warns and falls back to its default.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import { DEFAULTS, cfg, configure, resolveConfig } from '../src/config.ts';
 import { isQuarterlyVersion } from '../src/api-version.ts';
 
@@ -38,6 +39,19 @@ test('counts must be whole numbers of 0 or more', () => {
   assert.equal(result.lowStock, DEFAULTS.lowStock);
   assert.equal(result.collectionFirst, DEFAULTS.collectionFirst);
   assert.equal(warned.length, 4);
+});
+
+test('a delay longer than setTimeout keeps falls back to its default instead of firing at once', () => {
+  const { result, warned } = quietly(() =>
+    resolveConfig({ requestTimeout: 1e10, searchDelay: Number.MAX_SAFE_INTEGER }),
+  );
+  assert.equal(result.requestTimeout, DEFAULTS.requestTimeout);
+  assert.equal(result.searchDelay, DEFAULTS.searchDelay);
+  assert.deepEqual(warned, [
+    '[tether] invalid requestTimeout 10000000000: using 15000',
+    '[tether] invalid searchDelay 9007199254740991: using 150',
+  ]);
+  assert.equal(resolveConfig({ requestTimeout: 2_147_483_647 }).requestTimeout, 2_147_483_647);
 });
 
 test('prefix, checkoutTarget and defaultPurchase fall back to their defaults', () => {
@@ -236,4 +250,18 @@ test('Tether.config shows the live config and refuses writes, which would skip v
   assert.equal(warned.length, 2);
   quietly(() => configure({ domain: 'other.test' }));
   assert.equal(configView.domain, 'other.test', 'a view, not a copy');
+});
+
+test("docs/reference.md's Config table has a row for every option and every field of a nested one", async () => {
+  const { ACCOUNT, ANALYTICS, MARKETS } = await import('../src/config-sections.ts');
+  const reference = await readFile(new URL('../docs/reference.md', import.meta.url), 'utf8');
+  const config = reference.slice(reference.indexOf('\n## Config\n'), reference.indexOf('\n## Troubleshooting'));
+  const options = [
+    ...Object.keys(DEFAULTS),
+    ...Object.keys(MARKETS).map((key) => `markets.${key}`),
+    ...Object.keys(ANALYTICS).map((key) => `analytics.${key}`),
+    ...Object.keys(ACCOUNT).map((key) => `account.${key}`),
+  ];
+  const missing = options.filter((option) => !config.includes(`\n| \`${option}\``));
+  assert.deepEqual(missing, [], 'options without a row in the Config table');
 });

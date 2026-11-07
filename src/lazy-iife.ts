@@ -5,11 +5,12 @@
  * `window.Tether.__parts` and uses the core modules in `window.Tether.__core` instead of bundling copies.
  */
 import { cfg, isConfigured, log, MARKET_SOURCES, parseMarkets, reportError, warn } from './config.ts';
-import { endpoint, gql, orNull, shaped, TetherError } from './client.ts';
+import { endpoint, gql, matches, orNull, shaped, TetherError } from './client.ts';
 import {
   ANALYTICS_EVENTS,
   attr,
   attributesFromJson,
+  busy,
   emit,
   formatDate,
   formatMoney,
@@ -17,18 +18,22 @@ import {
   has,
   hasTemplate,
   isOwnEvent,
+  notifyLayoutChanged,
   parseJSONAttr,
   productUrl,
   qsa,
   repeat,
+  scoped,
   sel,
   setImage,
+  setStoreHtml,
   setText,
   show,
 } from './dom.ts';
-import { clearProductCache, getProduct } from './loader.ts';
+import { clearProductCache, getProduct, normalizeProductKey, primeProduct, withProductFragment } from './loader.ts';
+import { collectionFields } from './fragments.ts';
 import { allPlans } from './selling-plans.ts';
-import { boundary, resolveProductKey } from './status.ts';
+import { boundary, isNotFound, resolveProductKey, setScopeStatus } from './status.ts';
 import { Cart } from './cart.ts';
 import { scopes } from './product.ts';
 import { listSelector } from './collection.ts';
@@ -54,13 +59,14 @@ export const coreModules = {
     return [cfg, isConfigured, log, MARKET_SOURCES, parseMarkets, reportError, warn];
   },
   get 'client.ts'() {
-    return [endpoint, gql, orNull, shaped, TetherError];
+    return [endpoint, gql, matches, orNull, shaped, TetherError];
   },
   get 'dom.ts'() {
     return [
       ANALYTICS_EVENTS,
       attr,
       attributesFromJson,
+      busy,
       emit,
       formatDate,
       formatMoney,
@@ -68,24 +74,30 @@ export const coreModules = {
       has,
       hasTemplate,
       isOwnEvent,
+      notifyLayoutChanged,
       parseJSONAttr,
       productUrl,
       qsa,
       repeat,
+      scoped,
       sel,
       setImage,
+      setStoreHtml,
       setText,
       show,
     ];
   },
   get 'loader.ts'() {
-    return [clearProductCache, getProduct];
+    return [clearProductCache, getProduct, normalizeProductKey, primeProduct, withProductFragment];
+  },
+  get 'fragments.ts'() {
+    return [collectionFields];
   },
   get 'selling-plans.ts'() {
     return [allPlans];
   },
   get 'status.ts'() {
-    return [boundary, resolveProductKey];
+    return [boundary, isNotFound, resolveProductKey, setScopeStatus];
   },
   get 'cart.ts'() {
     return [Cart];
@@ -182,12 +194,17 @@ function loadScript(name: PartName, folder: string, file: string, integrity: str
       parts.delete(name);
       const problem = isTetherInternals(tether)
         ? 'did not register'
-        : "can't register: window.Tether is no longer this Tether script's";
+        : "can't register: window.Tether is no longer this Tether script's, another script replaced it";
       reject(new Error(`${url} ${problem}`));
     };
     script.onerror = () => {
       parts.delete(name);
-      reject(new Error(`Could not load ${url}, or it is not the file built with this Tether script`));
+      reject(
+        new Error(
+          `Could not load ${url}, or it is not the file built with this Tether script. Host the same release's files ` +
+            'next to the Tether script or at partsUrl.',
+        ),
+      );
     };
     document.head.appendChild(script);
   });

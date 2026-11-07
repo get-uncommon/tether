@@ -35,8 +35,10 @@ const versionIn = async (folder) => fieldOf(parseJson(await readFile(join(folder
  * - v0.6.8: downloads it from codeload by commit, after checking the commit is on the default branch;
  * - v0.7.0: installs only the release's signed asset, after `gh attestation verify` has checked it against GitHub;
  * - v0.7.1: skips a tag whose Release doesn't carry the asset yet, for the newest one that does;
- * - v0.7.2: the v0.7.1 updater, in a 0.7 copy;
- * - v0.8.0: removes managed entries a release dropped, and records the minor it installed in TETHER_VERSION.
+ * - v0.7.2: the v0.7.1 updater, in 0.7.2's copy;
+ * - v0.8.0: also removes the managed entries a release doesn't ship, refuses a release without the files the
+ *   workflow runs after an update, and writes the minor of the release it installed, not its own, into a copy
+ *   without a `TETHER_VERSION`.
  *
  * A test below fails when a release tag's updater or workflow is none of these.
  *
@@ -75,13 +77,19 @@ const ASSET_PATH = `${UPSTREAM}/releases/download/v${RELEASE_VERSION}/${ASSET}`;
 const OUTDATED = /^::warning title=Tether workflow file outdated::/m;
 
 const run = promisify(execFile);
+// execFileSync blocks the event loop, so no test timeout can end a git or tar that hangs: each has its own.
+const SYNC_CHILD_TIMEOUT_MS = 60_000;
 
 /**
  * @param {string[]} args
  * @returns Git's answer in this checkout, trimmed.
  */
 const gitHere = (args) =>
-  execFileSync('git', ['-C', ROOT, ...args], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }).trim();
+  execFileSync('git', ['-C', ROOT, ...args], {
+    encoding: 'utf8',
+    maxBuffer: 64 * 1024 * 1024,
+    timeout: SYNC_CHILD_TIMEOUT_MS,
+  }).trim();
 
 /**
  * @param {string} tag
@@ -89,7 +97,10 @@ const gitHere = (args) =>
  */
 function hasTag(tag) {
   try {
-    execFileSync('git', ['-C', ROOT, 'rev-parse', '--verify', '--quiet', `${tag}^{commit}`], { stdio: 'ignore' });
+    execFileSync('git', ['-C', ROOT, 'rev-parse', '--verify', '--quiet', `${tag}^{commit}`], {
+      stdio: 'ignore',
+      timeout: SYNC_CHILD_TIMEOUT_MS,
+    });
     return true;
   } catch {
     // Not a git checkout, or the tag isn't fetched.
@@ -105,7 +116,7 @@ function serverFiles() {
   const listed = execFileSync(
     'git',
     ['-C', ROOT, 'ls-files', '-z', '--cached', '--others', '--exclude-standard', '--', 'server'],
-    { encoding: 'utf8' },
+    { encoding: 'utf8', timeout: SYNC_CHILD_TIMEOUT_MS },
   );
   return listed
     .split('\0')
@@ -206,12 +217,16 @@ test('every release a copy can be made from has its updater and workflow tested,
  * @param {string} target
  */
 async function extractServer(tag, target) {
-  const names = execFileSync('git', ['-C', ROOT, 'ls-tree', '-r', '--name-only', tag, 'server/'], { encoding: 'utf8' })
+  const names = execFileSync('git', ['-C', ROOT, 'ls-tree', '-r', '--name-only', tag, 'server/'], {
+    encoding: 'utf8',
+    timeout: SYNC_CHILD_TIMEOUT_MS,
+  })
     .split('\n')
     .filter(Boolean);
   const batch = execFileSync('git', ['-C', ROOT, 'cat-file', '--batch'], {
     input: names.map((name) => `${tag}:${name}\n`).join(''),
     maxBuffer: 64 * 1024 * 1024,
+    timeout: SYNC_CHILD_TIMEOUT_MS,
   });
   let offset = 0;
   for (const name of names) {
@@ -269,6 +284,7 @@ function node(copy, args, { summary, env: extra = {} } = {}) {
     cwd: copy,
     env,
     maxBuffer: 16 * 1024 * 1024,
+    timeout: 120_000,
   });
 }
 
@@ -374,7 +390,7 @@ async function publishRelease(release, work, route) {
   const top = route === 'asset' ? `tether-server-${RELEASE_VERSION}` : `tether-${RELEASE_VERSION}`;
   await cp(release, join(work, 'archive', top, 'server'), { recursive: true });
   // Relative paths: GNU tar reads the `C:` of a Windows path as a remote host.
-  execFileSync('tar', ['-czf', 'release.tgz', '-C', 'archive', top], { cwd: work });
+  execFileSync('tar', ['-czf', 'release.tgz', '-C', 'archive', top], { cwd: work, timeout: SYNC_CHILD_TIMEOUT_MS });
   const github = await fakeGitHub(await readFile(join(work, 'release.tgz')));
   const ghLog = join(work, 'gh-arguments.txt');
   const gh = route === 'asset' ? await ghStub(join(work, 'bin'), ghLog) : { env: workflowPath([]), nodeOptions: [] };

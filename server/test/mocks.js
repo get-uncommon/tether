@@ -451,3 +451,27 @@ export async function waitFor(condition, what, timeoutMs = 5000) {
     await new Promise((resolve) => setTimeout(resolve, 5));
   }
 }
+
+/**
+ * Settles as `promise` does, or rejects once `ms` have passed, so a wait for an event that never comes fails the test
+ * with what it waited for instead of hanging the run.
+ *
+ * @template T
+ * @param {number} ms
+ * @param {Promise<T>} promise
+ * @param {string} what Named in the failure.
+ * @returns {Promise<T>}
+ */
+export function within(ms, promise, what) {
+  /** @type {ReturnType<typeof setTimeout> | undefined} */
+  let timer;
+  /** @type {Promise<never>} */
+  const deadline = new Promise((_resolve, reject) => {
+    timer = setTimeout(() => {
+      reject(new Error(`timed out after ${String(ms / 1000)}s waiting for ${what}`));
+    }, ms);
+  });
+  return Promise.race([promise, deadline]).finally(() => {
+    clearTimeout(timer);
+  });
+}

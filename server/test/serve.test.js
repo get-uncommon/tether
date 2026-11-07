@@ -21,7 +21,7 @@ const app = {
  * @returns {Promise<string>}
  */
 const raw = (port, text, { abortWhen } = {}) =>
-  new Promise((resolve) => {
+  new Promise((resolve, reject) => {
     const socket = connect(port, '127.0.0.1', () => {
       socket.write(text);
       if (abortWhen)
@@ -31,6 +31,10 @@ const raw = (port, text, { abortWhen } = {}) =>
         });
     });
     let out = '';
+    socket.setTimeout(10_000, () => {
+      socket.destroy();
+      reject(new Error(`timed out after 10s waiting for the server to answer ${JSON.stringify(text.slice(0, 40))}`));
+    });
     socket.on('data', (chunk) => {
       out += String(chunk);
     });

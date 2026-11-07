@@ -1,5 +1,76 @@
 # Changelog
 
+## 0.9.0 (unreleased)
+
+A minor release: the package exports fewer paths, and self-hosted script tags need one more file.
+
+**Sync Worker copies:** a copy whose `TETHER_VERSION` says `0.8` stays on 0.8.x and does not get
+this release's sync fixes (one takeover of a dead process's state-file lock in the Node sync, the
+Worker README's links). To take them, write `0.9` in the copy's `TETHER_VERSION` and commit it. A
+copy on `latest` installs 0.9.0 by itself. The update workflow is unchanged, so there is no other
+step.
+
+**Sites:** the script tag pinned to `@0.8` stays on 0.8.x and does not get `requestTimeout`; change
+it to `@0.9` to update. A site that hosts the script files itself also adds `tether.lists.min.js`
+(below). npm users get 0.9.0 with `npm install @occluze/tether@^0.9.0`.
+
+**Sites on `@latest`, `@0` or no version:** every part changed in this release (a part reads the
+core's modules by their position, and the core's modules changed), so a visitor whose browser still
+has a 0.8.0 core cached gets 0.9.0 parts it refuses: search, markets, bundles, customer accounts,
+analytics and `Tether.diagnose()` fail for that visitor until the browser fetches the core again.
+Product lists keep working, since a 0.8.0 core renders them itself. A 0.8.1 core loads the parts of
+its own release, so it isn't affected; neither are exact URLs (`@v0.8.1`) and self-hosted copies.
+
+- **Breaking (self-hosted script):** product lists (collections, search results, recommendations,
+  `Tether.getProducts()` and `Tether.getRecommendations()`) load as their own part,
+  `tether.lists.min.js`, which keeps the core about 1 KB smaller. jsDelivr and npm users need
+  nothing. **Upgrade:** a site that hosts the script files itself puts `tether.lists.min.js` next to
+  the core, as it does the other parts. A site that bundles, inlines or otherwise loads the core
+  other than by its own `<script src>` (a `type="module"` script included), whose lists worked
+  without parts, sets `partsUrl` to a folder with the same release's `tether.lists.min.js`. A list
+  shows its loading state at once, as before; its first query waits for the part, one more request
+  that the reference shows how to preload.
+- **Breaking (npm):** the package exports only its entry points (`.`, `/server`, `/astro`,
+  `/presets/barba`) and the `dist/tether.*` script files. **Upgrade:** code that imported internal
+  paths (`@occluze/tether/dist/esm/…`, `/dist/types/…`, `/dist/presets/…`) imports the documented
+  entry points instead.
+- Storefront requests time out after `requestTimeout` milliseconds (default 15000, `0` for none) and
+  fail as `NETWORK`: a query retries, a cart change isn't sent again and the cart is loaded again,
+  so a stalled connection no longer holds every later cart change. It works in every supported
+  browser. A value above 2147483647 (the longest delay a timer keeps, which would fire at once)
+  warns and uses the default, as does such a `searchDelay`. A `fetch` passed to the server helpers
+  must honour `init.signal`.
+- Fix: the retry waits start at 300 ms (500 ms after `THROTTLED`) and double, as documented; the
+  first retry used to wait twice that.
+- Docs: the reference lists every optional part, and its release steps include the jsDelivr purge
+  and the Astro starter lock; the server guides document `createStorefront()`'s `fetch`, `siteUrl`
+  and `pageSize`.
+- Docs: the reference documents every `TETHER_CONFIG` option and every `markets`, `analytics` and
+  `account` field with its default, and describes subscription self-service (skip, unskip, pause,
+  resume, cancel with accounts) the same way as the accounts guide and the Webflow guide.
+- Fix (sync Worker): the Worker README links to the changelog, the customer-accounts setup and the
+  rebuild guide by their GitHub URLs, so they work in a deployed copy, which holds only `server/`.
+- Fix (Node sync): when several processes find a dead process's state-file lock, only one takes it
+  over. The marker file a takeover leaves beside the lock is removed by a write after it.
+- Fix: `Tether.getRecommendations()` and the server's `getRecommendations()` reject with `NOT_FOUND`
+  for an empty, `null` or `undefined` product, instead of sending Shopify a request it refuses.
+- Fix: the Astro starter's lockfile always agrees with its `package.json`, so `npm ci` works in it
+  and in projects made from it; the starter moves to a release once npm has it.
+- Releases: pull requests that change code rehearse the release at the next minor and patch versions
+  in CI, and `npm run release` checks that CI passed instead of running the whole suite again; it
+  then locks the new release in the Astro starter. The smoke test retries a transient Shopify
+  failure (a 5xx, a network error, `INTERNAL_SERVER_ERROR`) and still stops on anything else. CI
+  also runs on `release/X.Y` branches.
+- Releases: the jsDelivr aliases of the GitHub files are purged as soon as the GitHub Release
+  exists, independent of the npm publish, so a failed publish no longer leaves them on the old
+  release.
+- Repository: the pre-push hook runs the same pinned workflow linters as CI (actionlint, shellcheck,
+  zizmor; Python 3 is needed when the pushed commits change `.github/`), and the test run reports
+  handles a test file leaves open.
+- Repository: every wait in the test suite is bounded, and `npm test` fails a stalled test instead
+  of hanging (the 0.8.0 release run hung on a test server whose random port was one Windows services
+  hold).
+
 ## 0.8.1 (2026-11-07)
 
 - Fix (script tag): a core loaded through a jsDelivr version alias (`@0.8`, `@0`, `@latest` or no

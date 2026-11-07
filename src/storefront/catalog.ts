@@ -3,13 +3,19 @@
  * product fragment, so what the server renders and hands over has the shape the script expects. Runs in Node and
  * Workers: no DOM, no shared config.
  */
-import { orNull, request, shaped } from '../client.ts';
+import { orNull, request, shaped, TetherError } from '../client.ts';
 import { productFragment, collectionFields } from '../fragments.ts';
 import { productKey } from '../shopify-values.ts';
-import { PRODUCT, PRODUCT_NODE } from '../product-shape.ts';
-import { isCollectionAnswer, isRecommendationsAnswer, isSearchAnswer } from '../loader.ts';
+import {
+  PRODUCT,
+  PRODUCT_NODE,
+  isCollectionAnswer,
+  isRecommendationsAnswer,
+  isSearchAnswer,
+} from '../product-shape.ts';
 import type { DataCheck, StorefrontConfig } from '../client.ts';
 import type { ProductFragmentConfig, Product } from '../fragments.ts';
+import type { ProductRef, RecommendationIntent } from '../shopify-values.ts';
 import type { Collection, PageInfo, ProductPage } from '../loader.ts';
 
 /** What the catalog needs of a storefront's config. */
@@ -33,7 +39,6 @@ export interface CatalogQuery {
 }
 
 type CollectionWithProducts = Collection & { products: Product[]; pageInfo: PageInfo };
-type RecommendationIntent = 'RELATED' | 'COMPLEMENTARY';
 
 /** A page of a GraphQL connection. */
 interface Connection<Node> {
@@ -176,13 +181,18 @@ export function createCatalog(conf: CatalogConfig, pageSize: number) {
     return page.collection ? { ...page.collection, products: page.products, pageInfo: page.pageInfo } : null;
   }
 
-  /** By product id (gid or numeric) or handle, so it can run next to `getProduct(handle)`. */
+  /**
+   * By product id (gid or numeric) or handle, so it can run next to `getProduct(handle)`.
+   *
+   * @throws {TetherError} `NOT_FOUND` when `product` names no product (empty, `null` or `undefined`).
+   */
   async function getRecommendations(
-    product: string | number | { id: string } | null | undefined,
+    product: ProductRef | null | undefined,
     intent: RecommendationIntent = 'RELATED',
   ): Promise<Product[]> {
     const key = productKey(typeof product === 'object' ? product?.id : product);
-    const byId = key?.startsWith('gid://') ?? false;
+    if (!key) throw new TetherError('No product for recommendations', { code: 'NOT_FOUND' });
+    const byId = key.startsWith('gid://');
     const data = await send(
       recommendationsQuery(byId),
       byId ? { id: key, intent } : { handle: key, intent },

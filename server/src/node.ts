@@ -1,9 +1,9 @@
 /** Node-only bits: JSON file store, config loading, HTTP server for webhooks. */
-import { open, readFile, writeFile, rename, rm, stat } from 'node:fs/promises';
+import { open, readdir, readFile, writeFile, rename, rm, stat } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { createServer } from 'node:http';
-import { resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { readCapped } from './capped-body.ts';
 import { handleShopifyWebhook, MAX_WEBHOOK_BYTES } from './webhook.ts';
@@ -33,6 +33,48 @@ const STALE_LOCK_MS = 30_000;
 /** Past taking over a stale lock: the lock can't be created at all. */
 const LOCK_TIMEOUT_MS = 2 * STALE_LOCK_MS;
 const LOCK_RETRY_MS = 20;
+/** Names a stale lock's takeover marker, after the lock file's name. */
+const TAKEOVER_MARKER = '.taken-';
+
+/**
+ * Removes the lock at `lockPath` that `held` describes, left by a process that died holding it. Waiters that find the
+ * same lock stale each try to create a marker named after it (its inode and mtime), and only the one that creates the
+ * marker removes the lock: a waiter acting late on what it saw finds the marker, and leaves alone the lock another
+ * waiter has taken since.
+ *
+ * @param held The lock's `stat`, older than {@link STALE_LOCK_MS}.
+ */
+export async function takeOverStaleLock(lockPath: string, held: Stats): Promise<void> {
+  try {
+    await (await open(`${lockPath}${TAKEOVER_MARKER}${String(held.ino)}-${String(held.mtimeMs)}`, 'wx')).close();
+  } catch (err) {
+    if (!hasCode(err, 'EEXIST')) throw err;
+    // Another waiter took this lock over, unless the marker is itself old: then a new lock happens to carry an old
+    // lock's inode and mtime, and removing the old markers lets the next try take it over.
+    await removeOldMarkers(lockPath);
+    return;
+  }
+  await rm(lockPath, { force: true });
+  await removeOldMarkers(lockPath);
+}
+
+/**
+ * Removes the takeover markers older than {@link STALE_LOCK_MS}. A waiter acts on its `stat` of a stale lock within that
+ * time, so no waiter still needs an older marker to see that the lock was taken over.
+ */
+async function removeOldMarkers(lockPath: string): Promise<void> {
+  const folder = dirname(lockPath);
+  const prefix = `${basename(lockPath)}${TAKEOVER_MARKER}`;
+  for (const name of await readdir(folder)) {
+    if (!name.startsWith(prefix)) continue;
+    const marker = join(folder, name);
+    const made = await stat(marker).catch((err: unknown) => {
+      if (isFileMissing(err) || hasCode(err, 'EPERM')) return null; // removed, or being removed, by another takeover
+      throw err;
+    });
+    if (made && Date.now() - made.mtimeMs > STALE_LOCK_MS) await rm(marker, { force: true });
+  }
+}
 
 /**
  * Runs `work` holding `${path}.lock`, an advisory lock every process writing the state file takes, so one process's
@@ -56,13 +98,16 @@ async function withFileLock<T>(path: string, work: () => Promise<T>): Promise<T>
       if (isFileMissing(err) || hasCode(err, 'EPERM')) return null; // released, or being released
       throw err;
     });
-    if (held && Date.now() - held.mtimeMs > STALE_LOCK_MS) await rm(lockPath, { force: true });
-    else await new Promise((resolve) => setTimeout(resolve, LOCK_RETRY_MS));
+    if (held && Date.now() - held.mtimeMs > STALE_LOCK_MS) await takeOverStaleLock(lockPath, held);
+    await new Promise((resolve) => setTimeout(resolve, LOCK_RETRY_MS));
   }
   try {
     return await work();
   } finally {
     await rm(lockPath, { force: true });
+    // The marker of this lock's own takeover is left for the waiters still acting on the stale lock; a later write
+    // removes it.
+    await removeOldMarkers(lockPath);
   }
 }
 

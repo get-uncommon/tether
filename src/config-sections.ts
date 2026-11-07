@@ -204,7 +204,7 @@ function sectionOption<Section extends object>(
   return section;
 }
 
-const ACCOUNT: Schema<Partial<AccountConfig>> = {
+export const ACCOUNT: Schema<Partial<AccountConfig>> = {
   server: url,
   orderUrl: url,
   subscriptionsUrl: url,
@@ -219,7 +219,7 @@ const ACCOUNT_NEEDS_SERVER = 'customer accounts need the Worker since 0.7.0: set
 
 const LOCALE_MARKET: Schema<LocaleMarket> = { country: text, language: text, locale: text };
 
-const MARKETS: Schema<MarketsConfig> = {
+export const MARKETS: Schema<MarketsConfig> = {
   // A single source name counts as a list of one.
   detect: (value) => {
     if (typeof value === 'boolean') return value;
@@ -251,7 +251,7 @@ const SHOPIFY_ANALYTICS: Schema<ShopifyAnalyticsOptions> = {
   proxy: (value) => value !== undefined && Boolean(value),
 };
 
-const ANALYTICS: Schema<AnalyticsConfig> = {
+export const ANALYTICS: Schema<AnalyticsConfig> = {
   dataLayer: when(isDataLayer),
   shopify: (value) =>
     typeof value === 'boolean'

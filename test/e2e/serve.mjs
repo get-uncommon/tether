@@ -60,9 +60,14 @@ async function serve(req, res) {
   }
 }
 
-createServer((req, res) => {
+const server = createServer((req, res) => {
   serve(req, res).catch((/** @type {unknown} */ error) => {
     console.error(error);
     res.destroy();
   });
-}).listen(Number(process.env['PORT'] || 4399), '127.0.0.1');
+});
+server.listen(Number(process.env['PORT'] || 4399), '127.0.0.1', () => {
+  // With PORT=0 the system picks the port, and test/build.test.js reads it from this line.
+  const address = server.address();
+  if (address && typeof address === 'object') console.log(`listening on http://127.0.0.1:${String(address.port)}/`);
+});

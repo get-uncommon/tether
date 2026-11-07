@@ -6,6 +6,7 @@
  *   TETHER_DOMAIN=x.myshopify.com TETHER_TOKEN=... TETHER_COLLECTION=all npm run smoke
  *   TETHER_API_VERSION=2026-10 npm run smoke         # check a newer API version first
  *
+ * A step that fails on Shopify's side for a moment (a 5xx, its internal error) is tried again: scripts/smoke-retry.ts.
  * Creates (and empties) a throwaway cart on that store. Run against your own dev store to also test selling plans.
  * It runs the built package (`@occluze/tether` resolves to dist/esm/ through the package's own exports), so it sends
  * the same minified GraphQL the browser build sends. It is typed by the source, which the published declarations are
@@ -13,6 +14,8 @@
  */
 import { JSDOM } from 'jsdom';
 import { messageOf } from '../server/src/shared/error-message.ts';
+import { withRetries } from './smoke-retry.ts';
+import type { RetryHooks } from './smoke-retry.ts';
 import type * as TetherPackage from '../src/index.ts';
 import type { ShopifyCartLine, ShopifyProduct, ShopifyVariant } from '../src/index.ts';
 
@@ -52,10 +55,23 @@ await Tether.init({
 
 let failed = 0;
 
-/** @param check Throws when the step fails. */
+const retryHooks: RetryHooks = {
+  sleep: (ms) =>
+    new Promise((resolve) => {
+      setTimeout(resolve, ms);
+    }),
+  log: (line) => {
+    console.log(line);
+  },
+};
+
+/**
+ * @param check Throws when the step fails. A step that fails on Shopify's side for a moment runs again
+ *   (`withRetries`), so it has to give the same result when run twice.
+ */
 async function step(name: string, check: () => Promise<void> | void): Promise<void> {
   try {
-    await check();
+    await withRetries(name, check, retryHooks);
     console.log(`  ok  ${name}`);
   } catch (error) {
     failed++;

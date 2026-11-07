@@ -2,13 +2,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { mkdtemp, readFile, rm, utimes, writeFile } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
-import { fileStore, loadConfig } from '../src/node.ts';
-import { asRecord, parseJson, waitFor } from './mocks.js';
+import { fileStore, loadConfig, takeOverStaleLock } from '../src/node.ts';
+import { asRecord, parseJson, waitFor, within } from './mocks.js';
 
 test('file store: a state file removed by another process leaves what this process holds', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'tether-sync-'));
@@ -65,13 +65,11 @@ function writeFromAnotherProcess(path, prefix, count) {
       await store.put(${JSON.stringify(prefix)} + ':' + i, i);
       await store.flush();
     }`;
-  return promisify(execFile)(process.execPath, [
-    '--experimental-strip-types',
-    '--no-warnings',
-    '--input-type=module',
-    '-e',
-    script,
-  ]);
+  return promisify(execFile)(
+    process.execPath,
+    ['--experimental-strip-types', '--no-warnings', '--input-type=module', '-e', script],
+    { timeout: 60_000 },
+  );
 }
 
 test('file store: two processes writing at once both keep every key', async () => {
@@ -102,17 +100,61 @@ test('file store: a write waits for the lock another process holds, and takes ov
   await new Promise((resolve) => setTimeout(resolve, 100));
   assert.equal(written, false, 'waits while the lock is held');
   await rm(`${path}.lock`);
-  await flushed;
+  await within(30_000, flushed, 'the write to take the freed lock');
   assert.deepEqual(parseJson(await readFile(path, 'utf8')), { k: 1 });
 
   await writeFile(`${path}.lock`, '');
   const longAgo = new Date(Date.now() - 3600e3);
   await utimes(`${path}.lock`, longAgo, longAgo);
   await store.put('k', 2);
-  await store.flush();
+  await within(30_000, store.flush(), 'the write to take over the stale lock');
   assert.deepEqual(parseJson(await readFile(path, 'utf8')), { k: 2 });
+
+  const markers = async () => (await readdir(dir)).filter((name) => name.startsWith('state.json.lock.taken-'));
+  const [marker] = await markers();
+  assert.ok(marker, 'the takeover leaves its marker for the other waiters');
+  await utimes(join(dir, marker), longAgo, longAgo);
+  await store.put('k', 3);
+  await within(30_000, store.flush(), 'the next write');
+  assert.deepEqual(await markers(), [], 'the next write removes the old marker');
 });
 
+test('file store: of the waiters that find one lock stale, only the first takes it over', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'tether-sync-'));
+  const lockPath = join(dir, 'state.json.lock');
+  const longAgo = new Date(Date.now() - 3600e3);
+  await writeFile(lockPath, '');
+  await utimes(lockPath, longAgo, longAgo);
+  const stale = await stat(lockPath);
+  await takeOverStaleLock(lockPath, stale);
+  await assert.rejects(stat(lockPath), { code: 'ENOENT' }, 'the first waiter removes the stale lock');
+  await writeFile(lockPath, 'taken since');
+  await takeOverStaleLock(lockPath, stale);
+  assert.equal(await readFile(lockPath, 'utf8'), 'taken since', 'a waiter late with the same view leaves it alone');
+
+  const [marker] = (await readdir(dir)).filter((name) => name.startsWith('state.json.lock.taken-'));
+  assert.ok(marker, 'the takeover leaves a marker');
+  await utimes(join(dir, marker), longAgo, longAgo);
+  // A later lock goes stale at another time. Linux may give the new file the freed inode back, so with the same mtime
+  // it would name the same marker as the first lock.
+  const laterStale = new Date(longAgo.getTime() - 60e3);
+  await utimes(lockPath, laterStale, laterStale);
+  await takeOverStaleLock(lockPath, await stat(lockPath));
+  assert.equal((await readdir(dir)).includes(marker), false, 'the next takeover removes an old marker');
+});
+
+test('file store: writes that all find the lock stale at once keep every key', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'tether-sync-'));
+  const path = join(dir, 'state.json');
+  const longAgo = new Date(Date.now() - 3600e3);
+  await writeFile(`${path}.lock`, '');
+  await utimes(`${path}.lock`, longAgo, longAgo);
+  const stores = Array.from({ length: 8 }, () => fileStore(path, { delayMs: 10_000 }));
+  await Promise.all(stores.map((store, i) => store.put(`k:${String(i)}`, i)));
+  await Promise.all(stores.map((store) => store.flush()));
+  const disk = asRecord(parseJson(await readFile(path, 'utf8')), 'the state file');
+  assert.equal(Object.keys(disk).length, stores.length, 'no write lost');
+});
 test('config file: a value of the wrong type is named when the config loads', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'tether-sync-'));
   const path = join(dir, 'tether-sync.config.json');

@@ -12,13 +12,8 @@ import { toCountry, toLanguage } from './market-codes.ts';
 import { isRecord } from '../server/src/shared/json.ts';
 import { isProductShape } from './product-shape.ts';
 import type { Product } from './fragments.ts';
+import type { MountedList } from './collection.ts';
 import type { CountryCode, LanguageCode } from './market-codes.ts';
-
-/** A mounted `ListScope`. */
-interface MountedList {
-  root: Element;
-  load: (more?: boolean) => Promise<unknown>;
-}
 
 type KeySource = Pick<ReturnType<typeof resolveProductKey>, 'fromUrl' | 'raw'>;
 

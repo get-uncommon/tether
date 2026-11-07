@@ -11,15 +11,8 @@ import { cfg, configView, configure, isConfigured, log, warn, reportError } from
 import { query, TetherError, withContext } from './client.ts';
 import { Cart } from './cart.ts';
 import { scopes } from './product.ts';
-import { ListScope, listSelector } from './collection.ts';
-import {
-  getProduct,
-  getProducts,
-  getRecommendations,
-  clearProductCache,
-  primeProduct,
-  normalizeProductKey,
-} from './loader.ts';
+import { listSelector, mountedList } from './collection.ts';
+import { getProduct, clearProductCache, primeProduct, normalizeProductKey } from './loader.ts';
 import * as plans from './selling-plans.ts';
 import { resolveProductKey } from './status.ts';
 import { sel, emit, isOwnEvent, ANALYTICS_EVENTS, formatMoney, imageUrl, pageGlobal } from './dom.ts';
@@ -48,7 +41,8 @@ import type { ShopifyCart } from './cart/store.ts';
 import type { ProductScope } from './product.ts';
 import type { DiagnoseOptions } from './diagnose.ts';
 import type { TetherEvents } from './markup.ts';
-import type { TetherInternals } from './lazy.ts';
+import type { Parts, TetherInternals } from './lazy.ts';
+import type { ProductQuery } from './loader.ts';
 
 export { addGroup, setCountry, VERSION };
 
@@ -133,7 +127,7 @@ function mountLists(root: ParentNode): number {
     if (mountedLists.has(el)) return;
     mountedLists.add(el);
     count++;
-    const list = new ListScope(el);
+    const list = mountedList(el);
     liveLists.add(list);
     el.addEventListener(`${cfg.prefix}:list-rendered`, (event) => {
       // The list emits this once its products are in the page, with the element they are in.
@@ -323,6 +317,13 @@ function startObserver() {
 /** @param markets Default `markets` of the config. */
 const detectMarket = (markets?: MarketsConfig | null) =>
   loadPart('markets').then((part) => part.detectMarket(markets ?? cfg.markets));
+
+/** `Tether.getProducts()`: a page of a collection or a search, from the lists part. */
+const getProducts = (query?: ProductQuery) => loadPart('lists').then((part) => part.getProducts(query));
+
+/** `Tether.getRecommendations()`: Shopify's recommendations for a product, from the lists part. */
+const getRecommendations: Parts['lists']['getRecommendations'] = (product, intent) =>
+  loadPart('lists').then((part) => part.getRecommendations(product, intent));
 
 const getLocalization = () => loadPart('markets').then((part) => part.getLocalization());
 

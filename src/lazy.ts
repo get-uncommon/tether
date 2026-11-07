@@ -8,6 +8,7 @@ export interface Parts {
   diagnose: typeof import('./diagnose.ts');
   markets: typeof import('./markets-ui.ts');
   search: typeof import('./search.ts');
+  lists: typeof import('./lists.ts');
   extras: typeof import('./extras.ts');
   account: typeof import('./account.ts');
   'account-pages': typeof import('./account-pages.ts');
@@ -30,6 +31,7 @@ const PARTS: { [Name in PartName]: () => Promise<Parts[Name]> } = {
   diagnose: () => import('./diagnose.ts'),
   markets: () => import('./markets-ui.ts'),
   search: () => import('./search.ts'),
+  lists: () => import('./lists.ts'),
   extras: () => import('./extras.ts'),
   account: () => import('./account.ts'),
   'account-pages': () => import('./account-pages.ts'),
