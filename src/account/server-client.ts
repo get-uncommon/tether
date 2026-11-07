@@ -23,8 +23,11 @@ export interface ServerRequest {
   body?: Record<string, unknown>;
 }
 
-/** The Worker's `/me` answer, until a change of the customer's data. */
+/** The Worker's `/me` answer, until a change of the customer's data or a logout. */
 let known: ServerLogin | null = null;
+
+/** The `/me` request `known` comes from; `forgetServerLogin` and the logout drop it, so its answer is not kept. */
+let asking: Promise<ServerLogin> | null = null;
 
 /**
  * @returns The Worker's account routes, without a trailing slash. `account.server` is a full URL or a path on this
@@ -110,21 +113,34 @@ export async function serverFetch(path: string, { method = 'GET', body }: Server
   return { kind: 'answer', data };
 }
 
+async function askWhoIsLoggedIn(): Promise<ServerLogin> {
+  const answer = await serverFetch('/me');
+  return answer.kind === 'answer' && answer.data['loggedIn'] === true
+    ? { loggedIn: true, customer: toAccountCustomer(answer.data['customer']) }
+    : { loggedIn: false };
+}
+
 /**
- * Who is logged in, asked once and then kept; the "may be logged in" hint follows the answer.
+ * Who is logged in, asked once (callers at the same time share the request) and then kept; the "may be logged in"
+ * hint follows the answer. An answer to a request sent before a logout or a change of the customer's data can be
+ * from before it: it is dropped, and the Worker asked again.
  *
  * @throws {TetherError} When the Worker can't be reached or fails: that says nothing about the login.
  */
 export async function serverLogin(): Promise<ServerLogin> {
-  if (!known) {
-    const answer = await serverFetch('/me');
-    known =
-      answer.kind === 'answer' && answer.data['loggedIn'] === true
-        ? { loggedIn: true, customer: toAccountCustomer(answer.data['customer']) }
-        : { loggedIn: false };
+  const request = (asking ??= askWhoIsLoggedIn());
+  let login: ServerLogin;
+  try {
+    login = await request;
+  } catch (error) {
+    // The next call asks again.
+    if (asking === request) asking = null;
+    throw error;
   }
-  setLoginHint(known.loggedIn);
-  return known;
+  if (asking !== request) return serverLogin();
+  known = login;
+  setLoginHint(login.loggedIn);
+  return login;
 }
 
 /** @returns True when the Worker last said a customer is logged in. */
@@ -133,6 +149,7 @@ export const isServerLoggedIn = (): boolean => known?.loggedIn === true;
 /** Asks the Worker again on the next `serverLogin()`, after a change of the customer's data. */
 export function forgetServerLogin(): void {
   known = null;
+  asking = null;
 }
 
 /** Goes to the Worker's (or Shopify's) pages, through `account.navigate` when the site replaces the redirect. */
@@ -186,7 +203,7 @@ export async function serverCheckoutUrl(): Promise<string | null> {
  */
 export async function serverLogout(returnTo: string): Promise<'redirected' | 'stayed'> {
   const answer = await serverFetch('/logout', { method: 'POST', body: { returnTo, cartId: Cart.id() } });
-  known = null;
+  forgetServerLogin();
   setLoginHint(false);
   emit('account-logout', {});
   const logoutUrl = answer.kind === 'answer' ? textOrNull(answer.data['logoutUrl']) : null;

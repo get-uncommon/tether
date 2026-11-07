@@ -1,4 +1,5 @@
-// The cart drawer: its open state, ARIA, focus and focus trap, manual drawers; and how cart amounts compare.
+// The cart drawer: its open state, ARIA, focus and focus trap, manual drawers; the site's hooks on a cart change; and
+// how cart amounts compare.
 import { test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
@@ -21,6 +22,7 @@ const { configure } = await import('../src/config.ts');
 const { Cart, trapFocus } = await import('../src/cart.ts');
 const { bindCartControls } = await import('../src/controls/cart-controls.ts');
 const { isGreaterAmount } = await import('../src/amounts.ts');
+const { formatMoney: builtInFormat } = await import('../src/shopify-values.ts');
 
 const CONFIG = { domain: 'shop.test', token: 't', autoMount: false };
 configure(CONFIG);
@@ -189,6 +191,17 @@ test('cartFocus: false leaves focus alone, and a closed drawer is still inert, o
   assert.deepEqual(stateOf('#drawer'), CLOSED);
 });
 
+test('a drawer the site closed itself, then took off the page, leaves the cart closed', async () => {
+  document.body.innerHTML = '<div id="drawer" tether-cart-drawer></div>';
+  Cart.open();
+  find('#drawer').classList.remove('is-open');
+  await classChangeSeen();
+  find('#drawer').remove();
+  assert.equal(Cart.isOpen(), false);
+  Cart.open();
+  assert.deepEqual(toggles, [true, false, true], 'opening on the page without a drawer is announced');
+});
+
 test('a throwing onCartOpen or onCartClose is reported: the add still succeeds, and cart-toggled still fires', async () => {
   document.body.innerHTML = '';
   const merchandiseId = product.variants.nodes[0]?.id ?? '';
@@ -219,6 +232,54 @@ test('a throwing onCartOpen or onCartClose is reported: the add still succeeds, 
     configure(CONFIG);
     localStorage.clear();
   }
+});
+
+/**
+ * Adds a line to a new cart, which Shopify answers with `warnings`, under `hooks`.
+ *
+ * @param {Partial<import('../src/config.ts').TetherOptions>} hooks
+ * @param {import('../src/config.ts').CartWarning[]} [warnings]
+ * @returns {Promise<{ reported: string[], cart: import('../src/cart/store.ts').ShopifyCart }>}
+ */
+async function addWithHooks(hooks, warnings = []) {
+  const merchandiseId = product.variants.nodes[0]?.id ?? '';
+  const answer = cartFrom([{ merchandiseId, quantity: 1 }]);
+  const { fetch } = globalThis;
+  globalThis.fetch = async () => jsonResponse({ data: { cartCreate: { cart: answer, userErrors: [], warnings } } });
+  /** @type {string[]} */
+  const reported = [];
+  configure({ ...CONFIG, ...hooks, onError: (_error, context) => reported.push(context) });
+  try {
+    const cart = await Cart.add(merchandiseId);
+    assert.equal(Cart.status.kind, 'ready');
+    assert.equal(Cart.id(), answer.id, 'the cart Shopify made is kept');
+    return { reported, cart };
+  } finally {
+    globalThis.fetch = fetch;
+    configure(CONFIG);
+    localStorage.clear();
+  }
+}
+
+test('a throwing warningText is reported: the add Shopify applied resolves, and Shopify’s text shows', async () => {
+  document.body.innerHTML = '<p id="warning" tether-cart-warning></p>';
+  const warning = { code: 'MERCHANDISE_NOT_ENOUGH_STOCK', message: 'Only 1 left', target: 'x' };
+  const warningText = () => {
+    throw new TypeError('the site has no text for this code');
+  };
+  const { reported } = await addWithHooks({ warningText }, [warning]);
+  assert.equal(find('#warning').textContent, 'Only 1 left');
+  assert.deepEqual(reported, ['warningText']);
+});
+
+test('a throwing formatMoney is reported: the add resolves, and amounts show in the built-in format', async () => {
+  document.body.innerHTML = '<span id="subtotal" tether-cart-subtotal></span>';
+  const formatMoney = () => {
+    throw new TypeError('site formatter bug');
+  };
+  const { reported, cart } = await addWithHooks({ formatMoney, locale: 'en-US' });
+  assert.equal(find('#subtotal').textContent, builtInFormat(cart.cost.subtotalAmount, 'en-US'));
+  assert.ok(reported.length > 0 && reported.every((context) => context === 'formatMoney'));
 });
 
 test('money: amounts compare as decimals, so a line is on sale only when it is', () => {

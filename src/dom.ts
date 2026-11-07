@@ -3,7 +3,7 @@
  * and how elements show, hide and report layout changes. Attribute names go through `attr()` so the prefix is
  * configurable. The optional parts import all of it from here (`window.Tether.__core['dom.ts']`).
  */
-import { cfg, reportError, warn } from './config.ts';
+import { callHook, cfg, warn } from './config.ts';
 import { attr, emit, get } from './markup.ts';
 import { storeHtmlFragment } from './store-html.ts';
 import { isRecord } from '../server/src/shared/json.ts';
@@ -59,8 +59,9 @@ export function formatPercent(percentage: number | null | undefined, locale: str
 /** Money in the configured locale, through the site's `formatMoney` when it has one. */
 export function formatMoney(money: Money | null | undefined): string {
   if (!money) return '';
-  if (cfg.formatMoney) return cfg.formatMoney(money, cfg.locale);
-  return formatMoneyIn(money, cfg.locale);
+  const { formatMoney: siteFormat, locale } = cfg;
+  const builtIn = () => formatMoneyIn(money, locale);
+  return siteFormat ? callHook('formatMoney', () => siteFormat(money, locale), builtIn) : builtIn();
 }
 
 /** @returns The date in the configured locale, `''` without one. */
@@ -99,13 +100,8 @@ const readText = (el: Element) => (isTextField(el) ? el.value : el.textContent);
 export function setTextTracked(el: HTMLElement, value: string | number | boolean | null | undefined): void {
   const before = readText(el);
   setText(el, value);
-  if (before !== readText(el) && el.hasAttribute(SEEN) && cfg.onValueChange) {
-    try {
-      cfg.onValueChange(el, before);
-    } catch (error) {
-      reportError(error, 'onValueChange');
-    }
-  }
+  if (before !== readText(el) && el.hasAttribute(SEEN))
+    callHook('onValueChange', () => cfg.onValueChange?.(el, before));
   el.setAttribute(SEEN, '1');
 }
 
@@ -245,12 +241,10 @@ function refreshScrollTrigger(): void {
 export function notifyLayoutChanged(reason: string): void {
   clearTimeout(layoutTimer);
   layoutTimer = setTimeout(() => {
-    try {
+    callHook('layout-changed', () => {
       if (cfg.onLayoutChange) cfg.onLayoutChange(reason);
       else refreshScrollTrigger();
-    } catch (error) {
-      reportError(error, 'layout-changed');
-    }
+    });
     emit('layout-changed', { reason });
   }, LAYOUT_DEBOUNCE_MS);
 }

@@ -87,7 +87,8 @@ function cartToCheckOut(): string | null {
  * @returns The checkout URL, `null` with nothing to check out or after a reported failure.
  */
 export async function checkout(target: CheckoutTarget = cfg.checkoutTarget): Promise<string | null> {
-  if (!cartToCheckOut()) return null;
+  // A queued change can still fill an empty cart, or create one.
+  if (runInOrder.idle() && !cartToCheckOut()) return null;
   const tab = target === '_blank' ? window.open('', '_blank') : null;
   if (tab) detachOpenerIfAllowed(tab);
   try {

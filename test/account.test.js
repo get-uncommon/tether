@@ -235,6 +235,40 @@ test('an answer without the ids the page acts on is an error, other fields read 
   await assert.rejects(account.order(1), /the answer has no order id/);
 });
 
+test('a /me answered after a logout does not log the customer back in, and calls at once share one /me', async () => {
+  configure({ ...testConfig(), account: SERVER });
+  document.body.innerHTML = '<p id="in" tether-show="logged-in">Hi</p>';
+  /** @type {string[]} */
+  const sent = [];
+  let sessionAlive = true;
+  /** @type {((value: unknown) => void)[]} */
+  const answerLater = [];
+  globalThis.fetch = async (url) => {
+    const path = new URL(urlOf(url)).pathname.replace('/_tether/account', '');
+    sent.push(path);
+    if (path === '/logout') {
+      sessionAlive = false;
+      return jsonResponse({ loggedOut: true, logoutUrl: null });
+    }
+    // The answer goes by the session cookie the request carried.
+    const body = sessionAlive ? { loggedIn: true, customer: ADA } : { loggedIn: false };
+    if (sessionAlive) await new Promise((resolve) => answerLater.push(resolve));
+    return jsonResponse(body);
+  };
+  const mounted = Promise.all([account.render(document), account.customer()]);
+  await new Promise(setImmediate);
+  assert.deepEqual(sent, ['/me']);
+  await account.logout();
+  answerLater.forEach((answer) => {
+    answer(undefined);
+  });
+  await mounted;
+  assert.deepEqual(sent, ['/me', '/logout', '/me']);
+  assert.equal(account.isLoggedIn(), false);
+  assert.equal(localStorage.getItem('tether:account-hint:shop.test'), null);
+  assert.equal(visible('in'), false);
+});
+
 test('without account.server every account function rejects with NOT_CONFIGURED, before any request', async () => {
   globalThis.fetch = async () => {
     throw new Error('no request expected');

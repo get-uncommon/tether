@@ -31,6 +31,7 @@ import {
   pendingQuantities,
   pendingQuantityOf,
   render,
+  runInOrder,
   savedCartId,
   settleLoad,
   showLastKnownCount,
@@ -131,7 +132,7 @@ function mergedAttributes(attributes: Attributes): { key: string; value: string 
  * Loads the saved cart. A cart Shopify no longer has is forgotten; one it can't be asked about (the network, the
  * token) is kept, because it is probably fine.
  */
-async function init(): Promise<ShopifyCart | null> {
+async function load(): Promise<ShopifyCart | null> {
   const id = savedCartId();
   if (!id) {
     settleLoad({ kind: 'loaded', cart: null });
@@ -151,7 +152,8 @@ async function init(): Promise<ShopifyCart | null> {
 }
 
 export const Cart = {
-  init,
+  /** Loads the saved cart in the queue, so a change Shopify answers meanwhile isn't replaced by an older answer. */
+  init: () => runInOrder(load),
   /** The saved cart's id. */
   id: savedCartId,
 

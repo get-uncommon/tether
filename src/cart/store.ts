@@ -3,12 +3,13 @@
  * the one queue every change goes through. A change of what the page shows goes through
  * here, so the document (`renderCart`) and the listeners (`tether:cart-updated`) always see the store's cart.
  */
-import { cfg } from '../config.ts';
+import { callHook, cfg } from '../config.ts';
 import { emit } from '../dom.ts';
 import { isOpen } from './drawer.ts';
 import { renderCart, quantityOf, showSavedCount } from './render.ts';
 import { getStored, removeStored, setStored } from '../storage.ts';
 import { CART_ID } from '../../server/src/shared/cart-id.ts';
+import { createSerialQueue } from '../../server/src/shared/serial.ts';
 import type { CartWarning } from '../config.ts';
 import type { Image } from '../fragments.ts';
 import type { Money } from '../shopify-values.ts';
@@ -220,29 +221,24 @@ export function showLastKnownCount(): void {
   if (count !== null) showSavedCount(count);
 }
 
-/** Sets Shopify's notes on the last change: each message once, in the site's words (`warningText`). */
+/**
+ * Sets Shopify's notes on the last change: each message once, in the site's words (`warningText`), else in Shopify's.
+ */
 export function setWarnings(notes: readonly CartWarning[]): void {
+  const siteText = (note: CartWarning) =>
+    callHook(
+      'warningText',
+      () => cfg.warningText?.(note),
+      () => null,
+    );
   warnings = notes
     .filter((note, index) => notes.findIndex((other) => other.message === note.message) === index)
-    .map((note) => ({ ...note, message: cfg.warningText?.(note) || note.message }));
+    .map((note) => ({ ...note, message: siteText(note) || note.message }));
   if (warnings.length) emit('cart-warning', { warnings });
 }
 
-/** The queue only waits for a task: its result, or failure, reaches the caller through the promise `run` returns. */
-const waitOnly = () => undefined;
-
-/** @returns A runner that starts each task once the one before has settled, whether it succeeded or failed. */
-export function serial(): <T>(task: () => Promise<T>) => Promise<T> {
-  let previous: Promise<unknown> = Promise.resolve();
-  return <T>(task: () => Promise<T>) => {
-    const run = previous.then(task);
-    previous = run.then(waitOnly, waitOnly);
-    return run;
-  };
-}
-
 /** The one queue every cart change runs through; checkout waits for the changes in it. */
-export const runInOrder = serial();
+export const runInOrder = createSerialQueue();
 
 /**
  * Runs a cart change after the ones before it, so quick clicks never race. A failure sets the `error` status (shown by
