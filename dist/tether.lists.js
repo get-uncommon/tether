@@ -81,6 +81,11 @@
 
   // src/lists.ts
   var URL_QUERY_SOURCE = "url:";
+  var noProducts = () => ({
+    collection: null,
+    products: [],
+    pageInfo: { hasNextPage: false, endCursor: null }
+  });
   var COLLECTION_SORT_KEYS = /* @__PURE__ */ new Set([
     "BEST_SELLING",
     "COLLECTION_DEFAULT",
@@ -171,6 +176,8 @@
       __publicField(this, "replacingToken", null);
       /** Whether the list has warned about its `tether-sort`, so a list that reloads warns once. */
       __publicField(this, "warnedSort", false);
+      /** Whether the list has warned about its `tether-empty-query`, likewise. */
+      __publicField(this, "warnedEmptyQuery", false);
       this.root = root;
       root.addEventListener("click", (event) => {
         if (!isElement(event.target)) return;
@@ -184,7 +191,12 @@
     $(selector) {
       return scoped(this.root, selector, listSelector());
     }
-    /** The collection or search query of the list's attributes. */
+    /**
+     * The collection or search query of the list's attributes.
+     *
+     * @returns `null` for a `url:` list whose parameter is missing or empty, with `tether-empty-query` (or `emptyQuery`)
+     *   `none`: it lists nothing.
+     */
     options() {
       const { root } = this;
       const query = {
@@ -199,8 +211,25 @@
         return query;
       }
       const raw = get(root, "products") ?? "";
-      query.query = raw.startsWith(URL_QUERY_SOURCE) ? new URL(window.location.href).searchParams.get(raw.slice(URL_QUERY_SOURCE.length)) || "" : raw;
-      return query;
+      if (!raw.startsWith(URL_QUERY_SOURCE)) {
+        query.query = raw;
+        return query;
+      }
+      query.query = new URL(window.location.href).searchParams.get(raw.slice(URL_QUERY_SOURCE.length)) || "";
+      return query.query || this.emptyQuery() === "all" ? query : null;
+    }
+    /**
+     * @returns The list's `tether-empty-query`, or the config's `emptyQuery` without one and, with a warning, for a value
+     *   that is neither `all` nor `none`.
+     */
+    emptyQuery() {
+      const raw = get(this.root, "empty-query");
+      if (raw === "all" || raw === "none") return raw;
+      if (raw !== null && !this.warnedEmptyQuery) {
+        warn(`${attr("empty-query")} ${JSON.stringify(raw)} is not all or none: using ${cfg.emptyQuery}`, this.root);
+        this.warnedEmptyQuery = true;
+      }
+      return cfg.emptyQuery;
     }
     /**
      * @returns The list's `tether-sort`, `undefined` (Shopify's default order) without one or, with a warning, for a key
@@ -241,7 +270,9 @@
           if (stale()) return;
           this.products = recommendations.slice(0, listLimit(this.root, recommendations.length));
         } else {
-          const page = await getProducts({ ...this.options(), after: more ? this.pageInfo?.endCursor ?? null : null });
+          const query = this.options();
+          const after = more ? this.pageInfo?.endCursor ?? null : null;
+          const page = query ? await getProducts({ ...query, after }) : noProducts();
           if (stale()) return;
           this.collection = page.collection;
           this.pageInfo = page.pageInfo;

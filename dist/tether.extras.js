@@ -112,13 +112,14 @@
     }
   }
   function onStorage(event) {
-    if (event.key === cfg.storageKey || event.key === `${cfg.storageKey}:seen`) {
+    const { key } = event;
+    if (key === null || key === cfg.storageKey || key === `${cfg.storageKey}:seen`) {
       Cart.init().catch((error) => {
         reportError(error, "cart from another tab");
       });
       return;
     }
-    if (event.key !== storageKey() || !event.newValue) return;
+    if (key !== storageKey() || !event.newValue) return;
     const market = parseSavedMarket(event.newValue);
     if (!market) return;
     const options = { language: market.language ?? null, locale: market.locale, remember: false };

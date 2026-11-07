@@ -1,5 +1,61 @@
 # Changelog
 
+## 0.11.0 (2026-11-07)
+
+- Fix: With a `storageKey` of the site's own, a cart change in another tab of the site reaches this
+  tab again: the storage listener follows the keys the cart and the market are stored under, not
+  every key that starts with the prefix. `localStorage.clear()` in another tab loads the cart again.
+- Fix: With `analytics.shopify`, an Astro navigation made before the analytics part loaded sends a
+  `page_viewed` for each page, and the product page left sends its `product_viewed`. Before, the
+  page the visitor left counted for none.
+- Fix: With page transitions (Barba, Swup, the Barba preset), the container
+  `Tether.mount(container)` mounts after `Tether.unmount()` sends Shopify a `page_viewed`, so each
+  page counts, not only the first. Astro's navigations still send one each.
+- Fix: Search results that arrive after the visitor pressed Escape, clicked outside or left the
+  search box stay closed (`aria-expanded="false"`) until the box has focus again.
+- Fix: Clicking Edit on another address while an address is saving keeps that address in the form,
+  so Save changes it instead of creating a new one.
+- Fix: A failed address delete or make-default shows Shopify's message in the address form's
+  `tether-form-error` when the address row has none, as in the documented markup, with
+  `role="alert"`.
+- Fix: `[tether-cart-warning]` gets `role="status"` when it has no role of its own, so screen
+  readers announce Shopify's warning. It looks the same.
+- Fix (sync Worker): listing the Webflow item index checks the run's subrequests before each page. A
+  run that runs out stores the pages it has (`index:listing`) and stops, and the next run continues
+  the listing there, so a collection of more than about 4,000 items no longer makes every Worker
+  reconcile fail once the day's cached index expires. A webhook lists at most 15 pages and leaves
+  the product to the next reconcile when the index needs more, so it stays within Cloudflare's 30
+  seconds after the answer.
+- Fix (sync Worker): a webhook that fails while a reconcile is running is no longer dropped from the
+  retry list when that reconcile stores the list at its end. Each failed webhook is stored under a
+  KV key of its own (`reconcile:retry:<id>:<uuid>`), which the next reconcile takes into the retry
+  list and then deletes. A deleted product whose `products/delete` webhook failed this way stayed
+  live in Webflow, because the reconcile's cursor finds only updated products. The retry list keeps
+  its key and format, so nothing needs migrating; a reconcile run costs one KV list request more.
+- Docs: the analytics guide says that `search` is sent for every answer to search as you type, also
+  one without results, and when page views are sent with page transitions.
+- Lists: a `tether-products="url:q"` list on a page without a `?q=`, or with an empty one, can list
+  nothing instead of every product: `emptyQuery: 'none'` in the config, or
+  `tether-empty-query="none"` on the list (which overrides the config, also with `"all"`), shows its
+  `list-empty` state and asks Shopify nothing. The default stays `'all'`. An unknown value warns,
+  and falls back to `'all'` in the config and to the config's value on a list.
+- Docs (sync Worker): the costs table says customer-account logins, token refreshes and logouts
+  share KV's 1,000 daily writes with the sync, and that logins fail once they run out; the reconcile
+  saves the cursor of the last product it did, not a page and offset; and a repeated
+  `products/delete` with `onDelete: 'delete'` can cost one KV write when the cached item index still
+  lists the deleted item.
+- Repository: a test runs `npm run dev`'s watch on a copy of the source, edits a part and a source
+  the core shares with it, and checks that each core then carries the hashes of its own kind of
+  part. The watch's wiring moves into `scripts/script-build.ts` for it.
+- Repository: the build retries a busy rename only on Windows, so a read-only `dist/` on Linux or
+  macOS fails at once instead of after about 10 seconds a file.
+- Repository: git ignores the temporary files an interrupted `npm run dev` leaves in `dist/`, so the
+  release's clean check passes; the next build removes them.
+- Repository: the release rehearsal runs, and `npm run release` looks for its run, on every file the
+  gate reads (`.config/`, `.changes/`, `docs/`, `examples/`, `dist/`, the workflows and the root
+  config files among them), and a test derives those files from Prettier, ESLint, the tests and the
+  scripts, so a release can't stand on an older commit's rehearsal.
+
 ## 0.10.2 (2026-11-07)
 
 - Fix: A `tether-form-error` on the account pages gets `role="alert"` when it has no role of its

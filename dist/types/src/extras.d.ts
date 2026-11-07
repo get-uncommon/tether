@@ -8,7 +8,10 @@ import type { ShopifyCart } from './cart/store.js';
 export declare function addGroup(button: Element): Promise<ShopifyCart | null>;
 /** Applies the code a `tether-discount-form` submitted; one Shopify refuses marks the form `is-invalid`. */
 export declare function applyDiscountCode(form: Element, input: HTMLInputElement | null, code: string): Promise<void>;
-/** Another tab changed the cart (it is loaded again here) or the visitor's market (this tab follows it). */
+/**
+ * Another tab changed the cart (it is loaded again here) or the visitor's market (this tab follows it), or cleared the
+ * storage (`key` is `null`), which the cart is loaded again for.
+ */
 export declare function onStorage(event: StorageEvent): void;
 /**
  * `?variant=` (and `selling_plan=`) follow the visitor's choice.

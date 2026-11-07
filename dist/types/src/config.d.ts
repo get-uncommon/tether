@@ -61,6 +61,8 @@ export interface CartWarning {
     target?: string;
 }
 export type CheckoutTarget = '_self' | '_blank';
+/** What a `tether-products="url:…"` list shows while its URL parameter is missing or empty. */
+export type EmptyQuery = 'all' | 'none';
 type PurchaseKind = 'one-time' | 'subscription';
 /** Every option, with its default filled in. */
 export interface TetherConfig {
@@ -91,6 +93,8 @@ export interface TetherConfig {
     sellingPlanGroupsFirst: number;
     sellingPlansFirst: number;
     collectionFirst: number;
+    /** `all` lists every product while a `url:` list's parameter is missing or empty; `none` lists none, unasked. */
+    emptyQuery: EmptyQuery;
     /**
      * How many times a failed request is sent again. A query is retried after a network error (no answer, or a body that
      * stopped arriving), a 429, a 5xx or Shopify's `THROTTLED`. A mutation, a cart change included, is retried only
@@ -161,11 +165,6 @@ export type TetherOptions = {
 export declare const DEFAULTS: Readonly<TetherConfig>;
 export declare const cfg: TetherConfig;
 /**
- * `cfg` as `Tether.config` shows it. A value written there would skip the validation `configure()` does, so the view
- * is read-only; `Tether.init(options)` is how a site changes the config.
- */
-export declare const configView: TetherConfig;
-/**
  * The configuration `options` describe: defaults filled in, every value validated (an invalid one warns and falls
  * back to its default), hooks that aren't functions dropped so callers only check for null.
  *
@@ -194,6 +193,8 @@ export declare function warn(...args: unknown[]): void;
  * @param context What failed, e.g. `product coffee-box`.
  */
 export declare function reportError(error: unknown, context: string): void;
+/** Reports `change` failing (`reportError`), for a change nothing waits on. */
+export declare function reportFailure(change: Promise<unknown>, context: string): void;
 /**
  * Calls one of the site's hooks. A bug in it is reported under `name`, and `fallback` answers instead, so the site's
  * code never fails the render, or the cart change Shopify already applied, that called it. A thrown `Error` is reported

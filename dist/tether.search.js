@@ -71,6 +71,8 @@
       __publicField(this, "resultsId");
       /** Counts searches, so only the latest one renders. */
       __publicField(this, "searchNumber", 0);
+      /** The search the visitor closed the results during (Escape, a click outside): its answer leaves them closed. */
+      __publicField(this, "dismissedSearch", 0);
       __publicField(this, "timer");
       __publicField(this, "lastTerm", "");
       /** Results per market and term, for typing back and forth: prices and names follow the market. */
@@ -156,7 +158,9 @@
       this.root.classList.toggle("is-open", open);
       this.results.hidden = !open;
       this.input.setAttribute("aria-expanded", String(open));
-      if (!open) this.highlight(this.options(), -1);
+      if (open) return;
+      this.dismissedSearch = this.searchNumber;
+      this.highlight(this.options(), -1);
     }
     options() {
       return qsa(this.results, '[role="option"]');
@@ -222,7 +226,7 @@
       const count = products.length + collections.length + queries.length;
       this.showCount(count);
       this.setState(count ? "ready" : "empty");
-      this.open(true);
+      if (document.activeElement === this.input && this.dismissedSearch !== this.searchNumber) this.open(true);
       emit("search", { term, products, collections, queries }, this.root);
     }
     showCount(count) {

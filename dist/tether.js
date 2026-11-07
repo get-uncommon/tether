@@ -282,6 +282,7 @@
     sellingPlanGroupsFirst: 10,
     sellingPlansFirst: 25,
     collectionFirst: 24,
+    emptyQuery: "all",
     retries: 2,
     requestTimeout: 15e3,
     revalidate: true,
@@ -313,35 +314,6 @@
     debug: false
   };
   var cfg = { ...DEFAULTS };
-  function refuseChange(key) {
-    warn(`Tether.config is read-only (${String(key)}): pass options to Tether.init() instead`);
-    return false;
-  }
-  var readOnlyViews = /* @__PURE__ */ new WeakMap();
-  var READ_ONLY = {
-    get: (object, key) => viewOf(Reflect.get(object, key)),
-    // A descriptor's value is the view too, so `Object.getOwnPropertyDescriptor` doesn't hand out the live object.
-    getOwnPropertyDescriptor(object, key) {
-      const descriptor = Reflect.getOwnPropertyDescriptor(object, key);
-      if (descriptor) descriptor.value = viewOf(descriptor.value);
-      return descriptor;
-    },
-    set: (_object, key) => refuseChange(key),
-    deleteProperty: (_object, key) => refuseChange(key),
-    defineProperty: (_object, key) => refuseChange(key)
-  };
-  function viewOf(value) {
-    return typeof value === "object" && value !== null ? readOnlyView(value) : value;
-  }
-  function readOnlyView(target) {
-    let view = readOnlyViews.get(target);
-    if (!view) {
-      view = new Proxy(target, READ_ONLY);
-      readOnlyViews.set(target, view);
-    }
-    return view;
-  }
-  var configView = new Proxy(cfg, READ_ONLY);
   var PREFIX = /^[a-z][a-z0-9-]*$/;
   var SWITCH_OPTIONS = [
     "revalidate",
@@ -474,6 +446,7 @@
       metafields: metafieldsOption(options.metafields ?? [], dropped),
       embedOrigins: embedOriginsOption(options.embedOrigins ?? [], dropped),
       checkoutTarget: choiceOption("checkoutTarget", options.checkoutTarget, ["_self", "_blank"]),
+      emptyQuery: choiceOption("emptyQuery", options.emptyQuery, ["all", "none"]),
       defaultPurchase: choiceOption("defaultPurchase", options.defaultPurchase, ["one-time", "subscription"]),
       cartDrawerOpenClass: classOption("cartDrawerOpenClass", options.cartDrawerOpenClass)
     };
@@ -507,6 +480,11 @@
       warn("onError threw", hookError);
     }
   }
+  function reportFailure(change, context) {
+    change.catch((error) => {
+      reportError(error, context);
+    });
+  }
   var reportedHookFailures = /* @__PURE__ */ new Set();
   var MAX_REMEMBERED_HOOK_FAILURES = 100;
   function callHook(name, hook2, fallback) {
@@ -521,6 +499,37 @@
       return fallback?.();
     }
   }
+
+  // src/config-view.ts
+  function refuseChange(key) {
+    warn(`Tether.config is read-only (${String(key)}): pass options to Tether.init() instead`);
+    return false;
+  }
+  var readOnlyViews = /* @__PURE__ */ new WeakMap();
+  var READ_ONLY = {
+    get: (object, key) => viewOf(Reflect.get(object, key)),
+    // A descriptor's value is the view too, so `Object.getOwnPropertyDescriptor` doesn't hand out the live object.
+    getOwnPropertyDescriptor(object, key) {
+      const descriptor = Reflect.getOwnPropertyDescriptor(object, key);
+      if (descriptor) descriptor.value = viewOf(descriptor.value);
+      return descriptor;
+    },
+    set: (_object, key) => refuseChange(key),
+    deleteProperty: (_object, key) => refuseChange(key),
+    defineProperty: (_object, key) => refuseChange(key)
+  };
+  function viewOf(value) {
+    return typeof value === "object" && value !== null ? readOnlyView(value) : value;
+  }
+  function readOnlyView(target) {
+    let view = readOnlyViews.get(target);
+    if (!view) {
+      view = new Proxy(target, READ_ONLY);
+      readOnlyViews.set(target, view);
+    }
+    return view;
+  }
+  var configView = new Proxy(cfg, READ_ONLY);
 
   // server/src/shared/error-message.ts
   function messageOf(error) {
@@ -2029,11 +2038,12 @@
     renderLineState(node, line, view);
     const planSelects = qsa(node, sel("line-plan")).filter(isSelect);
     planSelects.forEach((select) => {
-      getProduct(variant.product.handle).then((product) => {
-        fillPlanSelect(select, line, product);
-      }).catch((error) => {
-        reportError(error, "line plan options");
-      });
+      reportFailure(
+        getProduct(variant.product.handle).then((product) => {
+          fillPlanSelect(select, line, product);
+        }),
+        "line plan options"
+      );
     });
   }
   function renderConditions(cart, view) {
@@ -2090,6 +2100,7 @@
     });
     renderConditions(cart, view);
     qsa(document, sel("cart-warning")).forEach((el) => {
+      if (!el.hasAttribute("role")) el.setAttribute("role", "status");
       setTextTracked(el, [...new Set(view.warnings.map((warning) => warning.message))].join(" "));
     });
     renderFields(cart);
@@ -3041,7 +3052,7 @@
   function onAddClick(scope, button) {
     const { label, original } = addButtonLabel(button);
     const addingText = get(button, "adding-text");
-    busy(button, async () => {
+    const added = busy(button, async () => {
       if (addingText) setText(label, addingText);
       try {
         await scope.addToCart();
@@ -3051,11 +3062,13 @@
       } finally {
         if (addingText) setText(label, original);
       }
-    }).then(() => {
-      scope.renderVariant();
-    }).catch((error) => {
-      reportError(error, "add to cart render");
     });
+    reportFailure(
+      added.then(() => {
+        scope.renderVariant();
+      }),
+      "add to cart render"
+    );
   }
   function onClick(scope, event, target) {
     const optionValue = closestOwn(scope, target, sel("option-value"));
@@ -3151,14 +3164,6 @@
   }
   var ProductScope = class {
     constructor(root, product) {
-      __publicField(this, "root");
-      __publicField(this, "product");
-      __publicField(this, "plans");
-      __publicField(this, "selected");
-      /** How the visitor buys; `setPurchase` and `selectPlan` change it. */
-      __publicField(this, "purchase");
-      __publicField(this, "variant");
-      __publicField(this, "quantity");
       this.root = root;
       this.product = product;
       this.plans = allPlans(product);
@@ -3455,11 +3460,12 @@
     const keys = [...refreshQueue];
     refreshQueue = /* @__PURE__ */ new Set();
     keys.forEach((key) => {
-      refreshProduct(key).then((fresh) => {
-        applyRefresh(key, fresh);
-      }).catch((error) => {
-        reportError(error, `refresh ${key}`);
-      });
+      reportFailure(
+        refreshProduct(key).then((fresh) => {
+          applyRefresh(key, fresh);
+        }),
+        `refresh ${key}`
+      );
     });
   }
   var marketPending = null;
@@ -3596,7 +3602,7 @@
   }
 
   // src/part-integrity.ts
-  var PART_INTEGRITY = { "tether.diagnose.js": "sha384-3dIUM9ixt3x2USEJ72s9rJa+3pjfSUt1LoHQb5EcXB8XWe6GlxGpBgr9+z8Zmo+r", "tether.markets.js": "sha384-UMKj62O7TqyF61RRZDs9CEpQLk49vKnk9tFaiSJhUfndcD1o/jCM9Spn5yjAFqQO", "tether.search.js": "sha384-X2ZFhZuT86Mmzf6EQxpIa8jO/1O9JQGXbFJswIo/1pSZ7JeGaQCzaLLx668JOH/x", "tether.lists.js": "sha384-x1XFTeWjEUIPAGb/9B7ZmLgNIBo5EUleflBO3jP3Z4LAcgZqsAqx3wHKwXPnX6AJ", "tether.extras.js": "sha384-M+Yj0h4l3LR4GQ/V0oteP6V0VBAeeStSC8SOcCC0hwE5XmV20vv0jf5j66fnwmTw", "tether.account.js": "sha384-qRngYUoIRv70HIl8SfrPQGSeyFwR6OqX+Ca8VfY22Nl8W0ClpICNneDVpH3AZ+1Y", "tether.account-pages.js": "sha384-joHWCioWjBrYEx3uafQjDAUV3Ur5nsrytq7lfjRm0Q2wANZJO9FMkjgCWe4Rzvg6", "tether.analytics.js": "sha384-eLM6mL4ok8PfVX+EaHwEuRemJiSvl1caSyIMV9TdBbire5EL1fnr40l2vIlmnapW" };
+  var PART_INTEGRITY = { "tether.diagnose.js": "sha384-euwUnDXnDZd70Pud3pHrNgzBwk3Pm8mrQjusX12KVBUGxcD4Z1pI9swMKM3bcGba", "tether.markets.js": "sha384-UMKj62O7TqyF61RRZDs9CEpQLk49vKnk9tFaiSJhUfndcD1o/jCM9Spn5yjAFqQO", "tether.search.js": "sha384-FMneAYSGyeio3ZpsWldYhdu9fgPk2/vQ5h76dxS9wQSS/1LxMTdS+rEHOU2e+e5r", "tether.lists.js": "sha384-ynNjpPWE6k6ASotzhwNbuG9NZZOKbgqiNjQiE18iO9djnQqtG9W5mTkQt5UM3cNm", "tether.extras.js": "sha384-Hp4ITcajZpcqDnXoA4D84doONi3GvxBuU4HUvJg7ZwjcqY3Gm7tf5EMQWm93zfGE", "tether.account.js": "sha384-qRngYUoIRv70HIl8SfrPQGSeyFwR6OqX+Ca8VfY22Nl8W0ClpICNneDVpH3AZ+1Y", "tether.account-pages.js": "sha384-6Ce3yDhOtUN+ZUXrgtomSFqszahwl7zfg1tsvrclmMzi5BgV0URXnpjFGs2Kh+Of", "tether.analytics.js": "sha384-VaXbVXopkxHspIEDlFnF+VGpeesqtTu3mSoi+FtaWzRZzRXO8EFhQiQ0+2HxyQoE" };
 
   // src/part-registry.ts
   function isTetherInternals(value) {
@@ -3604,7 +3610,7 @@
   }
 
   // src/version.ts
-  var VERSION = "0.10.2";
+  var VERSION = "0.11.0";
 
   // src/lazy-iife.ts
   var coreModules = {
@@ -3762,15 +3768,22 @@
   }
 
   // src/analytics-queue.ts
+  var PAGE_TRANSITION = "page-transition";
   function queueAnalyticsEvents(load2) {
     const queue = [];
+    const bodies = /* @__PURE__ */ new WeakMap();
+    const landing = document.body;
+    const queuePageLoad = (event) => {
+      bodies.set(event, document.body);
+      queue.push(event);
+    };
     const listening = new window.AbortController();
     const options = { signal: listening.signal };
     ANALYTICS_EVENTS.forEach((name) => {
       document.addEventListener(`${cfg.prefix}:${name}`, (event) => queue.push(event), options);
     });
-    document.addEventListener("astro:page-load", (event) => queue.push(event), options);
-    load2().then((part) => part.startAnalytics(queue)).catch((error) => {
+    document.addEventListener("astro:page-load", queuePageLoad, options);
+    load2().then((part) => part.startAnalytics(queue, bodies, landing)).catch((error) => {
       listening.abort();
       queue.length = 0;
       reportError(error, "analytics");
@@ -3792,9 +3805,7 @@
 
   // src/part-use.ts
   function withPart(name, use) {
-    loadPart(name).then(use).catch((error) => {
-      reportError(error, name);
-    });
+    reportFailure(loadPart(name).then(use), name);
   }
 
   // src/account-api.ts
@@ -3849,11 +3860,6 @@
     const line = target.closest(`[${lineKeyAttribute()}]`);
     const id = line?.getAttribute(lineKeyAttribute());
     return line && id ? { line, id } : null;
-  }
-  function reportFailure(change, context) {
-    change.catch((error) => {
-      reportError(error, context);
-    });
   }
   function onLineClick(event, target) {
     const found = lineOf(target);
@@ -3925,15 +3931,14 @@
     const { target } = event;
     if (!isElement(target)) return;
     const found = lineOf(target);
-    if (found && target instanceof window.HTMLInputElement && target.matches(sel("line", "quantity"))) {
+    if (found && isInput(target) && target.matches(sel("line", "quantity"))) {
       onQuantityInput(target, found);
-    } else if (found && target instanceof window.HTMLSelectElement && target.matches(sel("line-plan"))) {
+    } else if (found && isSelect(target) && target.matches(sel("line-plan"))) {
       showLineBusy(found.line, Cart.updateLine(found.id, { sellingPlanId: target.value || null }), "cart line plan");
-    } else if (hasValue(target) && target.matches(sel("cart-note"))) {
+    } else if (isField(target) && target.matches(sel("cart-note"))) {
       reportFailure(Cart.setNote(target.value), "cart note");
     }
   }
-  var hasValue = (target) => target instanceof window.HTMLInputElement || target instanceof window.HTMLTextAreaElement || target instanceof window.HTMLSelectElement;
   function onKeydown2(event) {
     if (!Cart.isOpen()) return;
     if (event.key === "Escape") {
@@ -3951,7 +3956,7 @@
   // src/controls/discount.ts
   function codeInputOf(form) {
     const input = form.querySelector(sel("discount-input")) ?? form.querySelector("input");
-    return input instanceof window.HTMLInputElement ? input : null;
+    return input && isInput(input) ? input : null;
   }
   function onSubmit(event) {
     const { target } = event;
@@ -3961,10 +3966,9 @@
     const input = codeInputOf(form);
     const code = input?.value.trim();
     if (!code) return;
-    busy(form, () => loadPart("extras").then((part) => part.applyDiscountCode(form, input, code))).catch(
-      (error) => {
-        reportError(error, "discount");
-      }
+    reportFailure(
+      busy(form, () => loadPart("extras").then((part) => part.applyDiscountCode(form, input, code))),
+      "discount"
     );
   }
   function onInput(event) {
@@ -3982,9 +3986,7 @@
     event.preventDefault();
     const code = remove.closest(sel("discount-code"))?.getAttribute(attr("discount-code"));
     if (!code) return;
-    Cart.removeDiscount(code).catch((error) => {
-      reportError(error, "discount");
-    });
+    reportFailure(Cart.removeDiscount(code), "discount");
   }
   function bindDiscountControls() {
     document.addEventListener("submit", onSubmit, true);
@@ -3996,15 +3998,17 @@
   var addGroup = (button) => loadPart("extras").then((part) => part.addGroup(button));
   function onClick4(event) {
     const { target } = event;
-    const button = target instanceof window.Element ? target.closest(sel("group-add")) : null;
+    const button = isElement(target) ? target.closest(sel("group-add")) : null;
     if (!button) return;
     event.preventDefault();
-    busy(button, () => addGroup(button)).catch((error) => {
-      reportError(error, "extras");
-    });
+    reportFailure(
+      busy(button, () => addGroup(button)),
+      "extras"
+    );
   }
   function onStorage(event) {
-    if (!cfg.domain || !event.key?.startsWith(`${cfg.prefix}:`)) return;
+    const followed = [null, cfg.storageKey, seenKey(), storageKey()];
+    if (!cfg.domain || !followed.includes(event.key)) return;
     withPart("extras", (part) => {
       part.onStorage(event);
     });
@@ -4012,7 +4016,7 @@
   function onVariantChanged(event) {
     if (!isOwnEvent(event, "variant-changed")) return;
     const { target } = event;
-    if (!(target instanceof window.Element)) return;
+    if (!isElement(target)) return;
     if (!cfg.variantUrl && !target.hasAttribute(attr("variant-url"))) return;
     withPart("extras", (part) => {
       part.writeVariantUrl(target, event.detail);
@@ -4045,9 +4049,7 @@
   }
   function bindAstroRouter(hooks) {
     document.addEventListener("astro:page-load", () => {
-      onPageLoad(hooks).catch((error) => {
-        reportError(error, "page mount");
-      });
+      reportFailure(onPageLoad(hooks), "page mount");
     });
     document.addEventListener("astro:before-swap", () => {
       mountedBody = null;
@@ -4074,6 +4076,7 @@
   var initPromise = null;
   var observer = null;
   var analyticsQueue = null;
+  var pageLeft = false;
   var controlsBound = false;
   function mountLists(root) {
     let count = 0;
@@ -4112,6 +4115,8 @@
   function mount(root = document) {
     if (!isConfigured()) return 0;
     if (root === document) rememberDocumentMount();
+    else if (pageLeft) analyticsQueue?.push(new Event(PAGE_TRANSITION));
+    pageLeft = false;
     pruneLive();
     hydrateFromPage(root.ownerDocument ?? document);
     const count = mountWithin(root);
@@ -4135,6 +4140,7 @@
     log(`mounted ${count} scope(s) in ${roots.length} added element(s)`);
   }
   function unmount() {
+    pageLeft = true;
     Cart.close();
   }
   function getScope(el) {
@@ -4147,7 +4153,7 @@
     bindCartControls();
     bindDiscountControls();
     bindExtrasControls();
-    bindNavigation({ ready: () => initPromise ?? Promise.resolve(null), mount, unmount });
+    bindNavigation({ ready: () => initPromise ?? Promise.resolve(null), mount, unmount: Cart.close });
   }
   async function cartInPageMarket(cart) {
     const country = cfg.country;
@@ -4185,7 +4191,7 @@
     observer = new MutationObserver((mutations) => {
       mutations.forEach((mutation) => {
         mutation.addedNodes.forEach((node) => {
-          if (node instanceof window.Element) queued2.add(node);
+          if (isElement(node)) queued2.add(node);
         });
       });
       clearTimeout(timer);
@@ -4255,9 +4261,10 @@
     const config = pageGlobal("TETHER_CONFIG");
     if (!config || field(config, "autoMount") === false || pageGlobal("TETHER_INTEGRATION")) return;
     const start = () => {
-      init().then(() => mount(document)).catch((error) => {
-        reportError(error, "init");
-      });
+      reportFailure(
+        init().then(() => mount(document)),
+        "init"
+      );
     };
     if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", start, { once: true });
     else start();

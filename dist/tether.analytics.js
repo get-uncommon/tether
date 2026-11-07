@@ -134,7 +134,7 @@
     script.async = true;
     document.head.appendChild(script);
   }
-  async function startShopifyAnalytics(isProductPage) {
+  async function startShopifyAnalytics(isProductPage2) {
     const existing = shopifyGlobal();
     if (existing?.analytics) return existing.analytics;
     const data = await gql(
@@ -151,7 +151,7 @@
     shopify.shop = cfg.domain;
     shopify.routes = {
       root: "/",
-      match: () => ({ pageTemplateName: isProductPage() ? "product" : "page" }),
+      match: () => ({ pageTemplateName: isProductPage2() ? "product" : "page" }),
       ...shopify.routes
     };
     const { proxy, consent } = shopifyOptions();
@@ -166,6 +166,9 @@
     log("shopify analytics ready", data.shop.id);
     return bus2;
   }
+
+  // src/analytics-queue.ts
+  var PAGE_TRANSITION = "page-transition";
 
   // src/analytics.ts
   var DEFAULT_VARIANT_TITLE = "Default Title";
@@ -240,7 +243,8 @@
   var lastLines = null;
   var lastCart = null;
   var viewed = /* @__PURE__ */ new WeakSet();
-  var viewedBody = null;
+  var viewedBody;
+  var bodies = /* @__PURE__ */ new WeakMap();
   function send(name, data, shopifyEvent, shopifyPayload) {
     if (cfg.analytics?.dataLayer) pushToDataLayer(name, data);
     if (bus && shopifyEvent) bus.publish(shopifyEvent, shopifyPayload);
@@ -250,13 +254,17 @@
       reportError(error, "analytics onEvent");
     }
   }
-  function mainProduct() {
-    const el = document.querySelector(sel("product"));
-    if (!el || el.closest(`${sel("collection")},${sel("products")},${sel("recommendations")}`)) return null;
-    return scopes.get(el) ?? null;
+  function mainProductRoot(page2) {
+    const el = page2.querySelector(sel("product"));
+    return el?.closest(`${sel("collection")},${sel("products")},${sel("recommendations")}`) ? null : el;
+  }
+  function isProductPage() {
+    const root = mainProductRoot(document);
+    return root !== null && scopes.has(root);
   }
   function onProductReady({ product, scope }) {
-    if (viewed.has(scope.root) || mainProduct() !== scope) return;
+    const page2 = scope.root.closest("body") ?? document;
+    if (viewed.has(scope.root) || mainProductRoot(page2) !== scope.root) return;
     viewed.add(scope.root);
     const variant = scope.variant ?? product.variants.nodes[0];
     const items = [itemFromVariant(product, variant)];
@@ -333,29 +341,36 @@
   function report(event, name) {
     REPORTERS[name](event.detail);
   }
-  function publishPageView() {
-    viewedBody = document.body;
+  function startPageView() {
+    viewed = /* @__PURE__ */ new WeakSet();
     bus?.publish("page_viewed", {});
   }
   function handle(event) {
+    if (event.type === PAGE_TRANSITION) {
+      startPageView();
+      return;
+    }
     if (event.type === "astro:page-load") {
-      if (viewedBody === document.body) return;
-      viewed = /* @__PURE__ */ new WeakSet();
-      publishPageView();
+      const body = bodies.get(event);
+      if (body === viewedBody) return;
+      viewedBody = body;
+      startPageView();
       return;
     }
     ANALYTICS_EVENTS.forEach((name) => {
       if (isOwnEvent(event, name)) report(event, name);
     });
   }
-  async function startAnalytics(queue) {
+  async function startAnalytics(queue, pageLoads, landing) {
+    bodies = pageLoads;
     if (cfg.analytics?.shopify) {
-      bus = await startShopifyAnalytics(() => mainProduct() != null).catch((error) => {
+      bus = await startShopifyAnalytics(isProductPage).catch((error) => {
         reportError(error, "shopify analytics");
         return null;
       });
     }
-    publishPageView();
+    viewedBody = landing;
+    startPageView();
     queue.splice(0).forEach(handle);
     queue.push = (...events) => {
       events.forEach(handle);

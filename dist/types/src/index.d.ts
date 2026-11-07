@@ -36,12 +36,13 @@ export type { CustomerAddress, Fulfillment, MailingAddress, OrderDetail, OrderDe
 /** The helpers for selling plans, `Tether.plans`. */
 export type SellingPlanHelpers = typeof plans;
 /**
- * Mounts every product scope and product list inside `root`. Safe to call repeatedly.
+ * Mounts every product scope and product list inside `root`. Safe to call repeatedly. The first container mounted
+ * after `unmount()` is a new page for analytics.
  *
  * @returns The scopes and lists newly mounted.
  */
 export declare function mount(root?: Document | Element): number;
-/** Call before a page transition removes the page: closes the cart drawer. */
+/** Call before a page transition removes the page: closes the cart drawer; the next page's `mount()` is a new page. */
 export declare function unmount(): void;
 /** @returns The product scope `el` is in. */
 export declare function getScope(el: Element | null | undefined): ReadonlyProductScope | null;
@@ -132,12 +133,17 @@ declare const publicApi: {
         mountAccount: (root?: ParentNode | undefined) => Promise<void>;
         readonly isLoggedIn: () => Promise<boolean>;
         readonly order: (id: string | number) => Promise<import("./account/page-answers.js").OrderDetail | null>;
-        readonly updateProfile: (fields?: {
+        readonly updateProfile: (// fragment may bring its tag after the cards it is for, so every tag is read before any card mounts.
+        fields?: {
             firstName?: string;
             lastName?: string;
         }) => Promise<import("./account/page-answers.js").Profile>;
         readonly addresses: () => Promise<import("./account/page-answers.js").CustomerAddress[]>;
-        readonly saveAddress: (address: import("./account/operations.js").AddressFields | null, options?: {
+        readonly saveAddress: (address: import("./account/operations.js").AddressFields | null
+        /** Call before a page transition removes the page: closes the cart drawer; the next page's `mount()` is a new page. */
+        , 
+        /** Call before a page transition removes the page: closes the cart drawer; the next page's `mount()` is a new page. */
+        options?: {
             id?: string;
             isDefault?: boolean;
         }) => Promise<import("./account/page-answers.js").AccountAddress>;

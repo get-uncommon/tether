@@ -653,12 +653,11 @@
     const text = error instanceof Error && error.message ? error.message : "Something went wrong";
     return text.replace(/^Customer accounts: /, "");
   }
-  async function act(el, change) {
+  async function act(el, change, errorBoxes = qsa(el, sel("form-error"))) {
     if (el.getAttribute("aria-busy") === "true") return "busy";
     el.classList.add("is-busy");
     el.setAttribute("aria-busy", "true");
     el.setAttribute(attr("form-state"), "pending");
-    const errorBoxes = qsa(el, sel("form-error"));
     errorBoxes.forEach((box) => {
       if (!box.hasAttribute("role")) box.setAttribute("role", "alert");
       setText(box, "");
@@ -702,7 +701,7 @@
       const isDefault = box instanceof window.HTMLInputElement && box.checked;
       void act(form, async () => {
         await saveAddress(fieldsOf(form), { id, isDefault });
-        addressFormReset(form);
+        if (form.dataset["tetherAddressId"] === id) addressFormReset(form);
         await renderAddresses(document);
       });
     }
@@ -724,6 +723,10 @@
     }
     form.scrollIntoView({ block: "nearest" });
   }
+  function addressErrorBoxes(row) {
+    const own = qsa(row, sel("form-error"));
+    return own.length ? own : qsa(document.querySelector(sel("address-form")), sel("form-error"));
+  }
   function onAddressClick(event, target) {
     const row = target.closest("[data-tether-address]");
     const id = row instanceof window.HTMLElement ? row.dataset["tetherAddress"] : void 0;
@@ -737,16 +740,24 @@
     if (deleteButton) {
       event.preventDefault();
       if (!confirmed(deleteButton)) return true;
-      void act(row, async () => {
-        await deleteAddress(id);
-        await renderAddresses(document);
-      });
+      void act(
+        row,
+        async () => {
+          await deleteAddress(id);
+          await renderAddresses(document);
+        },
+        addressErrorBoxes(row)
+      );
     } else if (target.closest(sel("address-default"))) {
       event.preventDefault();
-      void act(row, async () => {
-        await saveAddress(null, { id, isDefault: true });
-        await renderAddresses(document);
-      });
+      void act(
+        row,
+        async () => {
+          await saveAddress(null, { id, isDefault: true });
+          await renderAddresses(document);
+        },
+        addressErrorBoxes(row)
+      );
     } else if (target.closest(sel("address-edit"))) {
       event.preventDefault();
       editAddress(id);
