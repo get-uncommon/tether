@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.9.5 (2026-11-07)
+
 - **Fix: 0.9.4's checkout could hang.** When a checkout resolver changes the cart during checkout
   (for example the account part, or a site's own `Tether.cart.setCheckoutResolver` that calls
   `setAttributes` or `setBuyerIdentity`), 0.9.4 waited for that change inside the cart's queue,

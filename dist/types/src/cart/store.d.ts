@@ -175,7 +175,7 @@ export declare function showLastKnownCount(): void;
 export declare function setWarnings(notes: readonly CartWarning[]): void;
 /** @returns A runner that starts each task once the one before has settled, whether it succeeded or failed. */
 export declare function serial(): <T>(task: () => Promise<T>) => Promise<T>;
-/** The one queue every cart change runs through; the checkout's URL lookup waits in it too. */
+/** The one queue every cart change runs through; checkout waits for the changes in it. */
 export declare const runInOrder: <T>(task: () => Promise<T>) => Promise<T>;
 /**
  * Runs a cart change after the ones before it, so quick clicks never race. A failure sets the `error` status (shown by

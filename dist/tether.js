@@ -1190,7 +1190,10 @@
   function setSelected(el, selected) {
     el.classList.toggle("is-selected", selected);
     const state = chosenState(el);
-    if (state === "aria-pressed" && el.tagName !== "BUTTON" && !isInput(el)) el.setAttribute("role", "button");
+    if (state === "aria-pressed" && el.tagName !== "BUTTON" && !isInput(el)) {
+      el.setAttribute("role", "button");
+      if (!el.hasAttribute("tabindex")) el.setAttribute("tabindex", "0");
+    }
     if (state) el.setAttribute(state, String(selected));
     if (isInput(el) && el.matches(CHECKABLE)) el.checked = selected;
     const input = el.querySelector(CHECKABLE);
@@ -2380,10 +2383,9 @@
     const tab = target === "_blank" ? window.open("", "_blank") : null;
     if (tab) detachOpenerIfAllowed(tab);
     try {
-      const url2 = await runInOrder(async () => {
-        const cartId = cartToCheckOut();
-        return cartId && checkoutUrl(cartId);
-      });
+      await runInOrder(() => Promise.resolve());
+      const cartId = cartToCheckOut();
+      const url2 = cartId && await checkoutUrl(cartId);
       if (!url2) {
         tab?.close();
         return null;
@@ -3047,6 +3049,14 @@
       onAddClick(scope, add);
     }
   }
+  function onKeydown(event, target) {
+    const { key } = event;
+    const presses = key === " " || key === "Enter" && !target.matches("a[href]");
+    const pressable = `:is(${sel("option-value")},${sel("plan-value")},${sel("purchase")})[role=button]:not(button,input)`;
+    if (!presses || event.defaultPrevented || !target.matches(pressable)) return;
+    event.preventDefault();
+    target.click();
+  }
   var purchaseKind = (value) => value === "subscription" ? "subscription" : "one-time";
   function onChange(scope, target) {
     const value = isField(target) ? target.value : "";
@@ -3066,6 +3076,9 @@
   function bindProductEvents(scope) {
     scope.root.addEventListener("click", (event) => {
       if (isElement(event.target)) onClick(scope, event, event.target);
+    });
+    scope.root.addEventListener("keydown", (event) => {
+      if (event.target instanceof window.HTMLElement) onKeydown(event, event.target);
     });
     scope.root.addEventListener("change", (event) => {
       const { target } = event;
@@ -3543,7 +3556,7 @@
   }
 
   // src/part-integrity.ts
-  var PART_INTEGRITY = { "tether.diagnose.js": "sha384-CqtXzvWbLD8aIgyTM43+KMXEFA7r7lhG+0XyQAw3Sp7B5qrzPsxlA9QfzBjoPqZz", "tether.markets.js": "sha384-WjowbRhM7OzzZOrCPZWSZqN7EjIiiR7u9cGmdI+9kgFVgmEQS8lVGWjgx+8jILOf", "tether.search.js": "sha384-fLQ7eKc5XOv0Cg2FfrZyeFAkRR4wDMjUWFpwvKrfPRnT2NvTuhKg80+KVu8Qce/G", "tether.lists.js": "sha384-l2uyr96zTetjo2WWhGsBamd1ZYkC3OB3G3+OScLEvxdok0c8k9GXLAh1WRALUr4S", "tether.extras.js": "sha384-/SMjz6qCFAOV0wwvEVNhQxtT/1pyx4hRxDJHOxHB6M3uclAvItSULKZqJvaehH+i", "tether.account.js": "sha384-XUPSX/7R9chq2KlQ1RzLiV7jYcWGe7o5tj4rLZMnf8MEa2aDOOCW2269Bj/ZkbmX", "tether.account-pages.js": "sha384-ND3kIaRypgnHG3QMDb8CqDxt7fuukDCdHsIAHoOUUsz3+FjvBqXgRDV4Mjp6x8jr", "tether.analytics.js": "sha384-jnLesn/+edWBSPuXLj7VX1kSAGwEqtb0VbHjuU//ofqgxkndHlDFsS8Bc8htlGt8" };
+  var PART_INTEGRITY = { "tether.diagnose.js": "sha384-CqtXzvWbLD8aIgyTM43+KMXEFA7r7lhG+0XyQAw3Sp7B5qrzPsxlA9QfzBjoPqZz", "tether.markets.js": "sha384-WjowbRhM7OzzZOrCPZWSZqN7EjIiiR7u9cGmdI+9kgFVgmEQS8lVGWjgx+8jILOf", "tether.search.js": "sha384-fLQ7eKc5XOv0Cg2FfrZyeFAkRR4wDMjUWFpwvKrfPRnT2NvTuhKg80+KVu8Qce/G", "tether.lists.js": "sha384-l2uyr96zTetjo2WWhGsBamd1ZYkC3OB3G3+OScLEvxdok0c8k9GXLAh1WRALUr4S", "tether.extras.js": "sha384-qx7paZ/rjwtn1Yy9TgszulmBuJsIQ9y4eZ590AArnZ+IDB8IzwJ5dNOFJ+yMHPdb", "tether.account.js": "sha384-XUPSX/7R9chq2KlQ1RzLiV7jYcWGe7o5tj4rLZMnf8MEa2aDOOCW2269Bj/ZkbmX", "tether.account-pages.js": "sha384-ND3kIaRypgnHG3QMDb8CqDxt7fuukDCdHsIAHoOUUsz3+FjvBqXgRDV4Mjp6x8jr", "tether.analytics.js": "sha384-jnLesn/+edWBSPuXLj7VX1kSAGwEqtb0VbHjuU//ofqgxkndHlDFsS8Bc8htlGt8" };
 
   // src/part-registry.ts
   function isTetherInternals(value) {
@@ -3551,7 +3564,7 @@
   }
 
   // src/version.ts
-  var VERSION = "0.9.4";
+  var VERSION = "0.9.5";
 
   // src/lazy-iife.ts
   var coreModules = {
@@ -3878,7 +3891,7 @@
     }
   }
   var hasValue = (target) => target instanceof window.HTMLInputElement || target instanceof window.HTMLTextAreaElement || target instanceof window.HTMLSelectElement;
-  function onKeydown(event) {
+  function onKeydown2(event) {
     if (!Cart.isOpen()) return;
     if (event.key === "Escape") {
       Cart.close();
@@ -3889,7 +3902,7 @@
   function bindCartControls() {
     document.addEventListener("click", onClick2);
     document.addEventListener("change", onChange2);
-    document.addEventListener("keydown", onKeydown);
+    document.addEventListener("keydown", onKeydown2);
   }
 
   // src/controls/discount.ts
@@ -3897,23 +3910,6 @@
   function codeInputOf(form) {
     const input = form.querySelector(sel("discount-input")) ?? form.querySelector("input");
     return input instanceof window.HTMLInputElement ? input : null;
-  }
-  function markInvalid(form, input, invalid) {
-    form.classList.toggle("is-invalid", invalid);
-    if (invalid) input?.setAttribute("aria-invalid", "true");
-    else input?.removeAttribute("aria-invalid");
-  }
-  async function applyCode(form, input, code) {
-    try {
-      await Cart.applyDiscount(code);
-      markInvalid(form, input, false);
-      emit("discount-applied", { code }, form);
-      if (input) input.value = "";
-    } catch (error) {
-      markInvalid(form, input, true);
-      if (error instanceof TetherError && error.code === "INVALID_DISCOUNT") emit("discount-invalid", { code }, form);
-      else reportError(error, "discount");
-    }
   }
   function onSubmit(event) {
     const { target } = event;
@@ -3923,7 +3919,11 @@
     const input = codeInputOf(form);
     const code = input?.value.trim();
     if (!code) return;
-    void busy(form, () => applyCode(form, input, code));
+    busy(form, () => loadPart("extras").then((part) => part.applyDiscountCode(form, input, code))).catch(
+      (error) => {
+        reportError(error, "discount");
+      }
+    );
   }
   function onInput(event) {
     const { target } = event;

@@ -36,7 +36,8 @@ export declare function show(el: HTMLElement, visible: boolean): void;
 /**
  * Marks an option element as chosen: `is-selected`, the ARIA state its role takes (`chosenState`), and its own or
  * inner radio/checkbox. An element that is no button and has no role of its own (a Webflow button is a link) gets
- * `role="button"`, where `aria-pressed` is valid.
+ * `role="button"`, where `aria-pressed` is valid, and a place in the Tab order unless it has its own `tabindex`; the
+ * product's events press it with Enter and Space.
  */
 export declare function setSelected(el: Element, selected: boolean): void;
 /**
