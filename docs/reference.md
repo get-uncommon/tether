@@ -239,10 +239,10 @@ iframes are kept only from YouTube (`www.youtube.com`, `www.youtube-nocookie.com
 Images accept `max-width`, `max-height`, `crop` for Shopify CDN resizing (or, as valid HTML,
 `tether-max-width` / `data-max-width`, and the same for the others).
 
-Classes Tether sets: option buttons get `is-selected` (+ `aria-pressed`) and `is-unavailable` when no
-available variant has that value with the other choices. Clicking an unavailable value picks the
-closest variant that has it and keeps the other choices where possible; a value no variant has is
-ignored. Add-to-cart gets `is-disabled` (+ `aria-disabled`, `disabled`) when the variant is sold out.
+Classes Tether sets: option buttons get `is-selected` (+ `aria-pressed`; a link or `div` option
+also gets `role="button"`, a radio or checkbox is `checked` instead) and `is-unavailable`
+(+ `aria-disabled`) when no available variant has that value with the other choices. Clicking an unavailable value picks the closest variant that has
+it and keeps the other choices where possible; a value no variant has is ignored. Add-to-cart gets `is-disabled` (+ `aria-disabled`, `disabled`) when the variant is sold out.
 The variant first selected is the one in `?variant=` / `tether-variant`, else the first available one.
 Cards: `price` is that variant's price; `min-price` shows "from" prices.
 
@@ -270,8 +270,8 @@ Products that can only be bought on a subscription (`requiresSellingPlan`): the 
 refused by Shopify.
 
 The product root gets class `is-subscription` and `tether-purchase-mode`. Selected buttons get
-`is-selected` + `aria-pressed`. Plans the current variant can't use get `is-unavailable`, and
-Tether switches to a plan the variant does have.
+`is-selected` + `aria-pressed`, as options do. Plans the current variant can't use get
+`is-unavailable` (+ `aria-disabled`), and Tether switches to a plan the variant does have.
 
 ### Conditions (`tether-show`)
 
@@ -375,7 +375,7 @@ Place these anywhere, typically in a drawer outside the Barba container.
 
 | Attribute                                                                                       |                                                                                                                                                                                                                                                                    |
 | ----------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `tether-cart-drawer`                                                                            | Gets `is-open` (`cartDrawerOpenClass`), dialog semantics, focus handling; closed it's `aria-hidden` and `inert`. Value `manual` = never auto-opened. `tether-cart-label` sets its label (default "Cart")                                                           |
+| `tether-cart-drawer`                                                                            | Gets `is-open` (`cartDrawerOpenClass`), dialog semantics, focus handling; closed it's `aria-hidden` and `inert`. Value `manual`: the site opens it (below). `tether-cart-label` sets its label (default "Cart")                                                    |
 | `tether-cart-open` (toggles), `tether-cart-close`                                               | Esc also closes                                                                                                                                                                                                                                                    |
 | `tether-cart-count`, `tether-cart-subtotal`, `tether-cart-total`, `tether-cart-checkout-charge` |                                                                                                                                                                                                                                                                    |
 | `tether-cart-lines`                                                                             | Keyed repeater; the first child is the line template                                                                                                                                                                                                               |
@@ -391,6 +391,11 @@ Place these anywhere, typically in a drawer outside the Barba container.
 | `tether-account-link`                                                                           | Links to Shopify's own account pages: the account, or `="subscriptions"` (`account.subscriptionsUrl`) and `="payment"` (`account.paymentUrl`) for what stays with Shopify ([accounts](accounts.md))                                                                |
 | `select[tether-country-select]`                                                                 | Country selector (Shopify Markets). `tether-country-label="{name} ({currency})"`                                                                                                                                                                                   |
 | `tether-country-bind`                                                                           | `name`, `code`, `currency`, `symbol` of the current country                                                                                                                                                                                                        |
+
+A `tether-cart-drawer="manual"` drawer is opened by the site: its own interaction adds the open
+class, and Tether follows the class (ARIA, `inert`, focus, `tether:cart-toggled`).
+`Tether.cart.open()`, `tether-cart-open` and an add to cart leave it closed; Esc,
+`tether-cart-close` and `Tether.cart.close()` close it by removing the class.
 
 ---
 
@@ -487,13 +492,13 @@ server helpers (`createStorefront()`, and `shop.config.js` with [Astro](astro.md
 | `sellingPlansFirst`        | `25`                       | Selling plans fetched per group, and plan allocations per variant, 1 to 250                                                                                                                                               |
 | `collectionFirst`          | `24`                       | Products per page of a [product list](#product-lists) without `tether-limit`, 1 to 250                                                                                                                                    |
 | `retries`                  | `2`                        | How often a failed request is sent again (see **Retries** below)                                                                                                                                                          |
-| `requestTimeout`           | `15000`                    | Milliseconds a Storefront API request may take, its whole answer included, before it fails as a network error, in every supported browser; `0` sets no limit (see **Retries** below)                                      |
+| `requestTimeout`           | `15000`                    | Milliseconds a Storefront API or account Worker request may take, its whole answer included, before it fails as a network error, in every supported browser; `0` sets no limit (see **Retries** below)                    |
 | `maxAge`                   | `60`                       | Seconds a Shopify answer may be cached; `0` leaves it to Shopify, which can be hours                                                                                                                                      |
 | `revalidate`               | `true`                     | Refreshes server-rendered products once in the background (see **Server-rendered products** below)                                                                                                                        |
 | `storageKey`               | `'<prefix>:cart:<domain>'` | The `localStorage` key of the cart id                                                                                                                                                                                     |
 | `cartDrawerOpenClass`      | `'is-open'`                | The class an open cart drawer gets: one class name, without spaces                                                                                                                                                        |
 | `openCartOnAdd`            | `true`                     | Opens the cart drawer after an add to cart                                                                                                                                                                                |
-| `cartFocus`                | `true`                     | Moves keyboard focus into the open cart drawer, keeps Tab inside it and returns focus on close                                                                                                                            |
+| `cartFocus`                | `true`                     | Moves keyboard focus into the open cart drawer, keeps Tab inside it and returns focus on close (a closed drawer is `inert` either way)                                                                                    |
 | `checkoutTarget`           | `'_self'`                  | `'_blank'` opens checkout in a new tab                                                                                                                                                                                    |
 | `defaultPurchase`          | `'one-time'`               | `'subscription'` starts a product with selling plans on its first plan ([Subscriptions](#subscriptions))                                                                                                                  |
 | `variantUrl`               | `false`                    | `?variant=` follows the visitor's choice on the page's main product                                                                                                                                                       |
@@ -597,7 +602,8 @@ too), and a `partsUrl` has to be https or on your own site.
 
 **Accessibility.** The cart drawer gets `role="dialog"`, `aria-modal` and a label (`tether-cart-label`
 to change it); opening moves focus into it, Tab stays inside, Escape closes it and returns focus.
-Cart buttons get `aria-expanded`, unavailable add-to-cart buttons `aria-disabled`.
+Closed, it is `aria-hidden` and `inert`. Cart buttons get `aria-expanded`; unavailable add-to-cart
+buttons and option values get `aria-disabled`.
 
 **Connection loss.** Products and lists that failed to load try again when the browser is back online.
 
@@ -672,15 +678,18 @@ TETHER_API_VERSION=2026-10 npm run smoke                        # try a newer Sh
 node scripts/api-version.ts --next                             # the next quarterly version
 ```
 
-**Releases:** write the `## X.Y.Z` section in `CHANGELOG.md`, then
+**Releases:** the notes of the next release are under `## Unreleased` at the top of
+`CHANGELOG.md`, where every pull request adds its lines. Then
 
 ```bash
 npm run release -- X.Y.Z --push
 ```
 
 It first checks that the `ci` workflow passed on GitHub for the commit it releases (through `gh`,
-which must be logged in). It bumps the version everywhere (packages, `VERSION`, the sync, README
-pins, `server/TETHER_VERSION` for a new minor), builds, refuses a release commit that changes
+which must be logged in), and that `## Unreleased` has notes. It bumps the version everywhere
+(packages, `VERSION`, the sync, README pins, `server/TETHER_VERSION` for a new minor), moves the
+notes into a `## X.Y.Z (YYYY-MM-DD)` section, dated with the day on the release machine's clock in
+its own time zone, under a new, empty `## Unreleased`, builds, refuses a release commit that changes
 anything else, runs the versions test and the live smoke test, commits, tags and pushes. The push
 goes through the pre-push hook, which for a push with a new tag runs `npm run check` and
 `npm run lint:workflows` locally: a release takes as long as that gate, and when the hook fails,
@@ -703,6 +712,15 @@ node --experimental-strip-types scripts/release.ts --rewrite-only X.Y.Z ../tethe
 cd ../tether-rehearsal && npm ci && npm run check
 cd - && npm run release -- X.Y.Z --push --rehearsed
 ```
+
+A released section stays as its tag has it, since the GitHub Release's notes are cut from the tag:
+`test/changelog.test.js` fails when a section in `CHANGELOG.md` differs from the same section in
+`git show vX.Y.Z:CHANGELOG.md`, for every release tag in the checkout (CI fetches them all), and when
+a heading other than the first `## Unreleased` isn't `## X.Y.Z (YYYY-MM-DD)`. A branch that was
+open across a release and merges it gets a conflict when its new lines start right under
+`## Unreleased`, where the release put the new section; lines it added further down merge into the
+released section without one, and that test then fails until they are moved back under
+`## Unreleased`.
 
 The `release` workflow then runs on the tag, in this order:
 
@@ -734,11 +752,11 @@ says the release is done and prints the command that does that step alone:
 
 **Maintenance releases:** a fix for an older minor line X.Y is released from its branch
 `release/X.Y`, made once from that line's last tag (`git push origin vX.Y.Z:refs/heads/release/X.Y`)
-and given `scripts/release.ts`, `scripts/release-version.ts`, `scripts/github-runs.ts`,
+and given `scripts/release.ts`, `scripts/release-version.ts`, `scripts/changelog.ts`, `scripts/github-runs.ts`,
 `.github/workflows/release.yml`, `.github/workflows/ci.yml` and
 `.github/workflows/release-rehearsal.yml` from main, since a tag runs the workflow at its own commit and a push to
 the branch runs its own `ci.yml`, whose passing run the release needs. Check out
-`origin/release/X.Y` and run the same command. The script also
+`origin/release/X.Y`, put the notes under its `## Unreleased` and run the same command. The script also
 records the release commit in main's history, by a merge commit that changes only main's
 `CHANGELOG.md`, and pushes the branch, main and the tag together. The release isn't GitHub's latest
 release, and goes to npm under the `latest-X.Y` dist-tag instead of `latest`.

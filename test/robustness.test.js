@@ -150,6 +150,14 @@ test('dynamic product page renders the product from ?handle=', async () => {
   assert.equal(document.title, 'Coffee Box | Shop');
 });
 
+test("tether-page-title puts the shop's text in as written, with no replacement patterns or placeholders read in it", async () => {
+  Tether.primeProduct({ ...product, handle: 'dollar-box', title: '$& $1 $$ {vendor} Box', vendor: "$' Roasters" });
+  document.body.innerHTML = page('dollar-box', 'tether-page-title="{title} by {vendor} ({type}) {unknown}"');
+  Tether.mount(document);
+  await waitForState('ready');
+  assert.equal(document.title, "$& $1 $$ {vendor} Box by $' Roasters (Coffee) {unknown}");
+});
+
 test('url:path takes the last path segment', async () => {
   go('https://site.test/shop/coffee-box');
   document.body.innerHTML = page('url:path');

@@ -325,7 +325,9 @@ export const Cart = {
    *
    * @throws {TetherError} `INVALID_DISCOUNT` (rejected) when Shopify doesn't accept the code.
    */
-  async applyDiscount(code: string): Promise<ShopifyCart | null> {
+  async applyDiscount(typed: string): Promise<ShopifyCart | null> {
+    // Shopify is sent the code trimmed (`discountCodesFrom`), so it is looked up and removed trimmed too.
+    const code = typed.trim();
     const cart = await Cart.setDiscountCodes((current) => [...new Set([...current, code])]);
     const wanted = code.toLowerCase();
     const applied = (cart?.discountCodes ?? []).find((discount) => discount.code.toLowerCase() === wanted);
@@ -339,7 +341,7 @@ export const Cart = {
   },
 
   removeDiscount(code: string): Promise<ShopifyCart | null> {
-    const unwanted = code.toLowerCase();
+    const unwanted = code.trim().toLowerCase();
     return Cart.setDiscountCodes((current) => current.filter((existing) => existing.toLowerCase() !== unwanted));
   },
 

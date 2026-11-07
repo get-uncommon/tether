@@ -1,7 +1,8 @@
 /**
  * The cart drawer: every `[tether-cart-drawer]` on the page opens and closes together, as a modal dialog. Focus moves
- * into the open cart, Tab stays inside it and focus returns on close (`cartFocus`). A page without a drawer (a cart
- * built in React, Svelte or Vue) still has an open state, for `Tether.cart.subscribe`.
+ * into the open cart, Tab stays inside it and focus returns on close (`cartFocus`). A `manual` drawer is opened by the
+ * site, with the open class, and Tether follows the class. A page without a drawer (a cart built in React, Svelte or
+ * Vue) still has an open state, for `Tether.cart.subscribe`.
  */
 import { cfg } from '../config.ts';
 import { sel, get, qsa, emit } from '../dom.ts';
@@ -15,8 +16,14 @@ const FOCUS_AFTER_OPEN_MS = 60;
 /** The open state of a page without a drawer element. */
 let openWithoutDrawer = false;
 
+/** The open state the page was last told about (`cart-toggled`, `onCartOpen`, `onCartClose`). */
+let announcedOpen = false;
+
 /** Where focus was before the cart opened. */
 let returnFocus: HTMLElement | null = null;
+
+/** Follows the open class on each drawer, so a `manual` drawer the site opens or closes itself is announced. */
+let classWatcher: MutationObserver | null = null;
 
 const isFocusable = (el: Element | null): el is HTMLElement => el !== null && 'focus' in el;
 
@@ -27,7 +34,12 @@ const focusables = (drawer: ParentNode): HTMLElement[] =>
 /** Every cart drawer on the page. */
 export const drawers = (): HTMLElement[] => qsa(document, sel('cart-drawer'));
 
+/** A drawer is open while it has the open class, whether Tether or, for a `manual` one, the site added it. */
 const isOpenDrawer = (drawer: HTMLElement) => drawer.classList.contains(cfg.cartDrawerOpenClass);
+
+const hasFocusInside = (all: HTMLElement[]) => all.some((drawer) => drawer.contains(document.activeElement));
+
+const isManual = (drawer: HTMLElement) => get(drawer, 'cart-drawer') === 'manual';
 
 /** True while a drawer, or the drawer-less cart, is open. */
 export function isOpen(): boolean {
@@ -35,23 +47,37 @@ export function isOpen(): boolean {
   return all.length ? all.some(isOpenDrawer) : openWithoutDrawer;
 }
 
+function watchOpenClass(drawer: HTMLElement): void {
+  classWatcher ??= new MutationObserver(() => {
+    const open = isOpen();
+    if (open === announcedOpen) return;
+    const all = drawers();
+    if (open) announceOpen(all.filter(isOpenDrawer));
+    else announceClosed(all, hasFocusInside(all));
+  });
+  // Observing a drawer again only replaces the options.
+  classWatcher.observe(drawer, { attributes: true, attributeFilter: ['class'] });
+}
+
 /**
- * `aria-expanded` on the open buttons, and dialog semantics on the drawers unless their markup has its own. A closed
- * drawer is hidden from screen readers and, with `cartFocus`, out of the Tab order (inert), like a closed dialog.
+ * `aria-expanded` on the open buttons, and dialog semantics on the drawers unless their markup has its own. Each
+ * drawer follows its own open class: a closed one is hidden from screen readers and inert, out of the Tab order like
+ * a closed dialog, so nothing `aria-hidden` can take focus.
  */
-export function syncDrawerAria(open: boolean): void {
+export function syncDrawerAria(): void {
   qsa(document, sel('cart-open')).forEach((button) => {
-    button.setAttribute('aria-expanded', String(open));
+    button.setAttribute('aria-expanded', String(isOpen()));
   });
   drawers().forEach((drawer) => {
     if (!drawer.hasAttribute('role')) drawer.setAttribute('role', 'dialog');
     if (!drawer.hasAttribute('aria-label') && !drawer.hasAttribute('aria-labelledby')) {
       drawer.setAttribute('aria-label', get(drawer, 'cart-label') || 'Cart');
     }
+    const open = isOpenDrawer(drawer);
     drawer.setAttribute('aria-modal', String(open));
-    if (isOpenDrawer(drawer)) return;
-    drawer.setAttribute('aria-hidden', 'true');
-    if (cfg.cartFocus) drawer.inert = true;
+    drawer.setAttribute('aria-hidden', String(!open));
+    drawer.inert = !open;
+    watchOpenClass(drawer);
   });
 }
 
@@ -61,17 +87,9 @@ function focusInto(drawer: HTMLElement) {
   target.focus({ preventScroll: true });
 }
 
-/** Opens every drawer except `tether-cart-drawer="manual"` ones, which the site opens itself. */
-export function openCart(): void {
-  if (isOpen()) return;
-  openWithoutDrawer = true;
-  const opened = drawers().filter((drawer) => get(drawer, 'cart-drawer') !== 'manual');
-  opened.forEach((drawer) => {
-    drawer.inert = false;
-    drawer.classList.add(cfg.cartDrawerOpenClass);
-    drawer.setAttribute('aria-hidden', 'false');
-  });
-  syncDrawerAria(true);
+function announceOpen(opened: HTMLElement[]): void {
+  announcedOpen = true;
+  syncDrawerAria();
   const [first] = opened;
   if (cfg.cartFocus && first) {
     returnFocus = isFocusable(document.activeElement) ? document.activeElement : null;
@@ -83,21 +101,42 @@ export function openCart(): void {
   emit('cart-toggled', { open: true });
 }
 
-export function closeCart(): void {
-  if (!isOpen()) return;
-  openWithoutDrawer = false;
-  const all = drawers();
-  const hadFocus = all.some((drawer) => drawer.contains(document.activeElement));
-  all.forEach((drawer) => {
-    drawer.classList.remove(cfg.cartDrawerOpenClass);
-    drawer.setAttribute('aria-hidden', 'true');
-    if (cfg.cartFocus) drawer.inert = true;
-  });
-  syncDrawerAria(false);
+/** @param hadFocus Whether focus was inside a drawer as it closed, so it goes back to where it was before. */
+function announceClosed(all: HTMLElement[], hadFocus: boolean): void {
+  announcedOpen = false;
+  syncDrawerAria();
   if (hadFocus && returnFocus?.isConnected) returnFocus.focus({ preventScroll: true });
   returnFocus = null;
   cfg.onCartClose?.(all);
   emit('cart-toggled', { open: false });
+}
+
+/**
+ * Opens every drawer but `tether-cart-drawer="manual"` ones, which only the site opens, by adding the open class. On a
+ * page whose drawers are all manual it does nothing.
+ */
+export function openCart(): void {
+  if (isOpen()) return;
+  const all = drawers();
+  const opened = all.filter((drawer) => !isManual(drawer));
+  if (all.length && !opened.length) return;
+  openWithoutDrawer = true;
+  opened.forEach((drawer) => {
+    drawer.classList.add(cfg.cartDrawerOpenClass);
+  });
+  announceOpen(opened);
+}
+
+/** Closes every open drawer, `manual` ones included. */
+export function closeCart(): void {
+  if (!isOpen()) return;
+  openWithoutDrawer = false;
+  const all = drawers();
+  const hadFocus = hasFocusInside(all);
+  all.forEach((drawer) => {
+    drawer.classList.remove(cfg.cartDrawerOpenClass);
+  });
+  announceClosed(all, hadFocus);
 }
 
 export function toggleCart(): void {

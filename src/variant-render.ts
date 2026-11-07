@@ -2,7 +2,19 @@
  * The DOM writes of a product scope that follow the visitor's choice, on every change: `product-state.ts`'s view as
  * text, selected and unavailable states, `tether-show` conditions and the add-to-cart buttons.
  */
-import { attr, sel, get, qsa, formatMoney, formatPercent, setText, setImage, setSelected, show } from './dom.ts';
+import {
+  attr,
+  sel,
+  get,
+  qsa,
+  formatMoney,
+  formatPercent,
+  setText,
+  setImage,
+  setSelected,
+  setUnavailable,
+  show,
+} from './dom.ts';
 import { STATUS_KEYS, ownedBy } from './status.ts';
 import { allocationFor } from './selling-plans.ts';
 import { isValueAvailable, planBindTexts, variantBindTexts } from './product-state.ts';
@@ -37,7 +49,7 @@ function renderOptionStates(scope: RenderScope, view: ProductView): void {
       const value = get(node, 'option-value') ?? '';
       setSelected(node, view.selected[name] === value);
       const unavailable = !isValueAvailable(product, view.selected, name, value);
-      node.classList.toggle('is-unavailable', unavailable);
+      setUnavailable(node, unavailable);
       node.setAttribute('data-unavailable', unavailable ? 'true' : 'false');
     });
   });
@@ -61,13 +73,12 @@ function renderPurchaseStates(scope: RenderScope, view: ProductView): void {
     }
     const mode = get(el, 'purchase');
     setSelected(el, mode === purchase.kind);
-    const unavailable = mode === 'subscription' ? !view.subscriptionAvailable : scope.product.requiresSellingPlan;
-    el.classList.toggle('is-unavailable', unavailable);
+    setUnavailable(el, mode === 'subscription' ? !view.subscriptionAvailable : scope.product.requiresSellingPlan);
   });
   scope.$(sel('plan-value')).forEach((node) => {
     const planId = get(node, 'plan-value') ?? '';
     setSelected(node, line.kind === 'subscription' && planId === line.planId);
-    node.classList.toggle('is-unavailable', !allocationFor(variant, planId));
+    setUnavailable(node, !allocationFor(variant, planId));
     const plan = scope.plans.find((candidate) => candidate.id === planId);
     const texts = planBindTexts(variant, planId, plan, FORMAT);
     qsa(node, sel('plan-bind')).forEach((el) => {

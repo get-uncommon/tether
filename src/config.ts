@@ -230,32 +230,44 @@ export const DEFAULTS: Readonly<TetherConfig> = {
 
 export const cfg: TetherConfig = { ...DEFAULTS };
 
+function refuseChange(key: string | symbol): false {
+  warn(`Tether.config is read-only (${String(key)}): pass options to Tether.init() instead`);
+  return false;
+}
+
+/** Each config object's read-only view, made once, so reading the same object twice gives the same view. */
+const readOnlyViews = new WeakMap<object, object>();
+
 /**
- * @returns A view of `target` and the objects in it that reads the live values and refuses every change: a write
- *   throws in strict-mode code (as on a frozen object) and warns in any code.
+ * Reads the live values, each object among them through its own view, and refuses every change: a write throws in
+ * strict-mode code (as on a frozen object) and warns in any code.
  */
-function readOnlyView<T extends object>(target: T): T {
-  const refuse = (key: string | symbol) => {
-    warn(`Tether.config is read-only (${String(key)}): pass options to Tether.init() instead`);
-    return false;
-  };
-  return new Proxy(target, {
-    get(object, key) {
-      const value: unknown = Reflect.get(object, key);
-      // The config's objects are its own copies (`resolveConfig`), never frozen, so a view of each is allowed.
-      return typeof value === 'object' && value !== null ? readOnlyView(value) : value;
-    },
-    set: (_object, key) => refuse(key),
-    deleteProperty: (_object, key) => refuse(key),
-    defineProperty: (_object, key) => refuse(key),
-  });
+const READ_ONLY: ProxyHandler<object> = {
+  get(object, key) {
+    const value: unknown = Reflect.get(object, key);
+    // The config's objects are its own copies (`resolveConfig`), never frozen, so a view of each is allowed.
+    return typeof value === 'object' && value !== null ? readOnlyView(value) : value;
+  },
+  set: (_object, key) => refuseChange(key),
+  deleteProperty: (_object, key) => refuseChange(key),
+  defineProperty: (_object, key) => refuseChange(key),
+};
+
+/** @returns The read-only view of `target`, the same one on every call. */
+function readOnlyView(target: object): object {
+  let view = readOnlyViews.get(target);
+  if (!view) {
+    view = new Proxy(target, READ_ONLY);
+    readOnlyViews.set(target, view);
+  }
+  return view;
 }
 
 /**
  * `cfg` as `Tether.config` shows it. A value written there would skip the validation `configure()` does, so the view
  * is read-only; `Tether.init(options)` is how a site changes the config.
  */
-export const configView = readOnlyView(cfg);
+export const configView = new Proxy<TetherConfig>(cfg, READ_ONLY);
 
 /** The prefix becomes part of attribute names, CSS selectors and event names, so it is kept to those characters. */
 const PREFIX = /^[a-z][a-z0-9-]*$/;

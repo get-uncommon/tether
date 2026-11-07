@@ -179,3 +179,74 @@ test('a failed search sets the error state and reaches onError', async () => {
   assert.equal(root.getAttribute('tether-search-state'), 'error');
   assert.deepEqual(errors, ['search']);
 });
+
+test('new results clear aria-activedescendant: no option is selected in them', async () => {
+  const root = find('[tether-search]');
+  const input = root.querySelector('input');
+  assert.ok(input);
+  type(input, 'cof');
+  await waitFor(() => root.getAttribute('tether-search-state') === 'ready', 'the results');
+  input.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+  input.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+  assert.ok(input.hasAttribute('aria-activedescendant'));
+  root.removeAttribute('tether-search-state');
+  type(input, 'coff');
+  await waitFor(() => root.getAttribute('tether-search-state') === 'ready', 'the new results');
+  assert.equal(input.hasAttribute('aria-activedescendant'), false);
+  assert.deepEqual(
+    [...root.querySelectorAll('[role="option"]')].map((option) => option.getAttribute('aria-selected')),
+    ['false', 'false'],
+  );
+});
+
+/**
+ * Records the signal of each `document` click listener `run` adds.
+ *
+ * @param {() => void} run
+ * @returns {AbortSignal[]}
+ */
+function clickListenerSignals(run) {
+  const spy = mock.method(document, 'addEventListener');
+  try {
+    run();
+  } finally {
+    spy.mock.restore();
+  }
+  return spy.mock.calls.flatMap(({ arguments: [name, , options] }) =>
+    name === 'click' && typeof options === 'object' && options.signal ? [options.signal] : [],
+  );
+}
+
+/** @param {AbortSignal[]} signals */
+const stopped = (signals) => signals.map((signal) => signal.aborted);
+
+test('a search box a page swap removed stops listening on document; one that comes back mounts again', () => {
+  document.body.innerHTML = markup;
+  const first = find('[tether-search]');
+  const [firstSignal] = clickListenerSignals(() => {
+    mountSearch(document);
+  });
+  assert.ok(firstSignal);
+  document.body.innerHTML = markup;
+  const [secondSignal] = clickListenerSignals(() => {
+    mountSearch(document);
+  });
+  assert.ok(secondSignal, 'the new page has its own box');
+  assert.deepEqual(stopped([firstSignal, secondSignal]), [true, false], 'the swapped-out box no longer listens');
+  document.body.replaceChildren(first);
+  const [thirdSignal] = clickListenerSignals(() => {
+    mountSearch(document);
+  });
+  assert.ok(thirdSignal, 'the box that comes back mounts afresh');
+  assert.deepEqual(stopped([secondSignal, thirdSignal]), [true, false]);
+});
+
+test('a click after a page swap stops a box no mount has pruned yet', () => {
+  document.body.innerHTML = markup;
+  const signals = clickListenerSignals(() => {
+    mountSearch(document);
+  });
+  document.body.innerHTML = '<p>A page without search</p>';
+  find('p').click();
+  assert.deepEqual(stopped(signals), [true]);
+});

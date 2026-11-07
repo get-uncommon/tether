@@ -5,7 +5,7 @@
  * `window.Tether.__parts` and uses the core modules in `window.Tether.__core` instead of bundling copies.
  */
 import { cfg, isConfigured, log, MARKET_SOURCES, parseMarkets, reportError, warn } from './config.ts';
-import { endpoint, gql, matches, orNull, shaped, TetherError } from './client.ts';
+import { endpoint, gql, matches, orNull, shaped, TetherError, withTimeout } from './client.ts';
 import {
   ANALYTICS_EVENTS,
   attr,
@@ -60,7 +60,7 @@ export const coreModules = {
     return [cfg, isConfigured, log, MARKET_SOURCES, parseMarkets, reportError, warn];
   },
   get 'client.ts'() {
-    return [endpoint, gql, matches, orNull, shaped, TetherError];
+    return [endpoint, gql, matches, orNull, shaped, TetherError, withTimeout];
   },
   get 'dom.ts'() {
     return [

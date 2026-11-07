@@ -1,4 +1,4 @@
-// The cart on its own: status, queue, expired carts, failed changes and checkout.
+// The cart on its own: status, queue, expired carts, failed changes and discount codes.
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
@@ -386,53 +386,6 @@ test('isCartGone: the network, the token and other errors keep the saved cart', 
   assert.equal(isCartGone(new TetherError('x', { userErrors: [{ field: ['cartId'], message: 'x' }] })), true);
 });
 
-test('checkout: a failing account step is reported and Shopify checkout is used instead', async () => {
-  await loadSaved(oneLine());
-  answers['TetherCheckout'] = () => ({ data: { cart: { checkoutUrl: 'https://shop.test/checkouts/1' } } });
-  Cart.setCheckoutResolver(async () => {
-    throw new Error('account server down');
-  });
-  /** @type {string[]} */
-  const urls = [];
-  document.addEventListener('tether:checkout', (event) => urls.push(stringAt(detailOf(event), 'url')), { once: true });
-  const url = await Cart.checkout('_self');
-  assert.equal(url, 'https://shop.test/checkouts/1');
-  assert.deepEqual(urls, [url]);
-  assert.deepEqual(
-    reported.map((report) => report.context),
-    ['account checkout'],
-  );
-});
-
-test("checkout: the account's URL wins, and the cart's unneeded request failing is not a failure", async () => {
-  await loadSaved(oneLine());
-  answers['TetherCheckout'] = () => ({ errors: [{ message: 'Internal error' }] });
-  Cart.setCheckoutResolver(async () => 'https://shop.test/checkouts/c/2?key=k');
-  const url = await Cart.checkout('_self');
-  assert.equal(url, 'https://shop.test/checkouts/c/2?key=k&logged_in=true');
-  assert.equal(reported.length, 0);
-});
-
-test("checkout: null from the account uses the cart's URL, without the login parameter", async () => {
-  await loadSaved(oneLine());
-  answers['TetherCheckout'] = () => ({ data: { cart: { checkoutUrl: 'https://shop.test/checkouts/1' } } });
-  Cart.setCheckoutResolver(async () => null);
-  assert.equal(await Cart.checkout('_self'), 'https://shop.test/checkouts/1');
-  Cart.setCheckoutResolver(null);
-  assert.equal(await Cart.checkout('_self'), 'https://shop.test/checkouts/1', 'cleared: the cart decides');
-  assert.equal(reported.length, 0);
-});
-
-test('checkout: without any checkout URL the failure is reported and nothing opens', async () => {
-  await loadSaved(oneLine());
-  answers['TetherCheckout'] = () => ({ errors: [{ message: 'Internal error' }] });
-  assert.equal(await Cart.checkout('_self'), null);
-  assert.deepEqual(
-    reported.map((report) => report.context),
-    ['checkout failed'],
-  );
-});
-
 test('applyDiscount: a refused code is removed again; a failed removal is reported, the rejection says why', async () => {
   localStorage.setItem(KEY, 'gid://shopify/Cart/abc');
   let removals = 0;
@@ -454,6 +407,23 @@ test('applyDiscount: a refused code is removed again; a failed removal is report
     reported.map((report) => report.context),
     ['removing a discount code Shopify refused'],
   );
+});
+
+test('applyDiscount and removeDiscount take a code with spaces around it as the code', async () => {
+  await loadSaved(oneLine());
+  /** @type {string[][]} */
+  const sent = [];
+  answers['Tether_cartDiscountCodesUpdate'] = (variables) => {
+    const codes = listAt(variables, 'discountCodes').map((code, i) => asString(code, `discountCodes[${i}]`));
+    sent.push(codes);
+    const discountCodes = codes.map((code) => ({ code: code.toUpperCase(), applicable: true }));
+    return payload('cartDiscountCodesUpdate', { ...oneLine(), discountCodes });
+  };
+  const cart = await Cart.applyDiscount(' save10 ');
+  assert.deepEqual(cart?.discountCodes, [{ code: 'SAVE10', applicable: true }]);
+  await Cart.removeDiscount(' SAVE10 ');
+  assert.deepEqual(sent, [['save10'], []]);
+  assert.equal(reported.length, 0);
 });
 
 test('lastError is read-only: the store decides it', () => {

@@ -301,6 +301,18 @@ test('Tether.config shows the live config and refuses writes, which would skip v
   assert.equal(configView.domain, 'other.test', 'a view, not a copy');
 });
 
+test('Tether.config gives the same view of an object on every read, and a new one when configure() replaces it', async () => {
+  const { configView } = await import('../src/config.ts');
+  quietly(() => configure({ domain: 'shop.test', markets: { detect: ['saved'] } }));
+  const markets = configView.markets;
+  assert.equal(configView.markets, markets);
+  assert.equal(configView.markets?.detect, markets?.detect);
+  quietly(() => configure({ markets: { detect: ['server'] } }));
+  assert.notEqual(configView.markets, markets);
+  assert.deepEqual(configView.markets?.detect, ['server']);
+  assert.equal(configView.markets, configView.markets);
+});
+
 test("docs/reference.md's Config table has a row for every option and every field of a nested one", async () => {
   const { ACCOUNT, ANALYTICS, MARKETS } = await import('../src/config-sections.ts');
   const reference = await readFile(new URL('../docs/reference.md', import.meta.url), 'utf8');

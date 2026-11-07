@@ -53,10 +53,14 @@ export function within(root: ParentNode & Partial<Pick<Element, 'matches'>>, sel
 function applyPageTitle(el: Element, product: Product): void {
   const template = get(el, 'page-title');
   if (!template || typeof document === 'undefined') return;
-  document.title = template
-    .replace(/\{title\}/g, product.title)
-    .replace(/\{vendor\}/g, product.vendor || '')
-    .replace(/\{type\}/g, product.productType || '');
+  const fields = new Map([
+    ['title', product.title],
+    ['vendor', product.vendor || ''],
+    ['type', product.productType || ''],
+  ]);
+  // One pass with a function replacer, so the shop's text goes in as written: no `$&` or `$$` in it is read as a
+  // pattern, and no `{vendor}` inside a title is filled in. An unknown `{name}` stays as it is.
+  document.title = template.replace(/\{(\w+)\}/g, (placeholder, name: string) => fields.get(name) ?? placeholder);
 }
 
 /**
