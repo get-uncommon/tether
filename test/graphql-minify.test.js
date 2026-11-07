@@ -33,3 +33,12 @@ test('a template nested in a non-GraphQL template is still found', () => {
   const code = 'const s = `x ${f(`{ cart { id } }`)} y`;';
   assert.equal(minifyGraphqlTemplates(code), 'const s = `x ${f(`{cart{id}}`)} y`;');
 });
+
+test('a fragment spread and a field list that starts with id are GraphQL too', () => {
+  const spread = 'const q = `h: product(handle: $h) { ...TetherProduct }`;';
+  assert.equal(minifyGraphqlTemplates(spread), 'const q = `h:product(handle:$h){...TetherProduct}`;');
+  const fields = 'const q = `\n  id handle\n  seo { title }`;';
+  assert.equal(minifyGraphqlTemplates(fields), 'const q = ` id handle seo{title}`;');
+  const message = 'const s = `Store not found (404): check ${domain}`;';
+  assert.equal(minifyGraphqlTemplates(message), message, 'a message is left as written');
+});

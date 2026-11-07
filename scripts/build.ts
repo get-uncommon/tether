@@ -26,7 +26,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const SRC = join(ROOT, 'src');
 const watch = process.argv.includes('--watch');
 const outIndex = process.argv.indexOf('--out');
-const OUT = join(ROOT, outIndex === -1 ? 'dist' : (process.argv[outIndex + 1] ?? 'dist'));
+const OUT = resolve(ROOT, outIndex === -1 ? 'dist' : (process.argv[outIndex + 1] ?? 'dist'));
 const TARGET = 'es2020';
 const BYTES_PER_KB = 1024;
 const GZIP_LEVEL = 9;

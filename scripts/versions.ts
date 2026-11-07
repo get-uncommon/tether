@@ -21,7 +21,7 @@ interface VersionCopy {
 
 export const VERSION_COPIES: readonly VersionCopy[] = [
   { file: 'server/package.json', pattern: PACKAGE_VERSION, written: (version) => `"version": "${version}"` },
-  { file: 'src/index.ts', pattern: VERSION_CONSTANT, written: (version) => `export const VERSION = '${version}';` },
+  { file: 'src/version.ts', pattern: VERSION_CONSTANT, written: (version) => `export const VERSION = '${version}';` },
   {
     file: 'server/src/version.ts',
     pattern: VERSION_CONSTANT,

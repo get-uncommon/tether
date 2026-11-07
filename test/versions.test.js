@@ -25,7 +25,7 @@ test('the release writes the package.json version into every copy', async () => 
   assert.equal((await versionMismatches(copy)).length, VERSION_COPIES.length);
   assert.equal(await syncVersions(copy), '9.8.7');
   assert.deepEqual(await versionMismatches(copy), []);
-  assert.match(await readFile(join(copy, 'src/index.ts'), 'utf8'), /export const VERSION = '9\.8\.7';/);
+  assert.match(await readFile(join(copy, 'src/version.ts'), 'utf8'), /export const VERSION = '9\.8\.7';/);
 });
 
 test("the Astro starter's lockfile locks what its package.json asks for, so npm ci works in it", async () => {

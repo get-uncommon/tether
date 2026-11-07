@@ -548,8 +548,10 @@ the elements added later are read and mounted on their own, once per burst of ad
 which is what most sites want. To pin exactly what runs, load a fixed release (`@vX.Y.Z`, a tag from
 the [Releases](https://github.com/ravi-klaassens/tether/releases)) and add the file's
 [`integrity`](https://www.srihash.org/) hash to the script tag (an `integrity` hash on `@X.Y` breaks
-with the next fix). The optional parts load from the same folder as the core, or from `partsUrl`,
-and are always checked against hashes built into the core, so a core runs only the parts of its own
+with the next fix). The optional parts load from the core's own release folder, or from
+`partsUrl`: a core loaded through a jsDelivr alias (`@X.Y`, `@latest` or no version) loads them from
+its exact release (`@vX.Y.Z`, or `@X.Y.Z` for npm), so a cached core never meets a newer part. They
+are always checked against hashes built into the core, so a core runs only the parts of its own
 release. A `partsUrl` therefore has to serve the files of the same release as the core: upload the
 whole folder of that release (every `tether.*.js` from its GitHub Release or `dist/`) and replace it
 together with the core. The browser refuses a part from another release, so it fails to load.

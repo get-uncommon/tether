@@ -194,7 +194,7 @@ export async function fetchCart(id: string): Promise<ShopifyCart | null> {
 /** @returns The cart's current checkout URL, `null` when Shopify doesn't have the cart. */
 export async function fetchCheckoutUrl(id: string): Promise<string | null> {
   const data = await gql(
-    'query TetherCheckout($id: ID!) { cart(id: $id) { checkoutUrl } }',
+    `query TetherCheckout($id: ID!) { cart(id: $id) { checkoutUrl } }`,
     { id },
     shaped<{ cart: { checkoutUrl: string } | null }>({ cart: orNull({ checkoutUrl: 'string' }) }),
   );

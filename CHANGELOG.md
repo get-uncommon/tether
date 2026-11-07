@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.8.1 (unreleased)
+
+- Fix (script tag): a core loaded through a jsDelivr version alias (`@0.8`, `@0`, `@latest` or no
+  version, in the `gh/` or the `npm/` form) loads its optional parts from its exact release folder
+  (`@v0.8.1`, or `@0.8.1` for npm) instead of the alias. jsDelivr caches each alias URL on its own
+  for up to 7 days, so after a release the cached core and a cached part could come from different
+  releases: the part failed its integrity check, and search, markets, customer accounts, analytics
+  and `Tether.diagnose()` stopped working. Sites on `@0.7` and `@latest` could hit it after 0.7.1,
+  0.7.2 and 0.8.0, and sites on `@0.8` from 0.8.1 on. Nothing to update: the fixed core does it.
+  Exact URLs (`@v0.8.1`), self-hosted copies and `partsUrl` load parts as before.
+- Each release purges jsDelivr's alias URLs for its files (`@X.Y`, and for the newest release `@X`,
+  `@latest` and no version), so they serve the new release within minutes instead of days.
+
+  What remains: a browser's own cache of a range URL can still pair an older core with a newer part
+  until that cached core expires. A part whose source didn't change is byte-for-byte the same in the
+  next release (parts carry no version), so it keeps its hash and an older core still loads it; only
+  a part that changed in the release fails for such a visitor, until the browser fetches the core
+  again. 0.8.1 changes no part, so 0.8.0 cores keep working with it. Every core from 0.8.1 on avoids
+  this entirely, by loading its exact folder.
+
 ## 0.8.0 (2026-11-06)
 
 A minor release because `Tether.query()`'s types changed (below); nothing else breaks.
