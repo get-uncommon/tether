@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.9.3 (unreleased)
+## 0.9.3 (2026-11-07)
 
 - Fix: `imagesFirst`, `variantsFirst`, `sellingPlanGroupsFirst`, `sellingPlansFirst` and
   `collectionFirst` take an integer from 1 to 250. A larger one warns and uses 250 instead of

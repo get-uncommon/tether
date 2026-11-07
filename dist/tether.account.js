@@ -35,7 +35,7 @@
 
   // tether-core:dom.ts
   var m3 = window.Tether.__core["dom.ts"];
-  var [ANALYTICS_EVENTS, attr, attributesFromJson, busy, emit, formatDate, formatMoney, get, has, hasTemplate, isOwnEvent, notifyLayoutChanged, parseJSONAttr, productUrl, qsa, repeat, scoped, sel, setImage, setStoreHtml, setText, show] = m3;
+  var [ANALYTICS_EVENTS, attr, attributesFromJson, busy, emit, formatDate, formatMoney, get, has, hasTemplate, integerAttribute, isOwnEvent, notifyLayoutChanged, parseJSONAttr, productUrl, qsa, repeat, scoped, sel, setImage, setStoreHtml, setText, show] = m3;
 
   // tether-core:cart.ts
   var m4 = window.Tether.__core["cart.ts"];
@@ -254,7 +254,7 @@
 
   // tether-core:shopify-values.ts
   var m6 = window.Tether.__core["shopify-values.ts"];
-  var [isHttpsUrl] = m6;
+  var [isHttpsUrl, MAX_CONNECTION_SIZE] = m6;
 
   // src/account/markup.ts
   function showIn(root, name, conditions) {
@@ -317,10 +317,7 @@
   var DEFAULT_ORDER_COUNT = 10;
   var MAX_ORDER_COUNT = 50;
   var isOrderCount = (value) => typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= MAX_ORDER_COUNT;
-  function listLimit(limit) {
-    const asked = Number.parseInt(limit || String(DEFAULT_ORDER_COUNT), 10) || DEFAULT_ORDER_COUNT;
-    return Math.min(Math.max(asked, 1), MAX_ORDER_COUNT);
-  }
+  var listLimit = (list) => integerAttribute(list, "limit", { min: 1, max: MAX_ORDER_COUNT, fallback: DEFAULT_ORDER_COUNT });
   var numericId = (gid) => gid.replace(/\?.*$/, "").replace(/^.*\//, "");
   function orderUrl(order2) {
     const template = cfg.account?.orderUrl;
@@ -364,7 +361,7 @@
     const first = lists[0];
     if (!first) return;
     showIn(root, "show", { "orders-loading": true, "orders-empty": false });
-    const limit = listLimit(get(first, "limit"));
+    const limit = listLimit(first);
     let orders2;
     try {
       orders2 = await loadOrders(limit);

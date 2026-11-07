@@ -58,6 +58,18 @@ export declare function watchImages(root: ParentNode, reason: string): void;
 export declare function busy<T>(el: Element, task: () => T | Promise<T>): Promise<T | undefined>;
 /** @returns The attribute's JSON, `null` when it is missing or not JSON (with a warning). */
 export declare function parseJSONAttr(el: Element | null | undefined, name: string): unknown;
+/** The integers a count attribute takes, and the value it has when it is missing or invalid. */
+interface IntegerRange {
+    min: number;
+    max?: number;
+    fallback: number;
+}
+/**
+ * Parses a count attribute with the config's count-option rules: an integer above `max` is the site asking for as
+ * much as there is, so it gets `max`; a missing or empty attribute is `fallback`, and so, with a warning, is one that
+ * isn't an integer or is below `min`. An element warns once per attribute.
+ */
+export declare function integerAttribute(el: Element, name: string, { min, max, fallback }: IntegerRange): number;
 export type AttributeValue = string | number | boolean | null | undefined;
 /**
  * `tether-line-attributes`, JSON the site writes: `{ a: 1 }` or `[{ key, value }]`. An array entry that isn't an
