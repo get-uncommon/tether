@@ -17,7 +17,7 @@
 
   // tether-core:dom.ts
   var m2 = window.Tether.__core["dom.ts"];
-  var [ANALYTICS_EVENTS, attr, attributesFromJson, busy, emit, formatDate, formatMoney, get, has, hasTemplate, integerAttribute, isElement, isOwnEvent, notifyLayoutChanged, parseJSONAttr, productUrl, qsa, repeat, scoped, sel, setImage, setStoreHtml, setText, show] = m2;
+  var [ANALYTICS_EVENTS, attr, attributesFromJson, busy, emit, formatDate, formatMoney, get, has, hasTemplate, integerAttribute, isElement, isField, isOwnEvent, notifyLayoutChanged, parseJSONAttr, productUrl, qsa, repeat, scoped, sel, setImage, setStoreHtml, setText, show] = m2;
 
   // tether-core:cart.ts
   var m3 = window.Tether.__core["cart.ts"];
@@ -240,6 +240,7 @@
   var lastLines = null;
   var lastCart = null;
   var viewed = /* @__PURE__ */ new WeakSet();
+  var viewedBody = null;
   function send(name, data, shopifyEvent, shopifyPayload) {
     if (cfg.analytics?.dataLayer) pushToDataLayer(name, data);
     if (bus && shopifyEvent) bus.publish(shopifyEvent, shopifyPayload);
@@ -332,10 +333,15 @@
   function report(event, name) {
     REPORTERS[name](event.detail);
   }
+  function publishPageView() {
+    viewedBody = document.body;
+    bus?.publish("page_viewed", {});
+  }
   function handle(event) {
     if (event.type === "astro:page-load") {
+      if (viewedBody === document.body) return;
       viewed = /* @__PURE__ */ new WeakSet();
-      bus?.publish("page_viewed", {});
+      publishPageView();
       return;
     }
     ANALYTICS_EVENTS.forEach((name) => {
@@ -349,7 +355,7 @@
         return null;
       });
     }
-    bus?.publish("page_viewed", {});
+    publishPageView();
     queue.splice(0).forEach(handle);
     queue.push = (...events) => {
       events.forEach(handle);

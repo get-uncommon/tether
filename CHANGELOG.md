@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.10.2 (2026-11-07)
+
+- Fix: A `tether-form-error` on the account pages gets `role="alert"` when it has no role of its
+  own, so screen readers announce Shopify's message when a profile, address, subscription or return
+  change fails. It looks the same.
+- Fix: With `analytics.shopify` on an Astro site with the ClientRouter, the landing page sends
+  Shopify one `page_viewed` instead of two: Astro's `astro:page-load` for the page Tether started on
+  no longer counts as a second view. Client-side navigations still each send one.
+- Repository: the browser test of Shopify's analytics asserts that nothing is sent before the
+  visitor's consent and that events go out after it, and a unit test covers the analytics bus's
+  consent gating, buffer and replay for each consent state.
+- Repository: the test of the built script also runs the account, account pages, search, extras and
+  analytics parts after terser against the built core, each loaded with the integrity hash of its
+  file.
+- Repository: `npm run dev` rebuilds each `<script>` core until it carries the hashes of the part
+  files as they are, since esbuild's `rebuild()` joins a build already running, which may have read
+  a part file before the part rewrote it. A part rebuilds only the core of its kind, and part files
+  are written through a temporary file renamed into place, which the next build's folder check
+  accepts when an interrupted run leaves it.
+
 ## 0.10.1 (2026-11-07)
 
 - Size: the minified `<script>` files are smaller, with the same behaviour: the build passes them

@@ -27,7 +27,7 @@
 
   // tether-core:dom.ts
   var m2 = window.Tether.__core["dom.ts"];
-  var [ANALYTICS_EVENTS, attr, attributesFromJson, busy, emit, formatDate, formatMoney, get, has, hasTemplate, integerAttribute, isElement, isOwnEvent, notifyLayoutChanged, parseJSONAttr, productUrl, qsa, repeat, scoped, sel, setImage, setStoreHtml, setText, show] = m2;
+  var [ANALYTICS_EVENTS, attr, attributesFromJson, busy, emit, formatDate, formatMoney, get, has, hasTemplate, integerAttribute, isElement, isField, isOwnEvent, notifyLayoutChanged, parseJSONAttr, productUrl, qsa, repeat, scoped, sel, setImage, setStoreHtml, setText, show] = m2;
 
   // tether-core:client.ts
   var m3 = window.Tether.__core["client.ts"];
@@ -636,7 +636,6 @@
   // src/account/page-events.ts
   var SUBSCRIPTION_ACTIONS = ["pause", "resume", "skip", "unskip", "cancel"];
   var isSubscriptionAction = (value) => SUBSCRIPTION_ACTIONS.some((action) => action === value);
-  var isField = (el) => el instanceof window.HTMLInputElement || el instanceof window.HTMLSelectElement || el instanceof window.HTMLTextAreaElement;
   var isForm = (el) => el instanceof window.HTMLFormElement;
   function fieldsOf(form) {
     const fields = {};
@@ -661,6 +660,7 @@
     el.setAttribute(attr("form-state"), "pending");
     const errorBoxes = qsa(el, sel("form-error"));
     errorBoxes.forEach((box) => {
+      if (!box.hasAttribute("role")) box.setAttribute("role", "alert");
       setText(box, "");
     });
     try {
@@ -802,7 +802,7 @@
   }
   function onClick(event) {
     const target = event.target;
-    if (!(target instanceof window.Element)) return;
+    if (!isElement(target)) return;
     if (onAddressClick(event, target)) return;
     const subscriptionButton = target.closest(sel("subscription-action"));
     if (subscriptionButton instanceof window.HTMLElement) {

@@ -3596,7 +3596,7 @@
   }
 
   // src/part-integrity.ts
-  var PART_INTEGRITY = { "tether.diagnose.js": "sha384-yYZpcrRmwYqG6dTXD5m7YKPlcVuL3RPHCuaDzLnfJvdmmxH9Fe3ip1ADcX1WK70B", "tether.markets.js": "sha384-S7JkU2e6i2yPAj5AGjSTwC8yU9XbNWu6j+fE1J/Iz1YTY6KfjjLRgPysvkMVG7EY", "tether.search.js": "sha384-p2jiGj4lAuskufTrc4Fj5ZOLolIaev7WjGiP4GfJhSB76ctBq8a59nITuhULeaN4", "tether.lists.js": "sha384-LCYUAkLThJgVcSTYhECqeWmjiDhbVdIn5/miFjgHALLW/+JlUktQzVPfP1GybH2j", "tether.extras.js": "sha384-uJkQJolGR0au//Prn6yB574rHFC1QAWLWA636jHV91PKIi7JuFWNyh/xzXfry+BW", "tether.account.js": "sha384-yjq622iQCNxGNYVIeZLVIvpCma5OaJ0fXxO7bcQblpRN00yqNDrEdOr4CyHs1UYP", "tether.account-pages.js": "sha384-N9fVpwkQLuIJ7HWLatw5XHjvfwbih4syjvKrG0ZPJQBeUhbi4Kiipp513OgYrdaX", "tether.analytics.js": "sha384-IHf1OHNKpDytCTEPTgtkrL3te+eGnaL2Es6OX7Sim1n42ujJPih37Wb2sCk1lYRH" };
+  var PART_INTEGRITY = { "tether.diagnose.js": "sha384-3dIUM9ixt3x2USEJ72s9rJa+3pjfSUt1LoHQb5EcXB8XWe6GlxGpBgr9+z8Zmo+r", "tether.markets.js": "sha384-UMKj62O7TqyF61RRZDs9CEpQLk49vKnk9tFaiSJhUfndcD1o/jCM9Spn5yjAFqQO", "tether.search.js": "sha384-X2ZFhZuT86Mmzf6EQxpIa8jO/1O9JQGXbFJswIo/1pSZ7JeGaQCzaLLx668JOH/x", "tether.lists.js": "sha384-x1XFTeWjEUIPAGb/9B7ZmLgNIBo5EUleflBO3jP3Z4LAcgZqsAqx3wHKwXPnX6AJ", "tether.extras.js": "sha384-M+Yj0h4l3LR4GQ/V0oteP6V0VBAeeStSC8SOcCC0hwE5XmV20vv0jf5j66fnwmTw", "tether.account.js": "sha384-qRngYUoIRv70HIl8SfrPQGSeyFwR6OqX+Ca8VfY22Nl8W0ClpICNneDVpH3AZ+1Y", "tether.account-pages.js": "sha384-joHWCioWjBrYEx3uafQjDAUV3Ur5nsrytq7lfjRm0Q2wANZJO9FMkjgCWe4Rzvg6", "tether.analytics.js": "sha384-eLM6mL4ok8PfVX+EaHwEuRemJiSvl1caSyIMV9TdBbire5EL1fnr40l2vIlmnapW" };
 
   // src/part-registry.ts
   function isTetherInternals(value) {
@@ -3604,7 +3604,7 @@
   }
 
   // src/version.ts
-  var VERSION = "0.10.1";
+  var VERSION = "0.10.2";
 
   // src/lazy-iife.ts
   var coreModules = {
@@ -3628,6 +3628,7 @@
         hasTemplate,
         integerAttribute,
         isElement,
+        isField,
         isOwnEvent,
         notifyLayoutChanged,
         parseJSONAttr,
