@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.8.1 (unreleased)
+## 0.8.1 (2026-11-07)
 
 - Fix (script tag): a core loaded through a jsDelivr version alias (`@0.8`, `@0`, `@latest` or no
   version, in the `gh/` or the `npm/` form) loads its optional parts from its exact release folder
