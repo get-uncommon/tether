@@ -24,7 +24,7 @@ test('the release writes the package.json version into every copy', async () => 
   assert.equal((await versionMismatches(copy)).length, VERSION_COPIES.length);
   assert.equal(await syncVersions(copy), '9.8.7');
   assert.deepEqual(await versionMismatches(copy), []);
-  assert.match(await readFile(join(copy, 'src/index.ts'), 'utf8'), /export const VERSION = '9\.8\.7';/);
+  assert.match(await readFile(join(copy, 'src/version.ts'), 'utf8'), /export const VERSION = '9\.8\.7';/);
   const starter = asRecord(parseJson(await readFile(join(copy, 'examples/astro/package.json'), 'utf8')), 'starter');
   assert.equal(recordAt(starter, 'dependencies')['@occluze/tether'], '^9.8.0', 'new projects get every 9.8 patch');
 });

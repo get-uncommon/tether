@@ -100,7 +100,7 @@ function batchQuery(keys: string[]): { query: QueryText; variables: Record<strin
   if (ids.length) {
     definitions.push('$ids: [ID!]!');
     variables['ids'] = ids;
-    selections.push('byId: nodes(ids: $ids) { ... on Product { ...TetherProduct } }');
+    selections.push(`byId: nodes(ids: $ids) { ... on Product { ...TetherProduct } }`);
   }
   handles.forEach((handle, index) => {
     definitions.push(`$h${index}: String!`);

@@ -6,8 +6,11 @@
  */
 import ts from 'typescript';
 
-/** Text that looks like GraphQL: an operation, a fragment, an inline fragment or a selection of Tether's fields. */
-const GRAPHQL = /\b(query|mutation|fragment)\b|\.\.\. ?on |\{[^}]*\b(id|nodes|amount|cart)\b/;
+/**
+ * Text that looks like GraphQL: an operation, a fragment, an inline fragment, a fragment spread, a selection of
+ * Tether's fields or a list of fields that starts with `id`.
+ */
+const GRAPHQL = /\b(query|mutation|fragment)\b|\.\.\. ?(on |[A-Z])|\{[^}]*\b(id|nodes|amount|cart)\b|^\s*id \w/;
 
 const minifyGraphqlText = (text: string): string =>
   text

@@ -24,6 +24,7 @@ import * as plans from './selling-plans.ts';
 import { resolveProductKey } from './status.ts';
 import { sel, emit, isOwnEvent, ANALYTICS_EVENTS, formatMoney, imageUrl, pageGlobal } from './dom.ts';
 import { loadPart, coreModules } from './lazy.ts';
+import { VERSION } from './version.ts';
 import {
   mountedLists,
   liveLists,
@@ -49,7 +50,7 @@ import type { DiagnoseOptions } from './diagnose.ts';
 import type { TetherEvents } from './markup.ts';
 import type { TetherInternals } from './lazy.ts';
 
-export { addGroup, setCountry };
+export { addGroup, setCountry, VERSION };
 
 // The types a site uses by name, under the names the docs give them.
 export type { TetherOptions as TetherConfig, TetherConfig as ResolvedTetherConfig } from './config.ts';
@@ -101,8 +102,6 @@ export type {
 } from './account/page-answers.ts';
 /** The helpers for selling plans, `Tether.plans`. */
 export type SellingPlanHelpers = typeof plans;
-
-export const VERSION = '0.8.0';
 
 /** Milliseconds `observe` waits after the last added node, so a burst of additions mounts once. */
 const OBSERVE_DEBOUNCE_MS = 50;
