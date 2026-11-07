@@ -3,7 +3,7 @@
  * Starter/Basic site plans and 120 on CMS/eCommerce/Business, per API token. The default of 50 leaves room for the
  * Designer and other integrations.
  */
-import { createSerialQueue } from './serial.ts';
+import { createSerialQueue } from './shared/serial.ts';
 import { sleep as realSleep } from './util.ts';
 
 const MS_PER_MINUTE = 60000;

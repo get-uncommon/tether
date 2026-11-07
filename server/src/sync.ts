@@ -9,7 +9,7 @@
 import { createItemIndex } from './item-index.ts';
 import { normalizeConfig } from './mapping.ts';
 import { reconcile } from './reconcile.ts';
-import { createSerialQueue } from './serial.ts';
+import { createSerialQueue } from './shared/serial.ts';
 import { SINCE_KEY } from './sync-state.ts';
 import { PublishError, flushPublish, queueRetry, removeProduct, syncProduct } from './sync-product.ts';
 import { noopLogger, productGid, scalarText } from './util.ts';
