@@ -50,7 +50,7 @@ These are compatibility promises:
 
 A refactor keeps all of them. A change to one is a behaviour change, with a CHANGELOG line.
 
-CHANGELOG lines go under `## Unreleased`, the first section of `CHANGELOG.md`, whatever the next version turns out to be. A release turns those notes into its `## X.Y.Z (date)` section and leaves an empty `## Unreleased` above it, and a released section never changes again: `test/changelog.test.js` compares each one with its tag's copy. After merging a release into a branch, check that the branch's new lines are still under `## Unreleased`.
+A change's CHANGELOG lines go in a note file of its own, `.changes/<short-slug>.md`, never into `CHANGELOG.md` itself: one or more bullets in the changelog's wording (`- Fix: …`, `- **Breaking (npm):** …`, `- Repository: …`), with no heading, wrapped at 100 by Prettier like `CHANGELOG.md`. Two branches never edit the same note file, so merging a release into an open branch can't move its notes into the released section. A release writes every note file into a new `## X.Y.Z (date)` section at the top of `CHANGELOG.md` and deletes them in the release commit (`applyReleaseVersion`): ordered by the first word of each file's first bullet, Breaking, Security and Fix first, Repository last and every other kind between, then by file name, and a file's bullets stay together. `CHANGELOG.md` has only released sections, and a released section never changes again: `test/changelog.test.js` compares each one with its tag's copy.
 
 ## Principles
 

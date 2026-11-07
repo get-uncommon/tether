@@ -1,6 +1,6 @@
 /**
  * Builds dist/, or the folder after `--out`, which the tests use so the committed dist/ only changes in a release. The
- * folder is emptied first and then holds exactly these files:
+ * build replaces the folder once every step has succeeded (`build`), so it holds exactly these files:
  *
  *   tether.min.js (+ .map), tether.js     the <script> build (IIFE)
  *   tether.<part>(.min).js                the optional parts, loaded on first use (`PARTS`); built first, so the
@@ -16,7 +16,8 @@
  */
 import * as esbuild from 'esbuild';
 import ts from 'typescript';
-import { readFile, readdir, writeFile, mkdir, rm } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { readFile, readdir, writeFile, mkdir, mkdtemp, rename, rm } from 'node:fs/promises';
 import { gzipSync, brotliCompressSync } from 'node:zlib';
 import { createHash } from 'node:crypto';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -51,12 +52,12 @@ const graphqlPlugin: esbuild.Plugin = {
  *
  * @param minified Which parts: a core loads the parts of its own kind (tether.min.js the .min ones).
  */
-function partIntegrityPlugin(minified: boolean): esbuild.Plugin {
+function partIntegrityPlugin(out: string, minified: boolean): esbuild.Plugin {
   return {
     name: 'tether-part-integrity',
     setup(build) {
       build.onLoad({ filter: /[/\\]src[/\\]part-integrity\.ts$/ }, async () => ({
-        contents: `export const PART_INTEGRITY = ${JSON.stringify(await partHashes(minified))};\n`,
+        contents: `export const PART_INTEGRITY = ${JSON.stringify(await partHashes(out, minified))};\n`,
         loader: 'js',
       }));
     },
@@ -64,10 +65,10 @@ function partIntegrityPlugin(minified: boolean): esbuild.Plugin {
 }
 
 /** @returns The `sha384-…` hash of each built part file, by file name. */
-async function partHashes(minified: boolean): Promise<Record<string, string>> {
+async function partHashes(out: string, minified: boolean): Promise<Record<string, string>> {
   const integrity: Record<string, string> = {};
   for (const file of PARTS.map((name) => `tether.${name}${minified ? '.min' : ''}.js`)) {
-    const bytes = await readFile(join(OUT, file));
+    const bytes = await readFile(join(out, file));
     integrity[file] = `sha384-${createHash('sha384').update(bytes).digest('base64')}`;
   }
   return integrity;
@@ -142,42 +143,50 @@ const common: esbuild.BuildOptions = {
   plugins: [graphqlPlugin],
 };
 
-const partBuild = (exportsByFile: Record<string, string[]>, name: string, minify: boolean): esbuild.BuildOptions => ({
+const partBuild = (
+  out: string,
+  exportsByFile: Record<string, string[]>,
+  name: string,
+  minify: boolean,
+): esbuild.BuildOptions => ({
   ...common,
   entryPoints: [join(SRC, 'parts', `${name}.ts`)],
   format: 'iife',
   minify,
-  outfile: join(OUT, `tether.${name}${minify ? '.min' : ''}.js`),
+  outfile: join(out, `tether.${name}${minify ? '.min' : ''}.js`),
   plugins: [partPlugin(exportsByFile), graphqlPlugin],
 });
 
 /** @returns The optional parts, which the core's builds depend on. */
-async function partBuilds(): Promise<esbuild.BuildOptions[]> {
+async function partBuilds(out: string): Promise<esbuild.BuildOptions[]> {
   const exportsByFile = await coreExports();
-  return PARTS.flatMap((name) => [partBuild(exportsByFile, name, false), partBuild(exportsByFile, name, true)]);
+  return PARTS.flatMap((name) => [
+    partBuild(out, exportsByFile, name, false),
+    partBuild(out, exportsByFile, name, true),
+  ]);
 }
 
 /** @returns The `<script>` cores, which carry the hashes of the parts built before them. */
-function scriptCoreBuilds(): esbuild.BuildOptions[] {
+function scriptCoreBuilds(out: string): esbuild.BuildOptions[] {
   const iife: esbuild.BuildOptions = { ...common, entryPoints: [join(SRC, 'index.ts')], format: 'iife' };
   return [
     {
       ...iife,
-      outfile: join(OUT, 'tether.js'),
-      plugins: [iifeLazyPlugin, partIntegrityPlugin(false), graphqlPlugin],
+      outfile: join(out, 'tether.js'),
+      plugins: [iifeLazyPlugin, partIntegrityPlugin(out, false), graphqlPlugin],
     },
     {
       ...iife,
-      outfile: join(OUT, 'tether.min.js'),
+      outfile: join(out, 'tether.min.js'),
       minify: true,
       sourcemap: true,
-      plugins: [iifeLazyPlugin, partIntegrityPlugin(true), graphqlPlugin],
+      plugins: [iifeLazyPlugin, partIntegrityPlugin(out, true), graphqlPlugin],
     },
   ];
 }
 
 /** @returns The ES modules for bundlers and the Barba preset. */
-function moduleBuilds(): esbuild.BuildOptions[] {
+function moduleBuilds(out: string): esbuild.BuildOptions[] {
   return [
     {
       ...common,
@@ -186,7 +195,7 @@ function moduleBuilds(): esbuild.BuildOptions[] {
       splitting: true,
       minify: true,
       external: ['@occluze/tether', 'node:*'],
-      outdir: join(OUT, 'esm'),
+      outdir: join(out, 'esm'),
       chunkNames: 'chunks/[name]-[hash]',
       entryNames: '[name]',
     },
@@ -194,7 +203,7 @@ function moduleBuilds(): esbuild.BuildOptions[] {
       ...common,
       entryPoints: [join(SRC, 'presets/barba.ts')],
       format: 'esm',
-      outfile: join(OUT, 'presets/barba.esm.js'),
+      outfile: join(out, 'presets/barba.esm.js'),
     },
   ];
 }
@@ -216,8 +225,8 @@ const diagnosticHost: ts.FormatDiagnosticsHost = {
  *
  * @throws {Error} When the declaration build reports a problem.
  */
-async function buildTypes(): Promise<void> {
-  const outDir = join(OUT, 'types');
+async function buildTypes(out: string): Promise<void> {
+  const outDir = join(out, 'types');
   const parsed = ts.getParsedCommandLineOfConfigFile(
     join(ROOT, '.config', 'tsconfig', 'declarations.json'),
     { outDir },
@@ -262,33 +271,59 @@ async function report(): Promise<void> {
   console.log(rows.join('\n'));
 }
 
+/** The top-level entries a build's output folder can hold: this build's, and those of a build of older source. */
+const BUILD_ENTRY = /^(?:tether(?:\.[\w-]+)*\.js(?:\.map)?|esm|presets|types)$/;
+
 /**
- * Empties the output folder, so it holds exactly this build's files: a part or preset the source no longer has can't
- * stay in dist/, where the release's fresh-build check sees it as a deletion. Only a folder that is missing, empty or a
- * build's (it has `tether.min.js`) is emptied, so a mistyped `--out` can't remove sources.
- *
- * @throws {Error} When the folder holds files and no build.
+ * Exits unless the output folder is missing, empty or a build's, every entry a name a build writes (`BUILD_ENTRY`):
+ * the build replaces the folder, so a mistyped `--out`, or one naming a site's asset folder, can't remove other files.
  */
-async function emptyOut(): Promise<void> {
-  await mkdir(OUT, { recursive: true });
-  const files = await readdir(OUT);
-  if (files.length && !files.includes('tether.min.js'))
-    throw new Error(`${OUT} isn't a build's output folder (no tether.min.js): not emptying it`);
-  await rm(OUT, { recursive: true, force: true });
-  await mkdir(OUT, { recursive: true });
+async function checkOut(): Promise<void> {
+  const entries = existsSync(OUT) ? await readdir(OUT) : [];
+  const foreign = entries.filter((entry) => !BUILD_ENTRY.test(entry));
+  if (!foreign.length) return;
+  console.error(`build: ${OUT} isn't a build's output folder (it holds ${foreign.join(', ')}): not replacing it`);
+  process.exit(1);
 }
 
-await emptyOut();
-await writeFile(
-  join(OUT, 'tether.esm.js'),
-  "export * from './esm/index.js';\nexport { default } from './esm/index.js';\n",
-);
+/** Writes every file of the build into `out`. */
+async function buildInto(out: string): Promise<void> {
+  await writeFile(
+    join(out, 'tether.esm.js'),
+    "export * from './esm/index.js';\nexport { default } from './esm/index.js';\n",
+  );
+  await buildTypes(out);
+  // The parts first: the cores read their hashes from the built files.
+  await Promise.all((await partBuilds(out)).map((options) => esbuild.build(options)));
+  await Promise.all([...scriptCoreBuilds(out), ...moduleBuilds(out)].map((options) => esbuild.build(options)));
+}
+
 /**
- * Watches the sources. A part that rebuilds rebuilds the `<script>` cores too, so they carry its new hash.
+ * Builds into a new folder next to the output folder, on the same volume so it can be renamed, and puts it in the
+ * output folder's place once every step has succeeded: a part or preset the source no longer has can't stay in
+ * dist/, where the release's fresh-build check sees it as a deletion, and a failed build leaves the folder as it was.
  */
-async function watchAll(parts: esbuild.BuildOptions[]): Promise<void> {
-  for (const options of moduleBuilds()) await (await esbuild.context(options)).watch();
-  const cores = await Promise.all(scriptCoreBuilds().map((options) => esbuild.context(options)));
+async function build(): Promise<void> {
+  await checkOut();
+  await mkdir(dirname(OUT), { recursive: true });
+  const staging = await mkdtemp(join(dirname(OUT), `.${basename(OUT)}-building-`));
+  try {
+    await buildInto(staging);
+    await rm(OUT, { recursive: true, force: true });
+    await rename(staging, OUT);
+  } finally {
+    // Gone after the rename; what a failed step left otherwise.
+    await rm(staging, { recursive: true, force: true });
+  }
+}
+
+/**
+ * Watches the sources, rebuilding into the output folder itself. A part that rebuilds rebuilds the `<script>` cores
+ * too, so they carry its new hash.
+ */
+async function watchAll(): Promise<void> {
+  for (const options of moduleBuilds(OUT)) await (await esbuild.context(options)).watch();
+  const cores = await Promise.all(scriptCoreBuilds(OUT).map((options) => esbuild.context(options)));
   for (const core of cores) await core.watch();
   const rebuildCores: esbuild.Plugin = {
     name: 'tether-rebuild-cores',
@@ -298,19 +333,12 @@ async function watchAll(parts: esbuild.BuildOptions[]): Promise<void> {
       });
     },
   };
-  for (const options of parts) {
+  for (const options of await partBuilds(OUT)) {
     const context = await esbuild.context({ ...options, plugins: [...(options.plugins ?? []), rebuildCores] });
     await context.watch();
   }
 }
 
-await buildTypes();
-const parts = await partBuilds();
-// The parts first: the cores read their hashes from the built files.
-await Promise.all(parts.map((options) => esbuild.build(options)));
-if (watch) {
-  await watchAll(parts);
-} else {
-  await Promise.all([...scriptCoreBuilds(), ...moduleBuilds()].map((options) => esbuild.build(options)));
-  await report();
-}
+await build();
+if (watch) await watchAll();
+else await report();

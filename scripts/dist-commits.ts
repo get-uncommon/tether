@@ -2,12 +2,13 @@
  * CI's `dist` job (`.github/workflows/ci.yml`, through `dist-guard.ts`): no commit of a pull request but a release
  * commit changes dist/, which is what the last release built. A release commit is known by its content as well as its
  * subject: it is `Tether X.Y.Z`, it moves package.json to X.Y.Z, and it changes nothing but the release's files
- * (`isReleaseCommitFile`). A merge is checked by what it changes against its first parent, unless its dist/ is one of
+ * (`isReleaseCommitChange`). A merge is checked by what it changes against its first parent, unless its dist/ is one of
  * its other parents' as it is, which a merge of the base branch brings in.
  */
 import { spawnSync } from 'node:child_process';
 import { field } from '../server/src/shared/json.ts';
-import { isReleaseCommitFile } from './release-version.ts';
+import { fileChanges, isReleaseCommitChange } from './release-version.ts';
+import type { FileChange } from './release-version.ts';
 
 const RELEASE_SUBJECT = /^Tether (\d+\.\d+\.\d+)$/;
 
@@ -23,7 +24,7 @@ export interface DistHistory {
   /** The commits in `base..head`, merges included; `null` when git can't list them. */
   commits(base: string, head: string): Commit[] | null;
   /** The files whose content differs between the trees of `from` and `to`; `null` when git can't tell. */
-  changedFiles(from: string, to: string): string[] | null;
+  changedFiles(from: string, to: string): FileChange[] | null;
   /** The version in package.json at `sha`; `null` without one. */
   packageVersion(sha: string): string | null;
   /** The id of dist/'s tree at `sha`; `null` when it has none. */
@@ -31,15 +32,15 @@ export interface DistHistory {
 }
 
 /** @returns Why `commit`, which changes dist/ and `files` against its first parent, is not a release commit. */
-function notReleaseReason(commit: Commit, parent: string, files: readonly string[], history: DistHistory) {
+function notReleaseReason(commit: Commit, parent: string, files: readonly FileChange[], history: DistHistory) {
   const subjectVersion = RELEASE_SUBJECT.exec(commit.subject)?.[1];
   if (subjectVersion === undefined) return 'its subject is not "Tether X.Y.Z"';
   const version = history.packageVersion(commit.sha);
   if (version !== subjectVersion || history.packageVersion(parent) === version) {
     return `it doesn't move package.json to ${subjectVersion}`;
   }
-  const other = files.find((file) => !isReleaseCommitFile(file));
-  return other === undefined ? null : `it also changes ${other}`;
+  const other = files.find((file) => !isReleaseCommitChange(file.path, file.deleted));
+  return other === undefined ? null : `it also changes ${other.path}`;
 }
 
 /**
@@ -59,7 +60,7 @@ export function distProblems(base: string, head: string, history: DistHistory): 
       problems.push(`${commit.sha.slice(0, 12)} ${commit.subject}: the files it changes can't be listed`);
       continue;
     }
-    if (!files.some((file) => file.startsWith('dist/'))) continue;
+    if (!files.some((file) => file.path.startsWith('dist/'))) continue;
     const dist = history.distTree(commit.sha);
     if (mergedParents.some((merged) => history.distTree(merged) === dist)) continue;
     const reason = notReleaseReason(commit, parent, files, history);
@@ -88,8 +89,10 @@ export function gitDistHistory(root: string): DistHistory {
         });
     },
     // Rename detection would list a file moved into dist/ by its new path alone.
-    changedFiles: (from, to) =>
-      answer(['diff', '--name-only', '--no-renames', from, to])?.split('\n').filter(Boolean) ?? null,
+    changedFiles(from, to) {
+      const changes = answer(['diff', '--name-status', '--no-renames', from, to]);
+      return changes === null ? null : fileChanges(changes);
+    },
     packageVersion(sha) {
       const json = answer(['show', `${sha}:package.json`]);
       if (json === null) return null;

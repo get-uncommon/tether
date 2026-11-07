@@ -133,7 +133,10 @@
         }
       },
       {
-        "files": "CHANGELOG.md",
+        "files": [
+          "CHANGELOG.md",
+          ".changes/*.md"
+        ],
         "options": {
           "proseWrap": "always",
           "printWidth": 100

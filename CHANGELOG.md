@@ -1,22 +1,5 @@
 # Changelog
 
-## Unreleased
-
-- Fix: a `warningText` or `formatMoney` that throws is reported (`onError`) and no longer fails a
-  cart change Shopify already applied: the change resolves, its cart (a new one included) is kept,
-  and the page shows Shopify's warning text or Tether's own money format instead.
-- Fix: `Tether.cart.add(v); Tether.cart.checkout()` on a page with no cart yet, or an empty one,
-  checks out the added line instead of doing nothing.
-- Fix: loading the cart again (after another tab changed it, or `Tether.cart.init()`) waits for the
-  changes in flight in this tab, so an older answer can't replace the cart they left.
-- Fix: a "who is logged in" answer that arrives after a logout no longer logs the customer back in
-  on the page; calls at the same time share one request to the Worker.
-- Fix: a cart drawer the site closed itself and then took off the page no longer leaves the cart
-  marked open (`Tether.cart.isOpen()`, `subscribe`), so the next `open()` is announced.
-- Repository: the build empties its output folder first, so a part or preset the source no longer
-  has can't stay in `dist/` (and ship with a release) or in the test build. The docs' part sizes are
-  tested against the built parts.
-
 ## 0.9.6 (2026-11-07)
 
 - Fix: an option value no available variant has is described as unavailable to screen readers

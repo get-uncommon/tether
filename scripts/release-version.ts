@@ -3,10 +3,12 @@
  * runs the gate on a pull request at the next versions: a test can fail only once package.json says a new version, and
  * the release itself no longer runs the whole gate.
  */
-import { readFile, writeFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { parseVersion } from '../server/src/release-range.ts';
-import { UNRELEASED_HEADING } from './changelog.ts';
+import { NOTES_FOLDER, noteProblems, releaseSection, withSection } from './changelog.ts';
+import type { Note } from './changelog.ts';
 import { VERSION_COPIES, syncVersions } from './versions.ts';
 
 const PACKAGE_VERSION = /"version": "\d+\.\d+\.\d+"/;
@@ -21,13 +23,44 @@ export const RELEASE_FILES: readonly string[] = [
 
 const RELEASE_COMMIT_FILES: ReadonlySet<string> = new Set([...RELEASE_FILES, 'package-lock.json']);
 
+/** A file a commit, or the working tree, changes, and whether it is deleted. */
+export interface FileChange {
+  /** Relative to the repository root. */
+  path: string;
+  deleted: boolean;
+}
+
+/** @param nameStatus What `git diff --name-status --no-renames` prints. */
+export const fileChanges = (nameStatus: string): FileChange[] =>
+  nameStatus
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => {
+      const [status = '', ...path] = line.split('\t');
+      return { path: path.join('\t'), deleted: status === 'D' };
+    });
+
 /**
  * @param file Relative to the repository root.
- * @returns Whether a release commit may change it: a file the version rewrite writes, the lockfile's copy of the
- *   version, or the rebuilt dist/.
+ * @param deleted Whether the commit deletes it.
+ * @returns Whether a release commit may make that change: to a file the version rewrite writes, the lockfile's copy of
+ *   the version, or the rebuilt dist/, or the deletion of a note file the release wrote into CHANGELOG.md.
  */
-export const isReleaseCommitFile = (file: string): boolean =>
-  RELEASE_COMMIT_FILES.has(file) || file.startsWith('dist/');
+export const isReleaseCommitChange = (file: string, deleted: boolean): boolean =>
+  RELEASE_COMMIT_FILES.has(file) || file.startsWith('dist/') || (deleted && file.startsWith(`${NOTES_FOLDER}/`));
+
+/**
+ * @returns The note files in `root`'s `NOTES_FOLDER`, with LF line ends even where core.autocrlf gave them CRLF; none
+ *   when it has no such folder.
+ */
+export async function readNotes(root: string): Promise<Note[]> {
+  const folder = join(root, NOTES_FOLDER);
+  if (!existsSync(folder)) return [];
+  const names = await readdir(folder);
+  return Promise.all(
+    names.map(async (name) => ({ name, text: (await readFile(join(folder, name), 'utf8')).replaceAll('\r\n', '\n') })),
+  );
+}
 
 /**
  * Rewrites `file` with `change`.
@@ -58,25 +91,29 @@ export function localDate(now = new Date()): string {
 }
 
 /**
- * Sets `version` in package.json and every copy of it (`syncVersions`), turns CHANGELOG.md's `## Unreleased` notes
- * into the version's dated section under a new, empty `## Unreleased`, and moves the README's pinned examples onto it.
+ * Sets `version` in package.json and every copy of it (`syncVersions`), writes the note files into CHANGELOG.md as the
+ * version's dated section, at the top (`releaseSection`), and deletes them, and moves the README's pinned examples
+ * onto it. Without note files the section is only its heading: the rehearsal rewrites a pull request that has none,
+ * and `release.ts` refuses to release one.
  *
  * @param version `X.Y.Z`.
  * @param date The release's day, `YYYY-MM-DD`.
- * @throws When `version` is not X.Y.Z, or package.json, a copy or CHANGELOG.md has nothing to replace.
+ * @throws When `version` is not X.Y.Z, a note file isn't one (`noteProblems`), package.json or a copy has nothing to
+ *   replace, or CHANGELOG.md already has the version's section.
  */
 export async function applyReleaseVersion(root: string, version: string, date = localDate()): Promise<void> {
   const parsed = parseVersion(version);
   if (parsed?.join('.') !== version) throw new Error(`"${version}" is not X.Y.Z`);
   const [major, minor] = parsed;
+  const notes = await readNotes(root);
+  const problems = notes.flatMap(noteProblems);
+  if (problems.length) throw new Error(`${NOTES_FOLDER}/: ${problems.join('; ')}`);
   await editFile(root, 'package.json', (json) => json.replace(PACKAGE_VERSION, `"version": "${version}"`));
   await syncVersions(root);
-  // The new section goes in below the heading, not in its place: a branch whose new notes start right under it then
-  // conflicts with the release when it merges it, instead of adding them to the released section. Notes added further
-  // down still merge in, and test/changelog.test.js fails on the section that differs from its tag.
   await editFile(root, 'CHANGELOG.md', (changelog) =>
-    changelog.replace(`\n${UNRELEASED_HEADING}\n`, `\n${UNRELEASED_HEADING}\n\n## ${version} (${date})\n`),
+    withSection(changelog, releaseSection(version, date, notes), version),
   );
+  for (const note of notes) await rm(join(root, NOTES_FOLDER, note.name));
   // Ranges like @0.3 follow the minor version.
   await editFile(
     root,

@@ -3,26 +3,18 @@
  * request throttle.
  */
 
-export interface SerialQueue {
-  /** Starts `task` once every task queued before it has settled. A failure rejects its own caller only. */
-  <T>(task: () => Promise<T>): Promise<T>;
-  /** True while no task is waiting or running. */
-  idle: () => boolean;
-}
+/** Starts `task` once every task queued before it has settled. A failure rejects its own caller only. */
+export type SerialQueue = <T>(task: () => Promise<T>) => Promise<T>;
+
+const settled = () => undefined;
 
 /** A queue whose tasks never overlap. */
 export function createSerialQueue(): SerialQueue {
   let tail: Promise<unknown> = Promise.resolve();
-  let pending = 0;
-  // The task's result, or failure, reaches its caller through the promise the queue returned; the queue only counts it.
-  const settled = () => {
-    pending--;
-  };
-  const run = <T>(task: () => Promise<T>): Promise<T> => {
-    pending++;
+  return <T>(task: () => Promise<T>): Promise<T> => {
     const result = tail.then(task);
+    // The task's result, or failure, reaches its caller through `result`; the queue only waits for it to settle.
     tail = result.then(settled, settled);
     return result;
   };
-  return Object.assign(run, { idle: () => !pending });
 }

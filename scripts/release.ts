@@ -26,8 +26,8 @@
  * leaves them on the previous release, so `npm ci` in the starter, and in every project `npm create astro` makes from
  * it, works at every commit. A release on an older minor line leaves main's starter alone.
  *
- * Needs the release's notes under CHANGELOG.md's "## Unreleased" first (they become its dated section, which the
- * release notes come from), a clean working tree, and HEAD at the branch the release goes on (a detached checkout works, so a
+ * Needs the release's note files in .changes/ first (they become its dated section in CHANGELOG.md, which the
+ * GitHub Release's notes come from, and the release commit deletes them), a clean working tree, and HEAD at the branch the release goes on (a detached checkout works, so a
  * worktree can release). The version is set in package.json and written from there into every copy (`versions.ts`);
  * dist/ is rebuilt from it.
  *
@@ -48,11 +48,11 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { compareVersions, parseVersion } from '../server/src/release-range.ts';
 import { field } from '../server/src/shared/json.ts';
-import { UNRELEASED_HEADING, headingProblems, sectionOf, withSection } from './changelog.ts';
+import { headingProblems, releaseNotesProblems, sectionOf, withSection } from './changelog.ts';
 import { newestRun, rehearsalCommits, rehearsalPathspecs } from './github-runs.ts';
 import { installMismatches } from './installed-packages.ts';
 import { NPM_PACKAGE, StarterNotReady, lockStarterAfterRelease, withStarterRange } from './release-starter.ts';
-import { applyReleaseVersion, editFile, isReleaseCommitFile } from './release-version.ts';
+import { applyReleaseVersion, editFile, fileChanges, isReleaseCommitChange, readNotes } from './release-version.ts';
 import { packageVersion } from './versions.ts';
 import type { Version } from '../server/src/release-range.ts';
 
@@ -243,14 +243,17 @@ function howToRehearse(version: string): string {
 
 /**
  * Exits when the working tree changed anything but what the version rewrite changes: the files `applyReleaseVersion`
- * writes, the lockfile's copy of the version and the rebuilt dist/. CI passed on HEAD, so the release commit is that
+ * writes, the lockfile's copy of the version, the rebuilt dist/ and the note files it deleted. CI passed on HEAD, so the release commit is that
  * tree with only the new version in it.
  */
 function checkOnlyVersionChanged(): void {
+  const untracked = output('git', ['ls-files', '--others', '--exclude-standard']).split('\n').filter(Boolean);
   const changed = [
-    ...output('git', ['diff', '--name-only', 'HEAD']).split('\n'),
-    ...output('git', ['ls-files', '--others', '--exclude-standard']).split('\n'),
-  ].filter((file) => file && !isReleaseCommitFile(file));
+    ...fileChanges(output('git', ['diff', '--name-status', '--no-renames', 'HEAD'])),
+    ...untracked.map((path) => ({ path, deleted: false })),
+  ]
+    .filter((change) => !isReleaseCommitChange(change.path, change.deleted))
+    .map((change) => change.path);
   if (changed.length > 0) fail(`the release would change more than the version: ${changed.join(', ')}`);
 }
 
@@ -261,7 +264,7 @@ async function rewrite(root: string, version: string): Promise<void> {
 }
 
 /**
- * Exits when the version, the working tree, the branch or CHANGELOG.md isn't ready for `version`.
+ * Exits when the version, the working tree, the branch, CHANGELOG.md or the note files aren't ready for `version`.
  *
  * @returns The branch the release goes on.
  */
@@ -287,9 +290,8 @@ async function checkReady(text: string, rehearsed: boolean): Promise<Line> {
   const changelog = await readFile(join(ROOT, 'CHANGELOG.md'), 'utf8');
   const problems = headingProblems(changelog);
   if (problems.length) fail(`CHANGELOG.md: ${problems.join('; ')}`);
-  if (sectionOf(changelog, 'Unreleased') === UNRELEASED_HEADING) {
-    fail(`write ${text}'s notes under "${UNRELEASED_HEADING}" in CHANGELOG.md first`);
-  }
+  const noteProblems = releaseNotesProblems(await readNotes(ROOT));
+  if (noteProblems.length) fail(`${text}'s notes: ${noteProblems.join('; ')}`);
   return line;
 }
 

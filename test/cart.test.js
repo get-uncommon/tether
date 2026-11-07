@@ -156,9 +156,8 @@ test('status: a failed change shows cart-error and keeps the cart; the next succ
   assert.equal(find('#err').style.display, 'none');
 });
 
-test('serial queue: each task starts once the one before has settled, failed or not; idle once all have', async () => {
+test('serial queue: each task starts once the one before has settled, failed or not', async () => {
   const run = createSerialQueue();
-  assert.equal(run.idle(), true);
   /** @type {string[]} */
   const order = [];
   const first = deferred();
@@ -174,12 +173,10 @@ test('serial queue: each task starts once the one before has settled, failed or 
   // Every task already queued has run by the next macrotask: b would have started by then.
   await new Promise(setImmediate);
   assert.deepEqual(order, ['a start'], 'b waits for a');
-  assert.equal(run.idle(), false);
   first.resolve();
   await assert.rejects(failing, /a failed/);
   assert.equal(await second, 'b');
   assert.deepEqual(order, ['a start', 'b start']);
-  assert.equal(run.idle(), true);
 });
 
 test('queue: quick changes reach Shopify one after another, each with the cart as it is by then', async () => {
