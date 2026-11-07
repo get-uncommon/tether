@@ -49,10 +49,10 @@ Shopify's own `shopify.js`, and publishes page, product, collection, search and 
 Shopify's script builds and sends them, so the data format stays Shopify's.
 
 - **Page views:** one for the page the visitor lands on and one for each page after it: an Astro
-  client-side navigation, or with page transitions (Barba, Swup) each container
-  `Tether.mount(container)` mounts after `Tether.unmount()`, as in the
-  [page transitions setup](reference.md#with-page-transitions-barba-swup-). A page transition that
-  skips `Tether.unmount()` sends no page view.
+  client-side navigation, or with page transitions (Barba, Swup) each new page's container
+  `Tether.mount(container)` mounts with a `Tether.unmount()` for the page left, before or after
+  the mount, as in the [page transitions setup](reference.md#with-page-transitions-barba-swup-). A
+  page transition that skips `Tether.unmount()` sends no page view.
 - **Consent:** nothing is sent until the Customer Privacy API allows analytics (the visitor's
   choice, and your region settings under Settings → Customer privacy). Options:
   `consent: 'no-banner'` (default: your own banner calls `Shopify.customerPrivacy.setTrackingConsent`),

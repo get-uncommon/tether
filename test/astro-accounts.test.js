@@ -427,9 +427,16 @@ test('account pages: Edit on another address while a save is on its way keeps th
     assert.ok(editFirst instanceof window.HTMLElement && editSecond instanceof window.HTMLElement);
     const form = find('[tether-address-form]');
     assert.ok(form instanceof window.HTMLFormElement);
+    /** @type {unknown[]} */
+    const thrown = [];
+    /** @param {ErrorEvent} event */
+    const onError = (event) => thrown.push(event.error);
+    window.addEventListener('error', onError);
     editFirst.click();
     form.dispatchEvent(new window.Event('submit', { cancelable: true, bubbles: true }));
     editSecond.click();
+    window.removeEventListener('error', onError);
+    assert.deepEqual(thrown, [], 'Edit fills the form without throwing');
     answerSave();
     await waitFor(() => form.getAttribute('tether-form-state') === 'saved', 'the first address saved');
     assert.equal(form.dataset['tetherAddressId'], 'gid://shopify/CustomerAddress/2');

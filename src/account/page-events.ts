@@ -130,7 +130,8 @@ function editAddress(id: string): void {
       field.value = typeof value === 'string' ? value : '';
     }
   }
-  form.scrollIntoView({ block: 'nearest' });
+  // jsdom has no scrollIntoView.
+  (form as Partial<Pick<HTMLElement, 'scrollIntoView'>>).scrollIntoView?.({ block: 'nearest' });
 }
 
 /**

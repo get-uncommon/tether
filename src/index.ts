@@ -18,7 +18,7 @@ import * as plans from './selling-plans.ts';
 import { resolveProductKey } from './status.ts';
 import { sel, emit, isElement, isOwnEvent, formatMoney, imageUrl, pageGlobal } from './dom.ts';
 import { loadPart, coreModules } from './lazy.ts';
-import { PAGE_TRANSITION, queueAnalyticsEvents } from './analytics-queue.ts';
+import { PAGE_LEFT, PAGE_MOUNT, queueAnalyticsEvents } from './analytics-queue.ts';
 import { VERSION } from './version.ts';
 import {
   mountedLists,
@@ -116,12 +116,6 @@ let observer: MutationObserver | null = null;
 /** The analytics part's queue, created once by the first `init()` with `analytics`. */
 let analyticsQueue: Event[] | null = null;
 
-/**
- * Set by `unmount()`: a page transition then mounts the next page's container, a new page in the same body. Astro's
- * navigation closes the cart without it, as its `astro:page-load` starts the page view.
- */
-let pageLeft = false;
-
 /** The document-wide listeners are bound once, by the first configured `init()`. */
 let controlsBound = false;
 
@@ -140,7 +134,7 @@ function mountLists(root: ParentNode): number {
     liveLists.add(list);
     el.addEventListener(`${cfg.prefix}:list-rendered`, (event) => {
       // The list emits this once its products are in the page, with the element they are in.
-      if (isOwnEvent(event, 'list-rendered')) mount(event.detail.container);
+      if (isOwnEvent(event, 'list-rendered')) mountRoot(event.detail.container);
     });
     void trackMarket(list.load());
   });
@@ -178,16 +172,24 @@ function mountWithin(root: Document | Element): number {
 }
 
 /**
- * Mounts every product scope and product list inside `root`. Safe to call repeatedly. The first container mounted
- * after `unmount()` is a new page for analytics.
+ * Mounts every product scope and product list inside `root`. Safe to call repeatedly. A container mounted with an
+ * `unmount()` before or after it is a new page for analytics.
  *
  * @returns The scopes and lists newly mounted.
  */
 export function mount(root: Document | Element = document): number {
   if (!isConfigured()) return 0;
   if (root === document) rememberDocumentMount();
-  else if (pageLeft) analyticsQueue?.push(new Event(PAGE_TRANSITION));
-  pageLeft = false;
+  analyticsQueue?.push(new CustomEvent(PAGE_MOUNT, { detail: root }));
+  return mountRoot(root);
+}
+
+/**
+ * Mounts `root` without telling analytics: a list's rendered products are in the page it is on.
+ *
+ * @returns The scopes and lists newly mounted.
+ */
+function mountRoot(root: Document | Element): number {
   // Page transitions detach old roots: they aren't kept alive.
   pruneLive();
   hydrateFromPage(root.ownerDocument ?? document);
@@ -219,9 +221,9 @@ function mountAdded(added: readonly Element[]): void {
   log(`mounted ${count} scope(s) in ${roots.length} added element(s)`);
 }
 
-/** Call before a page transition removes the page: closes the cart drawer; the next page's `mount()` is a new page. */
+/** Call when a page transition leaves the page: closes the cart drawer; the next page's `mount()` is a new page. */
 export function unmount(): void {
-  pageLeft = true;
+  analyticsQueue?.push(new Event(PAGE_LEFT));
   Cart.close();
 }
 
