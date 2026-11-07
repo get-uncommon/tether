@@ -52,7 +52,7 @@ import { sectionOf, withSection } from './changelog.ts';
 import { newestRun, rehearsalCommits, rehearsalPathspecs } from './github-runs.ts';
 import { installMismatches } from './installed-packages.ts';
 import { NPM_PACKAGE, StarterNotReady, lockStarterAfterRelease, withStarterRange } from './release-starter.ts';
-import { RELEASE_FILES, applyReleaseVersion, editFile } from './release-version.ts';
+import { applyReleaseVersion, editFile, isReleaseCommitFile } from './release-version.ts';
 import { packageVersion } from './versions.ts';
 import type { Version } from '../server/src/release-range.ts';
 
@@ -247,11 +247,10 @@ function howToRehearse(version: string): string {
  * tree with only the new version in it.
  */
 function checkOnlyVersionChanged(): void {
-  const allowed = new Set([...RELEASE_FILES, 'package-lock.json']);
   const changed = [
     ...output('git', ['diff', '--name-only', 'HEAD']).split('\n'),
     ...output('git', ['ls-files', '--others', '--exclude-standard']).split('\n'),
-  ].filter((file) => file && !allowed.has(file) && !file.startsWith('dist/'));
+  ].filter((file) => file && !isReleaseCommitFile(file));
   if (changed.length > 0) fail(`the release would change more than the version: ${changed.join(', ')}`);
 }
 

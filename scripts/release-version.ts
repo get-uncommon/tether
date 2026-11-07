@@ -18,6 +18,16 @@ export const RELEASE_FILES: readonly string[] = [
   'README.md',
 ];
 
+const RELEASE_COMMIT_FILES: ReadonlySet<string> = new Set([...RELEASE_FILES, 'package-lock.json']);
+
+/**
+ * @param file Relative to the repository root.
+ * @returns Whether a release commit may change it: a file the version rewrite writes, the lockfile's copy of the
+ *   version, or the rebuilt dist/.
+ */
+export const isReleaseCommitFile = (file: string): boolean =>
+  RELEASE_COMMIT_FILES.has(file) || file.startsWith('dist/');
+
 /**
  * Rewrites `file` with `change`.
  *
