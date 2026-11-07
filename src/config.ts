@@ -243,15 +243,24 @@ const readOnlyViews = new WeakMap<object, object>();
  * strict-mode code (as on a frozen object) and warns in any code.
  */
 const READ_ONLY: ProxyHandler<object> = {
-  get(object, key) {
-    const value: unknown = Reflect.get(object, key);
-    // The config's objects are its own copies (`resolveConfig`), never frozen, so a view of each is allowed.
-    return typeof value === 'object' && value !== null ? readOnlyView(value) : value;
+  get: (object, key) => viewOf(Reflect.get(object, key)),
+  // A descriptor's value is the view too, so `Object.getOwnPropertyDescriptor` doesn't hand out the live object.
+  getOwnPropertyDescriptor(object, key) {
+    const descriptor = Reflect.getOwnPropertyDescriptor(object, key);
+    if (descriptor) descriptor.value = viewOf(descriptor.value);
+    return descriptor;
   },
   set: (_object, key) => refuseChange(key),
   deleteProperty: (_object, key) => refuseChange(key),
   defineProperty: (_object, key) => refuseChange(key),
 };
+
+/** @returns An object's read-only view; any other value as it is. */
+function viewOf(value: unknown): unknown {
+  // The config's objects are its own copies (`resolveConfig`), never frozen and configurable, so a view of each is
+  // allowed, in `get` and in a descriptor.
+  return typeof value === 'object' && value !== null ? readOnlyView(value) : value;
+}
 
 /** @returns The read-only view of `target`, the same one on every call. */
 function readOnlyView(target: object): object {

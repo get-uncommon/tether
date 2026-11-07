@@ -313,6 +313,24 @@ test('Tether.config gives the same view of an object on every read, and a new on
   assert.equal(configView.markets, configView.markets);
 });
 
+test("Tether.config's descriptors hand out read-only views too, never the live objects", async () => {
+  const { configView } = await import('../src/config.ts');
+  quietly(() => configure({ domain: 'shop.test', markets: { detect: ['saved'] } }));
+  /** @type {unknown} */
+  const markets = Object.getOwnPropertyDescriptor(configView, 'markets')?.value;
+  assert.equal(markets, configView.markets, 'the same view a read gives');
+  assert.notEqual(markets, cfg.markets);
+  assert.equal(Object.getOwnPropertyDescriptors(configView).markets.value, configView.markets);
+  assert.equal(Object.getOwnPropertyDescriptor(configView, 'domain')?.value, 'shop.test');
+  const { warned } = quietly(() => {
+    assert.throws(() => {
+      /** @type {{ detect: string[] }} */ (markets).detect = ['server'];
+    }, TypeError);
+  });
+  assert.deepEqual(cfg.markets?.detect, ['saved']);
+  assert.equal(warned.length, 1);
+});
+
 test("docs/reference.md's Config table has a row for every option and every field of a nested one", async () => {
   const { ACCOUNT, ANALYTICS, MARKETS } = await import('../src/config-sections.ts');
   const reference = await readFile(new URL('../docs/reference.md', import.meta.url), 'utf8');

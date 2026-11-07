@@ -240,9 +240,13 @@ Images accept `max-width`, `max-height`, `crop` for Shopify CDN resizing (or, as
 `tether-max-width` / `data-max-width`, and the same for the others).
 
 Classes Tether sets: option buttons get `is-selected` (+ `aria-pressed`; a link or `div` option
-also gets `role="button"`, a radio or checkbox is `checked` instead) and `is-unavailable`
-(+ `aria-disabled`) when no available variant has that value with the other choices. Clicking an unavailable value picks the closest variant that has
-it and keeps the other choices where possible; a value no variant has is ignored. Add-to-cart gets `is-disabled` (+ `aria-disabled`, `disabled`) when the variant is sold out.
+also gets `role="button"` and, without its own `tabindex`, `tabindex="0"`, and Enter and Space press it;
+a radio or checkbox is `checked` instead) and `is-unavailable` when no available variant has that value with the other
+choices. Clicking an unavailable value picks the closest variant that has it and keeps the other choices where possible;
+a value no variant has is ignored. Because it still works, an unavailable value is not `aria-disabled`: screen readers
+hear "Unavailable" as its description, through `aria-describedby="tether-unavailable"` (added to its own ids) on a
+`hidden` note Tether adds to the page, so nothing changes on screen. To say it in your store's language, put your own
+element with `id="tether-unavailable"` on the page, for example `<span id="tether-unavailable" hidden>Ausverkauft</span>`. Add-to-cart gets `is-disabled` (+ `aria-disabled`, `disabled`) when the variant is sold out.
 The variant first selected is the one in `?variant=` / `tether-variant`, else the first available one.
 Cards: `price` is that variant's price; `min-price` shows "from" prices.
 
@@ -271,7 +275,8 @@ refused by Shopify.
 
 The product root gets class `is-subscription` and `tether-purchase-mode`. Selected buttons get
 `is-selected` + `aria-pressed`, as options do. Plans the current variant can't use get
-`is-unavailable` (+ `aria-disabled`), and Tether switches to a plan the variant does have.
+`is-unavailable` (+ `aria-disabled`: choosing one changes nothing), and Tether switches to a plan the
+variant does have.
 
 ### Conditions (`tether-show`)
 
@@ -421,7 +426,7 @@ Tether.cart.updateLine(lineId, { sellingPlanId: null });  // to one-time
 Tether.cart.changeQuantity(lineId, +1);           // your own +/- buttons: quick clicks add up
 Tether.cart.removeLine(lineId); Tether.cart.clear();
 Tether.cart.setNote('…'); Tether.cart.setAttributes({ source: 'quiz' });
-await Tether.cart.applyDiscount('WELCOME10');    // rejects with code INVALID_DISCOUNT (and drops it)
+await Tether.cart.applyDiscount('WELCOME10');    // rejects with code INVALID_DISCOUNT (and drops it); a blank code rejects unsent
 Tether.cart.removeDiscount('WELCOME10'); Tether.cart.setDiscountCodes(['A', 'B']);
 Tether.cart.setBuyerIdentity({ countryCode: 'DE' });
 Tether.cart.warnings;                             // [{ code, message, target }] from the last change (a copy)
@@ -513,8 +518,8 @@ server helpers (`createStorefront()`, and `shop.config.js` with [Astro](astro.md
 | `warningText`              | `null`                     | `(warning) => text`: your text for one of Shopify's cart warnings, translated by `warning.code` for instance; returning nothing keeps Shopify's                                                                           |
 | `formatMoney`              | `null`                     | `(money, locale) => text`: your money format, in place of `Intl` with `locale`                                                                                                                                            |
 | `onLayoutChange`           | `null`                     | `(reason) => {}` after renders changed the page's height; without it, `ScrollTrigger.refresh()` when GSAP's ScrollTrigger is on the page                                                                                  |
-| `onCartOpen`               | `null`                     | `(drawers) => {}` after the cart drawer opened                                                                                                                                                                            |
-| `onCartClose`              | `null`                     | `(drawers) => {}` after it closed                                                                                                                                                                                         |
+| `onCartOpen`               | `null`                     | `(drawers) => {}` after the cart drawer opened; an error it throws goes to `onError`, and the cart still opens                                                                                                            |
+| `onCartClose`              | `null`                     | `(drawers) => {}` after it closed; an error it throws goes to `onError`, and the cart still closes                                                                                                                        |
 | `onLineEnter`              | `null`                     | `(node) => {}` for a new cart line, to animate it in                                                                                                                                                                      |
 | `onLineLeave`              | `null`                     | `(node, done) => {}` for a removed cart line: animate it out, then call `done()`                                                                                                                                          |
 | `onValueChange`            | `null`                     | `(element, previousText) => {}` when a bound value's text changes, to animate it                                                                                                                                          |
@@ -592,8 +597,8 @@ too), and a `partsUrl` has to be https or on your own site.
 (jsDelivr serves them from the same folder) or at `partsUrl`, and as split chunks in a bundler:
 `tether.lists.min.js` (product lists, `Tether.getProducts()`, `Tether.getRecommendations()`),
 `tether.search.min.js` (search as you type), `tether.markets.min.js` (`markets.detect`,
-`tether-country-select`, `Tether.setCountry()`), `tether.extras.min.js` (bundles, `?variant=`),
-`tether.account.min.js` and `tether.account-pages.min.js` (customer accounts),
+`tether-country-select`, `Tether.setCountry()`), `tether.extras.min.js` (bundles, `?variant=`, the
+discount form), `tether.account.min.js` and `tether.account-pages.min.js` (customer accounts),
 `tether.analytics.min.js` (analytics) and `tether.diagnose.min.js` (`Tether.diagnose()`). So
 `Tether.getProducts()`, `Tether.getRecommendations()`, `Tether.detectMarket()` and
 `Tether.getLocalization()` return promises. The script build finds its folder from its own

@@ -91,11 +91,11 @@ export async function checkout(target: CheckoutTarget = cfg.checkoutTarget): Pro
   const tab = target === '_blank' ? window.open('', '_blank') : null;
   if (tab) detachOpenerIfAllowed(tab);
   try {
-    // In the queue, a change still on its way reaches Shopify first, and none starts while the visitor leaves.
-    const url = await runInOrder(async () => {
-      const cartId = cartToCheckOut();
-      return cartId && checkoutUrl(cartId);
-    });
+    // The changes queued before the click reach Shopify first. The URL is looked up outside the queue: the account's
+    // resolver can change the cart, and a change queued behind a task waiting for it would never start.
+    await runInOrder(() => Promise.resolve());
+    const cartId = cartToCheckOut();
+    const url = cartId && (await checkoutUrl(cartId));
     if (!url) {
       tab?.close();
       return null;

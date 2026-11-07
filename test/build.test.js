@@ -167,9 +167,12 @@ test('parts are small and the core is under budget', async () => {
   const { gzipSync } = await import('node:zlib');
   /** @param {string} file A file name in the test build. */
   const gz = async (file) => gzipSync(await readFile(join(DIST, file)), { level: 9 }).length;
-  // Each budget sits about half a KB above today's build, so growth is a decision; the build, not golfed source, keeps
-  // the files small.
-  assert.ok((await gz('tether.min.js')) < 29.5 * 1024, 'core gzip budget');
+  // Each budget is a ceiling a build must stay under, with no headroom promised: growth past one is a decision, made by
+  // moving code into a part or by raising the budget in the change that needs it. The build, not golfed source, keeps
+  // the files small. The core's went from 29.5 to 29.75 KB for about 180 bytes of fixes (site hooks that throw, a blank
+  // discount code, unavailable options described rather than disabled, `Tether.config`'s descriptors); moving the
+  // description sanitizer into a part instead would render descriptions after the rest of the product.
+  assert.ok((await gz('tether.min.js')) < 29.75 * 1024, 'core gzip budget');
   assert.ok((await gz('tether.search.min.js')) < 3 * 1024);
   assert.ok((await gz('tether.lists.min.js')) < 2.75 * 1024, 'lists part budget');
   assert.ok((await gz('tether.account.min.js')) < 4.75 * 1024, 'account part budget');

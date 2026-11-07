@@ -2,7 +2,7 @@
 import { test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
-import { cancelTimersAfterTests, detailOf, find } from './fixtures.js';
+import { cancelTimersAfterTests, cartFrom, detailOf, find, jsonResponse, product } from './fixtures.js';
 import { waitFor } from '../server/test/mocks.js';
 
 cancelTimersAfterTests();
@@ -187,6 +187,38 @@ test('cartFocus: false leaves focus alone, and a closed drawer is still inert, o
   assert.equal(document.activeElement?.id, 'opener');
   Cart.close();
   assert.deepEqual(stateOf('#drawer'), CLOSED);
+});
+
+test('a throwing onCartOpen or onCartClose is reported: the add still succeeds, and cart-toggled still fires', async () => {
+  document.body.innerHTML = '';
+  const merchandiseId = product.variants.nodes[0]?.id ?? '';
+  const cart = cartFrom([{ merchandiseId, quantity: 1 }]);
+  const { fetch } = globalThis;
+  globalThis.fetch = async () => jsonResponse({ data: { cartCreate: { cart, userErrors: [], warnings: [] } } });
+  /** @type {string[]} */
+  const reported = [];
+  const bug = () => {
+    throw new Error('site hook bug');
+  };
+  configure({
+    ...CONFIG,
+    onCartOpen: bug,
+    onCartClose: bug,
+    onError: (error, context) => reported.push(`${context}: ${String(error)}`),
+  });
+  toggles.length = 0;
+  try {
+    assert.equal((await Cart.add(merchandiseId)).totalQuantity, 1);
+    assert.equal(Cart.status.kind, 'ready');
+    assert.equal(Cart.isOpen(), true);
+    Cart.close();
+    assert.deepEqual(toggles, [true, false]);
+    assert.deepEqual(reported, ['onCartOpen: Error: site hook bug', 'onCartClose: Error: site hook bug']);
+  } finally {
+    globalThis.fetch = fetch;
+    configure(CONFIG);
+    localStorage.clear();
+  }
 });
 
 test('money: amounts compare as decimals, so a line is on sale only when it is', () => {
