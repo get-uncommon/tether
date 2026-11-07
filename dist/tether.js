@@ -3602,7 +3602,7 @@
   }
 
   // src/part-integrity.ts
-  var PART_INTEGRITY = { "tether.diagnose.js": "sha384-euwUnDXnDZd70Pud3pHrNgzBwk3Pm8mrQjusX12KVBUGxcD4Z1pI9swMKM3bcGba", "tether.markets.js": "sha384-UMKj62O7TqyF61RRZDs9CEpQLk49vKnk9tFaiSJhUfndcD1o/jCM9Spn5yjAFqQO", "tether.search.js": "sha384-FMneAYSGyeio3ZpsWldYhdu9fgPk2/vQ5h76dxS9wQSS/1LxMTdS+rEHOU2e+e5r", "tether.lists.js": "sha384-ynNjpPWE6k6ASotzhwNbuG9NZZOKbgqiNjQiE18iO9djnQqtG9W5mTkQt5UM3cNm", "tether.extras.js": "sha384-Hp4ITcajZpcqDnXoA4D84doONi3GvxBuU4HUvJg7ZwjcqY3Gm7tf5EMQWm93zfGE", "tether.account.js": "sha384-qRngYUoIRv70HIl8SfrPQGSeyFwR6OqX+Ca8VfY22Nl8W0ClpICNneDVpH3AZ+1Y", "tether.account-pages.js": "sha384-6Ce3yDhOtUN+ZUXrgtomSFqszahwl7zfg1tsvrclmMzi5BgV0URXnpjFGs2Kh+Of", "tether.analytics.js": "sha384-VaXbVXopkxHspIEDlFnF+VGpeesqtTu3mSoi+FtaWzRZzRXO8EFhQiQ0+2HxyQoE" };
+  var PART_INTEGRITY = { "tether.diagnose.js": "sha384-euwUnDXnDZd70Pud3pHrNgzBwk3Pm8mrQjusX12KVBUGxcD4Z1pI9swMKM3bcGba", "tether.markets.js": "sha384-UMKj62O7TqyF61RRZDs9CEpQLk49vKnk9tFaiSJhUfndcD1o/jCM9Spn5yjAFqQO", "tether.search.js": "sha384-FMneAYSGyeio3ZpsWldYhdu9fgPk2/vQ5h76dxS9wQSS/1LxMTdS+rEHOU2e+e5r", "tether.lists.js": "sha384-FuEVV6Lo81/xeAkcD1AGNnGAvfz8b9cq2qBIHDilIH3jtqE3GHAX9ogvNkjqSbM3", "tether.extras.js": "sha384-Hp4ITcajZpcqDnXoA4D84doONi3GvxBuU4HUvJg7ZwjcqY3Gm7tf5EMQWm93zfGE", "tether.account.js": "sha384-qRngYUoIRv70HIl8SfrPQGSeyFwR6OqX+Ca8VfY22Nl8W0ClpICNneDVpH3AZ+1Y", "tether.account-pages.js": "sha384-hUmXqgE+0NKlgihiMi5U+ju3Fd4ymlm+CQyHg5f8bxAufcJWzmBBRFCA7zxiZs3o", "tether.analytics.js": "sha384-O630KvTsu3NubakRzX428cNTWzXkI4fmhU1F8TCKhCGAW1GgWpknDVlPeMcnMKK0" };
 
   // src/part-registry.ts
   function isTetherInternals(value) {
@@ -3610,7 +3610,7 @@
   }
 
   // src/version.ts
-  var VERSION = "0.11.0";
+  var VERSION = "0.11.1";
 
   // src/lazy-iife.ts
   var coreModules = {
@@ -3768,7 +3768,8 @@
   }
 
   // src/analytics-queue.ts
-  var PAGE_TRANSITION = "page-transition";
+  var PAGE_MOUNT = "page-mount";
+  var PAGE_LEFT = "page-left";
   function queueAnalyticsEvents(load2) {
     const queue = [];
     const bodies = /* @__PURE__ */ new WeakMap();
@@ -3786,6 +3787,7 @@
     load2().then((part) => part.startAnalytics(queue, bodies, landing)).catch((error) => {
       listening.abort();
       queue.length = 0;
+      queue.push = () => 0;
       reportError(error, "analytics");
     });
     return queue;
@@ -4076,7 +4078,6 @@
   var initPromise = null;
   var observer = null;
   var analyticsQueue = null;
-  var pageLeft = false;
   var controlsBound = false;
   function mountLists(root) {
     let count = 0;
@@ -4087,7 +4088,7 @@
       const list = mountedList(el);
       liveLists.add(list);
       el.addEventListener(`${cfg.prefix}:list-rendered`, (event) => {
-        if (isOwnEvent(event, "list-rendered")) mount(event.detail.container);
+        if (isOwnEvent(event, "list-rendered")) mountRoot(event.detail.container);
       });
       void trackMarket(list.load());
     });
@@ -4115,8 +4116,10 @@
   function mount(root = document) {
     if (!isConfigured()) return 0;
     if (root === document) rememberDocumentMount();
-    else if (pageLeft) analyticsQueue?.push(new Event(PAGE_TRANSITION));
-    pageLeft = false;
+    analyticsQueue?.push(new CustomEvent(PAGE_MOUNT, { detail: root }));
+    return mountRoot(root);
+  }
+  function mountRoot(root) {
     pruneLive();
     hydrateFromPage(root.ownerDocument ?? document);
     const count = mountWithin(root);
@@ -4140,7 +4143,7 @@
     log(`mounted ${count} scope(s) in ${roots.length} added element(s)`);
   }
   function unmount() {
-    pageLeft = true;
+    analyticsQueue?.push(new Event(PAGE_LEFT));
     Cart.close();
   }
   function getScope(el) {

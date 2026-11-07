@@ -721,7 +721,7 @@
         field2.value = typeof value === "string" ? value : "";
       }
     }
-    form.scrollIntoView({ block: "nearest" });
+    form.scrollIntoView?.({ block: "nearest" });
   }
   function addressErrorBoxes(row) {
     const own = qsa(row, sel("form-error"));

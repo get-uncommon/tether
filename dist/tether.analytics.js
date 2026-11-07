@@ -168,7 +168,8 @@
   }
 
   // src/analytics-queue.ts
-  var PAGE_TRANSITION = "page-transition";
+  var PAGE_MOUNT = "page-mount";
+  var PAGE_LEFT = "page-left";
 
   // src/analytics.ts
   var DEFAULT_VARIANT_TITLE = "Default Title";
@@ -245,6 +246,13 @@
   var viewed = /* @__PURE__ */ new WeakSet();
   var viewedBody;
   var bodies = /* @__PURE__ */ new WeakMap();
+  var pageRoot = null;
+  var transition = null;
+  function containerOf(node) {
+    if (pageRoot?.contains(node)) return pageRoot;
+    if (transition !== "left" && transition?.contains(node)) return transition;
+    return null;
+  }
   function send(name, data, shopifyEvent, shopifyPayload) {
     if (cfg.analytics?.dataLayer) pushToDataLayer(name, data);
     if (bus && shopifyEvent) bus.publish(shopifyEvent, shopifyPayload);
@@ -262,9 +270,15 @@
     const root = mainProductRoot(document);
     return root !== null && scopes.has(root);
   }
+  function pageOf(el) {
+    const container = containerOf(el);
+    if (container) return container;
+    let page2 = el;
+    while (page2.parentElement) page2 = page2.parentElement;
+    return page2;
+  }
   function onProductReady({ product, scope }) {
-    const page2 = scope.root.closest("body") ?? document;
-    if (viewed.has(scope.root) || mainProductRoot(page2) !== scope.root) return;
+    if (viewed.has(scope.root) || mainProductRoot(pageOf(scope.root)) !== scope.root) return;
     viewed.add(scope.root);
     const variant = scope.variant ?? product.variants.nodes[0];
     const items = [itemFromVariant(product, variant)];
@@ -345,9 +359,29 @@
     viewed = /* @__PURE__ */ new WeakSet();
     bus?.publish("page_viewed", {});
   }
+  function enterPage(root) {
+    pageRoot = root;
+    transition = null;
+    startPageView();
+  }
+  function onPageMount(root) {
+    if (root === document) transition = null;
+    else if (transition === "left") enterPage(root);
+    else if (!pageRoot) pageRoot = root;
+    else if (!containerOf(root)) transition = root;
+  }
+  function onPageLeft() {
+    if (transition && transition !== "left") enterPage(transition);
+    else transition = "left";
+  }
+  var isPageMount = (event) => event.type === PAGE_MOUNT;
   function handle(event) {
-    if (event.type === PAGE_TRANSITION) {
-      startPageView();
+    if (isPageMount(event)) {
+      onPageMount(event.detail);
+      return;
+    }
+    if (event.type === PAGE_LEFT) {
+      onPageLeft();
       return;
     }
     if (event.type === "astro:page-load") {

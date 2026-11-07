@@ -1,5 +1,50 @@
 # Changelog
 
+## 0.11.1 (2026-11-07)
+
+- Fix: Clicking Edit on an address no longer throws where the browser has no `scrollIntoView`, after
+  filling the form.
+- Fix: When the analytics part fails to load, page transitions no longer pile up events in a buffer
+  nothing reads.
+- Fix: With `analytics.shopify` and page transitions (Barba, Swup), the product page left before the
+  analytics part loaded sends its `product_viewed`, as an Astro navigation's does.
+- Fix: With Barba's `sync: true`, which runs `beforeEnter` before `afterLeave`, page transitions
+  send Shopify their `page_viewed`; before, none did. A container mounted outside the page shown is
+  the new page once `Tether.unmount()` runs, before or after the mount, and its product sends
+  `product_viewed` while the page left is still in the document. The docs and the Barba preset
+  unmount in `beforeLeave`, which runs first in both modes, and the docs show Swup's hooks. A list
+  that renders after `Tether.unmount()` no longer starts the next page's view before that page
+  mounts.
+- Fix (sync Worker): a Webflow item index listing that a run stopped is continued for a day, or for
+  `match.indexTtlMinutes` when that is longer. Before, it was continued only within the TTL, so with
+  a short `match.indexTtlMinutes` a collection too big for one run started again at its first page
+  each run, never finished, and every create waited on it. `/check` warns when
+  `match.indexTtlMinutes` is under 60 minutes.
+- Fix (sync Worker): a reconcile takes in at most 100 failed webhooks' keys
+  (`reconcile:retry:<id>:<uuid>`) per run, reads one key per product and deletes every key it took
+  in, duplicates included, so a bigger backlog drains over the next runs. Before, a reconcile read
+  every key, and once about 1,000 had piled up (a product failing on each `products/update` during a
+  Webflow outage) every run failed on Cloudflare's 1,000 KV operations per invocation and nothing
+  was deleted. A Worker instance also stores no new key for a product while its last one still
+  waits, except for a `products/delete`, so a failing product costs a KV write per reconcile rather
+  than per webhook. Each new key expires after 30 days; keys stored by 0.11.0 are taken in as
+  before, and nothing needs migrating. After a rollback to 0.10, which never reads these keys, the
+  failures still queued are not retried, and KV drops each key this release stored 30 days after it
+  was stored. `/check` warns when the settings (`reconcile.maxProductsPerRun`, `MAX_SUBREQUESTS`)
+  let a reconcile run pass 1,000 KV operations.
+- Fix: A `url:` list whose parameter is only spaces (`?q=+`) is an empty search, so with
+  `emptyQuery: 'none'` (or `tether-empty-query="none"`) it lists nothing instead of every product,
+  and a search is sent without the spaces around it.
+- Repository: a test file fails when a jsdom page throws an exception nothing catches, from a script
+  or an event listener, which jsdom only hands to the page's console. jsdom's other errors, such as
+  "Not implemented: navigation", still don't fail a test.
+- Repository: on Windows, the test runner keeps Git for Windows' MSYS runtime running for the whole
+  run, so a test's bash or tar can't be the first MSYS program and set `/tmp` for every other MSYS
+  shell on the machine to that test file's temp folder, which then failed the file for what those
+  shells wrote there.
+- Repository: `npm run dev` writes the plain `tether.js` core through `writeAtomically` too, like
+  every other `<script>` file, so a browser never reads it half written.
+
 ## 0.11.0 (2026-11-07)
 
 - Fix: With a `storageKey` of the site's own, a cart change in another tab of the site reaches this

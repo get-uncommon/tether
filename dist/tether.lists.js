@@ -194,8 +194,8 @@
     /**
      * The collection or search query of the list's attributes.
      *
-     * @returns `null` for a `url:` list whose parameter is missing or empty, with `tether-empty-query` (or `emptyQuery`)
-     *   `none`: it lists nothing.
+     * @returns `null` for a `url:` list whose parameter is missing, empty or only spaces, with `tether-empty-query` (or
+     *   `emptyQuery`) `none`: it lists nothing.
      */
     options() {
       const { root } = this;
@@ -215,7 +215,7 @@
         query.query = raw;
         return query;
       }
-      query.query = new URL(window.location.href).searchParams.get(raw.slice(URL_QUERY_SOURCE.length)) || "";
+      query.query = new URL(window.location.href).searchParams.get(raw.slice(URL_QUERY_SOURCE.length))?.trim() ?? "";
       return query.query || this.emptyQuery() === "all" ? query : null;
     }
     /**
