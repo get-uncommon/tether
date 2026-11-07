@@ -153,7 +153,7 @@ test('the release rehearsal runs the gate at the next minor and patch versions, 
 test('the release relies on the ci run of the commit it releases, which runs on main and the release branches', async () => {
   const ci = await readFile(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8');
   assert.match(ci, /\n {2}push:\n {4}branches: \[main, 'release\/\*\*'\]\n/);
-  const release = await readFile(new URL('../scripts/release.ts', import.meta.url), 'utf8');
+  const release = await readFile(new URL('../scripts/release-steps.ts', import.meta.url), 'utf8');
   assert.ok(release.includes("'--workflow=ci.yml', `--commit=${sha}`"), 'asks GitHub for the ci runs of HEAD');
   assert.doesNotMatch(release, /run\('npm', \['run', 'check'\]\)/, 'the release leaves the whole gate to CI');
 });

@@ -17,6 +17,8 @@ import { basename, dirname, join } from 'node:path';
  *
  * @param write Writes the new folder's files into the empty folder it is given.
  * @param move Renames a folder: `rename`, or a stand-in in the tests.
+ * @throws The error of the step that failed. When the old folder can't be renamed back either, an `AggregateError`
+ *   with both renames' errors, whose message names the `-previous` folder the old folder is then left in.
  */
 export async function replaceFolder(
   out: string,
@@ -33,7 +35,17 @@ export async function replaceFolder(
     try {
       await move(next, out);
     } catch (error) {
-      if (replacing) await move(previous, out);
+      if (replacing) {
+        try {
+          await move(previous, out);
+        } catch (restoreError) {
+          throw new AggregateError(
+            [error, restoreError],
+            `${out} could not be replaced, nor put back: its old contents are in ${previous}`,
+            { cause: restoreError },
+          );
+        }
+      }
       throw error;
     }
     await rm(previous, { recursive: true, force: true });

@@ -1,14 +1,18 @@
 // CHANGELOG.md's sections: each release's section as its tag has it, the section a release writes from the note files
-// in .changes/, and a maintenance release's section, which the release script adds to main's CHANGELOG.md.
+// in .changes/, and a maintenance release's section, which the release script adds to main's CHANGELOG.md while it
+// takes the release's note files out of main's .changes/.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { readFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { headingProblems, noteProblems, releaseSection, sectionOf, withSection } from '../scripts/changelog.ts';
+import { mainTreeWithRelease } from '../scripts/main-history.ts';
 import { readNotes } from '../scripts/release-version.ts';
 import { compareVersions, parseVersion } from '../server/src/release-range.ts';
+import { tempFolder } from '../server/test/mocks.js';
+import { isolatedGitEnv } from './fixtures.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -92,6 +96,77 @@ test("a maintenance release's section goes into main's CHANGELOG.md in version o
   assert.ok(
     oldest.endsWith('- Fix: two.\n\n## 0.6.1 (2026-10-01)\n\n- Fix: four.\n'),
     'older than every section: last',
+  );
+});
+
+/**
+ * @param {string} cwd A scratch repository.
+ * @returns {import('../scripts/main-history.ts').Git} Git there, without this machine's config, with a test identity.
+ */
+function scratchGit(cwd) {
+  const env = { ...process.env, ...isolatedGitEnv() };
+  return (args, input) =>
+    execFileSync('git', ['-c', 'user.name=Tether test', '-c', 'user.email=test@shop.test', ...args], {
+      cwd,
+      env,
+      encoding: 'utf8',
+      input,
+      timeout: GIT_TIMEOUT_MS,
+    }).trim();
+}
+
+/**
+ * Commits `files` in `repo`, `null` deleting one.
+ *
+ * @param {import('../scripts/main-history.ts').Git} git
+ * @param {string} repo
+ * @param {Record<string, string | null>} files
+ */
+async function commitFiles(git, repo, files) {
+  for (const [file, content] of Object.entries(files)) {
+    const path = join(repo, file);
+    if (content === null) await rm(path);
+    else {
+      await mkdir(dirname(path), { recursive: true });
+      await writeFile(path, content);
+    }
+  }
+  git(['add', '-A']);
+  git(['commit', '-q', '-m', 'Commit']);
+}
+
+test("the commit recording a maintenance release on main adds its section, and takes its notes out of main's .changes/", async (t) => {
+  const repo = await tempFolder(t, 'tether-main-history-');
+  const git = scratchGit(repo);
+  git(['init', '-q', '-b', 'main']);
+  await commitFiles(git, repo, { 'CHANGELOG.md': MAIN, 'src/cart.ts': 'cart\n' });
+  git(['branch', 'release/0.7']);
+  // The fix, with its note, lands on main and is picked into the release branch.
+  const picked = { '.changes/cart-fix.md': '- Fix: three.\n', 'src/cart.ts': 'fixed cart\n' };
+  await commitFiles(git, repo, { ...picked, '.changes/new-feature.md': '- New.\n', 'src/new.ts': 'new\n' });
+  git(['checkout', '-q', 'release/0.7']);
+  await commitFiles(git, repo, picked);
+  await commitFiles(git, repo, { 'CHANGELOG.md': BRANCH, '.changes/cart-fix.md': null });
+
+  const tree = mainTreeWithRelease(git, 'main', 'release/0.7', '0.7.2');
+  assert.deepEqual(git(['ls-tree', '-r', '--name-only', tree]).split('\n'), [
+    '.changes/new-feature.md',
+    'CHANGELOG.md',
+    'src/cart.ts',
+    'src/new.ts',
+  ]);
+  assert.equal(
+    git(['show', `${tree}:CHANGELOG.md`]),
+    withSection(MAIN, sectionOf(BRANCH, '0.7.2') ?? '', '0.7.2').trimEnd(),
+  );
+  assert.equal(git(['rev-parse', `${tree}:src/cart.ts`]), git(['rev-parse', 'main:src/cart.ts']), "main's files");
+
+  git(['checkout', '-q', 'main']);
+  await commitFiles(git, repo, { '.changes/new-feature.md': null });
+  assert.equal(
+    git(['ls-tree', '--name-only', mainTreeWithRelease(git, 'main', 'release/0.7', '0.7.2')]),
+    'CHANGELOG.md\nsrc',
+    'a .changes/ the release empties is gone',
   );
 });
 
