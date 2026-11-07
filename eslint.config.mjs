@@ -41,6 +41,9 @@ export default tseslint.config(
     ignores: [
       'dist/**',
       '.test-dist/**',
+      // What an interrupted build leaves beside its output folder (scripts/replace-folder.ts).
+      '.dist-building-*/**',
+      '.test-dist-building-*/**',
       'node_modules/**',
       'examples/**',
       'test-results/**',

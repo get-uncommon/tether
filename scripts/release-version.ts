@@ -30,15 +30,19 @@ export interface FileChange {
   deleted: boolean;
 }
 
-/** @param nameStatus What `git diff --name-status --no-renames` prints. */
-export const fileChanges = (nameStatus: string): FileChange[] =>
-  nameStatus
-    .split('\n')
-    .filter(Boolean)
-    .map((line) => {
-      const [status = '', ...path] = line.split('\t');
-      return { path: path.join('\t'), deleted: status === 'D' };
-    });
+/**
+ * @param nameStatus What `git diff --name-status --no-renames -z` prints: each status and path ends in a NUL, and a
+ *   path is as it is, where without `-z` git quotes one with a byte outside ASCII (core.quotePath).
+ */
+export function fileChanges(nameStatus: string): FileChange[] {
+  const fields = nameStatus.split('\0');
+  const changes: FileChange[] = [];
+  for (let i = 0; i + 1 < fields.length; i += 2) {
+    const [status, path] = fields.slice(i, i + 2);
+    if (path !== undefined) changes.push({ path, deleted: status === 'D' });
+  }
+  return changes;
+}
 
 /**
  * @param file Relative to the repository root.
@@ -51,12 +55,13 @@ export const isReleaseCommitChange = (file: string, deleted: boolean): boolean =
 
 /**
  * @returns The note files in `root`'s `NOTES_FOLDER`, with LF line ends even where core.autocrlf gave them CRLF; none
- *   when it has no such folder.
+ *   when it has no such folder. Folders and dotfiles (the `.DS_Store` Finder writes) are no notes and are left out.
  */
 export async function readNotes(root: string): Promise<Note[]> {
   const folder = join(root, NOTES_FOLDER);
   if (!existsSync(folder)) return [];
-  const names = await readdir(folder);
+  const entries = await readdir(folder, { withFileTypes: true });
+  const names = entries.filter((entry) => entry.isFile() && !entry.name.startsWith('.')).map((entry) => entry.name);
   return Promise.all(
     names.map(async (name) => ({ name, text: (await readFile(join(folder, name), 'utf8')).replaceAll('\r\n', '\n') })),
   );

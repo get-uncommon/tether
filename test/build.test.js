@@ -380,10 +380,11 @@ test(
     const { VERSION } = await import('../src/version.ts');
     const again = await mkdtemp(join(tmpdir(), 'tether-build-'));
     try {
-      // An earlier build's output, with a part and a preset this source no longer has.
+      // An earlier build's output, with a part and a preset this source no longer has, and the files Finder and
+      // Explorer leave in a folder.
       await mkdir(join(again, 'presets'));
-      for (const stale of ['tether.min.js', 'tether.oldpart.min.js', 'presets/old.esm.js'])
-        await writeFile(join(again, stale), '');
+      const stale = ['tether.min.js', 'tether.oldpart.js', 'tether.oldpart.min.js', 'presets/old.esm.js'];
+      for (const file of [...stale, '.DS_Store', 'Thumbs.db', 'desktop.ini']) await writeFile(join(again, file), '');
       await promisify(execFile)(process.execPath, ['--experimental-strip-types', 'scripts/build.ts', '--out', again], {
         cwd: join(DIST, '..'),
         timeout: 60_000,
@@ -427,14 +428,17 @@ test("the build refuses an output folder that holds files a build doesn't write,
     await mkdir(assets);
     await writeFile(join(assets, 'tether.min.js'), 'self-hosted');
     await writeFile(join(assets, 'site.js'), 'mine');
+    // Named like a part, but no build writes it without its minified kind.
+    await writeFile(join(assets, 'tether.config.js'), 'config');
+    await writeFile(join(assets, '.DS_Store'), '');
     await assert.rejects(
       promisify(execFile)(process.execPath, ['--experimental-strip-types', 'scripts/build.ts', '--out', assets], {
         cwd: join(DIST, '..'),
         timeout: 60_000,
       }),
-      /isn't a build's output folder \(it holds site\.js\): not replacing it/,
+      /isn't a build's output folder \(it holds site\.js, tether\.config\.js\): not replacing it/,
     );
-    assert.deepEqual((await readdir(assets)).sort(), ['site.js', 'tether.min.js']);
+    assert.deepEqual((await readdir(assets)).sort(), ['.DS_Store', 'site.js', 'tether.config.js', 'tether.min.js']);
     assert.equal(await readFile(join(assets, 'tether.min.js'), 'utf8'), 'self-hosted');
     assert.deepEqual(await readdir(parent), ['js'], 'no build folder left next to it');
   } finally {

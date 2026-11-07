@@ -44,10 +44,14 @@ const hasFocusInside = (all: HTMLElement[]) => all.some((drawer) => drawer.conta
 
 const isManual = (drawer: HTMLElement) => get(drawer, 'cart-drawer') === 'manual';
 
-/** True while a drawer, or the drawer-less cart, is open. */
+/**
+ * True while a drawer, or the drawer-less cart, is open. The page watcher asks after every change to the page, so the
+ * elements with the open class come first, from the browser's live class index: only a drawer-less open cart has the
+ * drawers looked up.
+ */
 export function isOpen(): boolean {
-  const all = drawers();
-  return all.length ? all.some(isOpenDrawer) : openWithoutDrawer;
+  const openClassed = [...document.getElementsByClassName(cfg.cartDrawerOpenClass)];
+  return openClassed.some((el) => el.matches(sel('cart-drawer'))) || (openWithoutDrawer && !drawers().length);
 }
 
 /** Announces an open state the page changed without Tether. */

@@ -31,21 +31,36 @@ const KIND_ORDER = ['Breaking', 'Security', 'Fix'];
 const OTHER_KINDS = KIND_ORDER.length;
 const REPOSITORY = OTHER_KINDS + 1;
 
-/** The first word of a bullet, after any bold: `Breaking` for `- **Breaking (npm):**`, `Fix` for `- Fix: …`. */
-const KIND = /^- (?:\*\*)?(\w+)/;
+/**
+ * A bullet's kind, the first word after any bold: `Breaking` for `- **Breaking (npm):**`, `Fix` for `- Fix: …`. Only a
+ * line that starts a bullet matches; a bullet's later lines are indented.
+ */
+const KIND = /^- (?:\*\*)?(\w+)/gm;
+
+/** @returns The kind of each of the note's bullets, in its order. */
+const kindsOf = (note: Note): string[] => Array.from(note.text.matchAll(KIND), (match) => match[1] ?? '');
 
 function kindRank(note: Note): number {
-  const kind = KIND.exec(note.text)?.[1] ?? '';
+  const kind = kindsOf(note)[0] ?? '';
   if (kind === 'Repository') return REPOSITORY;
   const rank = KIND_ORDER.indexOf(kind);
   return rank === -1 ? OTHER_KINDS : rank;
 }
 
-/** @returns What is wrong with a note file: it holds CHANGELOG bullets, and no heading of its own. */
+/**
+ * @returns What is wrong with a note file: it holds CHANGELOG bullets of one kind, the one change's, since the release
+ *   sorts the file by its first bullet's kind; and no heading of its own.
+ */
 export function noteProblems(note: Note): string[] {
   const problems: string[] = [];
   if (!note.name.endsWith('.md')) problems.push(`${note.name}: a note file's name ends in .md`);
   if (!note.text.startsWith('- ')) problems.push(`${note.name}: a note starts with a "- " bullet`);
+  const kinds = new Set(kindsOf(note));
+  if (kinds.size > 1) {
+    problems.push(
+      `${note.name}: a note's bullets are all one kind (it has ${[...kinds].join(', ')}): split it, one file per kind`,
+    );
+  }
   if (/^#/m.test(note.text)) problems.push(`${note.name}: a note has no heading; the release writes it`);
   return problems;
 }

@@ -65,10 +65,17 @@ async function reloadAfterUnclearFailure(): Promise<void> {
 }
 
 /**
+ * A load queued behind other tasks that hasn't started, with no change queued after it: an `init()` meanwhile shares
+ * it instead of queueing another, since it still answers after every change queued before that call.
+ */
+let queuedLoad: Promise<ShopifyCart | null> | null = null;
+
+/**
  * Runs a cart change in the queue (`enqueue`). After a failure that doesn't say whether Shopify applied the change,
  * the cart is loaded again before the next change runs; the change still rejects.
  */
 function runChange<T>(task: () => Promise<T>): Promise<T> {
+  queuedLoad = null;
   return enqueue(() =>
     task().catch(async (error: unknown) => {
       if (isUnclearFailure(error)) await reloadAfterUnclearFailure();
@@ -152,12 +159,10 @@ async function load(): Promise<ShopifyCart | null> {
   return currentCart();
 }
 
-/** A load queued behind other tasks that hasn't started: an `init()` meanwhile shares it instead of queueing another. */
-let queuedLoad: Promise<ShopifyCart | null> | null = null;
-
 /**
  * Loads the saved cart in the queue, so a change Shopify answers meanwhile isn't replaced by an older answer. Calls
- * before the load starts (another tab writing the cart's keys in a burst) share it.
+ * before the load starts and before another change is queued (another tab writing the cart's keys in a burst) share
+ * it.
  */
 function reload(): Promise<ShopifyCart | null> {
   queuedLoad ??= queueFilling(() =>
@@ -245,10 +250,10 @@ export const Cart = {
       runChange(async () => {
         const cart = await mutateCart({
           name: 'cartLinesAdd',
-          args: '$lines: [CartLineInput!]!',
-          inner: 'lines: $lines',
-          variables: { lines },
-          createInput: { lines },
+          variable: 'lines',
+          type: '[CartLineInput!]!',
+          value: lines,
+          create: true,
         });
         // A mutation answers without a cart only beside user errors, which reject above; an add always has one.
         if (!cart) throw new TetherError('Shopify answered the add without a cart');
@@ -292,15 +297,14 @@ export const Cart = {
   },
 
   setNote(note: string | null | undefined): Promise<ShopifyCart | null> {
-    const variables = { note: note ?? '' };
     return runChange(async () =>
       commit(
         await mutateCart({
           name: 'cartNoteUpdate',
-          args: '$note: String!',
-          inner: 'note: $note',
-          variables,
-          createInput: variables,
+          variable: 'note',
+          type: 'String!',
+          value: note ?? '',
+          create: true,
         }),
         'note',
       ),
@@ -314,13 +318,12 @@ export const Cart = {
    */
   setAttributes(attributes: Attributes): Promise<ShopifyCart | null> {
     return runChange(async () => {
-      const variables = { attributes: mergedAttributes(attributes) };
       const cart = await mutateCart({
         name: 'cartAttributesUpdate',
-        args: '$attributes: [AttributeInput!]!',
-        inner: 'attributes: $attributes',
-        variables,
-        createInput: variables,
+        variable: 'attributes',
+        type: '[AttributeInput!]!',
+        value: mergedAttributes(attributes),
+        create: true,
       });
       return commit(cart, 'attributes');
     });
@@ -329,13 +332,12 @@ export const Cart = {
   /** Replaces the discount codes; `[]` removes them all. */
   setDiscountCodes(codes: DiscountCodes): Promise<ShopifyCart | null> {
     return runChange(async () => {
-      const variables = { discountCodes: discountCodesFrom(codes) };
       const cart = await mutateCart({
         name: 'cartDiscountCodesUpdate',
-        args: '$discountCodes: [String!]!',
-        inner: 'discountCodes: $discountCodes',
-        variables,
-        createInput: variables,
+        variable: 'discountCodes',
+        type: '[String!]!',
+        value: discountCodesFrom(codes),
+        create: true,
       });
       return commit(cart, 'discount');
     });
@@ -380,10 +382,10 @@ export const Cart = {
     return runChange(async () => {
       const cart = await mutateCart({
         name: 'cartBuyerIdentityUpdate',
-        args: '$buyerIdentity: CartBuyerIdentityInput!',
-        inner: 'buyerIdentity: $buyerIdentity',
-        variables: { buyerIdentity },
-        createInput: create ? { buyerIdentity } : null,
+        variable: 'buyerIdentity',
+        type: 'CartBuyerIdentityInput!',
+        value: buyerIdentity,
+        create,
       }).catch((error: unknown) => {
         // mutateCart has forgotten the cart Shopify no longer has; without `create` that leaves no cart.
         if (create || !isCartGone(error)) throw error;

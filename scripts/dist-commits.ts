@@ -90,7 +90,7 @@ export function gitDistHistory(root: string): DistHistory {
     },
     // Rename detection would list a file moved into dist/ by its new path alone.
     changedFiles(from, to) {
-      const changes = answer(['diff', '--name-status', '--no-renames', from, to]);
+      const changes = answer(['diff', '--name-status', '--no-renames', '-z', from, to]);
       return changes === null ? null : fileChanges(changes);
     },
     packageVersion(sha) {

@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { DEFAULTS, cfg, configure, resolveConfig } from '../src/config.ts';
+import { DEFAULTS, callHook, cfg, configure, resolveConfig } from '../src/config.ts';
 import { isQuarterlyVersion } from '../src/api-version.ts';
 
 /**
@@ -148,6 +148,56 @@ test('hooks that are not functions are dropped with a warning; the domain loses 
   assert.deepEqual(warned, ['[tether] invalid onCartOpen "open": ignored']);
   assert.equal(result.domain, 'shop.example');
   assert.equal(result.storageKey, 'tether:cart:shop.example');
+});
+
+test('a hook that throws gets its fallback and is reported, whatever it throws; an Error once for each message', () => {
+  /** @type {[string, unknown][]} */
+  const reported = [];
+  let warnings = 0;
+  const { warn } = console;
+  console.warn = () => {
+    warnings++;
+  };
+  configure({ domain: 'shop.test', token: 't', onError: (error, context) => reported.push([context, error]) });
+  /** @param {unknown} thrown */
+  const throwing = (thrown) => () => {
+    throw thrown;
+  };
+  /** @type {unknown} */
+  const noText = Object.create(null);
+  const brokenText = {
+    toString() {
+      throw new Error('no text');
+    },
+  };
+  try {
+    for (const thrown of [noText, noText, brokenText]) {
+      assert.equal(
+        callHook('formatMoney', throwing(thrown), () => 'built-in'),
+        'built-in',
+      );
+    }
+    for (const message of ['first bug', 'second bug', 'first bug']) {
+      callHook('formatMoney', throwing(new Error(message)), () => 'built-in');
+    }
+    callHook('onCartOpen', throwing(new Error('first bug')));
+    callHook('onCartOpen', throwing(new Error('first bug')));
+    assert.deepEqual(
+      reported.map(([context, error]) => [context, error instanceof Error ? error.message : error]),
+      [
+        ['formatMoney', noText],
+        ['formatMoney', noText],
+        ['formatMoney', brokenText],
+        ['formatMoney', 'first bug'],
+        ['formatMoney', 'second bug'],
+        ['onCartOpen', 'first bug'],
+      ],
+    );
+    assert.equal(warnings, reported.length, 'each one is logged too');
+  } finally {
+    console.warn = warn;
+    configure({ domain: 'shop.test', token: 't' });
+  }
 });
 
 test('configure replaces the shared config in place', () => {

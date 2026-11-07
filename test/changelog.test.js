@@ -147,6 +147,10 @@ test('a note file holds CHANGELOG bullets and no heading', () => {
     "fix.txt: a note file's name ends in .md",
     'fix.txt: a note starts with a "- " bullet',
   ]);
+  assert.deepEqual(
+    noteProblems({ name: 'npm.md', text: '- Fix: one.\n- **Breaking (npm):** two.\n  - Fix: nested.\n' }),
+    ["npm.md: a note's bullets are all one kind (it has Fix, Breaking): split it, one file per kind"],
+  );
   assert.deepEqual(noteProblems({ name: 'fix.md', text: '## 0.8.0 (2026-12-01)\n\n- Fix: one.\n' }), [
     'fix.md: a note starts with a "- " bullet',
     'fix.md: a note has no heading; the release writes it',

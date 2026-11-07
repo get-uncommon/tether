@@ -233,6 +233,77 @@ test('an open drawer taken off the page is announced closed; a manual drawer the
   assert.deepEqual(toggles, [true, false, true]);
 });
 
+test('a manual drawer the site takes off the page and puts back later is followed each time', async () => {
+  document.body.innerHTML = '<main id="page"><div id="m" tether-cart-drawer="manual"><button>y</button></div></main>';
+  Cart.render();
+  const drawer = find('#m');
+  drawer.classList.add('is-open');
+  await classChangeSeen();
+  assert.deepEqual(toggles, [true]);
+
+  drawer.remove();
+  await classChangeSeen();
+  assert.equal(Cart.isOpen(), false);
+  assert.deepEqual(toggles, [true, false], 'gone while open: announced closed');
+
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  find('#page').append(drawer);
+  await classChangeSeen();
+  assert.equal(Cart.isOpen(), true, 'back with the open class: open again');
+  assert.deepEqual(stateOf('#m'), OPEN);
+  assert.deepEqual(toggles, [true, false, true]);
+
+  drawer.classList.remove('is-open');
+  drawer.remove();
+  await classChangeSeen();
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  find('#page').append(drawer);
+  // As mounting the added markup, or `observe`, does.
+  Cart.render();
+  await classChangeSeen();
+  assert.equal(Cart.isOpen(), false);
+  assert.deepEqual(stateOf('#m'), CLOSED, 'back closed: still inert and hidden');
+  assert.deepEqual(toggles, [true, false, true, false]);
+});
+
+test('a change to the page outside the drawers does not look the drawers up, open or closed', async () => {
+  document.body.innerHTML = '<div id="drawer" tether-cart-drawer></div><ul id="list"></ul>';
+  Cart.render();
+  /** @type {string[]} */
+  const lookups = [];
+  const lookUp = Object.getOwnPropertyDescriptor(window.Document.prototype, 'querySelectorAll');
+  assert.ok(lookUp);
+  /** @type {unknown} */
+  const original = lookUp.value;
+  assert.ok(typeof original === 'function');
+  Object.defineProperty(window.Document.prototype, 'querySelectorAll', {
+    configurable: true,
+    /**
+     * @this {Document}
+     * @param {string} selector
+     */
+    value(selector) {
+      lookups.push(selector);
+      /** @type {unknown} */
+      const found = Reflect.apply(original, this, [selector]);
+      return found;
+    },
+  });
+  try {
+    for (const open of [false, true]) {
+      if (open) Cart.open();
+      lookups.length = 0;
+      find('#list').append(document.createElement('li'));
+      find('#list').classList.toggle('busy');
+      await classChangeSeen();
+      assert.deepEqual(lookups, [], open ? 'open' : 'closed');
+      assert.equal(Cart.isOpen(), open);
+    }
+  } finally {
+    Object.defineProperty(window.Document.prototype, 'querySelectorAll', lookUp);
+  }
+});
+
 test('a throwing onCartOpen or onCartClose is reported: the add still succeeds, and cart-toggled still fires', async () => {
   document.body.innerHTML = '';
   const merchandiseId = product.variants.nodes[0]?.id ?? '';
@@ -315,6 +386,23 @@ test('a throwing formatMoney is reported once: the add resolves, and amounts sho
   Cart.render();
   Cart.render();
   assert.deepEqual(reported, ['formatMoney'], 'not once for each price on each render');
+});
+
+test('a formatMoney that throws something with no text is reported, and the add and the render still finish', async () => {
+  document.body.innerHTML = '<span id="subtotal" tether-cart-subtotal></span>';
+  const formatMoney = () => {
+    throw Object.create(null);
+  };
+  const { warn } = console;
+  console.warn = () => {};
+  try {
+    const { reported, cart } = await addWithHooks({ formatMoney, locale: 'en-US' });
+    assert.equal(find('#subtotal').textContent, builtInFormat(cart.cost.subtotalAmount, 'en-US'));
+    assert.ok(reported.length > 0);
+    assert.ok(reported.every((context) => context === 'formatMoney'));
+  } finally {
+    console.warn = warn;
+  }
 });
 
 test('money: amounts compare as decimals, so a line is on sale only when it is', () => {

@@ -17,12 +17,13 @@
 import * as esbuild from 'esbuild';
 import ts from 'typescript';
 import { existsSync } from 'node:fs';
-import { readFile, readdir, writeFile, mkdir, mkdtemp, rename, rm } from 'node:fs/promises';
+import { readFile, readdir, writeFile, mkdir } from 'node:fs/promises';
 import { gzipSync, brotliCompressSync } from 'node:zlib';
 import { createHash } from 'node:crypto';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, join, basename, resolve } from 'node:path';
 import { minifyGraphqlTemplates } from './graphql-minify.ts';
+import { replaceFolder } from './replace-folder.ts';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const SRC = join(ROOT, 'src');
@@ -271,16 +272,42 @@ async function report(): Promise<void> {
   console.log(rows.join('\n'));
 }
 
-/** The top-level entries a build's output folder can hold: this build's, and those of a build of older source. */
-const BUILD_ENTRY = /^(?:tether(?:\.[\w-]+)*\.js(?:\.map)?|esm|presets|types)$/;
+/** The top-level entries a build writes into its output folder. */
+const BUILD_ENTRIES: ReadonlySet<string> = new Set([
+  'tether.js',
+  'tether.min.js',
+  'tether.min.js.map',
+  'tether.esm.js',
+  ...PARTS.flatMap((name) => [`tether.${name}.js`, `tether.${name}.min.js`]),
+  'esm',
+  'presets',
+  'types',
+]);
+
+/** The files macOS's Finder and Windows' Explorer write into a folder someone opened. */
+const OS_FILES: ReadonlySet<string> = new Set(['.DS_Store', 'Thumbs.db', 'desktop.ini']);
+
+/** A part's file, `tether.<name>.js` or `tether.<name>.min.js`. */
+const PART_FILE = /^tether\.([\w-]+?)(?:\.min)?\.js$/;
 
 /**
- * Exits unless the output folder is missing, empty or a build's, every entry a name a build writes (`BUILD_ENTRY`):
- * the build replaces the folder, so a mistyped `--out`, or one naming a site's asset folder, can't remove other files.
+ * @returns Whether `entry` is a file a build writes, `entries` being the output folder's: one of this build's
+ *   (`BUILD_ENTRIES`), a file the OS writes (`OS_FILES`), or a part a build of older source wrote, known by its other
+ *   kind beside it, since a build writes every part both plain and minified. A site's own `tether.config.js` is none.
+ */
+function isBuildEntry(entry: string, entries: readonly string[]): boolean {
+  if (BUILD_ENTRIES.has(entry) || OS_FILES.has(entry)) return true;
+  const part = PART_FILE.exec(entry)?.[1];
+  return part !== undefined && entries.includes(`tether.${part}.js`) && entries.includes(`tether.${part}.min.js`);
+}
+
+/**
+ * Exits unless the output folder is missing, empty or a build's, every entry one a build writes (`isBuildEntry`): the
+ * build replaces the folder, so a mistyped `--out`, or one naming a site's asset folder, can't remove other files.
  */
 async function checkOut(): Promise<void> {
   const entries = existsSync(OUT) ? await readdir(OUT) : [];
-  const foreign = entries.filter((entry) => !BUILD_ENTRY.test(entry));
+  const foreign = entries.filter((entry) => !isBuildEntry(entry, entries)).toSorted();
   if (!foreign.length) return;
   console.error(`build: ${OUT} isn't a build's output folder (it holds ${foreign.join(', ')}): not replacing it`);
   process.exit(1);
@@ -299,22 +326,13 @@ async function buildInto(out: string): Promise<void> {
 }
 
 /**
- * Builds into a new folder next to the output folder, on the same volume so it can be renamed, and puts it in the
- * output folder's place once every step has succeeded: a part or preset the source no longer has can't stay in
- * dist/, where the release's fresh-build check sees it as a deletion, and a failed build leaves the folder as it was.
+ * Builds into a new folder and puts it in the output folder's place once every step has succeeded (`replaceFolder`): a
+ * part or preset the source no longer has can't stay in dist/, where the release's fresh-build check sees it as a
+ * deletion, and a failed build leaves the folder as it was.
  */
 async function build(): Promise<void> {
   await checkOut();
-  await mkdir(dirname(OUT), { recursive: true });
-  const staging = await mkdtemp(join(dirname(OUT), `.${basename(OUT)}-building-`));
-  try {
-    await buildInto(staging);
-    await rm(OUT, { recursive: true, force: true });
-    await rename(staging, OUT);
-  } finally {
-    // Gone after the rename; what a failed step left otherwise.
-    await rm(staging, { recursive: true, force: true });
-  }
+  await replaceFolder(OUT, buildInto);
 }
 
 /**
