@@ -131,7 +131,7 @@ class SearchBox {
   searchNumber = 0;
   timer: ReturnType<typeof setTimeout> | undefined = undefined;
   lastTerm = '';
-  /** Results per term, for typing back and forth. */
+  /** Results per market and term, for typing back and forth: prices and names follow the market. */
   readonly cache = new Map<string, SearchResults | null>();
   /**
    * Removes the box's listeners once its root has left the page. The window's own controller: a page's
@@ -230,10 +230,11 @@ class SearchBox {
   }
 
   async fetchResults(term: string): Promise<SearchResults | null> {
-    const cached = this.cache.get(term);
+    const key = `${String(cfg.country)} ${String(cfg.language)} ${term}`;
+    const cached = this.cache.get(key);
     if (cached) return cached;
     const data = await gql(QUERY, { q: term, limit: this.limit }, isSearchAnswer);
-    this.cache.set(term, data.predictiveSearch);
+    this.cache.set(key, data.predictiveSearch);
     return data.predictiveSearch;
   }
 

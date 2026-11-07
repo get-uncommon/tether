@@ -199,6 +199,29 @@ test('new results clear aria-activedescendant: no option is selected in them', a
   );
 });
 
+test('a term searched again in another market is sent again: its prices are that market’s', async () => {
+  const { cfg } = await import('../src/config.ts');
+  const { toCountry } = await import('../src/market-codes.ts');
+  const root = find('[tether-search]');
+  const input = root.querySelector('input');
+  assert.ok(input);
+  for (const term of ['cofa', 'cofb']) {
+    root.removeAttribute('tether-search-state');
+    type(input, term);
+    await waitFor(() => root.getAttribute('tether-search-state') === 'ready', `the results for ${term}`);
+  }
+  const sent = calls.length;
+  cfg.country = toCountry('US') ?? undefined;
+  try {
+    root.removeAttribute('tether-search-state');
+    type(input, 'cofa');
+    await waitFor(() => root.getAttribute('tether-search-state') === 'ready', 'the results in US');
+    assert.equal(calls.length, sent + 1);
+  } finally {
+    cfg.country = undefined;
+  }
+});
+
 /**
  * Records the signal of each `document` click listener `run` adds.
  *
