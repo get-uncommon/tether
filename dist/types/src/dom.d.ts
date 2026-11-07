@@ -26,6 +26,8 @@ export declare function setStoreHtml(el: Element, html: string | null | undefine
 export declare const isInput: (el: Element) => el is HTMLInputElement;
 /** A form field, which has a `value`. */
 export declare const isField: (el: Element) => el is HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement;
+/** An event's target that is an element, not the document or the window. */
+export declare const isElement: (target: EventTarget | null) => target is Element;
 /**
  * Sets the text of `el`, or its value when it is a form field.
  *

@@ -1,0 +1,1 @@
+import{e as n}from"./chunk-SJUOME55.js";import{c as t,d as o}from"./chunk-JC5HJZRE.js";var e={nodes:[n],pageInfo:{hasNextPage:"boolean"}},s=o({collection:t({handle:"string",products:e})}),i=o({products:e}),p=o({productRecommendations:t([n])});export{s as a,i as b,p as c};

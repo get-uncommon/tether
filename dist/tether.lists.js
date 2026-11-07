@@ -25,7 +25,7 @@
 
   // tether-core:dom.ts
   var m3 = window.Tether.__core["dom.ts"];
-  var [ANALYTICS_EVENTS, attr, attributesFromJson, busy, emit, formatDate, formatMoney, get, has, hasTemplate, integerAttribute, isOwnEvent, notifyLayoutChanged, parseJSONAttr, productUrl, qsa, repeat, scoped, sel, setImage, setStoreHtml, setText, show] = m3;
+  var [ANALYTICS_EVENTS, attr, attributesFromJson, busy, emit, formatDate, formatMoney, get, has, hasTemplate, integerAttribute, isElement, isOwnEvent, notifyLayoutChanged, parseJSONAttr, productUrl, qsa, repeat, scoped, sel, setImage, setStoreHtml, setText, show] = m3;
 
   // src/shopify-fields.ts
   var IMAGE_FIELDS = "url altText width height";
@@ -53,6 +53,8 @@
     priceRange: { minVariantPrice: MONEY, maxVariantPrice: MONEY },
     variants: { nodes: [{ id: "string", price: MONEY, selectedOptions: ["object"] }] }
   };
+
+  // src/product-answers.ts
   var PRODUCT_CONNECTION = {
     nodes: [PRODUCT],
     pageInfo: { hasNextPage: "boolean" }
@@ -152,7 +154,6 @@
     list.forEach(primeProduct);
     return list;
   }
-  var isElement = (target) => target instanceof window.Element;
   var listLimit = (root, fallback) => integerAttribute(root, "limit", { min: 1, max: MAX_CONNECTION_SIZE, fallback });
   var toIntent = (raw) => raw === "COMPLEMENTARY" ? "COMPLEMENTARY" : "RELATED";
   var ListScope = class {

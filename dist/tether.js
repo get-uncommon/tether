@@ -1152,6 +1152,7 @@
   var isInput = (el) => el.tagName === "INPUT";
   var isTextField = (el) => isInput(el) || el.tagName === "TEXTAREA";
   var isField = (el) => isTextField(el) || el.tagName === "SELECT";
+  var isElement = (target) => target instanceof window.Element;
   function setText(el, value) {
     const text2 = value == null ? "" : String(value);
     if (isTextField(el)) el.value = text2;
@@ -1499,19 +1500,8 @@
     priceRange: { minVariantPrice: MONEY2, maxVariantPrice: MONEY2 },
     variants: { nodes: [{ id: "string", price: MONEY2, selectedOptions: ["object"] }] }
   };
-  var PRODUCT_CONNECTION = {
-    nodes: [PRODUCT],
-    pageInfo: { hasNextPage: "boolean" }
-  };
   var isProductShape = (value) => field(value, "id") !== "" && field(value, "handle") !== "" && matches(value, PRODUCT);
   var PRODUCT_NODE = (node) => isRecord(node) && (node["id"] === void 0 || matches(node, PRODUCT));
-  var isCollectionAnswer = shaped({
-    collection: orNull({ handle: "string", products: PRODUCT_CONNECTION })
-  });
-  var isSearchAnswer = shaped({ products: PRODUCT_CONNECTION });
-  var isRecommendationsAnswer = shaped({
-    productRecommendations: orNull([PRODUCT])
-  });
 
   // src/cart/cart-shape.ts
   var LINE = {
@@ -3044,7 +3034,6 @@
 
   // src/product-events.ts
   var productSelector = () => sel("product");
-  var isElement = (target) => target instanceof window.Element;
   function closestOwn(scope, target, selector) {
     const el = target.closest(selector);
     return el?.closest(productSelector()) === scope.root ? el : null;
@@ -3607,7 +3596,7 @@
   }
 
   // src/part-integrity.ts
-  var PART_INTEGRITY = { "tether.diagnose.js": "sha384-CqtXzvWbLD8aIgyTM43+KMXEFA7r7lhG+0XyQAw3Sp7B5qrzPsxlA9QfzBjoPqZz", "tether.markets.js": "sha384-tjsSd8vhXuzcx03YQ8Q0OOlZYFyWS3x3iHv1srkfn6sIeEhd5KusdFO4dLQzVhXv", "tether.search.js": "sha384-wBmhnRNikwSpRazt7QsR/rgo00v32Pl1O4Bx9TFnvVQgQmn6QGBxOcioCTwZ1qVb", "tether.lists.js": "sha384-63E1B/V0tADJNnye49RghdL+8RQqx/hX/osDp0aex6pX5pi+YImZXHK5FZ9OYtlK", "tether.extras.js": "sha384-qx7paZ/rjwtn1Yy9TgszulmBuJsIQ9y4eZ590AArnZ+IDB8IzwJ5dNOFJ+yMHPdb", "tether.account.js": "sha384-A5LC6eOq1My82IYPD0qA/NKhefGuBvA+9vwY7l/t0S40/SwIjWCBXJIO3YNyYGPc", "tether.account-pages.js": "sha384-ND3kIaRypgnHG3QMDb8CqDxt7fuukDCdHsIAHoOUUsz3+FjvBqXgRDV4Mjp6x8jr", "tether.analytics.js": "sha384-jnLesn/+edWBSPuXLj7VX1kSAGwEqtb0VbHjuU//ofqgxkndHlDFsS8Bc8htlGt8" };
+  var PART_INTEGRITY = { "tether.diagnose.js": "sha384-yYZpcrRmwYqG6dTXD5m7YKPlcVuL3RPHCuaDzLnfJvdmmxH9Fe3ip1ADcX1WK70B", "tether.markets.js": "sha384-S7JkU2e6i2yPAj5AGjSTwC8yU9XbNWu6j+fE1J/Iz1YTY6KfjjLRgPysvkMVG7EY", "tether.search.js": "sha384-p2jiGj4lAuskufTrc4Fj5ZOLolIaev7WjGiP4GfJhSB76ctBq8a59nITuhULeaN4", "tether.lists.js": "sha384-LCYUAkLThJgVcSTYhECqeWmjiDhbVdIn5/miFjgHALLW/+JlUktQzVPfP1GybH2j", "tether.extras.js": "sha384-uJkQJolGR0au//Prn6yB574rHFC1QAWLWA636jHV91PKIi7JuFWNyh/xzXfry+BW", "tether.account.js": "sha384-yjq622iQCNxGNYVIeZLVIvpCma5OaJ0fXxO7bcQblpRN00yqNDrEdOr4CyHs1UYP", "tether.account-pages.js": "sha384-N9fVpwkQLuIJ7HWLatw5XHjvfwbih4syjvKrG0ZPJQBeUhbi4Kiipp513OgYrdaX", "tether.analytics.js": "sha384-IHf1OHNKpDytCTEPTgtkrL3te+eGnaL2Es6OX7Sim1n42ujJPih37Wb2sCk1lYRH" };
 
   // src/part-registry.ts
   function isTetherInternals(value) {
@@ -3615,7 +3604,7 @@
   }
 
   // src/version.ts
-  var VERSION = "0.10.0";
+  var VERSION = "0.10.1";
 
   // src/lazy-iife.ts
   var coreModules = {
@@ -3638,6 +3627,7 @@
         has,
         hasTemplate,
         integerAttribute,
+        isElement,
         isOwnEvent,
         notifyLayoutChanged,
         parseJSONAttr,
@@ -3854,7 +3844,6 @@
 
   // src/controls/cart-controls.ts
   var lineKeyAttribute = () => `data-${cfg.prefix}-key`;
-  var isElement2 = (target) => target instanceof window.Element;
   function lineOf(target) {
     const line = target.closest(`[${lineKeyAttribute()}]`);
     const id = line?.getAttribute(lineKeyAttribute());
@@ -3887,7 +3876,7 @@
   }
   function onClick2(event) {
     const { target } = event;
-    if (!isElement2(target)) return;
+    if (!isElement(target)) return;
     if (target.closest(sel("cart-open"))) {
       event.preventDefault();
       Cart.toggle();
@@ -3933,7 +3922,7 @@
   }
   function onChange2(event) {
     const { target } = event;
-    if (!isElement2(target)) return;
+    if (!isElement(target)) return;
     const found = lineOf(target);
     if (found && target instanceof window.HTMLInputElement && target.matches(sel("line", "quantity"))) {
       onQuantityInput(target, found);
@@ -3959,14 +3948,13 @@
   }
 
   // src/controls/discount.ts
-  var isElement3 = (target) => target instanceof window.Element;
   function codeInputOf(form) {
     const input = form.querySelector(sel("discount-input")) ?? form.querySelector("input");
     return input instanceof window.HTMLInputElement ? input : null;
   }
   function onSubmit(event) {
     const { target } = event;
-    const form = isElement3(target) ? target.closest(sel("discount-form")) : null;
+    const form = isElement(target) ? target.closest(sel("discount-form")) : null;
     if (!form) return;
     event.preventDefault();
     const input = codeInputOf(form);
@@ -3980,7 +3968,7 @@
   }
   function onInput(event) {
     const { target } = event;
-    if (!isElement3(target)) return;
+    if (!isElement(target)) return;
     const form = target.closest(sel("discount-form"));
     if (!form) return;
     form.classList.remove("is-invalid");
@@ -3988,7 +3976,7 @@
   }
   function onClick3(event) {
     const { target } = event;
-    const remove = isElement3(target) ? target.closest(sel("discount-remove")) : null;
+    const remove = isElement(target) ? target.closest(sel("discount-remove")) : null;
     if (!remove) return;
     event.preventDefault();
     const code = remove.closest(sel("discount-code"))?.getAttribute(attr("discount-code"));
