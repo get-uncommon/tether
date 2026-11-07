@@ -2,19 +2,6 @@
 
 ## Unreleased
 
-- Fix: `imagesFirst`, `variantsFirst`, `sellingPlanGroupsFirst`, `sellingPlansFirst` and
-  `collectionFirst` take an integer from 1 to 250. A larger one warns and uses 250 instead of
-  failing every product query; 0 or less warns and uses the default (`variantsFirst: 0` left
-  products without variants).
-- Fix: `tether-limit` on a product list takes 1 to 250, `tether-search-limit` 1 to 10 (Shopify's
-  limits) and `tether-search-min` at least 1. A larger value warns once and uses the maximum, and a
-  value that isn't a whole number in range warns once and uses the default:
-  `tether-search-limit="12"` failed every search, and `tether-limit="-4"` dropped the last four
-  recommendations. An orders list's `tether-limit` above 50 warns too.
-- Fix: `cartDrawerOpenClass` must be one class name. An empty one or one with spaces warns and uses
-  `is-open`; it used to make every add to cart report an error after the line was added.
-- Fix: an option named like a built-in object property (`constructor`, `toString`) warns as unknown,
-  and the Astro integration leaves it out of the page.
 - Fix: a `tether-cart-drawer="manual"` drawer the site opens, by adding the open class, is usable:
   Tether follows the class, so the open drawer is no longer `inert` and `aria-hidden`, focus moves
   in, and `Tether.cart.isOpen()`, `tether:cart-toggled` and `subscribe` see it. Esc,
@@ -42,6 +29,22 @@
   instead of `[aria-pressed="true"]`.
 - Fix: `Tether.cart.applyDiscount(' CODE ')` and `removeDiscount(' CODE ')` take the code without
   the spaces around it: a valid code with spaces no longer rejects as `INVALID_DISCOUNT`.
+
+## 0.9.3 (2026-11-07)
+
+- Fix: `imagesFirst`, `variantsFirst`, `sellingPlanGroupsFirst`, `sellingPlansFirst` and
+  `collectionFirst` take an integer from 1 to 250. A larger one warns and uses 250 instead of
+  failing every product query; 0 or less warns and uses the default (`variantsFirst: 0` left
+  products without variants).
+- Fix: `tether-limit` on a product list takes 1 to 250, `tether-search-limit` 1 to 10 (Shopify's
+  limits) and `tether-search-min` at least 1. A larger value warns once and uses the maximum, and a
+  value that isn't a whole number in range warns once and uses the default:
+  `tether-search-limit="12"` failed every search, and `tether-limit="-4"` dropped the last four
+  recommendations. An orders list's `tether-limit` above 50 warns too.
+- Fix: `cartDrawerOpenClass` must be one class name. An empty one or one with spaces warns and uses
+  `is-open`; it used to make every add to cart report an error after the line was added.
+- Fix: an option named like a built-in object property (`constructor`, `toString`) warns as unknown,
+  and the Astro integration leaves it out of the page.
 - Fix (sync Worker): a `metafield:` source in `FIELD_MAP` or the config file, or a
   `shopify.metafields` entry, that isn't `namespace.key` stops the sync with an error naming the
   entry, which `/check` reports; it used to ask Shopify for a metafield with an empty key.

@@ -28,9 +28,19 @@
     return isRecord(value) ? value[key] : void 0;
   }
 
-  // src/config-sections.ts
-  var METAFIELD_PART = /^[A-Za-z0-9_.-]+$/;
+  // server/src/shared/metafield-ref.ts
+  var METAFIELD_KEY = /^[A-Za-z0-9_.-]+$/;
   var METAFIELD_NAMESPACE = /^(\$app(:[A-Za-z0-9_-]+)?|[A-Za-z0-9_.-]+)$/;
+  var isMetafieldIdentifier = (namespace, key) => METAFIELD_NAMESPACE.test(namespace) && METAFIELD_KEY.test(key);
+  function metafieldIdentifierOf(ref) {
+    const dot = ref.indexOf(".");
+    if (dot <= 0) return null;
+    const namespace = ref.slice(0, dot);
+    const key = ref.slice(dot + 1);
+    return isMetafieldIdentifier(namespace, key) ? { namespace, key } : null;
+  }
+
+  // src/config-sections.ts
   var HOSTNAME = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/i;
   var COOKIE_NAME = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
   var GLOBAL_NAME = /^[A-Za-z_$][\w$]*$/;
@@ -99,18 +109,12 @@
     return origins;
   }
   function toMetafieldIdentifier(ref) {
-    let namespace;
-    let key;
-    if (typeof ref === "string") {
-      const dot = ref.indexOf(".");
-      namespace = dot > 0 ? ref.slice(0, dot) : "";
-      key = ref.slice(dot + 1);
-    } else if (typeof ref === "object" && ref !== null) {
-      namespace = Reflect.get(ref, "namespace");
-      key = Reflect.get(ref, "key");
-    }
+    if (typeof ref === "string") return metafieldIdentifierOf(ref);
+    if (typeof ref !== "object" || ref === null) return null;
+    const namespace = Reflect.get(ref, "namespace");
+    const key = Reflect.get(ref, "key");
     if (typeof namespace !== "string" || typeof key !== "string") return null;
-    return METAFIELD_NAMESPACE.test(namespace) && METAFIELD_PART.test(key) ? { namespace, key } : null;
+    return isMetafieldIdentifier(namespace, key) ? { namespace, key } : null;
   }
   function metafieldsOption(value, invalid) {
     if (!Array.isArray(value)) {
@@ -220,6 +224,45 @@
     return LANGUAGE.test(primary) ? primary : null;
   }
 
+  // src/shopify-values.ts
+  var MAX_CONNECTION_SIZE = 250;
+  function isHttpsUrl(url2) {
+    if (typeof url2 !== "string") return false;
+    try {
+      return new URL(url2).protocol === "https:";
+    } catch {
+      return false;
+    }
+  }
+  function formatMoney(money, locale) {
+    if (!money) return "";
+    const amount = parseFloat(money.amount);
+    if (Number.isNaN(amount)) return "";
+    try {
+      return new Intl.NumberFormat(locale || void 0, { style: "currency", currency: money.currencyCode }).format(
+        amount
+      );
+    } catch {
+      return `${money.currencyCode} ${amount.toFixed(2)}`;
+    }
+  }
+  function productUrl(productPath, handle, id) {
+    if (!/\{(handle|id)\}/.test(productPath)) {
+      return handle ? `${productPath.replace(/\/$/, "")}/${encodeURIComponent(handle)}` : null;
+    }
+    const numericId2 = id ? id.split("/").at(-1) ?? "" : "";
+    if (productPath.includes("{handle}") && !handle) return null;
+    if (productPath.includes("{id}") && !numericId2) return null;
+    return productPath.replace(/\{handle\}/g, encodeURIComponent(handle ?? "")).replace(/\{id\}/g, encodeURIComponent(numericId2));
+  }
+  function productKey(raw) {
+    const value = String(raw ?? "").trim();
+    if (!value) return null;
+    if (value.startsWith("gid://")) return value;
+    if (/^\d+$/.test(value)) return `gid://shopify/Product/${value}`;
+    return /\/products\/([^/?#]+)/.exec(value)?.[1] ?? value;
+  }
+
   // src/config.ts
   var DEFAULTS = {
     domain: "",
@@ -297,7 +340,7 @@
     "astro",
     "debug"
   ];
-  var TEXT_OPTIONS = ["token", "productPath", "collectionPath", "cartDrawerOpenClass"];
+  var TEXT_OPTIONS = ["token", "productPath", "collectionPath"];
   var COUNT_OPTIONS = [
     "imagesFirst",
     "variantsFirst",
@@ -330,7 +373,7 @@
   }
   function warnUnknownKeys(options) {
     for (const key of Object.keys(options)) {
-      if (!(key in DEFAULTS)) warn(`unknown option ${JSON.stringify(key)}: ignored`);
+      if (!Object.hasOwn(DEFAULTS, key)) warn(`unknown option ${JSON.stringify(key)}: ignored`);
     }
   }
   function setHook(config, name, value) {
@@ -342,16 +385,22 @@
   }
   var MAX_TIMER_MS = 2147483647;
   var MAX_RETRIES = 10;
-  var COUNT_MAXIMUMS = {
-    requestTimeout: MAX_TIMER_MS,
-    searchDelay: MAX_TIMER_MS,
-    retries: MAX_RETRIES
+  var CONNECTION_RANGE = { min: 1, max: MAX_CONNECTION_SIZE };
+  var COUNT_RANGES = {
+    imagesFirst: CONNECTION_RANGE,
+    variantsFirst: CONNECTION_RANGE,
+    sellingPlanGroupsFirst: CONNECTION_RANGE,
+    sellingPlansFirst: CONNECTION_RANGE,
+    collectionFirst: CONNECTION_RANGE,
+    requestTimeout: { max: MAX_TIMER_MS },
+    searchDelay: { max: MAX_TIMER_MS },
+    retries: { max: MAX_RETRIES }
   };
   function countOption(name, value) {
-    if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
+    const { min = 0, max: maximum } = COUNT_RANGES[name] ?? {};
+    if (typeof value !== "number" || !Number.isInteger(value) || value < min) {
       return invalidOption(name, value, DEFAULTS[name]);
     }
-    const maximum = COUNT_MAXIMUMS[name];
     if (maximum === void 0 || value <= maximum) return value;
     warn(`${name} ${String(value)} is more than its maximum: using ${String(maximum)}`);
     return maximum;
@@ -361,6 +410,10 @@
   }
   function textOption(name, value) {
     return typeof value === "string" ? value : invalidOption(name, value, DEFAULTS[name]);
+  }
+  var CLASS_TOKEN = /^\S+$/;
+  function classOption(name, value) {
+    return typeof value === "string" && CLASS_TOKEN.test(value) ? value : invalidOption(name, value, DEFAULTS[name]);
   }
   function localeOption(value) {
     if (value === void 0 || value === null || value === "") return void 0;
@@ -408,7 +461,8 @@
       metafields: metafieldsOption(options.metafields ?? [], dropped),
       embedOrigins: embedOriginsOption(options.embedOrigins ?? [], dropped),
       checkoutTarget: choiceOption("checkoutTarget", options.checkoutTarget, ["_self", "_blank"]),
-      defaultPurchase: choiceOption("defaultPurchase", options.defaultPurchase, ["one-time", "subscription"])
+      defaultPurchase: choiceOption("defaultPurchase", options.defaultPurchase, ["one-time", "subscription"]),
+      cartDrawerOpenClass: classOption("cartDrawerOpenClass", options.cartDrawerOpenClass)
     };
     for (const name of COUNT_OPTIONS) resolved[name] = countOption(name, options[name]);
     for (const name of SWITCH_OPTIONS) resolved[name] = switchOption(name, options[name]);
@@ -881,44 +935,6 @@
     return template.content;
   }
 
-  // src/shopify-values.ts
-  function isHttpsUrl(url2) {
-    if (typeof url2 !== "string") return false;
-    try {
-      return new URL(url2).protocol === "https:";
-    } catch {
-      return false;
-    }
-  }
-  function formatMoney(money, locale) {
-    if (!money) return "";
-    const amount = parseFloat(money.amount);
-    if (Number.isNaN(amount)) return "";
-    try {
-      return new Intl.NumberFormat(locale || void 0, { style: "currency", currency: money.currencyCode }).format(
-        amount
-      );
-    } catch {
-      return `${money.currencyCode} ${amount.toFixed(2)}`;
-    }
-  }
-  function productUrl(productPath, handle, id) {
-    if (!/\{(handle|id)\}/.test(productPath)) {
-      return handle ? `${productPath.replace(/\/$/, "")}/${encodeURIComponent(handle)}` : null;
-    }
-    const numericId2 = id ? id.split("/").at(-1) ?? "" : "";
-    if (productPath.includes("{handle}") && !handle) return null;
-    if (productPath.includes("{id}") && !numericId2) return null;
-    return productPath.replace(/\{handle\}/g, encodeURIComponent(handle ?? "")).replace(/\{id\}/g, encodeURIComponent(numericId2));
-  }
-  function productKey(raw) {
-    const value = String(raw ?? "").trim();
-    if (!value) return null;
-    if (value.startsWith("gid://")) return value;
-    if (/^\d+$/.test(value)) return `gid://shopify/Product/${value}`;
-    return /\/products\/([^/?#]+)/.exec(value)?.[1] ?? value;
-  }
-
   // src/images.ts
   function imageUrl(url2, { width, height, crop } = {}) {
     if (!url2) return url2;
@@ -1208,6 +1224,31 @@
       warn(`invalid JSON in ${attr(name)}`, el);
       return null;
     }
+  }
+  var INTEGER_TEXT = /^-?\d+$/;
+  var invalidIntegerAttributes = /* @__PURE__ */ new WeakMap();
+  function warnInvalidAttribute(el, name, message) {
+    const warned = invalidIntegerAttributes.get(el) ?? /* @__PURE__ */ new Set();
+    invalidIntegerAttributes.set(el, warned);
+    if (warned.has(name)) return;
+    warned.add(name);
+    warn(`${attr(name)} ${message}`, el);
+  }
+  function integerAttribute(el, name, { min, max, fallback }) {
+    const raw = get(el, name)?.trim();
+    if (!raw) return fallback;
+    const value = INTEGER_TEXT.test(raw) ? Number(raw) : Number.NaN;
+    if (Number.isNaN(value) || value < min) {
+      warnInvalidAttribute(
+        el,
+        name,
+        `${JSON.stringify(raw)} is not a whole number from ${String(min)}: using ${String(fallback)}`
+      );
+      return fallback;
+    }
+    if (max === void 0 || value <= max) return value;
+    warnInvalidAttribute(el, name, `${raw} is more than its maximum: using ${String(max)}`);
+    return max;
   }
   function attributeText(value) {
     if (value === null || value === void 0) return "";
@@ -3440,7 +3481,7 @@
   }
 
   // src/part-integrity.ts
-  var PART_INTEGRITY = { "tether.diagnose.js": "sha384-6b98ZqhqrOFydwTyklda6rjvyWrgz1OnmffApLQ3+gg6VPSU1Yy3LhR1OT4lprfa", "tether.markets.js": "sha384-f9ZeUfc/tMICwVFPrC44Sa1oxm9c6jTQASJdNhHWDk55thsEVScodDBKSYUiuDgr", "tether.search.js": "sha384-kNQI7aVmvUyNgV2e6+PRy53xmbKiZi2n1hhYmHUDFCGU3BR6SoGpGKVKVbPE0ZtG", "tether.lists.js": "sha384-MfQgl9RjiTn6vr80fQymnFikrsDXh3wcmT8cu858s7z9p/oByQaJUKZo92qhjX1P", "tether.extras.js": "sha384-H4CWsEibHw/99UiBAi366ctyaNZrVMkK6Y1YJYYcGDbNthy5eQdS+RRcrlm1clmQ", "tether.account.js": "sha384-UeOp/wddJlVjmlYcVqqO9hU7ANLYEtY/TtK/y5cFkQ6J+SPBmqI/VReaAh+reCMC", "tether.account-pages.js": "sha384-jBeU+vF/U13v+9LZxg5R8lQb/PDHTXPVvu1EmsdDUrlh7BmIntbZJh2+iT6YykTy", "tether.analytics.js": "sha384-4gJ/lcu+S+sfpEHu64+0m2zbXpvNsyOxKDQchPEIb1SFg3ky1JlXODNSdRoodST9" };
+  var PART_INTEGRITY = { "tether.diagnose.js": "sha384-V4pclvaqH/qR/arn2rEkiL09rESoS1Z5AEE01ZSaFNlDU+sXXpOhKprwno6MT998", "tether.markets.js": "sha384-5wg1XGIKHX3Q4SX9E1xoYiJT653F0uCs7WCJ36Rf+YX6o1VJhuK6m59ZuUuqgxXw", "tether.search.js": "sha384-KMmZKdaQq6+LzU7kFva2DYZ7dh425RhHClXfVPHp8dNDGn1eG2UEMuPooowJOQtt", "tether.lists.js": "sha384-L/+3bMN1EifET4EcFWBk5IAFywRaC0uilAX3eYLeGqmX9zkPFjS/SvVSklpRwSSA", "tether.extras.js": "sha384-/SMjz6qCFAOV0wwvEVNhQxtT/1pyx4hRxDJHOxHB6M3uclAvItSULKZqJvaehH+i", "tether.account.js": "sha384-CVXd+K/5Wc9mSdfMM6cE1BYN4kjFWCXpEfoLq/jU0zy1C+V4SXfyTCyXloVFMMs7", "tether.account-pages.js": "sha384-bUUsp/0dKGSGzjctzF1FgLcCvgBGh+wQw95IhbjU+ckMo78vzetzlI2+QuNQugaI", "tether.analytics.js": "sha384-DBXy5gOU7crMr0xSS4TjnZN1Q8Slz3h18Ih/jLBjwYRVFE1fGzdR9PBuHnKOxc0E" };
 
   // src/part-registry.ts
   function isTetherInternals(value) {
@@ -3448,7 +3489,7 @@
   }
 
   // src/version.ts
-  var VERSION = "0.9.2";
+  var VERSION = "0.9.3";
 
   // src/lazy-iife.ts
   var coreModules = {
@@ -3470,6 +3511,7 @@
         get,
         has,
         hasTemplate,
+        integerAttribute,
         isOwnEvent,
         notifyLayoutChanged,
         parseJSONAttr,
@@ -3515,7 +3557,7 @@
       return [setCountry];
     },
     get "shopify-values.ts"() {
-      return [isHttpsUrl];
+      return [isHttpsUrl, MAX_CONNECTION_SIZE];
     },
     // Parts that load other parts (account → account-pages) use this same loader.
     get "lazy.ts"() {

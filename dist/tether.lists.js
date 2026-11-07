@@ -25,7 +25,7 @@
 
   // tether-core:dom.ts
   var m3 = window.Tether.__core["dom.ts"];
-  var [ANALYTICS_EVENTS, attr, attributesFromJson, busy, emit, formatDate, formatMoney, get, has, hasTemplate, isOwnEvent, notifyLayoutChanged, parseJSONAttr, productUrl, qsa, repeat, scoped, sel, setImage, setStoreHtml, setText, show] = m3;
+  var [ANALYTICS_EVENTS, attr, attributesFromJson, busy, emit, formatDate, formatMoney, get, has, hasTemplate, integerAttribute, isOwnEvent, notifyLayoutChanged, parseJSONAttr, productUrl, qsa, repeat, scoped, sel, setImage, setStoreHtml, setText, show] = m3;
 
   // tether-core:fragments.ts
   var m4 = window.Tether.__core["fragments.ts"];
@@ -70,6 +70,10 @@
   // tether-core:collection.ts
   var m7 = window.Tether.__core["collection.ts"];
   var [listSelector] = m7;
+
+  // tether-core:shopify-values.ts
+  var m8 = window.Tether.__core["shopify-values.ts"];
+  var [isHttpsUrl, MAX_CONNECTION_SIZE] = m8;
 
   // src/lists.ts
   var URL_QUERY_SOURCE = "url:";
@@ -126,7 +130,7 @@
     return list;
   }
   var isElement = (target) => target instanceof window.Element;
-  var toLimit = (raw) => parseInt(raw ?? "", 10) || void 0;
+  var listLimit = (root, fallback) => integerAttribute(root, "limit", { min: 1, max: MAX_CONNECTION_SIZE, fallback });
   var toIntent = (raw) => raw === "COMPLEMENTARY" ? "COMPLEMENTARY" : "RELATED";
   var ListScope = class {
     constructor(root) {
@@ -151,9 +155,10 @@
     /** The collection or search query of the list's attributes. */
     options() {
       const { root } = this;
-      const query = { reverse: get(root, "reverse") === "true" };
-      const first = toLimit(get(root, "limit"));
-      if (first) query.first = first;
+      const query = {
+        reverse: get(root, "reverse") === "true",
+        first: listLimit(root, cfg.collectionFirst)
+      };
       const sortKey = get(root, "sort");
       if (sortKey) query.sortKey = sortKey;
       if (has(root, "collection")) {
@@ -185,8 +190,7 @@
         if (has(this.root, "recommendations")) {
           const recommendations = await this.loadRecommendations();
           if (stale()) return;
-          const limit = toLimit(get(this.root, "limit"));
-          this.products = limit ? recommendations.slice(0, limit) : recommendations;
+          this.products = recommendations.slice(0, listLimit(this.root, recommendations.length));
         } else {
           const page = await getProducts({ ...this.options(), after: more ? this.pageInfo?.endCursor ?? null : null });
           if (stale()) return;

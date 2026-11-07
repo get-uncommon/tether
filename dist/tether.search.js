@@ -23,7 +23,7 @@
 
   // tether-core:dom.ts
   var m3 = window.Tether.__core["dom.ts"];
-  var [ANALYTICS_EVENTS, attr, attributesFromJson, busy, emit, formatDate, formatMoney, get, has, hasTemplate, isOwnEvent, notifyLayoutChanged, parseJSONAttr, productUrl, qsa, repeat, scoped, sel, setImage, setStoreHtml, setText, show] = m3;
+  var [ANALYTICS_EVENTS, attr, attributesFromJson, busy, emit, formatDate, formatMoney, get, has, hasTemplate, integerAttribute, isOwnEvent, notifyLayoutChanged, parseJSONAttr, productUrl, qsa, repeat, scoped, sel, setImage, setStoreHtml, setText, show] = m3;
 
   // tether-core:mounting.ts
   var m4 = window.Tether.__core["mounting.ts"];
@@ -39,13 +39,11 @@
   });
   var QUERY = `query TetherPredictive($q:String!,$limit:Int!){predictiveSearch(query:$q,limit:$limit,limitScope:EACH,types:[PRODUCT,COLLECTION,QUERY]){products{id handle title availableForSale featuredImage{url altText}priceRange{minVariantPrice{amount currencyCode}}}collections{handle title image{url altText}}queries{text}}}`;
   var DEFAULT_LIMIT = 6;
+  var MAX_LIMIT = 10;
   var DEFAULT_MIN_CHARACTERS = 2;
   var DEFAULT_ACTION = "/search";
   var mounted = /* @__PURE__ */ new WeakSet();
   var searchBoxCount = 0;
-  function integerAttribute(el, name, fallback) {
-    return parseInt(get(el, name) || "", 10) || fallback;
-  }
   var linkIn = (node) => node.tagName === "A" ? node : node.querySelector("a");
   function bindValues(node, values) {
     qsa(node, sel("search-bind")).forEach((el) => {
@@ -79,8 +77,8 @@
       this.root = root;
       this.input = input;
       this.results = results;
-      this.limit = integerAttribute(root, "search-limit", DEFAULT_LIMIT);
-      this.minCharacters = integerAttribute(root, "search-min", DEFAULT_MIN_CHARACTERS);
+      this.limit = integerAttribute(root, "search-limit", { min: 1, max: MAX_LIMIT, fallback: DEFAULT_LIMIT });
+      this.minCharacters = integerAttribute(root, "search-min", { min: 1, fallback: DEFAULT_MIN_CHARACTERS });
       if (!results.id) {
         searchBoxCount += 1;
         results.id = `${cfg.prefix}-search-${searchBoxCount}`;
