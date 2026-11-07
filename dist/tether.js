@@ -3602,7 +3602,7 @@
   }
 
   // src/part-integrity.ts
-  var PART_INTEGRITY = { "tether.diagnose.js": "sha384-euwUnDXnDZd70Pud3pHrNgzBwk3Pm8mrQjusX12KVBUGxcD4Z1pI9swMKM3bcGba", "tether.markets.js": "sha384-UMKj62O7TqyF61RRZDs9CEpQLk49vKnk9tFaiSJhUfndcD1o/jCM9Spn5yjAFqQO", "tether.search.js": "sha384-FMneAYSGyeio3ZpsWldYhdu9fgPk2/vQ5h76dxS9wQSS/1LxMTdS+rEHOU2e+e5r", "tether.lists.js": "sha384-FuEVV6Lo81/xeAkcD1AGNnGAvfz8b9cq2qBIHDilIH3jtqE3GHAX9ogvNkjqSbM3", "tether.extras.js": "sha384-Hp4ITcajZpcqDnXoA4D84doONi3GvxBuU4HUvJg7ZwjcqY3Gm7tf5EMQWm93zfGE", "tether.account.js": "sha384-qRngYUoIRv70HIl8SfrPQGSeyFwR6OqX+Ca8VfY22Nl8W0ClpICNneDVpH3AZ+1Y", "tether.account-pages.js": "sha384-hUmXqgE+0NKlgihiMi5U+ju3Fd4ymlm+CQyHg5f8bxAufcJWzmBBRFCA7zxiZs3o", "tether.analytics.js": "sha384-O630KvTsu3NubakRzX428cNTWzXkI4fmhU1F8TCKhCGAW1GgWpknDVlPeMcnMKK0" };
+  var PART_INTEGRITY = { "tether.diagnose.js": "sha384-euwUnDXnDZd70Pud3pHrNgzBwk3Pm8mrQjusX12KVBUGxcD4Z1pI9swMKM3bcGba", "tether.markets.js": "sha384-UMKj62O7TqyF61RRZDs9CEpQLk49vKnk9tFaiSJhUfndcD1o/jCM9Spn5yjAFqQO", "tether.search.js": "sha384-FMneAYSGyeio3ZpsWldYhdu9fgPk2/vQ5h76dxS9wQSS/1LxMTdS+rEHOU2e+e5r", "tether.lists.js": "sha384-FuEVV6Lo81/xeAkcD1AGNnGAvfz8b9cq2qBIHDilIH3jtqE3GHAX9ogvNkjqSbM3", "tether.extras.js": "sha384-Hp4ITcajZpcqDnXoA4D84doONi3GvxBuU4HUvJg7ZwjcqY3Gm7tf5EMQWm93zfGE", "tether.account.js": "sha384-qRngYUoIRv70HIl8SfrPQGSeyFwR6OqX+Ca8VfY22Nl8W0ClpICNneDVpH3AZ+1Y", "tether.account-pages.js": "sha384-hUmXqgE+0NKlgihiMi5U+ju3Fd4ymlm+CQyHg5f8bxAufcJWzmBBRFCA7zxiZs3o", "tether.analytics.js": "sha384-QN/z0gk9w+S/2pT1oTFFSvHjv24AuTyuLgD02saRmRhCJyxCgzHGt6tjQvMCzv0a" };
 
   // src/part-registry.ts
   function isTetherInternals(value) {
@@ -3610,7 +3610,7 @@
   }
 
   // src/version.ts
-  var VERSION = "0.11.1";
+  var VERSION = "0.11.2";
 
   // src/lazy-iife.ts
   var coreModules = {

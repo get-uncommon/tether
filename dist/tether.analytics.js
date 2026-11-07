@@ -364,11 +364,14 @@
     transition = null;
     startPageView();
   }
+  var isBeside = (root, page2) => root.parentElement !== null && root.parentElement === page2.parentElement;
   function onPageMount(root) {
-    if (root === document) transition = null;
-    else if (transition === "left") enterPage(root);
-    else if (!pageRoot) pageRoot = root;
-    else if (!containerOf(root)) transition = root;
+    if (root === document) {
+      pageRoot = document;
+      transition = null;
+    } else if (transition === "left") enterPage(root);
+    else if (!pageRoot || root.contains(pageRoot)) pageRoot = root;
+    else if (isBeside(root, pageRoot)) transition = root;
   }
   function onPageLeft() {
     if (transition && transition !== "left") enterPage(transition);

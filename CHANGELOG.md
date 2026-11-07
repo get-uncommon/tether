@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.11.2 (2026-11-07)
+
+- Fix: With `analytics.shopify`, `Tether.mount(el)` for a part of the page (products added later, an
+  island, your own component) is no longer taken for a new page: a product mounted later on a
+  product page sends no second `product_viewed`, and an island mounted outside `<main>` no longer
+  makes the next `Tether.unmount()` send the page view early, with the old page's URL.
+- Fix (sync Worker): `/check` counts a deploy-only Worker's (`DEPLOY_HOOK_URL` without Webflow)
+  reconcile run's KV operations with its changes: a deploy-only change makes no request, so up to
+  `reconcile.maxChangesPerRun` products each write twice besides the products the subrequests bound.
+  Before, it counted those writes only for products that sent a request, so with `maxChangesPerRun`
+  and `maxProductsPerRun` at 400 it said 733 KV operations while a run could pass Cloudflare's 1,000
+  and fail, and `/check` gave no warning. With the default settings a deploy-only run uses at most
+  573 KV operations, a Webflow run still 533.
+- Fix (sync Worker): an outage of Webflow or Shopify longer than about 40 minutes no longer makes
+  the sync give up on the products it failed to update or delete meanwhile. Before, each cron run
+  (every 10 minutes) retried every failed product and gave up after 5 failures, so after a longer
+  outage those updates stayed stale, a deletion was lost for good, and a deletion that failed for a
+  product already being retried got that product's spent attempts. A failed product is now retried
+  on the next run, then 10 and 30 minutes later, then every hour, and given up on (with
+  `giving up on product <id>` in the log) once it has failed for a day and at least 5 times; a
+  webhook that fails for a product already on the retry list starts its day again. The retry list is
+  written only in a run that changes it, so a run with no retry due writes nothing, and a product
+  that keeps failing costs about 25 KV writes over its day. Entries only gain fields
+  (`failingSince`, `retryAt`), so 0.11.1 still reads the list, and an entry 0.11.1 stored starts its
+  day when this release first reads it.
+- Repository: the bash `scripts/test-leaks.ts` keeps running on Windows starts only in the test
+  runner, never keeps a process alive, and when it fails to start or prints nothing in time the
+  tests run without it, with a note, instead of the run crashing or aborting.
+
 ## 0.11.1 (2026-11-07)
 
 - Fix: Clicking Edit on an address no longer throws where the browser has no `scrollIntoView`, after
