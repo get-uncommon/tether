@@ -161,7 +161,10 @@ export declare function announce(reason: CartUpdateReason): void;
  * @returns `cart`.
  */
 export declare function commit(cart: ShopifyCart | null, reason: CartUpdateReason): ShopifyCart | null;
-/** The outcome of loading the saved cart: the cart, `null` when there is none, or the failure. */
+/**
+ * The outcome of loading the saved cart: the cart, `null` when there is none, or the failure. A failed load keeps the
+ * cart as Shopify last sent it, so the next change builds on its attributes and discount codes.
+ */
 export declare function settleLoad(outcome: {
     kind: 'loaded';
     cart: ShopifyCart | null;
@@ -177,9 +180,13 @@ export declare function showLastKnownCount(): void;
 export declare function setWarnings(notes: readonly CartWarning[]): void;
 /** The one queue every cart change runs through; checkout waits for the changes in it. */
 export declare const runInOrder: import("../../server/src/shared/serial.js").SerialQueue;
-/** Queues a task that can leave the cart with lines when it has none (`mayFill`). */
-export declare function queueFilling<T>(queue: () => Promise<T>): Promise<T>;
-/** @returns True while a queued add or load can still give an empty cart, or none, lines. */
+/**
+ * Counts a task that can leave the cart with lines when it has none (`mayFill`) while it is queued.
+ *
+ * @param enqueueTask Queues the task and returns its promise.
+ */
+export declare function queueFilling<T>(enqueueTask: () => Promise<T>): Promise<T>;
+/** @returns True while a queued add, or load of a saved cart, can still give an empty cart, or none, lines. */
 export declare const mayFill: () => boolean;
 /**
  * Runs a cart change after the ones before it, so quick clicks never race. A failure sets the `error` status (shown by

@@ -23,6 +23,9 @@ export declare function formatDate(iso: string | null | undefined): string;
  * (`store-html.ts`). Everything else from Shopify is written as text (`setText`).
  */
 export declare function setStoreHtml(el: Element, html: string | null | undefined): void;
+export declare const isInput: (el: Element) => el is HTMLInputElement;
+/** A form field, which has a `value`. */
+export declare const isField: (el: Element) => el is HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement;
 /**
  * Sets the text of `el`, or its value when it is a form field.
  *

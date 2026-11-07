@@ -11,7 +11,8 @@ export declare function setCheckoutResolver(resolver: CheckoutResolver | null): 
  * the click (Safari blocks `window.open` after an await) and gets its URL once there is one, so a queued change that
  * empties the cart closes the tab again.
  *
- * @returns The checkout URL, `null` with nothing to check out or after a reported failure.
+ * @returns The checkout URL; `null` with nothing to check out, when the visitor closed the checkout tab first, or after
+ *   a reported failure.
  */
 export declare function checkout(target?: CheckoutTarget): Promise<string | null>;
 export {};

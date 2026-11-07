@@ -508,13 +508,14 @@
     }
   }
   var reportedHookFailures = /* @__PURE__ */ new Set();
+  var MAX_REMEMBERED_HOOK_FAILURES = 100;
   function callHook(name, hook2, fallback) {
     try {
       return hook2();
     } catch (error) {
       const failure = error instanceof Error && `${name}: ${error.message}`;
       if (!failure || !reportedHookFailures.has(failure)) {
-        if (failure) reportedHookFailures.add(failure);
+        if (failure && reportedHookFailures.size < MAX_REMEMBERED_HOOK_FAILURES) reportedHookFailures.add(failure);
         reportError(error, name);
       }
       return fallback?.();
@@ -1148,8 +1149,9 @@
   function setStoreHtml(el, html) {
     el.replaceChildren(storeHtmlFragment(html, el.ownerDocument, cfg.embedOrigins));
   }
-  var isTextField = (el) => el.tagName === "INPUT" || el.tagName === "TEXTAREA";
   var isInput = (el) => el.tagName === "INPUT";
+  var isTextField = (el) => isInput(el) || el.tagName === "TEXTAREA";
+  var isField = (el) => isTextField(el) || el.tagName === "SELECT";
   function setText(el, value) {
     const text2 = value == null ? "" : String(value);
     if (isTextField(el)) el.value = text2;
@@ -1159,8 +1161,9 @@
   function setTextTracked(el, value) {
     const before = readText(el);
     setText(el, value);
-    if (before !== readText(el) && el.hasAttribute(SEEN))
+    if (before !== readText(el) && el.hasAttribute(SEEN)) {
       callHook("onValueChange", () => cfg.onValueChange?.(el, before));
+    }
     el.setAttribute(SEEN, "1");
   }
   function reveal(el) {
@@ -1550,7 +1553,7 @@
     if (open === announcedOpen) return;
     const all = drawers();
     if (open) announceOpen(all.filter(isOpenDrawer));
-    else announceClosed(all, hasFocusInside(all));
+    else announceClosed(all, document.activeElement === document.body || hasFocusInside(all));
   }
   function syncDrawerAria() {
     qsa(document, sel("cart-open")).forEach((button) => {
@@ -2215,7 +2218,7 @@
     return cart;
   }
   function settleLoad(outcome) {
-    status = outcome.kind === "loaded" ? statusOf(outcome.cart) : { kind: "error", error: outcome.error, cart: null };
+    status = outcome.kind === "loaded" ? statusOf(outcome.cart) : { kind: "error", error: outcome.error, cart: currentCart() };
     announce("load");
   }
   function lastKnownCount() {
@@ -2239,9 +2242,9 @@
   }
   var runInOrder = createSerialQueue();
   var fillingTasks = 0;
-  function queueFilling(queue) {
+  function queueFilling(enqueueTask) {
     fillingTasks++;
-    return queue().finally(() => {
+    return enqueueTask().finally(() => {
       fillingTasks--;
     });
   }
@@ -2435,9 +2438,9 @@
         return null;
       }
       if (!isHttpsUrl(url2)) throw new TetherError("The checkout URL is not https: not opened");
+      if (tab?.closed) return null;
       emit("checkout", { url: url2, cart: currentCart() });
-      if (tab && !tab.closed) tab.location.href = url2;
-      else window.location.href = url2;
+      (tab ?? window).location.href = url2;
       return url2;
     } catch (error) {
       tab?.close();
@@ -2517,18 +2520,20 @@
       settleLoad({ kind: "loaded", cart });
     } catch (error) {
       reportError(error, "cart load failed");
-      if (isCartGone(error)) forgetSavedCart();
+      if (isCartGone(error)) {
+        forgetSavedCart();
+        keepQuietly(null);
+      }
       settleLoad({ kind: "failed", error });
     }
     return currentCart();
   }
   function reload() {
-    queuedLoad ?? (queuedLoad = queueFilling(
-      () => runInOrder(() => {
-        queuedLoad = null;
-        return load();
-      })
-    ));
+    const queueLoad = () => runInOrder(() => {
+      queuedLoad = null;
+      return load();
+    });
+    queuedLoad ?? (queuedLoad = savedCartId() ? queueFilling(queueLoad) : queueLoad());
     return queuedLoad;
   }
   var Cart = {
@@ -2940,10 +2945,9 @@
 
   // src/variant-render.ts
   var FORMAT = { money: formatMoney2, percent: formatPercent };
-  var isInput2 = (el) => el.tagName === "INPUT";
   function addButtonLabel(button) {
     const label = qsa(button, sel("add-label"))[0] ?? button;
-    const original = label.dataset["tetherLabel"] ?? (isInput2(label) ? label.value : label.textContent);
+    const original = label.dataset["tetherLabel"] ?? (isInput(label) ? label.value : label.textContent);
     label.dataset["tetherLabel"] = original;
     return { label, original };
   }
@@ -3050,7 +3054,6 @@
 
   // src/product-events.ts
   var productSelector = () => sel("product");
-  var isField = (el) => el.tagName === "INPUT" || el.tagName === "SELECT" || el.tagName === "TEXTAREA";
   var isElement = (target) => target instanceof window.Element;
   function closestOwn(scope, target, selector) {
     const el = target.closest(selector);
@@ -3159,15 +3162,13 @@
       }
     });
   }
-  var isInput3 = (el) => el.tagName === "INPUT";
-  var isField2 = (el) => el.tagName === "INPUT" || el.tagName === "SELECT" || el.tagName === "TEXTAREA";
   function lineAttributeValue(el) {
-    if (isInput3(el) && el.type === "checkbox") {
+    if (isInput(el) && el.type === "checkbox") {
       if (!el.checked) return null;
       return el.value && el.value !== "on" ? el.value : "Yes";
     }
-    if (isInput3(el) && el.type === "radio") return el.checked ? el.value : null;
-    return isField2(el) && el.value || null;
+    if (isInput(el) && el.type === "radio") return el.checked ? el.value : null;
+    return isField(el) && el.value || null;
   }
   var ProductScope = class {
     constructor(root, product) {
@@ -3623,7 +3624,7 @@
   }
 
   // src/version.ts
-  var VERSION = "0.9.8";
+  var VERSION = "0.9.9";
 
   // src/lazy-iife.ts
   var coreModules = {

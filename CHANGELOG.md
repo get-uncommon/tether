@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.9.9 (2026-11-07)
+
+- Fix: Checkout with `checkoutTarget: '_blank'` on a page without a cart, while the cart is loaded
+  again for a change in another tab, opens no blank tab.
+- Fix: with `checkoutTarget: '_blank'`, a visitor who closes the new tab before the checkout URL has
+  come stays on the page, instead of this page going to checkout; `checkout()` answers `null`.
+- Fix: when loading the cart again for a change in another tab fails, this tab keeps the cart it had
+  instead of showing it empty, so the count and the drawer stay, and the next `setAttributes`,
+  `applyDiscount` or `removeDiscount` keeps the cart's other attributes and discount codes instead
+  of replacing them.
+- Fix: a site hook whose errors carry data in their message (an amount, an id) no longer makes
+  Tether remember every message for the page's lifetime: past 100 messages a new one is reported
+  each time.
+- Fix: when the site takes the open cart drawer off the page while focus is inside it, focus goes
+  back to the button that opened the cart instead of staying on the page's body.
+- Repository: a maintenance release's commit on main also takes the release's note files out of
+  main's `.changes/`, so a fix picked from main into the release branch isn't listed again by main's
+  next release.
+- Repository: `npm run release` first checks that the tree has every script, workflow, package and
+  npm script the release needs, and names each one a maintenance branch lacks; the
+  maintenance-release docs list the files to copy from main, and a test keeps that list whole.
+- Repository: the version rewrite refuses a version CHANGELOG.md already has before it changes any
+  file, with an error that says so.
+- Repository: when the build can neither swap its output folder in nor put the old one back, its
+  error names the folder the old output is left in, with both renames' errors.
+
 ## 0.9.8 (2026-11-07)
 
 - Fix: an `Error` a site hook throws (`formatMoney` for every price, `onLineEnter` for every line)
