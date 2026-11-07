@@ -167,8 +167,8 @@ test('parts are small and the core is under budget', async () => {
   const { gzipSync } = await import('node:zlib');
   /** @param {string} file A file name in the test build. */
   const gz = async (file) => gzipSync(await readFile(join(DIST, file)), { level: 9 }).length;
-  // The README promises a core of about 29 KB gzipped. Each budget sits about half a KB above today's build, so growth
-  // is a decision; the build, not golfed source, keeps the files small.
+  // Each budget sits about half a KB above today's build, so growth is a decision; the build, not golfed source, keeps
+  // the files small.
   assert.ok((await gz('tether.min.js')) < 29.5 * 1024, 'core gzip budget');
   assert.ok((await gz('tether.search.min.js')) < 3 * 1024);
   assert.ok((await gz('tether.lists.min.js')) < 2.75 * 1024, 'lists part budget');
@@ -178,6 +178,22 @@ test('parts are small and the core is under budget', async () => {
   assert.ok((await gz('tether.markets.min.js')) < 3 * 1024);
   assert.ok((await gz('tether.diagnose.min.js')) < 5.75 * 1024);
   assert.ok((await gz('tether.analytics.min.js')) < 3.5 * 1024);
+});
+
+test("the README's size badge and claims are the core's gzipped size", async () => {
+  const { gzipSync } = await import('node:zlib');
+  const readme = await readFile(join(DIST, '..', 'README.md'), 'utf8');
+  const claims = [...readme.matchAll(/gzipped-(\d+(?:\.\d+)?)%20KB|(\d+(?:\.\d+)?) KB gzipped/g)].map(
+    ([, badge, text]) => badge ?? text ?? '',
+  );
+  assert.ok(claims.length > 0, "the README's size badge (gzipped-N%20KB) is missing");
+  const kilobytes = gzipSync(await readFile(join(DIST, 'tether.min.js')), { level: 9 }).length / 1024;
+  for (const claim of claims) {
+    // A claim is rounded to as many decimals as it is written with.
+    const decimals = claim.split('.')[1]?.length ?? 0;
+    const actual = kilobytes.toFixed(decimals);
+    assert.equal(claim, actual, `the README says ${claim} KB; the core is ${kilobytes.toFixed(2)} KB: write ${actual}`);
+  }
 });
 
 /**

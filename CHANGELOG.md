@@ -17,6 +17,11 @@
   top of the new main, and a starter that can't be locked no longer fails a release that is done.
 - Repository: `npm run e2e:build` works on Windows. The pre-push hook runs only the starter's
   version test and Prettier for a push whose every commit changes only the starter's package files.
+- Repository: a commit-msg hook checks each message against the history's style (a capitalised
+  plain-English subject of at most 120 characters, no conventional-commit type, no closing full
+  stop, a blank line before the body). An `eslint-disable` comment without a reason after `--`, or
+  one that silences nothing, fails the lint. `npm test` fails when the README's gzipped size badge
+  doesn't match the built core, and names the number to write.
 
 ## 0.9.0 (2026-11-07)
 

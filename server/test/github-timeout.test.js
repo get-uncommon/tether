@@ -2,9 +2,9 @@
 // URL, which the updater's `main` reports as its `::error` annotation like any other failure.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { once } from 'node:events';
 import { createServer } from 'node:http';
 import { fetchFromGitHub } from '../scripts/release-asset.ts';
+import { listenForFetch } from './mocks.js';
 
 const TIMEOUT_MS = 100;
 
@@ -14,14 +14,12 @@ const TIMEOUT_MS = 100;
  */
 async function stallingServer(/** @type {import('node:test').TestContext} */ t, answer) {
   const server = createServer(answer);
-  await once(server.listen(0, '127.0.0.1'), 'listening');
+  const port = await listenForFetch(server);
   t.after(async () => {
     server.closeAllConnections();
     await new Promise((resolve) => server.close(resolve));
   });
-  const address = server.address();
-  assert.ok(address !== null && typeof address === 'object');
-  return `http://127.0.0.1:${String(address.port)}/`;
+  return `http://127.0.0.1:${String(port)}/`;
 }
 
 test('a request GitHub never answers fails within the timeout, naming its URL', async (t) => {
