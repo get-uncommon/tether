@@ -2,7 +2,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
-import { find } from './fixtures.js';
+import { cancelTimersAfterTests, find } from './fixtures.js';
+
+cancelTimersAfterTests();
 
 const dom = new JSDOM('<!doctype html><body></body>', { url: 'https://site.test/' });
 Object.assign(globalThis, {

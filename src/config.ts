@@ -352,15 +352,25 @@ function setHook<Name extends HookOption>(config: Pick<TetherConfig, Name>, name
   }
 }
 
-/** Options passed to `setTimeout` as its delay. */
-const DELAY_OPTIONS: ReadonlySet<CountOption> = new Set(['requestTimeout', 'searchDelay']);
-
 /** The longest delay `setTimeout` keeps: browsers and Node fire a longer one after 1 ms. */
 const MAX_TIMER_MS = 2_147_483_647;
 
-/** @returns `value` when it is a non-negative integer, and for a delay no more than `MAX_TIMER_MS`, else the default. */
+/**
+ * The most retries a request gets: with the client's capped backoff, ten already wait two to three minutes in all,
+ * and more would only keep a failing page sending.
+ */
+const MAX_RETRIES = 10;
+
+/** The bounded count options' largest values; the others take any non-negative integer. */
+const COUNT_MAXIMUMS: Partial<Readonly<Record<CountOption, number>>> = {
+  requestTimeout: MAX_TIMER_MS,
+  searchDelay: MAX_TIMER_MS,
+  retries: MAX_RETRIES,
+};
+
+/** @returns `value` when it is a non-negative integer no more than the option's maximum, else the default. */
 function countOption(name: CountOption, value: unknown): number {
-  const maximum = DELAY_OPTIONS.has(name) ? MAX_TIMER_MS : Number.POSITIVE_INFINITY;
+  const maximum = COUNT_MAXIMUMS[name] ?? Number.POSITIVE_INFINITY;
   if (typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= maximum) return value;
   return invalidOption(name, value, DEFAULTS[name]);
 }

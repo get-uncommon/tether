@@ -1,5 +1,7 @@
-# Local git hooks (https://lefthook.dev): Prettier and ESLint on staged files; before each push, the full gate
-# (`npm run check`) and, beside it, the workflow linters CI's `workflows` job runs (`npm run lint:workflows`). CI runs
+# Local git hooks (https://lefthook.dev): Prettier and ESLint on staged files; the message's style
+# (`scripts/commit-msg.ts`); before each push, the full gate
+# (`npm run check`, or for a push that changes only the Astro starter's package files a narrow check:
+# `scripts/pre-push.ts` reads the pushed refs on stdin to tell) and, beside it, the workflow linters CI's `workflows` job runs (`npm run lint:workflows`). CI runs
 # both on pull requests and pushes to main (`.github/workflows/ci.yml`). The linters stay out of `npm run check`: CI's
 # `check` job, the release and the rehearsal run that gate too, and would download them again for every Node version.
 pre-commit:
@@ -11,10 +13,15 @@ pre-commit:
     lint:
       glob: '*.{js,mjs,cjs,ts}'
       run: npx eslint --no-warn-ignored {staged_files}
+commit-msg:
+  commands:
+    style:
+      run: node --experimental-strip-types scripts/commit-msg.ts {1}
 pre-push:
   parallel: true
   commands:
     check:
-      run: npm run check
+      use_stdin: true
+      run: node --experimental-strip-types scripts/pre-push.ts
     workflows:
       run: npm run lint:workflows

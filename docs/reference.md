@@ -536,7 +536,7 @@ add to cart and every other cart change included, is sent again only after a 429
 which Shopify answers without running it: after a network error or a server error Shopify may
 already have applied it, so Tether doesn't send it twice, and a failed cart change loads the cart
 again to show what Shopify has. The first retry waits 300 ms (500 ms after `THROTTLED`), and each
-later one twice as long as the one before.
+later one twice as long as the one before, up to 30 seconds. `retries` can be at most 10.
 
 A request that has no complete answer after `requestTimeout` milliseconds (15 seconds by default)
 is stopped and counts as a network error (`NETWORK`): a query is sent again, a cart change isn't,
@@ -683,6 +683,19 @@ worktree with the release's own rewrite (`node scripts/release.ts --rewrite-only
 and runs `npm run check` there. It runs on pull requests that change `src/`, `server/`, `scripts/`,
 `test/`, the package files or the README.
 
+So the release also checks, through `gh`, that the rehearsal passed for the newest commit that
+changes one of those paths: on that commit itself, or on the head of the pull request that merged
+it. A commit pushed without a pull request (a release commit included) has no rehearsal run, and
+the release refuses until a pull request brings a change, or until you rehearse it yourself, in a
+worktree at the version you release, and pass `--rehearsed`:
+
+```bash
+git worktree add --detach ../tether-rehearsal HEAD
+node --experimental-strip-types scripts/release.ts --rewrite-only X.Y.Z ../tether-rehearsal
+cd ../tether-rehearsal && npm ci && npm run check
+cd - && npm run release -- X.Y.Z --push --rehearsed
+```
+
 The `release` workflow then runs on the tag, in this order:
 
 1. It refuses a tag whose commit isn't in main's history (deployed sync Workers install only
@@ -705,14 +718,17 @@ URLs serve the new release once they are purged.
 
 With `--push`, `npm run release` then waits up to 20 minutes for npm to have the version and locks
 the Astro starter on it (its range and its lockfile, in one commit it pushes to main), so `npm ci`
-works in the starter and in projects made from it. When npm takes longer, it prints the command that
-does that step alone: `npm run release -- X.Y.Z --starter --push`. A maintenance release leaves
-main's starter alone.
+works in the starter and in projects made from it. When main moved during the wait, that commit goes
+on top of main as it is then, from a detached checkout of `origin/main`. When npm takes longer, or
+the starter can't be locked (main moved to another minor version, or GitHub refused the push), it
+says the release is done and prints the command that does that step alone:
+`npm run release -- X.Y.Z --starter --push`. A maintenance release leaves main's starter alone.
 
 **Maintenance releases:** a fix for an older minor line X.Y is released from its branch
 `release/X.Y`, made once from that line's last tag (`git push origin vX.Y.Z:refs/heads/release/X.Y`)
-and given `scripts/release.ts`, `scripts/release-version.ts`, `.github/workflows/release.yml` and
-`.github/workflows/ci.yml` from main, since a tag runs the workflow at its own commit and a push to
+and given `scripts/release.ts`, `scripts/release-version.ts`, `scripts/github-runs.ts`,
+`.github/workflows/release.yml`, `.github/workflows/ci.yml` and
+`.github/workflows/release-rehearsal.yml` from main, since a tag runs the workflow at its own commit and a push to
 the branch runs its own `ci.yml`, whose passing run the release needs. Check out
 `origin/release/X.Y` and run the same command. The script also
 records the release commit in main's history, by a merge commit that changes only main's

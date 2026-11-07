@@ -11,7 +11,6 @@ import {
   rendered,
   seedCart,
   server,
-  settle,
 } from './astro-harness.js';
 import { cartFrom, find, graphqlRequest, jsonResponse, product } from './fixtures.js';
 import { listAt, numberAt, parseJson, recordAt, recordsAt, waitFor } from '../server/test/mocks.js';
@@ -161,7 +160,10 @@ test('variantUrl: the choice goes into ?variant= after a change (not on first re
   document.body.innerHTML = '<div tether-product="coffee-box"></div>';
   Tether.mount(document);
   await rendered();
-  await settle(); // time for the extras part to write a URL, which it must not
+  // The first render's tether:variant-changed has the extras listener load its part: once a later load of the part has
+  // settled, and the microtasks after it have run, the listener has handled that event.
+  await import('../src/extras.ts');
+  await new Promise((resolve) => setTimeout(resolve, 0));
   assert.equal(window.location.search, '', 'nothing on first render');
   productScope().select('Size', '1kg');
   await waitFor(() => /variant=\d+/.test(window.location.search), 'the extras part to write the URL');

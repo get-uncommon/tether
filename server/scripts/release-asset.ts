@@ -43,6 +43,36 @@ export class GitHubError extends Error {
 }
 
 const NOT_FOUND = 404;
+const MS_PER_SECOND = 1000;
+
+/**
+ * How long one request to GitHub, its whole answer included, may take. A stalled connection would otherwise hang
+ * until the workflow's `timeout-minutes` kills the job, which prints no `::error` annotation.
+ */
+const GITHUB_TIMEOUT_MS = 60_000;
+
+/**
+ * Fetches `url` and reads its answer with `read`, within `timeoutMs`.
+ *
+ * @throws An error naming `url` when the whole answer didn't arrive in time, and whatever `fetch` or `read` throws.
+ */
+export async function fetchFromGitHub<T>(
+  url: string,
+  headers: Record<string, string>,
+  read: (response: Response) => Promise<T>,
+  timeoutMs = GITHUB_TIMEOUT_MS,
+): Promise<T> {
+  try {
+    const response = await fetch(url, { headers, signal: AbortSignal.timeout(timeoutMs) });
+    return await read(response);
+  } catch (error) {
+    // The timeout's abort rejects `fetch`, or the body's read once the answer started, with a `TimeoutError`.
+    if (error instanceof DOMException && error.name === 'TimeoutError') {
+      throw new Error(`${url}: no whole answer within ${String(timeoutMs / MS_PER_SECOND)} s`, { cause: error });
+    }
+    throw error;
+  }
+}
 
 /** @param version `0.7.0`. */
 export function releaseAssetName(version: string): string {
@@ -123,10 +153,12 @@ export function verifyAttestation(run: RunCommand, file: string, release: Releas
  * @returns The downloaded file.
  */
 export async function downloadAsset(url: string, dir: string): Promise<string> {
-  const response = await fetch(url);
-  if (!response.ok) throw new Error(`download ${url}: ${response.status}`);
+  const bytes = await fetchFromGitHub(url, {}, async (response) => {
+    if (!response.ok) throw new Error(`download ${url}: ${response.status}`);
+    return Buffer.from(await response.arrayBuffer());
+  });
   const archive = join(dir, 'release.tgz');
-  await writeFile(archive, Buffer.from(await response.arrayBuffer()));
+  await writeFile(archive, bytes);
   return archive;
 }
 

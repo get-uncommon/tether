@@ -1,7 +1,7 @@
 // The server module, hydration of server-rendered data, Astro View Transitions and cart.subscribe.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { Tether, calls, server, setLivePrice, settle } from './astro-harness.js';
+import { Tether, calls, queuedRequestsSent, server, setLivePrice } from './astro-harness.js';
 import { find, jsonResponse, product } from './fixtures.js';
 import { fieldOf, parseJson, recordsAt, waitFor } from '../server/test/mocks.js';
 
@@ -112,7 +112,7 @@ test('hydration: the next page of a View Transition visit keeps the copy loaded 
   Tether.unmount();
   document.body.innerHTML = page(shop.hydrate(old));
   Tether.mount(document);
-  await settle();
+  await queuedRequestsSent();
   assert.equal(calls.filter((call) => call.op === 'TetherProducts').length, before, 'no second refresh');
   assert.match(find('#price').textContent, /22/, 'shows the live copy, not the build');
 });
@@ -127,7 +127,7 @@ test('hydration: a server-rendered image with the same URL is not loaded again',
   document.body.innerHTML = `${shop.hydrate(served)}<div tether-product="coffee-box"><img id="im" tether-bind="image" src="${src}" alt="x"></div>`;
   const img = find('#im');
   Tether.mount(document);
-  await settle();
+  await queuedRequestsSent();
   assert.equal(find('#im'), img);
   assert.equal(img.getAttribute('src'), src, 'src untouched');
 });
@@ -145,7 +145,7 @@ test('hydration: revalidate:false skips the background refresh', async () => {
   const shop = server.createStorefront({ domain: 'shop.test', token: 't', country: 'NL' });
   document.body.innerHTML = page(shop.hydrate(product));
   Tether.mount(document);
-  await settle();
+  await queuedRequestsSent();
   assert.equal(calls.length, 0);
   await Tether.init({ domain: 'shop.test', token: 't', autoMount: false, country: 'NL', locale: 'nl-NL' });
 });

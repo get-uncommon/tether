@@ -5,7 +5,10 @@
  *   npm run release -- 0.4.0            set the version, build, run a sanity check and the smoke test, commit, tag
  *   npm run release -- 0.4.0 --push     ...and push (GitHub Actions then creates the GitHub Release and publishes
  *                                       to npm with provenance), wait for npm to have it, then lock the Astro starter
- *                                       on it and push that too
+ *                                       on it and push that too, on top of main as it is by then
+ *   npm run release -- 0.4.0 --rehearsed
+ *                                       ...for a HEAD whose change has no passed rehearsal run, after rehearsing it
+ *                                       by hand (`howToRehearse`)
  *   npm run release -- 0.4.0 --starter  only lock the Astro starter on 0.4.0, which npm must have, and commit
  *                                       (with --push, push)
  *   node scripts/release.ts --rewrite-only 0.4.0 <folder>
@@ -14,7 +17,8 @@
  *
  * The release doesn't run the whole gate: it needs HEAD's `ci` run on GitHub to have passed, and the release commit to
  * change only what the version rewrite changes. A test that fails only at a new version is caught before that, on the
- * pull request, by the rehearsal, which runs the gate at the next minor and patch versions.
+ * pull request, by the rehearsal, which runs the gate at the next minor and patch versions; the release needs it to
+ * have passed on the newest change it tested (`checkRehearsed`).
  *
  * The starter's package.json and lockfile change together, by npm, and only to a version npm has: a release commit
  * leaves them on the previous release, so `npm ci` in the starter, and in every project `npm create astro` makes from
@@ -27,20 +31,22 @@
  *
  * A version on main's minor line or a newer one is released from main. An older minor line gets a maintenance release
  * from its branch `release/X.Y`, made once from that line's last tag (`git push origin vX.Y.Z:refs/heads/release/X.Y`);
- * the branch needs this script, `release-version.ts`, `.github/workflows/release.yml` and `ci.yml` from main first,
+ * the branch needs this script, `release-version.ts`, `github-runs.ts`, `.github/workflows/release.yml`, `ci.yml` and
+ * `release-rehearsal.yml` from main first,
  * since a tag runs the workflow at its own commit and a push to the branch runs its own `ci.yml`. Deployed Worker copies install only a tag whose commit is on main, so the script also records the
  * maintenance commit in main's history, by a merge commit that keeps main's files as they are but for CHANGELOG.md,
  * which gets the release's section. The branch, main and the tag are pushed in one atomic push: all of them land, or
  * none does.
  */
 import { readFile } from 'node:fs/promises';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { join, dirname, resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { compareVersions, parseVersion } from '../server/src/release-range.ts';
 import { field } from '../server/src/shared/json.ts';
 import { sectionOf, withSection } from './changelog.ts';
+import { newestRun, rehearsalCommits, rehearsalPathspecs } from './github-runs.ts';
 import { RELEASE_FILES, applyReleaseVersion, editFile } from './release-version.ts';
 import { packageVersion } from './versions.ts';
 import type { Version } from '../server/src/release-range.ts';
@@ -118,9 +124,19 @@ function checkClean(): void {
  * GitHub now, from any checkout (a worktree can't check out a branch another one holds).
  */
 function checkHeadIs(branch: string): void {
-  if (output('git', ['rev-parse', 'HEAD']) !== output('git', ['rev-parse', `origin/${branch}`])) {
-    fail(`HEAD is not origin/${branch}: check it out (git switch --detach origin/${branch})`);
-  }
+  if (!headIs(branch)) fail(notAtBranch(branch));
+}
+
+function headIs(branch: string): boolean {
+  return output('git', ['rev-parse', 'HEAD']) === output('git', ['rev-parse', `origin/${branch}`]);
+}
+
+function isAncestorOfMain(commit: string): boolean {
+  return spawnSync('git', ['merge-base', '--is-ancestor', commit, `origin/${MAIN}`], { cwd: ROOT }).status === 0;
+}
+
+function notAtBranch(branch: string): string {
+  return `HEAD is not origin/${branch}: check it out (git switch --detach origin/${branch})`;
 }
 
 /**
@@ -135,13 +151,74 @@ function checkCiPassed(sha: string): void {
   } catch {
     fail(`could not ask GitHub for the ci runs of ${sha} (is gh installed and logged in?)`);
   }
-  const runs: unknown = JSON.parse(listed);
-  // gh lists the newest run first.
-  const newest: unknown = Array.isArray(runs) ? runs[0] : undefined;
-  if (newest === undefined) fail(`GitHub has no ci run for HEAD (${sha}): push it and wait for CI`);
-  const url = String(field(newest, 'url'));
-  if (field(newest, 'status') !== 'completed') fail(`CI is still running on HEAD (${sha}): wait for ${url}`);
-  if (field(newest, 'conclusion') !== 'success') fail(`CI did not pass on HEAD (${sha}): ${url}`);
+  const state = newestRun(listed);
+  switch (state.kind) {
+    case 'passed':
+      return;
+    case 'missing':
+      return fail(`GitHub has no ci run for HEAD (${sha}): push it and wait for CI`);
+    case 'running':
+      return fail(`CI is still running on HEAD (${sha}): wait for ${state.url}`);
+    case 'failed':
+      return fail(`CI did not pass on HEAD (${sha}): ${state.url}`);
+  }
+}
+
+/**
+ * Exits unless the `release-rehearsal` workflow passed on the newest commit on `branch` that changes what it tests:
+ * on that commit itself, or on the head of the pull request it was merged by. Every later commit leaves the tested
+ * files as they are, so that run stands for HEAD. A commit pushed without a pull request has no rehearsal run; the
+ * owner rehearses it by hand (`howToRehearse`) and passes `--rehearsed`.
+ */
+async function checkRehearsed(branch: string, version: string): Promise<void> {
+  const workflow = await readFile(join(ROOT, '.github/workflows/release-rehearsal.yml'), 'utf8');
+  const sha = output('git', [
+    'log',
+    '-1',
+    '--first-parent',
+    '--format=%H',
+    'HEAD',
+    '--',
+    ...rehearsalPathspecs(workflow),
+  ]);
+  const states: string[] = [];
+  try {
+    const pulls = output('gh', ['api', `repos/{owner}/{repo}/commits/${sha}/pulls`]);
+    for (const commit of rehearsalCommits(sha, branch, pulls)) {
+      const listed = output('gh', [
+        'run',
+        'list',
+        '--workflow=release-rehearsal.yml',
+        `--commit=${commit}`,
+        '--json=status,conclusion,url',
+      ]);
+      const state = newestRun(listed);
+      if (state.kind === 'passed') return;
+      if (state.kind !== 'missing') states.push(`${state.kind}: ${state.url}`);
+    }
+  } catch {
+    fail(`could not ask GitHub for the rehearsal runs of ${sha} (is gh installed and logged in?)`);
+  }
+  const found = states.length > 0 ? `its rehearsal ${states.join(', ')}` : 'it has no rehearsal run';
+  fail(
+    [
+      `${sha}, the newest commit on ${branch} that changes what release-rehearsal tests, has not passed it (${found}).`,
+      'Wait for a run that is going, or put the change through a pull request, which runs the rehearsal.',
+      'Or rehearse it by hand and release with --rehearsed:',
+      howToRehearse(version),
+    ].join('\n'),
+  );
+}
+
+/** The rehearsal workflow's steps, at the version being released, in a worktree next to this checkout. */
+function howToRehearse(version: string): string {
+  const folder = join(ROOT, '..', `tether-rehearsal-${version}`);
+  return [
+    `  git worktree add --detach "${folder}" HEAD`,
+    `  node --experimental-strip-types scripts/release.ts --rewrite-only ${version} "${folder}"`,
+    `  cd "${folder}" && npm ci && npm run check`,
+    `  npm run release -- ${version} --rehearsed   (back in this checkout, once the check passed)`,
+  ].join('\n');
 }
 
 /**
@@ -169,8 +246,8 @@ async function rewrite(root: string, version: string): Promise<void> {
  *
  * @returns The branch the release goes on.
  */
-async function checkReady(text: string): Promise<Line> {
-  if (!text) fail('usage: npm run release -- X.Y.Z [--push]');
+async function checkReady(text: string, rehearsed: boolean): Promise<Line> {
+  if (!text) fail('usage: npm run release -- X.Y.Z [--push] [--rehearsed]');
   const version = versionOrFail(text, 'the version');
   checkClean();
   run('git', ['fetch', '--quiet', 'origin', MAIN]);
@@ -181,6 +258,7 @@ async function checkReady(text: string): Promise<Line> {
   if (line.kind === 'maintenance') run('git', ['fetch', '--quiet', 'origin', branch]);
   checkHeadIs(branch);
   checkCiPassed(output('git', ['rev-parse', 'HEAD']));
+  if (!rehearsed) await checkRehearsed(branch, text);
   const current = versionOrFail(await packageVersion(ROOT), `${branch}'s version`);
   if (compareVersions(version, current) <= 0) fail(`${text} is not newer than ${current.join('.')}`);
   if (line.kind === 'maintenance' && (current[0] !== version[0] || current[1] !== version[1])) {
@@ -259,22 +337,29 @@ async function waitForNpm(version: string): Promise<boolean> {
   return true;
 }
 
+/** Why the Astro starter can't be locked on a version now. */
+class StarterNotReady extends Error {}
+
 /**
  * Locks the Astro starter on `text`: its range becomes `^X.Y.0`, every patch of that minor version, and npm locks the
  * newest release in it, writing the lockfile's copy of the range too. Commits that on main, and pushes it with `push`.
- * Exits when the working tree isn't clean, HEAD isn't origin/main, `text` isn't on main's minor line or npm doesn't
- * have it.
+ *
+ * @throws {StarterNotReady} When the working tree isn't clean, HEAD isn't origin/main, `text` isn't on main's minor
+ *   line, npm doesn't have it or GitHub refuses the push.
  */
 async function lockStarter(text: string, push: boolean): Promise<void> {
   const [major, minor] = versionOrFail(text, 'the version');
-  checkClean();
+  if (output('git', ['status', '--porcelain']))
+    throw new StarterNotReady('working tree not clean: commit or stash first');
   run('git', ['fetch', '--quiet', 'origin', MAIN]);
-  checkHeadIs(MAIN);
+  if (!headIs(MAIN)) throw new StarterNotReady(notAtBranch(MAIN));
   const mainVersion = versionOrFail(await packageVersion(ROOT), "main's version");
   if (mainVersion[0] !== major || mainVersion[1] !== minor) {
-    fail(`main is on ${mainVersion.join('.')}, so its starter stays on that minor version`);
+    throw new StarterNotReady(`main is on ${mainVersion.join('.')}, so its starter stays on that minor version`);
   }
-  if (!isOnNpm(text)) fail(`npm has no ${text} yet: run this again once the release workflow has published it`);
+  if (!isOnNpm(text)) {
+    throw new StarterNotReady(`npm has no ${text} yet: run this again once the release workflow has published it`);
+  }
   const range = `^${String(major)}.${String(minor)}.0`;
   await editFile(
     ROOT,
@@ -301,15 +386,19 @@ async function lockStarter(text: string, push: boolean): Promise<void> {
   }
   run('git', ['commit', '-q', '-a', '-m', `Lock Tether ${text} in the Astro starter`]);
   if (push) {
-    run('git', ['push', 'origin', `HEAD:${MAIN}`]);
+    try {
+      run('git', ['push', 'origin', `HEAD:${MAIN}`]);
+    } catch {
+      throw new StarterNotReady(`GitHub refused the push of the starter's commit (main moved?)`);
+    }
     console.log(`Pushed the Astro starter on Tether ${text}.`);
   } else {
     console.log(`Committed the Astro starter on Tether ${text}. Push when ready: git push origin HEAD:${MAIN}`);
   }
 }
 
-async function release(version: string, push: boolean): Promise<void> {
-  const line = await checkReady(version);
+async function release(version: string, push: boolean, rehearsed: boolean): Promise<void> {
+  const line = await checkReady(version, rehearsed);
   await rewrite(ROOT, version);
   // npm and the Release ship the committed dist/, which carries the version: release.yml refuses a tag whose dist/
   // differs from a fresh build.
@@ -341,8 +430,26 @@ async function release(version: string, push: boolean): Promise<void> {
   console.log('Pushed. GitHub Actions creates the release and publishes to npm.');
   if (line.kind === 'maintenance') return;
   console.log(`Waiting for npm to have ${version}, to lock the Astro starter on it...`);
-  if (await waitForNpm(version)) await lockStarter(version, true);
-  else console.log(`npm doesn't have ${version} yet. ${lockLater}`);
+  if (!(await waitForNpm(version))) {
+    console.log(`npm doesn't have ${version} yet. ${lockLater}`);
+    return;
+  }
+  // The starter's commit goes on main as GitHub has it now, which is past the release commit when someone pushed to
+  // main during the wait. The checkout is clean, since the release commit holds every change. A main that no longer
+  // holds the release commit was rewritten, which `lockStarter` refuses to build on.
+  run('git', ['fetch', '--quiet', 'origin', MAIN]);
+  if (!headIs(MAIN) && isAncestorOfMain('HEAD')) {
+    console.log(`main moved during the wait: locking the starter on top of it, from a detached origin/${MAIN}.`);
+    run('git', ['checkout', '--quiet', '--detach', `origin/${MAIN}`]);
+  }
+  try {
+    await lockStarter(version, true);
+  } catch (error) {
+    if (!(error instanceof StarterNotReady)) throw error;
+    // The release is pushed and published whatever happens to the starter, so this ends as a success.
+    console.log(`The release of ${version} is done, but the starter isn't locked on it: ${error.message}.`);
+    console.log(`To lock it: npm run release -- ${version} --starter --push`);
+  }
 }
 
 const [version = '', folder] = process.argv.slice(2).filter((arg) => !arg.startsWith('--'));
@@ -350,5 +457,11 @@ const push = process.argv.includes('--push');
 if (process.argv.includes('--rewrite-only')) {
   if (folder === undefined) fail('usage: node scripts/release.ts --rewrite-only X.Y.Z <folder>');
   await rewrite(resolve(folder), versionOrFail(version, 'the version').join('.'));
-} else if (process.argv.includes('--starter')) await lockStarter(version, push);
-else await release(version, push);
+} else if (process.argv.includes('--starter')) {
+  try {
+    await lockStarter(version, push);
+  } catch (error) {
+    if (error instanceof StarterNotReady) fail(error.message);
+    throw error;
+  }
+} else await release(version, push, process.argv.includes('--rehearsed'));

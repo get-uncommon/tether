@@ -2,8 +2,18 @@
 import { test, before, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
-import { apparel, find, graphqlRequest, jsonResponse, product, pageGlobals } from './fixtures.js';
+import {
+  apparel,
+  cancelTimersAfterTests,
+  find,
+  graphqlRequest,
+  jsonResponse,
+  product,
+  pageGlobals,
+} from './fixtures.js';
 import { asString, waitFor } from '../server/test/mocks.js';
+
+cancelTimersAfterTests();
 
 const dom = new JSDOM('<!doctype html><body><span tether-cart-count></span><main></main></body>', {
   url: 'https://site.test/',

@@ -58,6 +58,16 @@ function serverSockets(server) {
   return sockets;
 }
 
+/**
+ * Closes `server` and the connections it still holds, once both are closed.
+ *
+ * @param {import('node:http').Server} server
+ */
+async function closed(server) {
+  server.closeAllConnections();
+  await new Promise((resolve) => server.close(resolve));
+}
+
 /** @param {import('node:net').Server} server Listening on TCP, so its address is an AddressInfo. */
 function listening(server) {
   const address = server.address();
@@ -75,9 +85,13 @@ test('serve: an aborted upload, a huge body and unknown paths do not crash or bu
     await raw(port, halfUpload, {
       abortWhen: () => waitFor(() => sockets[0]?.bytesRead === halfUpload.length, 'the server to read the half upload'),
     });
-    await waitFor(() => sockets[0]?.destroyed === true, 'the server to close the aborted upload');
-    const health = await fetch(`http://127.0.0.1:${port}/health`);
-    assert.equal(health.status, 200);
+    const [aborted] = sockets;
+    assert.ok(aborted);
+    // Not events.once: the server's socket emits the parse error of the cut-off body before it closes.
+    if (!aborted.closed) await new Promise((resolve) => aborted.on('close', resolve));
+    // Raw requests, not fetch: fetch refuses some of the ports `listen(0)` can pick on Windows ("bad port").
+    const health = await raw(port, 'GET /health HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n');
+    assert.match(health, /^HTTP\/1\.1 200/);
     // Too large: refused before it is read.
     const big = await raw(
       port,
@@ -91,14 +105,13 @@ test('serve: an aborted upload, a huge body and unknown paths do not crash or bu
     );
     assert.match(other, /^HTTP\/1\.1 404/);
     // A webhook with a bad signature still gets its normal answer.
-    const bad = await fetch(`http://127.0.0.1:${port}/webhooks/shopify`, {
-      method: 'POST',
-      body: '{}',
-      headers: { 'x-shopify-hmac-sha256': 'nope' },
-    });
-    assert.equal(bad.status, 401);
+    const bad = await raw(
+      port,
+      'POST /webhooks/shopify HTTP/1.1\r\nHost: x\r\nConnection: close\r\nX-Shopify-Hmac-Sha256: nope\r\nContent-Length: 2\r\n\r\n{}',
+    );
+    assert.match(bad, /^HTTP\/1\.1 401/);
   } finally {
-    server.close();
+    await closed(server);
   }
 });
 
@@ -117,7 +130,6 @@ test('serve logs the address it really listens on', async () => {
       /^tether-sync listening on every interface \((::|0\.0\.0\.0)\), e\.g\. http:\/\/localhost:\d+\//,
     );
   } finally {
-    local.close();
-    everywhere.close();
+    await Promise.all([closed(local), closed(everywhere)]);
   }
 });

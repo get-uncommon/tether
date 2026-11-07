@@ -1,12 +1,13 @@
 // The Node-only parts: the state file store and the config file.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFile } from 'node:child_process';
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
 import { mkdtemp, readdir, readFile, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createInterface } from 'node:readline';
 import { pathToFileURL } from 'node:url';
-import { promisify } from 'node:util';
 import { fileStore, loadConfig, takeOverStaleLock } from '../src/node.ts';
 import { asRecord, parseJson, waitFor, within } from './mocks.js';
 
@@ -50,42 +51,91 @@ test('file store: a state file that is not a JSON object is an error, never over
 });
 
 /**
- * Writes `count` keys named `prefix:i` to the state file at `path`, one flush each, from another Node process.
+ * Starts another Node process with its own store on the state file at `path`. Sent the line `i`, it writes `other:i`
+ * and flushes, and answers `i` once the write is on disk.
  *
+ * @param {import('node:test').TestContext} t The process is ended when this test ends.
  * @param {string} path
- * @param {string} prefix
- * @param {number} count
+ * @returns {Promise<(round: number) => Promise<void>>} Resolves once the process is ready.
  */
-function writeFromAnotherProcess(path, prefix, count) {
+async function writerInAnotherProcess(t, path) {
   const store = pathToFileURL(join(import.meta.dirname, '../src/node.ts')).href;
   const script = `
+    const { createInterface } = await import('node:readline');
     const { fileStore } = await import(${JSON.stringify(store)});
     const store = fileStore(${JSON.stringify(path)}, { delayMs: 10_000 });
-    for (let i = 0; i < ${String(count)}; i++) {
-      await store.put(${JSON.stringify(prefix)} + ':' + i, i);
+    console.log('ready');
+    for await (const round of createInterface({ input: process.stdin })) {
+      await store.put('other:' + round, Number(round));
       await store.flush();
+      console.log(round);
     }`;
-  return promisify(execFile)(
+  const child = spawn(
     process.execPath,
     ['--experimental-strip-types', '--no-warnings', '--input-type=module', '-e', script],
-    { timeout: 60_000 },
+    {
+      stdio: ['pipe', 'pipe', 'inherit'],
+    },
   );
+  const exited = once(child, 'exit');
+  t.after(async () => {
+    child.stdin.end();
+    if (child.exitCode === null) child.kill();
+    await exited;
+  });
+  const lines = createInterface({ input: child.stdout })[Symbol.asyncIterator]();
+  const nextLine = async (/** @type {string} */ what) => (await within(30_000, lines.next(), what)).value;
+  assert.equal(await nextLine('the other process to start'), 'ready');
+  return async (round) => {
+    child.stdin.write(`${String(round)}\n`);
+    assert.equal(await nextLine(`the other process's write ${String(round)}`), String(round));
+  };
 }
 
-test('file store: two processes writing at once both keep every key', async () => {
+test('file store: two processes writing at once both keep every key', async (t) => {
   const dir = await mkdtemp(join(tmpdir(), 'tether-sync-'));
   const path = join(dir, 'state.json');
-  const rounds = 200;
+  const rounds = 40;
   const here = fileStore(path, { delayMs: 10_000 });
-  const other = writeFromAnotherProcess(path, 'other', rounds);
+  const other = await writerInAnotherProcess(t, path);
+  // Each round starts both writes together and ends once both are on disk, so every read, merge and rename in one
+  // process meets one in the other: without the lock, one write of each pair would be lost.
   for (let i = 0; i < rounds; i++) {
+    const theirs = other(i);
     await here.put(`here:${String(i)}`, i);
     await here.flush();
+    await theirs;
   }
-  await other;
   const disk = asRecord(parseJson(await readFile(path, 'utf8')), 'the state file');
   assert.equal(Object.keys(disk).length, 2 * rounds, 'no write lost');
 });
+
+/** How long a write waits before it tries a held lock again: `LOCK_RETRY_MS` in src/node.ts. */
+const LOCK_RETRY_MS = 20;
+
+/**
+ * Counts the waits of {@link LOCK_RETRY_MS} the code makes until `stop()`, which puts the real `setTimeout` back.
+ *
+ * @returns {{ count: () => number, stop: () => void }}
+ */
+function countLockWaits() {
+  const start = globalThis.setTimeout;
+  let waits = 0;
+  /**
+   * @param {() => void} callback
+   * @param {number} [ms]
+   */
+  const counting = (callback, ms) => {
+    if (ms === LOCK_RETRY_MS) waits += 1;
+    return start(callback, ms);
+  };
+  // Defined, not assigned: the type of the global setTimeout is also the DOM's.
+  Object.defineProperty(globalThis, 'setTimeout', { value: counting, writable: true, configurable: true });
+  return {
+    count: () => waits,
+    stop: () => Object.defineProperty(globalThis, 'setTimeout', { value: start, writable: true, configurable: true }),
+  };
+}
 
 test('file store: a write waits for the lock another process holds, and takes over one left by a dead process', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'tether-sync-'));
@@ -94,13 +144,19 @@ test('file store: a write waits for the lock another process holds, and takes ov
   await writeFile(`${path}.lock`, '');
   await store.put('k', 1);
   let written = false;
-  const flushed = store.flush().then(() => {
-    written = true;
-  });
-  await new Promise((resolve) => setTimeout(resolve, 100));
-  assert.equal(written, false, 'waits while the lock is held');
-  await rm(`${path}.lock`);
-  await within(30_000, flushed, 'the write to take the freed lock');
+  const waits = countLockWaits();
+  try {
+    const flushed = store.flush().then(() => {
+      written = true;
+    });
+    // Found the lock held, waited, and found it held again.
+    await waitFor(() => waits.count() >= 2, 'the write to wait for the held lock twice');
+    assert.equal(written, false, 'waits while the lock is held');
+    await rm(`${path}.lock`);
+    await within(30_000, flushed, 'the write to take the freed lock');
+  } finally {
+    waits.stop();
+  }
   assert.deepEqual(parseJson(await readFile(path, 'utf8')), { k: 1 });
 
   await writeFile(`${path}.lock`, '');

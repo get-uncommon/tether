@@ -2,6 +2,7 @@ import { test, before, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
 import {
+  cancelTimersAfterTests,
   cartFrom,
   fakeLine,
   find,
@@ -16,6 +17,8 @@ import {
   pageGlobals,
 } from './fixtures.js';
 import { listAt, recordAt, recordsAt, stringAt, waitFor } from '../server/test/mocks.js';
+
+cancelTimersAfterTests();
 
 const dom = new JSDOM('<!doctype html><body></body>', { url: 'https://site.test/product/coffee-box' });
 Object.assign(globalThis, pageGlobals(dom.window));

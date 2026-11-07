@@ -44,6 +44,8 @@ jobs:
       # test/upgrade-from-released.test.js installs the tree into copies made from every release tag. The worktree
       # shares the checkout's tags.
       - run: git fetch --depth=1 --no-tags origin '+refs/tags/v*:refs/tags/v*'
+      # The rewrite runs this checkout's scripts/release.ts, which imports packages (yaml): install them first.
+      - run: npm ci --ignore-scripts
       - name: Write the next ${{ matrix.bump }} version into a worktree
         shell: bash
         env:

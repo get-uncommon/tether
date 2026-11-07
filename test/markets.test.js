@@ -3,6 +3,7 @@ import { test, before, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
 import {
+  cancelTimersAfterTests,
   cartFrom,
   detailOf,
   find,
@@ -11,9 +12,12 @@ import {
   operationName,
   pageGlobals,
   product,
+  whenRead,
 } from './fixtures.js';
 import { fieldOf, parseJson, recordAt, stringAt, waitFor } from '../server/test/mocks.js';
 import { isRecord } from '../server/src/shared/json.ts';
+
+cancelTimersAfterTests();
 
 // A German Webflow locale page, with a saved cart from the Dutch market.
 const dom = new JSDOM('<!doctype html><html lang="de-DE"><body></body></html>', {
@@ -27,7 +31,7 @@ const delays = {}; // country -> ms, to simulate a slow response from the old ma
 const CURRENCY = { NL: 'EUR', DE: 'EUR', US: 'USD', CH: 'CHF' };
 /**
  * @typedef {{ host: string, op: string, variables: ReturnType<typeof graphqlRequest>['variables'], ctx: string,
- *   country: string | null, answered: boolean }} StorefrontCall
+ *   country: string | null, read: boolean }} StorefrontCall
  */
 /** @type {StorefrontCall[]} */
 const calls = [];
@@ -76,14 +80,11 @@ globalThis.fetch = async (url, init) => {
   const ctx = /@inContext\(([^)]*)\)/.exec(query)?.[1] || '';
   const country = /country: (\w+)/.exec(ctx)?.[1] || null;
   /** @type {StorefrontCall} */
-  const call = { host, op, variables, ctx, country, answered: false };
+  const call = { host, op, variables, ctx, country, read: false };
   calls.push(call);
   hosts.add(host);
   /** @param {unknown} data */
-  const ok = (data) => {
-    call.answered = true;
-    return jsonResponse({ data });
-  };
+  const ok = (data) => whenRead(jsonResponse({ data }), call);
   const delay = country ? delays[country] : undefined;
   if (delay) await new Promise((resolve) => setTimeout(resolve, delay));
 
@@ -348,9 +349,9 @@ test('a slow response from the old market never overwrites the new one or refill
   );
   await Tether.setCountry('US', { remember: false });
   const slow = calls.find((call) => call.country === 'NL');
-  await waitFor(() => slow?.answered === true, 'the NL answer');
-  // Nothing may happen once the stale answer is read: give it a moment to be (wrongly) applied.
-  await new Promise((resolve) => setTimeout(resolve, 20));
+  await waitFor(() => slow?.read === true, 'Tether to read the NL answer');
+  // What Tether does with an answer it has read runs in microtasks, or in a 0 ms timer queued before this one.
+  await new Promise((resolve) => setTimeout(resolve, 0));
   delete delays['NL'];
   assert.match(find('#price').textContent, /35/);
   const cached = await Tether.getProduct('coffee-box');

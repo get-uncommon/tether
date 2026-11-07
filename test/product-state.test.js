@@ -3,8 +3,20 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
-import { apparel, find, findAll, jsonResponse, PLAN_2MONTH, PLAN_MONTH, product, pageGlobals } from './fixtures.js';
+import {
+  apparel,
+  cancelTimersAfterTests,
+  find,
+  findAll,
+  jsonResponse,
+  PLAN_2MONTH,
+  PLAN_MONTH,
+  product,
+  pageGlobals,
+} from './fixtures.js';
 import { waitFor } from '../server/test/mocks.js';
+
+cancelTimersAfterTests();
 
 const dom = new JSDOM('<!doctype html><body></body>', { url: 'https://state.test/product/coffee-box' });
 Object.assign(globalThis, pageGlobals(dom.window));

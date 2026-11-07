@@ -222,6 +222,8 @@ export function withContext(
 const RETRY_BACKOFF_MS = 300;
 /** The same for Shopify's `THROTTLED` error, which asks for a longer wait. */
 const THROTTLE_BACKOFF_MS = 500;
+/** The longest wait between two tries, however many retries came before. */
+const MAX_BACKOFF_MS = 30_000;
 /** Shopify's status for a request its bot protection rejected; retrying doesn't help. */
 const SECURITY_REJECTION = 430;
 const MS_PER_SECOND = 1000;
@@ -467,7 +469,7 @@ export async function request<T>(
         storesWithoutInventory.add(store);
         break;
       case 'retry':
-        await sleep(outcome.backoffMs * 2 ** retries);
+        await sleep(Math.min(outcome.backoffMs * 2 ** retries, MAX_BACKOFF_MS));
         retries += 1;
         log('retry', retries);
         break;

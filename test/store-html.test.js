@@ -52,6 +52,18 @@ test('a link that opens a new tab gets no handle on the page and keeps its own r
   );
 });
 
+test('a link to a named target also gets no handle on the page, unlike one to this tab or a parent', () => {
+  const box = render(
+    '<a href="https://shop.test/" target="promo">x</a><a href="/y" target="_TOP">y</a>' +
+      '<a href="/z" target="_parent">z</a><a href="/w">w</a>',
+  );
+  assert.equal(
+    box.innerHTML,
+    '<a href="https://shop.test/" target="promo" rel="noopener noreferrer">x</a><a href="/y" target="_TOP">y</a>' +
+      '<a href="/z" target="_parent">z</a><a href="/w">w</a>',
+  );
+});
+
 test('embeds over http, relative or without a src are removed; the https one is sandboxed whatever it was written with', () => {
   const box = render(
     '<iframe src="http://video.test/e"></iframe><iframe src="/embed"></iframe><iframe></iframe>' +

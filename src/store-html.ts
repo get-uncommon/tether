@@ -297,6 +297,9 @@ function cleanAttributes(element: Element, page: Page): void {
   else element.setAttribute('style', cleaned);
 }
 
+/** Link targets that open in this tab or one of its parents, so no new page gets `window.opener`; empty means `_self`. */
+const SAME_TAB_TARGETS = new Set(['', '_self', '_parent', '_top']);
+
 /** @param element A kept element, its attributes cleaned. */
 function hardenEmbedsAndLinks(element: Element): void {
   if (element.localName === 'iframe') {
@@ -307,8 +310,11 @@ function hardenEmbedsAndLinks(element: Element): void {
     element.setAttribute('referrerpolicy', IFRAME_REFERRER_POLICY);
     return;
   }
-  if (element.localName !== 'a' || element.getAttribute('target')?.toLowerCase() !== '_blank') return;
-  // The opened page gets no handle on this one (`window.opener`) and isn't told which page linked to it.
+  if (element.localName !== 'a') return;
+  const target = element.getAttribute('target');
+  if (target === null || SAME_TAB_TARGETS.has(target.toLowerCase())) return;
+  // The opened page gets no handle on this one (`window.opener`) and isn't told which page linked to it. Browsers
+  // imply `noopener` only for `_blank`, so a named target such as `promo` needs it written too.
   const rel = new Set((element.getAttribute('rel') ?? '').split(/\s+/).filter(Boolean));
   rel.add('noopener');
   rel.add('noreferrer');

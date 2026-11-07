@@ -140,7 +140,14 @@ test('the release rehearsal runs the gate at the next minor and patch versions, 
   assert.ok(job.indexOf('git worktree add --detach "$RUNNER_TEMP/next" HEAD') < rewrite && rewrite !== -1);
   assert.match(job, /- run: npm ci\n {8}working-directory: \$\{\{ runner\.temp \}\}\/next\n/);
   assert.match(job, /- run: npm run check\n {8}working-directory: \$\{\{ runner\.temp \}\}\/next\n/);
-  assert.ok(job.indexOf('release.ts --rewrite-only') < job.indexOf('- run: npm ci'), 'installed at the new version');
+  assert.ok(
+    job.indexOf('release.ts --rewrite-only') < job.indexOf('- run: npm ci\n        working-directory:'),
+    'the worktree is installed at the new version',
+  );
+  assert.ok(
+    job.indexOf('- run: npm ci --ignore-scripts') < rewrite,
+    'the checkout is installed before release.ts runs',
+  );
 });
 
 test('the release relies on the ci run of the commit it releases, which runs on main and the release branches', async () => {
@@ -185,7 +192,7 @@ test('CI and the pre-push hook lint the workflows with one script, at the versio
   assert.doesNotMatch(job, /[0-9a-f]{64}|actionlint_|zizmor==|npm ci/, 'no version of its own, and no dependency');
   const lefthook = await readFile(new URL('../.config/lefthook.yml', import.meta.url), 'utf8');
   const [, prePush = ''] = /\npre-push:\n([^]*)/.exec(lefthook) ?? [];
-  assert.match(prePush, /run: npm run check\n/);
+  assert.match(prePush, /use_stdin: true\n {6}run: node --experimental-strip-types scripts\/pre-push\.ts\n/);
   assert.match(prePush, /run: npm run lint:workflows\n/);
   const pkg = await readFile(new URL('../package.json', import.meta.url), 'utf8');
   assert.ok(pkg.includes('"lint:workflows": "node --experimental-strip-types scripts/lint-workflows.ts"'));

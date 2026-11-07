@@ -45,6 +45,7 @@ import { field } from '../src/shared/json.ts';
 import { messageOf } from '../src/shared/error-message.ts';
 import {
   downloadAsset,
+  fetchFromGitHub,
   fetchSignedRelease,
   GitHubError,
   releaseAssetName,
@@ -116,16 +117,15 @@ export function releasesInRange(tags: string[], spec: string): Version[] {
 
 async function githubJson(path: string): Promise<unknown> {
   const token = process.env['GITHUB_TOKEN'];
-  const response = await fetch(`https://api.github.com${path}`, {
-    headers: {
-      accept: 'application/vnd.github+json',
-      'user-agent': 'tether-sync-updater',
-      ...(token ? { authorization: `Bearer ${token}` } : {}),
-    },
+  const headers = {
+    accept: 'application/vnd.github+json',
+    'user-agent': 'tether-sync-updater',
+    ...(token ? { authorization: `Bearer ${token}` } : {}),
+  };
+  return fetchFromGitHub(`https://api.github.com${path}`, headers, async (response): Promise<unknown> => {
+    if (!response.ok) throw new GitHubError(path, response.status);
+    return response.json();
   });
-  if (!response.ok) throw new GitHubError(path, response.status);
-  const answer: unknown = await response.json();
-  return answer;
 }
 
 /**

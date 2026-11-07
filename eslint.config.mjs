@@ -1,6 +1,7 @@
 // The lint gate. Type-aware typescript-eslint rules run on the TypeScript sources (the shipped code in src/ and
 // server/src/, and the scripts) and on the JavaScript tests, which .config/tsconfig/test.json and e2e.json type-check.
 // The JavaScript shims that old deployed copies call get the untyped rules only.
+import comments from '@eslint-community/eslint-plugin-eslint-comments/configs';
 import js from '@eslint/js';
 import prettier from 'eslint-config-prettier';
 import globals from 'globals';
@@ -48,7 +49,16 @@ export default tseslint.config(
       'src/globals.d.ts',
     ],
   },
+  {
+    // A disable comment that no longer silences anything is an error, not a warning.
+    linterOptions: { reportUnusedDisableDirectives: 'error' },
+  },
   js.configs.recommended,
+  comments.recommended,
+  {
+    // Every disable comment says, after ` -- `, why the rule is wrong for that line.
+    rules: { '@eslint-community/eslint-comments/require-description': ['error', { ignore: ['eslint-enable'] }] },
+  },
   {
     files: TYPED_FILES,
     extends: [tseslint.configs.strictTypeChecked, tseslint.configs.stylisticTypeChecked],

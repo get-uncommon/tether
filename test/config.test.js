@@ -54,6 +54,13 @@ test('a delay longer than setTimeout keeps falls back to its default instead of 
   assert.equal(resolveConfig({ requestTimeout: 2_147_483_647 }).requestTimeout, 2_147_483_647);
 });
 
+test('retries above ten fall back to the default', () => {
+  const { result, warned } = quietly(() => resolveConfig({ retries: 11 }));
+  assert.equal(result.retries, DEFAULTS.retries);
+  assert.deepEqual(warned, ['[tether] invalid retries 11: using 2']);
+  assert.equal(resolveConfig({ retries: 10 }).retries, 10);
+});
+
 test('prefix, checkoutTarget and defaultPurchase fall back to their defaults', () => {
   const { result, warned } = quietly(() =>
     resolveConfig({ prefix: 'x"] *', checkoutTarget: '_top', defaultPurchase: 'subscription' }),

@@ -2,7 +2,7 @@
 import { test, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
-import { captureTetherWarnings, find, jsonResponse } from './fixtures.js';
+import { captureTetherWarnings, find, jsonResponse, product } from './fixtures.js';
 import { waitFor } from '../server/test/mocks.js';
 
 // The failures these tests cause on purpose are checked through onError and states, not the console.
@@ -85,13 +85,21 @@ test('Tether.on hears only the events Tether dispatched: a forged tether:cart-up
 });
 
 test('a forged tether:variant-changed loads nothing and writes no variant link', async () => {
+  const { emit } = await import('../src/dom.ts');
   document.body.innerHTML = '<div id="p" tether-variant-url></div>';
   errors.length = 0;
   const before = window.location.href;
-  find('#p').dispatchEvent(new window.CustomEvent('tether:variant-changed', { detail: {}, bubbles: true }));
-  // Nothing is meant to happen, so there is no condition to wait for: a handler that took the forged detail would have
-  // loaded and reported by now.
-  await new Promise((resolve) => setTimeout(resolve, 30));
-  assert.deepEqual(errors, []);
-  assert.equal(window.location.href, before);
+  const root = find('#p');
+  root.dispatchEvent(new window.CustomEvent('tether:variant-changed', { detail: {}, bubbles: true }));
+  // Two of Tether's own events after it, the second of which writes the link: the listener's part call for each runs
+  // after the one it would have made for the forged event, so the forged event's work, if any, is done by then.
+  const [first, second] = product.variants.nodes;
+  assert.ok(first && second);
+  for (const variant of [first, second]) {
+    emit('variant-changed', { product, variant, selected: {}, purchase: 'one-time', sellingPlanId: null }, root);
+  }
+  const link = `?variant=${second.id.replace('gid://shopify/ProductVariant/', '')}`;
+  await waitFor(() => window.location.search === link, 'the link to the second variant');
+  assert.deepEqual(errors, [], 'the forged detail reached nothing that reports');
+  window.history.replaceState(null, '', before);
 });
