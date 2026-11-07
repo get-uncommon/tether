@@ -32,6 +32,7 @@ globalThis.fetch = async (_url, init) => {
     failNext = false;
     return jsonResponse({}, 500);
   }
+  if (variables['q'] === 'nothing') return jsonResponse({ data: { predictiveSearch: null } });
   const money = { amount: '30.0', currencyCode: 'EUR' };
   return jsonResponse({
     data: {
@@ -143,6 +144,11 @@ test('typing sends one predictive query and renders products, queries and collec
     ['/search?q=cof%20beans'],
     'the typed term itself is not suggested',
   );
+  assert.deepEqual(
+    queries.map((link) => link.getAttribute('role')),
+    ['option'],
+    'a suggestion is an option of the listbox',
+  );
   assert.equal(find('[tether-search-collections] a', root).getAttribute('href'), '/collection/coffee');
   assert.equal(find('[tether-show="search-empty"]', root).style.display, 'none');
   assert.equal(searches.at(-1)?.term, 'cof');
@@ -159,11 +165,14 @@ test('arrow keys move through the options, Escape closes', () => {
   /** @param {string} name */
   const key = (name) => input.dispatchEvent(new window.KeyboardEvent('keydown', { key: name, bubbles: true }));
   const options = [...root.querySelectorAll('[role="option"]')];
-  assert.equal(options.length, 2);
+  assert.equal(options.length, 3, 'the product, the suggestion and the collection');
   key('ArrowDown');
   assert.equal(input.getAttribute('aria-activedescendant'), options[0]?.id);
+  key('ArrowDown');
+  assert.equal(input.getAttribute('aria-activedescendant'), options[1]?.id, 'the suggestion');
   key('ArrowUp');
-  assert.equal(input.getAttribute('aria-activedescendant'), options[1]?.id, 'wraps around');
+  key('ArrowUp');
+  assert.equal(input.getAttribute('aria-activedescendant'), options[2]?.id, 'wraps around');
   key('Escape');
   assert.ok(!root.classList.contains('is-open'));
   assert.equal(input.hasAttribute('aria-activedescendant'), false);
@@ -195,7 +204,52 @@ test('new results clear aria-activedescendant: no option is selected in them', a
   assert.equal(input.hasAttribute('aria-activedescendant'), false);
   assert.deepEqual(
     [...root.querySelectorAll('[role="option"]')].map((option) => option.getAttribute('aria-selected')),
-    ['false', 'false'],
+    ['false', 'false', 'false'],
+  );
+});
+
+test('Enter after Escape submits the form: the closed list has no selected option to open', async () => {
+  const root = find('[tether-search]');
+  const input = root.querySelector('input');
+  assert.ok(input);
+  root.removeAttribute('tether-search-state');
+  type(input, 'cofe');
+  await waitFor(() => root.getAttribute('tether-search-state') === 'ready', 'the results');
+  /** @param {string} name */
+  const key = (name) =>
+    input.dispatchEvent(new window.KeyboardEvent('keydown', { key: name, bubbles: true, cancelable: true }));
+  /** @type {EventTarget[]} */
+  const clicked = [];
+  /** @param {Event} event */
+  const record = (event) => {
+    if (event.target) clicked.push(event.target);
+    event.preventDefault();
+  };
+  root.addEventListener('click', record);
+  try {
+    key('ArrowDown');
+    key('Escape');
+    assert.equal(root.querySelector('[aria-selected="true"]'), null);
+    assert.equal(key('Enter'), true, 'the form submits');
+    assert.deepEqual(clicked, []);
+  } finally {
+    root.removeEventListener('click', record);
+  }
+});
+
+test('a term without results is not searched again', async () => {
+  const root = find('[tether-search]');
+  const input = root.querySelector('input');
+  assert.ok(input);
+  for (const term of ['nothing', 'cofg', 'nothing']) {
+    root.removeAttribute('tether-search-state');
+    type(input, term);
+    await waitFor(() => root.hasAttribute('tether-search-state'), `the results for ${term}`);
+  }
+  assert.equal(root.getAttribute('tether-search-state'), 'empty');
+  assert.deepEqual(
+    calls.slice(-2).map((call) => call.variables['q']),
+    ['nothing', 'cofg'],
   );
 });
 

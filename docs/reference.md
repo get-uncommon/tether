@@ -317,9 +317,12 @@ loses to it.
 `tether-recommendations="<handle>"` lists related products (`url:handle` on a dynamic product page;
 empty inside a `tether-product`: that product). `tether-products=""` lists all products. Search
 syntax caveat: Shopify matches words loosely, so `handle:a OR handle:b` can return other products, and
-search only covers the store's default language. `tether-sort` takes the Shopify
-sort keys (`BEST_SELLING`, `PRICE`, `CREATED`, `TITLE`, …), with `tether-reverse="true"`.
-Lists, and `Tether.getProducts()` and `Tether.getRecommendations()`, are an optional part (2 KB) that
+search only covers the store's default language. `tether-sort` takes Shopify's sort keys, with
+`tether-reverse="true"`: a collection takes `BEST_SELLING`, `COLLECTION_DEFAULT`, `CREATED`, `ID`,
+`MANUAL`, `PRICE`, `RELEVANCE` and `TITLE`; a `tether-products` search takes `BEST_SELLING`,
+`CREATED_AT` (or `CREATED`), `ID`, `PRICE`, `PRODUCT_TYPE`, `RELEVANCE`, `TITLE`, `UPDATED_AT` and
+`VENDOR`. Another key warns in the console and leaves Shopify's default order.
+Lists, and `Tether.getProducts()` and `Tether.getRecommendations()`, are an optional part (3 KB) that
 loads with a page's first list. A list shows its loading state at once, but its first query waits
 for that file, one more request on the way to the first cards. On a script-tag page where the list
 is the main content, such as a collection page, preload it from the exact release the core loads its
@@ -439,7 +442,8 @@ const p = await Tether.getProduct('coffee-box');  // batched + cached
 const { products, pageInfo } = await Tether.getProducts({ collection: 'coffee', first: 12 });
 const scope = Tether.getScope(el);
 scope.selectPlan('Every month'); scope.setPurchase('one-time');
-scope.purchase;  // { kind: 'subscription', planId } or { kind: 'one-time', offeredPlanId } (read-only)
+scope.purchase;  // { kind: 'subscription', planId } or { kind: 'one-time', offeredPlanId }
+scope.selected; scope.variant; scope.quantity;  // read-only, like every field: the methods change them
 
 Tether.query(`query { shop { name } }`);          // anything else in the Storefront API: `data`, as an object to check
 Tether.plans.planSavings(variant, planId);        // selling plan helpers
@@ -609,7 +613,8 @@ discount form), `tether.account.min.js` and `tether.account-pages.min.js` (custo
 **Accessibility.** The cart drawer gets `role="dialog"`, `aria-modal` and a label (`tether-cart-label`
 to change it); opening moves focus into it, Tab stays inside, Escape closes it and returns focus.
 Closed, it is `aria-hidden` and `inert`. Cart buttons get `aria-expanded`; unavailable add-to-cart
-buttons and option values get `aria-disabled`.
+buttons get `aria-disabled`, and unavailable option values `aria-describedby="tether-unavailable"`
+(see Product scope).
 
 **Connection loss.** Products and lists that failed to load try again when the browser is back online.
 
