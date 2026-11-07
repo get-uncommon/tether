@@ -5,7 +5,7 @@
  * core finds the lists and keeps each one's handle (`collection.ts`); this part queries and renders them, and answers
  * `Tether.getProducts()` and `Tether.getRecommendations()`.
  */
-import { cfg, reportError } from './config.ts';
+import { cfg, reportError, warn } from './config.ts';
 import { gql, TetherError } from './client.ts';
 import {
   attr,
@@ -35,6 +35,30 @@ import type { Collection, PageInfo, ProductPage, ProductQuery } from './loader.t
 
 /** `tether-products="url:q"`: the search in the page's `?q=`, for a results page on a static site. */
 const URL_QUERY_SOURCE = 'url:';
+
+/** Storefront API `ProductCollectionSortKeys`, which a collection's products take. */
+const COLLECTION_SORT_KEYS = new Set([
+  'BEST_SELLING',
+  'COLLECTION_DEFAULT',
+  'CREATED',
+  'ID',
+  'MANUAL',
+  'PRICE',
+  'RELEVANCE',
+  'TITLE',
+]);
+/** Storefront API `ProductSortKeys`, which a search takes. */
+const SEARCH_SORT_KEYS = new Set([
+  'BEST_SELLING',
+  'CREATED_AT',
+  'ID',
+  'PRICE',
+  'PRODUCT_TYPE',
+  'RELEVANCE',
+  'TITLE',
+  'UPDATED_AT',
+  'VENDOR',
+]);
 
 const COLLECTION_QUERY = `query TetherCollection($handle: String!, $first: Int!, $after: String, $sortKey: ProductCollectionSortKeys, $reverse: Boolean, $filters: [ProductFilter!]) {
   collection(handle: $handle) {
@@ -140,6 +164,13 @@ class ListScope {
   collection: Collection | null = null;
   /** Counts loads, so only the latest one renders. */
   loadToken = 0;
+  /**
+   * The `loadToken` of the load in flight that replaces the products, `null` without one. A "load more" click during
+   * it does nothing: its page would follow the products being replaced, which can be another market's.
+   */
+  replacingToken: number | null = null;
+  /** Whether the list has warned about its `tether-sort`, so a list that reloads warns once. */
+  warnedSort = false;
 
   constructor(root: HTMLElement) {
     this.root = root;
@@ -148,6 +179,7 @@ class ListScope {
       const more = event.target.closest(sel('load-more'));
       if (more?.closest(listSelector()) !== root) return;
       event.preventDefault();
+      if (this.replacingToken !== null) return;
       void busy(more, () => this.load(true));
     });
   }
@@ -163,9 +195,10 @@ class ListScope {
       reverse: get(root, 'reverse') === 'true',
       first: listLimit(root, cfg.collectionFirst),
     };
-    const sortKey = get(root, 'sort');
+    const isCollection = has(root, 'collection');
+    const sortKey = this.sortKey(isCollection);
     if (sortKey) query.sortKey = sortKey;
-    if (has(root, 'collection')) {
+    if (isCollection) {
       query.collection = get(root, 'collection') ?? '';
       return query;
     }
@@ -174,6 +207,22 @@ class ListScope {
       ? new URL(window.location.href).searchParams.get(raw.slice(URL_QUERY_SOURCE.length)) || ''
       : raw;
     return query;
+  }
+
+  /**
+   * @returns The list's `tether-sort`, `undefined` (Shopify's default order) without one or, with a warning, for a key
+   *   its source doesn't take: Shopify would fail the whole list. A search takes `CREATED` as `CREATED_AT`.
+   */
+  sortKey(isCollection: boolean): string | undefined {
+    const raw = get(this.root, 'sort')?.trim();
+    if (!raw) return undefined;
+    if (isCollection ? COLLECTION_SORT_KEYS.has(raw) : SEARCH_SORT_KEYS.has(raw)) return raw;
+    if (!isCollection && raw === 'CREATED') return 'CREATED_AT';
+    if (!this.warnedSort) {
+      warn(`${attr('sort')} ${JSON.stringify(raw)} is not a sort key of this list: using the default`, this.root);
+    }
+    this.warnedSort = true;
+    return undefined;
   }
 
   /**
@@ -194,6 +243,7 @@ class ListScope {
     this.loadToken += 1;
     const token = this.loadToken;
     const stale = () => token !== this.loadToken;
+    if (!more) this.replacingToken = token;
     try {
       if (has(this.root, 'recommendations')) {
         const recommendations = await this.loadRecommendations();
@@ -216,6 +266,8 @@ class ListScope {
       // A missing product for recommendations is a page detail, not an error to report.
       if (!(isNotFound(error) && has(this.root, 'recommendations'))) reportError(error, 'list load failed');
       emit('error', { error, context: 'list' }, this.root);
+    } finally {
+      if (this.replacingToken === token) this.replacingToken = null;
     }
   }
 

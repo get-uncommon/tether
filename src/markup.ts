@@ -8,7 +8,7 @@ import type { CartLineInput } from './cart/mutations.ts';
 import type { CartWarning } from './config.ts';
 import type { Product, ProductVariant } from './fragments.ts';
 import type { Collection } from './loader.ts';
-import type { ProductScope } from './product.ts';
+import type { ReadonlyProductScope } from './product.ts';
 import type { Purchase } from './product-state.ts';
 import type { SearchResults } from './search.ts';
 
@@ -45,8 +45,8 @@ export const scoped = (root: Element | null | undefined, selector: string, scope
  */
 export interface TetherEvents {
   ready: { cart: ShopifyCart | null };
-  'product-ready': { product: Product; scope: ProductScope };
-  'product-updated': { product: Product; scope: ProductScope };
+  'product-ready': { product: Product; scope: ReadonlyProductScope };
+  'product-updated': { product: Product; scope: ReadonlyProductScope };
   /** `key` is null when the scope names no product; `source` is what it named. */
   'product-not-found': { key: string | null; source: string };
   'variant-changed': {

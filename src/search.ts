@@ -222,7 +222,7 @@ class SearchBox {
     this.root.classList.toggle('is-open', open);
     this.results.hidden = !open;
     this.input.setAttribute('aria-expanded', String(open));
-    if (!open) this.input.removeAttribute('aria-activedescendant');
+    if (!open) this.highlight(this.options(), -1);
   }
 
   options() {
@@ -231,8 +231,8 @@ class SearchBox {
 
   async fetchResults(term: string): Promise<SearchResults | null> {
     const key = `${String(cfg.country)} ${String(cfg.language)} ${term}`;
-    const cached = this.cache.get(key);
-    if (cached) return cached;
+    // A term without results is cached as `null`.
+    if (this.cache.has(key)) return this.cache.get(key) ?? null;
     const data = await gql(QUERY, { q: term, limit: this.limit }, isSearchAnswer);
     this.cache.set(key, data.predictiveSearch);
     return data.predictiveSearch;
@@ -291,7 +291,7 @@ class SearchBox {
     });
     this.fillList('search-queries', queries, (node, query) => {
       bindValues(node, { text: query.text });
-      linkIn(node)?.setAttribute('href', this.queryUrl(query.text));
+      linkOption(node, this.queryUrl(query.text));
     });
     const count = products.length + collections.length + queries.length;
     this.showCount(count);
@@ -306,20 +306,24 @@ class SearchBox {
       if (condition === 'search-empty') show(el, count === 0);
       if (condition === 'search-results') show(el, count > 0);
     });
-    this.options().forEach((option, index) => {
+    const options = this.options();
+    options.forEach((option, index) => {
       option.id ||= `${this.resultsId}-${index}`;
-      option.setAttribute('aria-selected', 'false');
     });
     // No option is selected in the new results, and an id kept may now name another one.
-    this.input.removeAttribute('aria-activedescendant');
+    this.highlight(options, -1);
   }
 
+  /** @param index `-1` selects no option. */
   highlight(options: HTMLElement[], index: number) {
     options.forEach((option, optionIndex) => {
       option.setAttribute('aria-selected', String(optionIndex === index));
     });
     const option = options[index];
-    if (!option) return;
+    if (!option) {
+      this.input.removeAttribute('aria-activedescendant');
+      return;
+    }
     this.input.setAttribute('aria-activedescendant', option.id);
     // jsdom has no scrollIntoView.
     (option as Partial<Pick<HTMLElement, 'scrollIntoView'>>).scrollIntoView?.({ block: 'nearest' });
@@ -335,7 +339,7 @@ class SearchBox {
     } else if (event.key === 'ArrowUp' && options.length) {
       event.preventDefault();
       this.highlight(options, current <= 0 ? options.length - 1 : current - 1);
-    } else if (event.key === 'Enter' && current >= 0) {
+    } else if (event.key === 'Enter' && current >= 0 && !this.results.hidden) {
       event.preventDefault();
       options[current]?.click();
     } else if (event.key === 'Escape') {

@@ -2,9 +2,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdir, readdir, readFile, rename, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { basename, dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { replaceFolder } from '../scripts/replace-folder.ts';
 import { tempFolder } from '../server/test/mocks.js';
+
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 /**
  * @param {string} folder
@@ -114,4 +118,20 @@ test('a first build makes the folder, and its parent', async (t) => {
   await replaceFolder(out, writeNew);
   assert.deepEqual(await contents(out), { 'tether.min.js': 'new core' });
   assert.deepEqual(await readdir(join(parent, 'site')), ['dist']);
+});
+
+test("the folders beside dist/ and .test-dist/ are ones the repository's ignore files cover", async (t) => {
+  for (const name of ['dist', '.test-dist']) {
+    const parent = await tempFolder(t, 'tether-replace-folder-');
+    let building = '';
+    await replaceFolder(join(parent, name), async (folder) => {
+      building = basename(folder);
+      await writeNew(folder);
+    });
+    for (const left of [building, `${building}-previous`]) {
+      // check-ignore exits 0 for an ignored path and 1 for one it would track.
+      execFileSync('git', ['check-ignore', '--quiet', '--no-index', `${left}/`], { cwd: ROOT });
+      assert.match(left, new RegExp(String.raw`^\.${name.replace(/^\./, '')}-building-`));
+    }
+  }
 });
