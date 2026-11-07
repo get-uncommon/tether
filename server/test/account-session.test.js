@@ -273,7 +273,7 @@ test('logout with KV down still clears the cookie, and logs why Shopify is not l
   const { cookie } = await loginFlow();
   const down = () => Promise.reject(new Error('KV unavailable'));
   /** @type {import('../src/env.ts').KvBinding} */
-  const TETHER_SYNC = { get: down, put: down, delete: down };
+  const TETHER_SYNC = { get: down, put: down, delete: down, list: down };
   /** @type {string[]} */
   const logged = [];
   const realError = console.error;

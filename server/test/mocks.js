@@ -140,6 +140,44 @@ export function shopifyProduct(number, over = {}) {
   };
 }
 
+/**
+ * KV's `list` over a fake namespace's keys: one page, with every key that has the prefix.
+ *
+ * @param {() => Iterable<string>} keys
+ * @returns {import('../src/env.ts').KvBinding['list']}
+ */
+export const kvList =
+  (keys) =>
+  async ({ prefix }) => ({
+    keys: [...keys()].filter((name) => name.startsWith(prefix)).map((name) => ({ name })),
+    list_complete: true,
+  });
+
+/**
+ * A KV namespace in memory, holding the texts it is given.
+ *
+ * @returns {import('../src/env.ts').KvBinding & { map: Map<string, string> }}
+ */
+export function memoryKv() {
+  /** @type {Map<string, string>} */
+  const map = new Map();
+  return {
+    map,
+    async get(key, type) {
+      const value = map.get(key);
+      if (value === undefined) return null;
+      return type === 'json' ? parseJson(value) : value;
+    },
+    async put(key, value) {
+      map.set(key, value);
+    },
+    async delete(key) {
+      map.delete(key);
+    },
+    list: kvList(() => map.keys()),
+  };
+}
+
 /** @typedef {ReturnType<typeof shopifyProduct>} MockProduct */
 /**
  * @typedef {{ id: string, isArchived?: boolean | undefined, isDraft?: boolean | undefined,

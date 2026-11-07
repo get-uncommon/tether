@@ -23,6 +23,7 @@ import {
   recordAt,
   recordsAt,
   stringAt,
+  memoryKv,
 } from './mocks.js';
 import { isRecord } from '../src/shared/json.ts';
 
@@ -282,22 +283,7 @@ test('.dev.vars.example: only the six fields a deploy needs, all empty and descr
 
 test('webhooks: POST /reconcile registers them through the app, and again after Shopify removed them; check reports them', async () => {
   const apis = createMockApis({ products: [shopifyProduct(1)] });
-  /** @type {Map<string, string>} */
-  const entries = new Map();
-  /** @type {import('../src/env.ts').KvBinding} */
-  const TETHER_SYNC = {
-    async get(key, type) {
-      const value = entries.get(key);
-      if (value == null) return null;
-      return type === 'json' ? parseJson(value) : value;
-    },
-    async put(key, value) {
-      entries.set(key, value);
-    },
-    async delete(key) {
-      entries.delete(key);
-    },
-  };
+  const TETHER_SYNC = memoryKv();
   const worker = createWorker(defaultConfig, { fetch: apis.fetch, sleep: instantSleep });
   const wenv = { ...deployEnv, TETHER_SYNC };
   const auth = { authorization: `Bearer ${deployEnv.SYNC_SECRET}` };

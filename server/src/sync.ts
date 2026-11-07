@@ -162,6 +162,8 @@ interface SyncOptions {
   dryRun?: boolean;
   /** The subrequests left, or `null` for no limit. */
   budget?: Budget | null;
+  /** The pages of Webflow items one run may list for the item index. */
+  maxIndexPages?: number;
 }
 
 export function createSync({
@@ -173,8 +175,10 @@ export function createSync({
   now = () => Date.now(),
   dryRun = false,
   budget = null,
+  maxIndexPages = Infinity,
 }: SyncOptions): SyncEngine {
   const cfg = normalizeConfig(config);
+  const outOfBudget = () => budget !== null && budget.left() < cfg.reconcile.reserveSubrequests;
   const ctx: SyncContext = {
     cfg,
     target: webflow,
@@ -182,7 +186,15 @@ export function createSync({
     log,
     now,
     dryRun,
-    index: createItemIndex({ target: webflow, store, match: cfg.match, now, dryRun }),
+    index: createItemIndex({
+      target: webflow,
+      store,
+      match: cfg.match,
+      now,
+      dryRun,
+      outOfBudget,
+      maxPages: maxIndexPages,
+    }),
     stats: { created: 0, updated: 0, unchanged: 0, archived: 0, deleted: 0, skipped: 0, failed: 0 },
     toPublish: new Map(),
     collectionFields: collectionFieldsOnce(cfg, webflow, log),
@@ -211,7 +223,7 @@ export function createSync({
     removeProduct: (id) => serial(() => removeProduct(ctx, id)),
     queueRetry: (id, error) => serial(() => queueRetry(ctx, id, error)),
     flushPublish: () => serial(() => flushPublish(ctx)),
-    reconcile: (options) => serial(() => reconcile(ctx, shopify, budget, options)),
+    reconcile: (options) => serial(() => reconcile(ctx, shopify, outOfBudget, options)),
     importAll: (options) => serial(() => importAll(ctx, shopify, options)),
   };
 }

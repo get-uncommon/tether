@@ -17,6 +17,7 @@ import {
   parseJson,
   recordsAt,
   stringAt,
+  kvList,
 } from './mocks.js';
 
 const SECRET = 'a-long-random-sync-secret-123';
@@ -70,6 +71,7 @@ function kv() {
     delete: async (key) => {
       map.delete(key);
     },
+    list: kvList(() => map.keys()),
   };
 }
 

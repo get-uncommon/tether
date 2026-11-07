@@ -4,7 +4,7 @@
  * second Webflow write.
  */
 import { mapProduct, withoutOwned, onlyExisting } from './mapping.ts';
-import { readProductState, readRetries, productKey, RETRY_KEY } from './sync-state.ts';
+import { readProductState, productKey, retryInboxKey } from './sync-state.ts';
 import { sha256, toHex } from './crypto.ts';
 import { SyncError, httpStatusOf, numericId, scalarText, stableStringify } from './util.ts';
 import { messageOf } from './shared/error-message.ts';
@@ -275,12 +275,12 @@ function retryReason(error: unknown): string {
   return error instanceof Error ? String(error) : scalarText(error);
 }
 
-/** Remembers a product to retry on the next reconcile, after a webhook failed. */
+/**
+ * Remembers a product to retry on the next reconcile, after a webhook failed: one KV write, under a key of its own, so
+ * a reconcile running at the same time can't overwrite it. A product queued twice is retried once.
+ */
 export async function queueRetry(ctx: SyncContext, id: string | number, error: unknown): Promise<void> {
   if (ctx.dryRun) return;
-  const list = await readRetries(ctx.store);
   const shopifyId = numericId(id);
-  if (list.some((entry) => entry.id === shopifyId)) return;
-  list.push({ id: shopifyId, attempts: 1, error: retryReason(error) });
-  await ctx.store.put(RETRY_KEY, list);
+  await ctx.store.put(retryInboxKey(shopifyId), { id: shopifyId, attempts: 1, error: retryReason(error) });
 }

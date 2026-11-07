@@ -8,16 +8,21 @@
  * The products synced go live in one publish at the end. One the publish leaves unconfirmed goes on the retry list,
  * so the position can move past it. The retries are stored before the position: a run that dies between the two
  * writes repeats work, and never loses a product.
+ *
+ * The retry list is this run's to rewrite. Failures queued under their own keys (webhooks') join it at the start, and
+ * their keys are deleted once the list that holds them is stored; one queued while the run goes on waits for the next.
+ * A product whose item index can't be listed within the budget stops the run without costing an attempt.
  */
 import { PublishError, flushPublish, removeProduct, syncProduct } from './sync-product.ts';
-import { PAGE_KEY, RETRY_KEY, SINCE_KEY, readPage, readRetries, readSince } from './sync-state.ts';
+import { IndexListingStopped } from './item-index.ts';
+import { PAGE_KEY, RETRY_KEY, SINCE_KEY, readPage, readRetries, readRetryInbox, readSince } from './sync-state.ts';
 import { numericId, productGid } from './util.ts';
 import { messageOf } from './shared/error-message.ts';
 
 import type { Product } from './product.ts';
 import type { ProductEdge } from './shopify.ts';
 import type { SyncContext, SyncResult, SyncStats } from './sync-product.ts';
-import type { ReconcilePage, RetryEntry } from './sync-state.ts';
+import type { QueuedRetry, ReconcilePage, RetryEntry } from './sync-state.ts';
 
 /** The part of the Shopify client the engine reads products with. */
 export interface ProductSource {
@@ -114,6 +119,10 @@ async function runRetries(
         : await removeProduct(ctx, entry.id);
       if (isChange(result)) run.changes++;
     } catch (err) {
+      if (err instanceof IndexListingStopped) {
+        left.push(entry);
+        continue;
+      }
       if (entry.attempts < MAX_ATTEMPTS)
         run.failures.push({ id: entry.id, attempts: entry.attempts + 1, error: messageOf(err) });
       else ctx.log.error(`giving up on product ${entry.id}: ${messageOf(err)}`);
@@ -146,6 +155,11 @@ async function runPage(deps: RunDeps, run: Run, page: ProductPage): Promise<void
       try {
         if (isChange(await syncProduct(ctx, product, { publishNow: false }))) run.changes++;
       } catch (err) {
+        if (err instanceof IndexListingStopped) {
+          // The cursor stays before this product, so the next run starts with it.
+          run.stopped = 'subrequests';
+          return;
+        }
         ctx.stats.failed++;
         ctx.log.error(`sync ${product.handle} failed: ${messageOf(err)}`);
         run.failures.push({ id, attempts: 1, error: messageOf(err) });
@@ -215,6 +229,24 @@ interface Position {
   restart: boolean;
 }
 
+interface Retries {
+  /** The list the run started with, queued failures included. */
+  retry: RetryEntry[];
+  /** The retries the budget deferred. */
+  retryLeft: RetryEntry[];
+  /** The queued failures the run took into `retry`. */
+  queued: QueuedRetry[];
+}
+
+/**
+ * The retry list with the queued failures added. A product already on it keeps its attempts.
+ */
+function withQueued(listed: RetryEntry[], queued: QueuedRetry[]): RetryEntry[] {
+  const byId = new Map(listed.map((entry) => [entry.id, entry]));
+  for (const { entry } of queued) if (!byId.has(entry.id)) byId.set(entry.id, entry);
+  return [...byId.values()];
+}
+
 /**
  * Stores the retries, then the cursor or the position of a window stopped part-way. Only what moved is written:
  * KV's free tier allows 1,000 writes a day.
@@ -222,13 +254,14 @@ interface Position {
 async function savePosition(
   ctx: SyncContext,
   { run, listingStopped, start, storedSince, resume, restart }: Position,
-  { retry, retryLeft }: { retry: RetryEntry[]; retryLeft: RetryEntry[] },
+  { retry, retryLeft, queued }: Retries,
 ): Promise<void> {
   const { store } = ctx;
   const failed = run.failures.filter((failure): failure is RetryEntry => failure.id !== null);
   // A product both failed and deferred, or both failed and left unpublished, is retried once.
   const nextRetry = [...new Map([...retryLeft, ...failed].map((entry) => [entry.id, entry])).values()];
   if (nextRetry.length || retry.length) await store.put(RETRY_KEY, nextRetry);
+  for (const { key } of queued) await store.delete(key);
   if (!listingStopped) {
     if (storedSince !== run.newest) await store.put(SINCE_KEY, run.newest);
     if (resume || restart) await store.delete(PAGE_KEY);
@@ -237,10 +270,11 @@ async function savePosition(
   }
 }
 
+/** @param outOfBudget Whether the Worker run's subrequests are down to the reserve. */
 export async function reconcile(
   ctx: SyncContext,
   shopify: ProductSource,
-  budget: Budget | null,
+  outOfBudget: () => boolean,
   options: ReconcileOptions = {},
 ): Promise<ReconcileResult> {
   const { cfg, store, now } = ctx;
@@ -268,12 +302,12 @@ export async function reconcile(
     after: resumed ? resumed.after : null,
     newest: resumed ? resumed.newest : start,
   };
-  const reserve = cfg.reconcile.reserveSubrequests;
-  const retry = await readRetries(store);
+  const queued = await readRetryInbox(store);
+  const retry = withQueued(await readRetries(store), queued);
   const deps: RunDeps = {
     ctx,
     shopify,
-    outOfBudget: () => budget !== null && budget.left() < reserve,
+    outOfBudget,
     limits: { maxChanges, maxProducts, maxPages },
     retried: new Set(retry.map((entry) => entry.id)),
   };
@@ -291,7 +325,7 @@ export async function reconcile(
   }
   if (!ctx.dryRun) {
     const position = { run, listingStopped, start, storedSince, resume, restart: Boolean(sinceOverride) };
-    await savePosition(ctx, position, { retry, retryLeft });
+    await savePosition(ctx, position, { retry, retryLeft, queued });
   }
   const { changes, processed, pages, stopped, failures, newest } = run;
   return {

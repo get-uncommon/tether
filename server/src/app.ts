@@ -60,6 +60,12 @@ type AppSync = Omit<SyncEngine, 'syncById' | 'removeProduct' | 'reconcile' | 'im
 /** Webhook runs live inside a Worker's waitUntil: few retries, and no waiting out a long Retry-After. */
 const WEBHOOK_SHOPIFY_RETRIES = 1;
 const WEBHOOK_WEBFLOW = { retries: 2, maxRetryWaitMs: 10000 };
+/**
+ * A webhook lists at most this many pages of a stale item index: 1,500 items, 18 seconds at Webflow's default 50
+ * requests a minute, which leaves the rest of waitUntil's 30 seconds for the product's own requests. A longer listing
+ * goes on in the next run, which also retries the webhook's product.
+ */
+const WEBHOOK_INDEX_PAGES = 15;
 
 function destinationFrom(env: CleanEnv): Destination {
   const hookUrl = env.DEPLOY_HOOK_URL;
@@ -195,7 +201,16 @@ export function createApp(
       ...transport,
     });
   const { webflow, deploy } = targetFor(destination, hookFor, webflowClient);
-  const engine = createSync({ config, shopify, webflow, store, log, dryRun, budget });
+  const engine = createSync({
+    config,
+    shopify,
+    webflow,
+    store,
+    log,
+    dryRun,
+    budget,
+    ...(mode === 'webhook' ? { maxIndexPages: WEBHOOK_INDEX_PAGES } : {}),
+  });
   // App-registered webhooks are signed with the client secret, admin-created ones with their own key.
   const webhookSecrets = [env.SHOPIFY_WEBHOOK_SECRET, env.SHOPIFY_CLIENT_SECRET].filter(
     (secret) => secret !== undefined,

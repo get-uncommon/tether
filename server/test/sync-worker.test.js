@@ -12,6 +12,7 @@ import {
   jsonOf,
   parseJson,
   stringAt,
+  kvList,
 } from './mocks.js';
 import { setup } from './sync-fixtures.js';
 
@@ -128,6 +129,7 @@ function kv() {
     async delete(key) {
       entries.delete(key);
     },
+    list: kvList(() => entries.keys()),
   };
 }
 
@@ -212,6 +214,7 @@ test('concurrent create + update webhooks in two Worker invocations: one item (u
     async delete(key) {
       entries.delete(key);
     },
+    list: kvList(() => entries.keys()),
   };
   const worker = createWorker(baseConfig, { fetch: apis.fetch, sleep: instantSleep });
   /** @type {Promise<unknown>[]} */

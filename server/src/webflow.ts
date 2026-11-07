@@ -28,6 +28,11 @@ export interface WebflowItem {
   fieldData: FieldData;
 }
 
+interface ItemPage {
+  items: WebflowItem[];
+  next: number | null;
+}
+
 interface PublishResult {
   publishedItemIds: string[];
   errors: unknown[];
@@ -44,8 +49,8 @@ interface ItemFlags {
  */
 export interface CmsTarget {
   getCollection: () => Promise<WebflowCollection>;
-  /** Every staged item. */
-  listAllItems: () => Promise<WebflowItem[]>;
+  /** One page of the staged items, from `offset`, and the offset of the next page: `null` after the last. */
+  listItemPage: (offset: number) => Promise<ItemPage>;
   createItem: (fieldData: FieldData, flags?: ItemFlags) => Promise<{ id: string }>;
   updateItem: (id: string, fieldData: FieldData, flags?: ItemFlags) => Promise<unknown>;
   deleteItem: (id: string) => Promise<unknown>;
@@ -249,17 +254,12 @@ export function createWebflow({
     call,
     getCollection: async () => parseCollection(await call('GET', collection)),
 
-    async listAllItems() {
-      const items: WebflowItem[] = [];
-      let received = 0;
-      for (let offset = 0; ; offset += PAGE_SIZE) {
-        const page = parseItemPage(
-          await call('GET', `${collection}/items?limit=${String(PAGE_SIZE)}&offset=${String(offset)}`),
-        );
-        items.push(...page.items);
-        received += page.received;
-        if (!page.received || received >= (page.total ?? received)) return items;
-      }
+    async listItemPage(offset) {
+      const page = parseItemPage(
+        await call('GET', `${collection}/items?limit=${String(PAGE_SIZE)}&offset=${String(offset)}`),
+      );
+      const end = offset + page.received;
+      return { items: page.items, next: page.received && page.total !== null && end < page.total ? end : null };
     },
 
     getItem: (id) => callUnlessGone('GET', `${collection}/items/${id}`),

@@ -268,6 +268,9 @@ export function fileStore(
       dirty.set(key, undefined);
       schedule();
     },
+    async list(prefix) {
+      return [...(await load()).keys()].filter((key) => key.startsWith(prefix));
+    },
   };
 }
 

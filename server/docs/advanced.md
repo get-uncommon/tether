@@ -24,17 +24,27 @@ cron ───▶ reconcile (updated_at ≥ cursor)┘                     └�
 - The hash is stored only once the item is **published**, so a failed publish is retried.
 - Reconcile stops at the first budget it reaches: `maxChangesPerRun` Webflow writes,
   `maxProductsPerRun` products, `maxPagesPerRun` Shopify pages, or the Worker's subrequest limit.
-  It saves its exact position (page and offset) and continues there next run, so a bulk edit of
-  thousands of products spreads over several runs instead of failing. Each window overlaps the
-  previous one by `overlapMinutes` (Shopify's search index lags a little behind updates).
-- Failed products, including failed webhooks, are retried on the next runs (up to 5 times).
+  It saves the cursor of the last product it did and continues right after it next run, so a bulk
+  edit of thousands of products spreads over several runs instead of failing. Each window overlaps
+  the previous one by `overlapMinutes` (Shopify's search index lags a little behind updates).
+- Failed products, including failed webhooks, go on a retry list and are tried again on the next
+  runs, up to 5 attempts each. A failed webhook is stored under a KV key of its own, so a reconcile
+  running at that moment can't overwrite it; the next reconcile takes it into the list. A deleted
+  product only reaches Webflow through its webhook or this list: the reconcile's cursor finds
+  updated products, never deleted ones. If the failure can't be stored either (KV down or out of
+  writes for the day), the Worker logs `retry not queued` and the item stays until you remove it,
+  or until `tether-sync import --prune` from the Node CLI.
 - Webflow slugs are unique, so two runs creating the same product at once (Shopify sends
   `products/create` and `products/update` together) can't make a duplicate: the second one gets
   a conflict, finds the first one's item and updates it.
 - Product pages are sized to stay under Shopify's 1,000-point query cost limit (25 variants and
   10 images per product by default), and shrink automatically if Shopify still refuses.
 - The client-credentials token (24h) and the Webflow item index (`match.indexTtlMinutes`, a day)
-  are cached in the store, so a run doesn't spend requests on them.
+  are cached in the store, so a run doesn't spend requests on them. Listing the index costs one
+  request per 100 items. A run that needs it stops listing when its subrequests run out, stores
+  the pages it has, and the next run continues from there; a webhook lists at most 15 pages (1,500
+  items, about 18 seconds at 50 requests a minute, inside the Worker's 30 seconds after answering)
+  and leaves its product to the next reconcile when the index needs more.
 
 ## Setup
 
@@ -203,18 +213,21 @@ Notifications also work: put their signing key in `SHOPIFY_WEBHOOK_SECRET`. The 
 and does the work afterwards. A failed webhook is picked up by the next reconcile. Bodies over
 1 MB are refused (413), and a delivery Shopify sends again with the same `X-Shopify-Webhook-Id` is
 dropped (per Worker instance, without a KV write). A replay later only makes the sync read the
-product again: it writes only what changed.
+product again: it writes only what changed. One exception: with `onDelete: 'delete'` a deleted
+product's stored state goes with its item, so a repeated `products/delete` that still finds the
+item in the cached item index tries the delete again (two Webflow requests, both answered "not
+found") and stores the index without it (one KV write and one KV delete).
 
 ## Costs on free tiers
 
 Check current pricing pages before relying on this; these were the published limits in late 2026.
 
-| Service            | Free tier                                                                                    | What the sync uses                                                                                                                                                                                |
-| ------------------ | -------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Cloudflare Workers | 100,000 requests/day, 10 ms CPU per run, 50 subrequests per run, 5 cron triggers per account | 1 request per webhook; a cron every 10 min = 144 runs/day. Waiting on APIs doesn't count as CPU. A run stops at 45 subrequests and resumes next time                                              |
-| Cloudflare KV      | 100,000 reads/day, 1,000 writes/day                                                          | 1 read per product checked; writes only when something changed: 1–2 per changed product, the cursor when it moves, the item index and the Shopify token about once a day. A quiet store writes ~0 |
-| Shopify Admin API  | included in every plan                                                                       | 1 query per webhook, 1 per ~19 products per reconcile                                                                                                                                             |
-| Webflow Data API   | included with a site plan; 60 requests/min (Starter/Basic), 120 (CMS/eCommerce/Business)     | ~1–2 per changed product, publishes batched per 100                                                                                                                                               |
+| Service            | Free tier                                                                                    | What the sync uses                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| ------------------ | -------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Cloudflare Workers | 100,000 requests/day, 10 ms CPU per run, 50 subrequests per run, 5 cron triggers per account | 1 request per webhook; a cron every 10 min = 144 runs/day. Waiting on APIs doesn't count as CPU. A run stops at 45 subrequests and resumes next time                                                                                                                                                                                                                                                                                                                       |
+| Cloudflare KV      | 100,000 reads/day, 1,000 writes/day, 1,000 deletes/day, 1,000 lists/day                      | 1 read per product checked and 1 list per reconcile run (144/day); writes only when something changed: 1–2 per changed product, the cursor when it moves, 1 per failed webhook, the retry list while it isn't empty, the item index and the Shopify token about once a day. A quiet store's sync writes ~0, but customer accounts share the same 1,000 writes: each login, token refresh and logout writes one. When the day's writes run out, logins fail until 00:00 UTC |
+| Shopify Admin API  | included in every plan                                                                       | 1 query per webhook, 1 per ~19 products per reconcile                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| Webflow Data API   | included with a site plan; 60 requests/min (Starter/Basic), 120 (CMS/eCommerce/Business)     | ~1–2 per changed product, publishes batched per 100                                                                                                                                                                                                                                                                                                                                                                                                                        |
 
 The real limit is usually Webflow's **CMS item count** for your site plan, not the API.
 On the free plan a run handles roughly 15–20 changed products (each is an update plus its share of

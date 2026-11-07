@@ -5,7 +5,10 @@
  *
  * A signed webhook replayed later is harmless: no webhook changes anything by itself. Each one only makes the sync ask
  * Shopify for the product's current state, and the sync writes to Webflow and KV only when that state differs from
- * what it last wrote. A replay therefore costs one Shopify read, one KV read and their subrequests, never a write.
+ * what it last wrote. A replay therefore costs one Shopify read, one KV read and their subrequests, and no write, with
+ * one exception: with `onDelete: 'delete'` the product's state is deleted along with its item, so a replayed deletion
+ * that finds the item still in the cached item index unpublishes and deletes it again (two Webflow requests, both
+ * answered 404) and stores the index without it (one KV write, one KV delete).
  * Repeats of one delivery are dropped by their `X-Shopify-Webhook-Id` without any KV write, because KV's free plan
  * allows only 1,000 writes a day: first by the ids this isolate accepted, then by Cloudflare's Cache API, which every
  * isolate of the data centre shares and which costs nothing. Cloudflare's Cache API works only for a Worker on the
@@ -188,7 +191,7 @@ export async function handleShopifyWebhook(
       log?.error?.(`webhook ${topic} ${id} failed: ${messageOf(error)}`);
       await sync.queueRetry(id, error).catch((queueError: unknown) => {
         log?.error?.(
-          `webhook ${topic} ${id}: retry not queued (${messageOf(queueError)}); the reconcile cursor still covers it`,
+          `webhook ${topic} ${id}: retry not queued (${messageOf(queueError)}); the reconcile's cursor finds an update, never a deletion`,
         );
       });
       return { action: 'failed', error };
