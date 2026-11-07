@@ -1,4 +1,5 @@
 // The release, smoke and ci workflows, read as text: which job may do what, in which order, and what reaches the GitHub Release.
+// Also the workflow linters, which CI and the pre-push hook run through one script at the versions one file pins.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readdir, readFile } from 'node:fs/promises';
@@ -37,7 +38,10 @@ test('the release installs dependencies only in a job that can read the reposito
   const workflow = await readFile(new URL('../.github/workflows/release.yml', import.meta.url), 'utf8');
   assert.match(workflow, /^permissions: \{\}$/m, 'no job gets a permission it does not name');
   const jobs = workflowJobs(workflow);
-  assert.deepEqual([...jobs.keys()], ['check', 'server-asset', 'channel', 'github-release', 'npm', 'purge-cdn']);
+  assert.deepEqual(
+    [...jobs.keys()],
+    ['check', 'server-asset', 'channel', 'github-release', 'npm', 'purge-cdn-gh', 'purge-cdn-npm'],
+  );
   const check = jobs.get('check') ?? '';
   assert.match(check, /permissions:\n {6}contents: read\n {4}steps:/, 'the check job only reads');
   assert.match(check, /- run: npm ci\n/);
@@ -147,18 +151,55 @@ test('the release relies on the ci run of the commit it releases, which runs on 
   assert.doesNotMatch(release, /run\('npm', \['run', 'check'\]\)/, 'the release leaves the whole gate to CI');
 });
 
-test('after npm, the release purges the jsDelivr aliases this release moves, and only warns when that fails', async () => {
-  const purge =
-    workflowJobs(await readFile(new URL('../.github/workflows/release.yml', import.meta.url), 'utf8')).get(
-      'purge-cdn',
-    ) ?? '';
-  assert.match(purge, /needs: \[npm, channel\]/, 'once both the Release and npm serve this version');
-  assert.match(purge, /permissions:\n {6}contents: read\n {4}steps:/, 'no token: the purge API is public');
-  assert.match(purge, /LATEST: \$\{\{ needs\.channel\.outputs\.latest \}\}/);
+test("the release purges jsDelivr's gh/ aliases after the GitHub Release and its npm/ aliases after npm, warning on failure", async () => {
+  const jobs = workflowJobs(await readFile(new URL('../.github/workflows/release.yml', import.meta.url), 'utf8'));
+  const gh = jobs.get('purge-cdn-gh') ?? '';
+  const npm = jobs.get('purge-cdn-npm') ?? '';
+  assert.match(
+    gh,
+    /needs: \[github-release, channel\]/,
+    'the gh/ URLs come from the tag: a failed npm publish does not hold them back',
+  );
+  assert.match(gh, /PACKAGE: gh\/\$\{\{ github\.repository \}\}\n/);
+  assert.match(npm, /needs: \[npm, channel\]/, 'once npm serves this version');
+  assert.match(npm, /PACKAGE: npm\/@occluze\/tether\n/);
+  const script = (/** @type {string} */ job) => job.slice(job.indexOf('run: |')).trimEnd();
+  assert.equal(script(gh), script(npm), 'the same purge for both');
+  for (const purge of [gh, npm]) {
+    assert.match(purge, /permissions:\n {6}contents: read\n {4}steps:/, 'no token: the purge API is public');
+    assert.match(purge, /LATEST: \$\{\{ needs\.channel\.outputs\.latest \}\}/);
+  }
+  const purge = script(gh);
   assert.match(purge, /aliases=\("@\$\{V%\.\*\}"\)\n/, 'every release purges its own @X.Y');
   assert.match(purge, /if \[ "\$LATEST" = true \]; then aliases\+=\("@\$\{V%%\.\*\}" "@latest" ""\); fi/);
-  assert.match(purge, /for package in "gh\/\$GITHUB_REPOSITORY" "npm\/@occluze\/tether"; do/);
-  assert.match(purge, /"https:\/\/purge\.jsdelivr\.net\/\$package\$alias\/\$file"/);
+  assert.match(purge, /"https:\/\/purge\.jsdelivr\.net\/\$PACKAGE\$alias\/\$file"/);
   assert.match(purge, /find dist -type f -not -path 'dist\/types\/\*'/, 'every file a browser loads from dist/');
   assert.match(purge, /curl -fsS --max-time 30 [^\n]*\|\|\n\s*echo "::warning::/, 'a failed purge warns');
+});
+
+test('CI and the pre-push hook lint the workflows with one script, at the versions .config/workflow-linters.json pins', async () => {
+  const ci = workflowJobs(await readFile(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8'));
+  const job = ci.get('workflows') ?? '';
+  assert.match(job, /run: node --experimental-strip-types scripts\/lint-workflows\.ts\n/);
+  assert.match(job, /GH_TOKEN: \$\{\{ github\.token \}\}/, "zizmor's online audits");
+  assert.doesNotMatch(job, /[0-9a-f]{64}|actionlint_|zizmor==|npm ci/, 'no version of its own, and no dependency');
+  const lefthook = await readFile(new URL('../.config/lefthook.yml', import.meta.url), 'utf8');
+  const [, prePush = ''] = /\npre-push:\n([^]*)/.exec(lefthook) ?? [];
+  assert.match(prePush, /run: npm run check\n/);
+  assert.match(prePush, /run: npm run lint:workflows\n/);
+  const pkg = await readFile(new URL('../package.json', import.meta.url), 'utf8');
+  assert.ok(pkg.includes('"lint:workflows": "node --experimental-strip-types scripts/lint-workflows.ts"'));
+  const script = await readFile(new URL('../scripts/lint-workflows.ts', import.meta.url), 'utf8');
+  assert.ok(script.includes("['.github/workflows', 'server/.github/workflows']"), 'and the workflow copies ship');
+
+  const { default: linters } = await import('../.config/workflow-linters.json', { with: { type: 'json' } });
+  assert.deepEqual(Object.keys(linters), ['actionlint', 'shellcheck', 'zizmor']);
+  for (const [name, { version, platforms }] of Object.entries(linters)) {
+    assert.match(version, /^\d+\.\d+\.\d+$/, `${name} at an exact version`);
+    assert.deepEqual(Object.keys(platforms).sort(), ['darwin-arm64', 'darwin-x64', 'linux-x64', 'win32-x64']);
+    for (const { file, sha256 } of Object.values(platforms)) {
+      assert.ok(file.includes(version), `${file} is ${name} ${version}`);
+      assert.match(sha256, /^[0-9a-f]{64}$/);
+    }
+  }
 });

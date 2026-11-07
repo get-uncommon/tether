@@ -1,6 +1,6 @@
 # Publishes a release when a version tag is pushed (made by `npm run release -- X.Y.Z`):
-# the gate, the GitHub Release, npm publish with provenance (trusted publishing: no token in the repo), then a purge
-# of jsDelivr's cached alias URLs.
+# the gate, the GitHub Release, npm publish with provenance (trusted publishing: no token in the repo), and a purge
+# of jsDelivr's cached alias URLs after each of those two.
 # The Release carries tether-server-X.Y.Z.tar.gz, the sync Worker's server/ folder with a GitHub artifact
 # attestation from this workflow: deployed copies install an update only from that file, after
 # `gh attestation verify --signer-workflow <repo>/.github/workflows/release.yml` (server/scripts/release-asset.ts).
@@ -194,10 +194,38 @@ jobs:
 
   # jsDelivr caches each version-alias URL (`@X.Y`, `@latest`, no version) for up to 7 days, so until then an alias can
   # serve the previous release's core while parts already resolve to this one; a core loads its parts from its exact
-  # release folder, but older cores don't. Only the newest release moves `@latest`, `@X` and the bare URL. The purge
-  # API is public, and a failed purge only means the cache expires on its own, so it warns instead of failing the
-  # release. dist/types/ is left out: only npm installs read it.
-  purge-cdn:
+  # release folder, but older cores don't. Only the newest release moves `@latest`, `@X` and the bare URL. The `gh/`
+  # URLs, which the README's script tag uses, come from the tag, and are purged once the GitHub Release exists, so a
+  # failed npm publish doesn't leave them stale; the `npm/` URLs are purged once npm has the version. The purge API is
+  # public, and a failed purge only means the cache expires on its own, so it warns instead of failing the release.
+  # dist/types/ is left out: only npm installs read it.
+  purge-cdn-gh:
+    needs: [github-release, channel]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - name: Purge jsDelivr's gh/ alias URLs
+        shell: bash
+        env:
+          LATEST: ${{ needs.channel.outputs.latest }}
+          PACKAGE: gh/${{ github.repository }}
+        run: |
+          V="${GITHUB_REF_NAME#v}"
+          aliases=("@${V%.*}")
+          if [ "$LATEST" = true ]; then aliases+=("@${V%%.*}" "@latest" ""); fi
+          urls=()
+          while IFS= read -r file; do
+            for alias in "${aliases[@]}"; do urls+=("https://purge.jsdelivr.net/$PACKAGE$alias/$file"); done
+          done < <(find dist -type f -not -path 'dist/types/*' | sort)
+          printf '%s\n' "${urls[@]}" | xargs -P 8 -n 1 curl -fsS --max-time 30 --retry 2 -o /dev/null ||
+            echo "::warning::Some of jsDelivr's ${#urls[@]} purges of $PACKAGE failed: their alias URLs update within 7 days"
+
+  purge-cdn-npm:
     needs: [npm, channel]
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -207,19 +235,18 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
-      - name: Purge jsDelivr's alias URLs
+      - name: Purge jsDelivr's npm/ alias URLs
         shell: bash
         env:
           LATEST: ${{ needs.channel.outputs.latest }}
+          PACKAGE: npm/@occluze/tether
         run: |
           V="${GITHUB_REF_NAME#v}"
           aliases=("@${V%.*}")
           if [ "$LATEST" = true ]; then aliases+=("@${V%%.*}" "@latest" ""); fi
           urls=()
           while IFS= read -r file; do
-            for package in "gh/$GITHUB_REPOSITORY" "npm/@occluze/tether"; do
-              for alias in "${aliases[@]}"; do urls+=("https://purge.jsdelivr.net/$package$alias/$file"); done
-            done
+            for alias in "${aliases[@]}"; do urls+=("https://purge.jsdelivr.net/$PACKAGE$alias/$file"); done
           done < <(find dist -type f -not -path 'dist/types/*' | sort)
           printf '%s\n' "${urls[@]}" | xargs -P 8 -n 1 curl -fsS --max-time 30 --retry 2 -o /dev/null ||
-            echo "::warning::Some of jsDelivr's ${#urls[@]} purges failed: their alias URLs update within 7 days"
+            echo "::warning::Some of jsDelivr's ${#urls[@]} purges of $PACKAGE failed: their alias URLs update within 7 days"

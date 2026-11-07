@@ -1,5 +1,7 @@
-# Local git hooks (https://lefthook.dev): Prettier and ESLint on staged files, the full gate (`npm run check`) before
-# each push. CI runs the same gate on pull requests and pushes to main (`.github/workflows/ci.yml`).
+# Local git hooks (https://lefthook.dev): Prettier and ESLint on staged files; before each push, the full gate
+# (`npm run check`) and, beside it, the workflow linters CI's `workflows` job runs (`npm run lint:workflows`). CI runs
+# both on pull requests and pushes to main (`.github/workflows/ci.yml`). The linters stay out of `npm run check`: CI's
+# `check` job, the release and the rehearsal run that gate too, and would download them again for every Node version.
 pre-commit:
   parallel: true
   commands:
@@ -10,6 +12,9 @@ pre-commit:
       glob: '*.{js,mjs,cjs,ts}'
       run: npx eslint --no-warn-ignored {staged_files}
 pre-push:
+  parallel: true
   commands:
     check:
       run: npm run check
+    workflows:
+      run: npm run lint:workflows
