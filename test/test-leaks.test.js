@@ -38,3 +38,29 @@ test('a test process that removes what it made in the temp folder passes', () =>
   assert.equal(status, 0, stderr);
   assert.ok(!existsSync(temp));
 });
+
+test('a test process whose jsdom page throws an exception nothing catches fails, naming it, whatever its console', () => {
+  const { status, stderr } = testProcess(
+    "const { JSDOM, VirtualConsole } = require('jsdom'); const { window } = new JSDOM('<button></button>', { virtualConsole: new VirtualConsole() }); const button = window.document.querySelector('button'); button.addEventListener('click', () => { button.scrollIntoView(); }); button.click()",
+  );
+  assert.equal(status, 1);
+  assert.match(
+    stderr,
+    /^test-leaks: .* threw in a jsdom page: Uncaught \[TypeError: button\.scrollIntoView is not a function\]/m,
+  );
+});
+
+test("a test process whose jsdom page follows a link jsdom can't navigate, or handles its own error, passes", () => {
+  const { status, stderr } = testProcess(
+    "const { JSDOM } = require('jsdom'); const { window } = new JSDOM('<a href=\"https://other.test/\">x</a>', { url: 'https://site.test/' }); window.document.querySelector('a').click(); window.addEventListener('error', (event) => { event.preventDefault(); }); window.document.body.addEventListener('click', () => { throw new Error('handled'); }); window.document.body.click()",
+  );
+  assert.equal(status, 0, stderr);
+  assert.match(stderr, /Not implemented: navigation/);
+});
+
+test('a test process whose jsdom page throws only once it was closed passes', () => {
+  const { status, stderr } = testProcess(
+    "const { JSDOM } = require('jsdom'); const { window } = new JSDOM('<p>x</p>'); new window.MutationObserver(() => window.document.body).observe(window.document.body, { childList: true }); window.close()",
+  );
+  assert.equal(status, 0, stderr);
+});

@@ -201,7 +201,9 @@ function scriptCoreBuild(
 ): esbuild.BuildOptions {
   const iife: esbuild.BuildOptions = { ...COMMON_OPTIONS, entryPoints: [join(src, 'index.ts')], format: 'iife' };
   const plugins = [iifeLazyPlugin(src), partIntegrityPlugin(out, minified, onEmbed), graphqlPlugin];
-  if (!minified) return { ...iife, outfile: join(out, 'tether.js'), plugins };
+  if (!minified) {
+    return { ...iife, outfile: join(out, 'tether.js'), write: false, plugins: [...plugins, atomicWritePlugin] };
+  }
   return {
     ...iife,
     outfile: join(out, 'tether.min.js'),

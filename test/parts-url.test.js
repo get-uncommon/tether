@@ -111,11 +111,22 @@ test('a partsUrl on the site itself is hash-checked too, without CORS', async ()
 test('a part rejects its load when another script replaced window.Tether, instead of never settling', async () => {
   const win = await pageWithCore('https://cdn.test/tether/');
   const tether = builtTether(win);
+  // The part itself still runs and throws reading the core modules from the other script's object, as it would in
+  // a browser: that page error is expected here, and the load's rejection is what says why.
+  /** @type {unknown[]} */
+  const pageErrors = [];
+  const onError = (/** @type {ErrorEvent} */ event) => {
+    pageErrors.push(event.error);
+    event.preventDefault();
+  };
+  win.addEventListener('error', onError);
   win['Tether'] = { version: 'another script' };
   await assert.rejects(within(30_000, tether.diagnose({ silent: true }), 'the diagnose part to reject'), {
     message:
       /tether\.diagnose\.min\.js can't register: window\.Tether is no longer this Tether script's, another script replaced it$/,
   });
+  win.removeEventListener('error', onError);
+  assert.equal(pageErrors.length, 1, 'the part threw once, on the replaced window.Tether');
   win['Tether'] = tether;
   const again = await within(30_000, tether.diagnose({ silent: true }), 'the diagnose part on the next use');
   assert.equal(again.config['domain'], 'shop.test', 'the next use tries again');
