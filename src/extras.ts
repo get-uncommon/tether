@@ -1,9 +1,10 @@
 /**
  * Optional part with features that load when first needed: bundles (on the first "add set" click), tab sync (on the
- * first change in another tab) and shareable variant links (on the first variant change, with `variantUrl` or
- * `tether-variant-url`).
+ * first change in another tab), shareable variant links (on the first variant change, with `variantUrl` or
+ * `tether-variant-url`) and the discount form's code (on its first submit).
  */
 import { cfg, warn, reportError } from './config.ts';
+import { TetherError } from './client.ts';
 import { sel, get, has, qsa, emit, parseJSONAttr, attributesFromJson } from './dom.ts';
 import { scopes } from './product.ts';
 import { Cart } from './cart.ts';
@@ -45,6 +46,26 @@ export async function addGroup(button: Element): Promise<ShopifyCart | null> {
   } catch (error) {
     reportError(error, 'group add');
     return null;
+  }
+}
+
+function markInvalid(form: Element, input: HTMLInputElement | null, invalid: boolean): void {
+  form.classList.toggle('is-invalid', invalid);
+  if (invalid) input?.setAttribute('aria-invalid', 'true');
+  else input?.removeAttribute('aria-invalid');
+}
+
+/** Applies the code a `tether-discount-form` submitted; one Shopify refuses marks the form `is-invalid`. */
+export async function applyDiscountCode(form: Element, input: HTMLInputElement | null, code: string): Promise<void> {
+  try {
+    await Cart.applyDiscount(code);
+    markInvalid(form, input, false);
+    emit('discount-applied', { code }, form);
+    if (input) input.value = '';
+  } catch (error) {
+    markInvalid(form, input, true);
+    if (error instanceof TetherError && error.code === 'INVALID_DISCOUNT') emit('discount-invalid', { code }, form);
+    else reportError(error, 'discount');
   }
 }
 

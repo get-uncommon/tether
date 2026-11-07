@@ -83,6 +83,20 @@ function onClick(scope: ProductScope, event: Event, target: Element): void {
   }
 }
 
+/**
+ * Presses an option, plan or purchase element that is a button only by `role` (`setSelected`) as a native button is
+ * pressed: Enter or Space clicks it, so `onClick` handles it. A native button, and a link on Enter, click themselves.
+ * A nested scope's root sees the key first and prevents its default, so the element is clicked once.
+ */
+function onKeydown(event: KeyboardEvent, target: HTMLElement): void {
+  const { key } = event;
+  const presses = key === ' ' || (key === 'Enter' && !target.matches('a[href]'));
+  const pressable = `:is(${sel('option-value')},${sel('plan-value')},${sel('purchase')})[role=button]:not(button,input)`;
+  if (!presses || event.defaultPrevented || !target.matches(pressable)) return;
+  event.preventDefault();
+  target.click();
+}
+
 /** @returns The kind a `tether-purchase` value asks for: `subscription`, else buying once. */
 const purchaseKind = (value: string | null): Purchase['kind'] =>
   value === 'subscription' ? 'subscription' : 'one-time';
@@ -107,6 +121,9 @@ function onChange(scope: ProductScope, target: Element): void {
 export function bindProductEvents(scope: ProductScope): void {
   scope.root.addEventListener('click', (event) => {
     if (isElement(event.target)) onClick(scope, event, event.target);
+  });
+  scope.root.addEventListener('keydown', (event) => {
+    if (event.target instanceof window.HTMLElement) onKeydown(event, event.target);
   });
   scope.root.addEventListener('change', (event) => {
     const { target } = event;
