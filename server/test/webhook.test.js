@@ -199,3 +199,30 @@ test('a failing delivery cache is logged and the webhook still synced', async ()
   assert.ok(task, 'synced');
   assert.match(warnings[0] ?? '', /delivery cache failed \(cache down\)/);
 });
+
+test('a failed products/delete is queued as a deletion, any other topic is not', async () => {
+  /** @type {[string, boolean | undefined][]} */
+  const queued = [];
+  /** @type {WebhookSync} */
+  const sync = {
+    syncById: () => Promise.reject(new Error('Webflow 503')),
+    queueRetry: async (id, _error, options) => {
+      queued.push([id, options.deletion]);
+    },
+  };
+  for (const topic of ['products/update', 'products/delete']) {
+    const request = await signed('{"id":9}');
+    const headers = new Headers(request.headers);
+    headers.set('x-shopify-topic', topic);
+    const { task } = await handleShopifyWebhook(new Request(request, { headers }), {
+      sync,
+      secrets: ['whsec'],
+      shopDomain: SHOP,
+    });
+    await task;
+  }
+  assert.deepEqual(queued, [
+    ['9', false],
+    ['9', true],
+  ]);
+});

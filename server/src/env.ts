@@ -107,7 +107,7 @@ export interface KvBinding {
   get(key: string, type?: 'text' | 'json'): Promise<unknown>;
   put(key: string, value: string, options?: { expirationTtl: number }): Promise<void>;
   delete(key: string): Promise<void>;
-  list(options: { prefix: string; cursor?: string }): Promise<KvListPage>;
+  list(options: { prefix: string; limit: number }): Promise<KvListPage>;
 }
 
 /** The binding's name in wrangler.jsonc. */

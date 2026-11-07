@@ -6,23 +6,39 @@
 export interface Store {
   /** `null` when the key is not set. */
   get: (key: string) => Promise<unknown>;
-  put: (key: string, value: unknown) => Promise<void>;
+  /**
+   * `expirationTtl` is the seconds after which KV drops the key on its own, 60 at least. The memory and file stores
+   * keep the key until it is deleted.
+   */
+  put: (key: string, value: unknown, options?: KvPutOptions) => Promise<void>;
   delete: (key: string) => Promise<void>;
-  /** The keys that start with `prefix`. */
-  list: (prefix: string) => Promise<string[]>;
+  /** The first `limit` keys that start with `prefix`, in key order, as KV lists them. At most 1,000. */
+  list: (prefix: string, limit: number) => Promise<string[]>;
 }
 
-/** One page of a KV `list()`: a page that is not the last carries the cursor of the next. */
-export type KvListPage =
-  | { keys: { name: string }[]; list_complete: true }
-  | { keys: { name: string }[]; list_complete: false; cursor: string };
+interface KvPutOptions {
+  expirationTtl: number;
+}
+
+/** The part of a KV `list()` page the store reads. */
+export interface KvListPage {
+  keys: { name: string }[];
+}
 
 /** The part of a Cloudflare KV namespace binding the store uses. */
 export interface KvNamespace {
   get: (key: string, type: 'json') => Promise<unknown>;
-  put: (key: string, value: string) => Promise<void>;
+  put: (key: string, value: string, options?: KvPutOptions) => Promise<void>;
   delete: (key: string) => Promise<void>;
-  list: (options: { prefix: string; cursor?: string }) => Promise<KvListPage>;
+  list: (options: { prefix: string; limit: number }) => Promise<KvListPage>;
+}
+
+/** What KV's `list()` answers with a `limit`, for the stores that hold every key in memory. */
+export function firstKeys(keys: Iterable<string>, prefix: string, limit: number): string[] {
+  return [...keys]
+    .filter((key) => key.startsWith(prefix))
+    .sort()
+    .slice(0, limit);
 }
 
 /** Runs `compute` inside a promise, so a throw becomes a rejection as it would in an async method. */
@@ -45,36 +61,29 @@ export function memoryStore(initial: Record<string, unknown> = {}): Store & { ma
       settled(() => {
         map.delete(key);
       }),
-    list: (prefix) => settled(() => [...map.keys()].filter((key) => key.startsWith(prefix))),
+    list: (prefix, limit) => settled(() => firstKeys(map.keys(), prefix, limit)),
   };
 }
 
 /**
  * Cloudflare KV. The free plan allows 1,000 writes, 1,000 deletes and 1,000 list requests a day, so the sync only
- * writes when something changed. A list may miss a key written in the last minute: KV is eventually consistent.
+ * writes when something changed, and every plan allows 1,000 KV operations per Worker invocation. A list may miss a
+ * key written in the last minute: KV is eventually consistent.
  */
 export function kvStore(kv: KvNamespace, prefix = 'tether-sync:'): Store {
   return {
     get(key) {
       return kv.get(prefix + key, 'json');
     },
-    async put(key, value) {
-      await kv.put(prefix + key, JSON.stringify(value));
+    async put(key, value, options) {
+      await kv.put(prefix + key, JSON.stringify(value), options);
     },
     async delete(key) {
       await kv.delete(prefix + key);
     },
-    async list(keyPrefix) {
-      const keys: string[] = [];
-      let cursor: string | null = null;
-      do {
-        const options: { prefix: string; cursor?: string } = { prefix: prefix + keyPrefix };
-        if (cursor !== null) options.cursor = cursor;
-        const page: KvListPage = await kv.list(options);
-        keys.push(...page.keys.map(({ name }) => name.slice(prefix.length)));
-        cursor = page.list_complete ? null : page.cursor;
-      } while (cursor !== null);
-      return keys;
+    async list(keyPrefix, limit) {
+      const page = await kv.list({ prefix: prefix + keyPrefix, limit });
+      return page.keys.map(({ name }) => name.slice(prefix.length));
     },
   };
 }

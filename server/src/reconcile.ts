@@ -9,20 +9,33 @@
  * so the position can move past it. The retries are stored before the position: a run that dies between the two
  * writes repeats work, and never loses a product.
  *
- * The retry list is this run's to rewrite. Failures queued under their own keys (webhooks') join it at the start, and
- * their keys are deleted once the list that holds them is stored; one queued while the run goes on waits for the next.
- * A product whose item index can't be listed within the budget stops the run without costing an attempt.
+ * The retry list is this run's to rewrite. Failures queued under their own keys (webhooks') join it at the start, a
+ * page of keys at a time, and those keys are deleted once the list that holds them is stored; one queued while the run
+ * goes on waits for the next. A product whose item index can't be listed within the budget stops the run without
+ * costing an attempt.
+ *
+ * Cloudflare allows a Worker invocation 1,000 KV operations; {@link maxReconcileKvOperations} counts a run's.
  */
 import { PublishError, flushPublish, removeProduct, syncProduct } from './sync-product.ts';
 import { IndexListingStopped } from './item-index.ts';
-import { PAGE_KEY, RETRY_KEY, SINCE_KEY, readPage, readRetries, readRetryInbox, readSince } from './sync-state.ts';
+import {
+  PAGE_KEY,
+  RETRY_INBOX_KV_OPERATIONS,
+  RETRY_KEY,
+  SINCE_KEY,
+  readPage,
+  readRetries,
+  readRetryInbox,
+  readSince,
+} from './sync-state.ts';
 import { numericId, productGid } from './util.ts';
 import { messageOf } from './shared/error-message.ts';
 
 import type { Product } from './product.ts';
 import type { ProductEdge } from './shopify.ts';
 import type { SyncContext, SyncResult, SyncStats } from './sync-product.ts';
-import type { QueuedRetry, ReconcilePage, RetryEntry } from './sync-state.ts';
+import type { ReconcileSettings } from './mapping.ts';
+import type { ReconcilePage, RetryEntry } from './sync-state.ts';
 
 /** The part of the Shopify client the engine reads products with. */
 export interface ProductSource {
@@ -84,6 +97,30 @@ interface Run {
 /** Attempts before a failing product is dropped from the retry list. */
 const MAX_ATTEMPTS = 5;
 const MS_PER_MINUTE = 60000;
+
+/** Cloudflare's limit on one Worker invocation, on every plan; a KV call past it throws. */
+export const KV_OPERATIONS_PER_INVOCATION = 1000;
+/**
+ * A run's KV operations besides its products and the inbox: the cursor, the window's position and the retry list (a
+ * read and a write each), the item index and a stopped listing (a read and a write each), the Shopify token (a read,
+ * and a delete and two writes when Shopify refuses it), the deploy hook's state and the webhook registration (a read
+ * and a write each).
+ */
+const RUN_KV_OPERATIONS = 18;
+/** A product's state read, the write of a created item before its publish and the write after the publish. */
+const KV_OPERATIONS_PER_PRODUCT = 3;
+
+/**
+ * The most KV operations a Worker reconcile run can use. Each product of the window costs a state read. A product
+ * writes only after a Webflow request, and a retry asks Shopify for its product first, so the subrequests bound how
+ * many do more than read: a product starts only while the reserve is left.
+ */
+export function maxReconcileKvOperations(settings: ReconcileSettings, subrequests: number): number {
+  const requesting = Math.max(0, subrequests - settings.reserveSubrequests + 1);
+  return (
+    RUN_KV_OPERATIONS + RETRY_INBOX_KV_OPERATIONS + settings.maxProductsPerRun + KV_OPERATIONS_PER_PRODUCT * requesting
+  );
+}
 
 const isoMinus = (iso: string, minutes: number) =>
   new Date(Date.parse(iso) - minutes * MS_PER_MINUTE).toISOString().replace('.000Z', 'Z');
@@ -234,17 +271,8 @@ interface Retries {
   retry: RetryEntry[];
   /** The retries the budget deferred. */
   retryLeft: RetryEntry[];
-  /** The queued failures the run took into `retry`. */
-  queued: QueuedRetry[];
-}
-
-/**
- * The retry list with the queued failures added. A product already on it keeps its attempts.
- */
-function withQueued(listed: RetryEntry[], queued: QueuedRetry[]): RetryEntry[] {
-  const byId = new Map(listed.map((entry) => [entry.id, entry]));
-  for (const { entry } of queued) if (!byId.has(entry.id)) byId.set(entry.id, entry);
-  return [...byId.values()];
+  /** The inbox keys the run took into `retry`. */
+  inboxKeys: string[];
 }
 
 /**
@@ -254,14 +282,14 @@ function withQueued(listed: RetryEntry[], queued: QueuedRetry[]): RetryEntry[] {
 async function savePosition(
   ctx: SyncContext,
   { run, listingStopped, start, storedSince, resume, restart }: Position,
-  { retry, retryLeft, queued }: Retries,
+  { retry, retryLeft, inboxKeys }: Retries,
 ): Promise<void> {
   const { store } = ctx;
   const failed = run.failures.filter((failure): failure is RetryEntry => failure.id !== null);
   // A product both failed and deferred, or both failed and left unpublished, is retried once.
   const nextRetry = [...new Map([...retryLeft, ...failed].map((entry) => [entry.id, entry])).values()];
   if (nextRetry.length || retry.length) await store.put(RETRY_KEY, nextRetry);
-  for (const { key } of queued) await store.delete(key);
+  for (const key of inboxKeys) await store.delete(key);
   if (!listingStopped) {
     if (storedSince !== run.newest) await store.put(SINCE_KEY, run.newest);
     if (resume || restart) await store.delete(PAGE_KEY);
@@ -302,8 +330,9 @@ export async function reconcile(
     after: resumed ? resumed.after : null,
     newest: resumed ? resumed.newest : start,
   };
-  const queued = await readRetryInbox(store);
-  const retry = withQueued(await readRetries(store), queued);
+  const listed = await readRetries(store);
+  const inbox = await readRetryInbox(store, new Set(listed.map((entry) => entry.id)));
+  const retry = [...listed, ...inbox.entries];
   const deps: RunDeps = {
     ctx,
     shopify,
@@ -325,7 +354,7 @@ export async function reconcile(
   }
   if (!ctx.dryRun) {
     const position = { run, listingStopped, start, storedSince, resume, restart: Boolean(sinceOverride) };
-    await savePosition(ctx, position, { retry, retryLeft, queued });
+    await savePosition(ctx, position, { retry, retryLeft, inboxKeys: inbox.keys });
   }
   const { changes, processed, pages, stopped, failures, newest } = run;
   return {

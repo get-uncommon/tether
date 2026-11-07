@@ -19,7 +19,7 @@ import type { RawConfig, SyncConfig } from './mapping.ts';
 import type { Product } from './product.ts';
 import type { Budget, ProductSource, ReconcileOptions, ReconcileResult } from './reconcile.ts';
 import type { Store } from './store.ts';
-import type { SyncContext, SyncProductOptions, SyncResult, SyncStats } from './sync-product.ts';
+import type { QueueRetryOptions, SyncContext, SyncProductOptions, SyncResult, SyncStats } from './sync-product.ts';
 import type { Logger } from './util.ts';
 import type { CmsTarget } from './webflow.ts';
 
@@ -58,7 +58,7 @@ export interface SyncEngine {
   /** The product was deleted in Shopify. */
   removeProduct: (id: string | number) => Promise<SyncResult>;
   /** Retries a product on the next reconcile. */
-  queueRetry: (id: string | number, error: unknown) => Promise<void>;
+  queueRetry: (id: string | number, error: unknown, options?: QueueRetryOptions) => Promise<void>;
   flushPublish: () => Promise<string[]>;
   reconcile: (options?: ReconcileOptions) => Promise<ReconcileResult>;
   /**
@@ -221,7 +221,7 @@ export function createSync({
         return product ? syncProduct(ctx, product) : removeProduct(ctx, id);
       }),
     removeProduct: (id) => serial(() => removeProduct(ctx, id)),
-    queueRetry: (id, error) => serial(() => queueRetry(ctx, id, error)),
+    queueRetry: (id, error, options) => serial(() => queueRetry(ctx, id, error, options)),
     flushPublish: () => serial(() => flushPublish(ctx)),
     reconcile: (options) => serial(() => reconcile(ctx, shopify, outOfBudget, options)),
     importAll: (options) => serial(() => importAll(ctx, shopify, options)),

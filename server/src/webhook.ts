@@ -20,7 +20,7 @@ import { verifyShopifyHmac } from './hmac.ts';
 import { isRecord } from './shared/json.ts';
 import { sleep as realSleep } from './util.ts';
 import { messageOf } from './shared/error-message.ts';
-import type { SyncAction } from './sync-product.ts';
+import type { QueueRetryOptions, SyncAction } from './sync-product.ts';
 
 /** Largest webhook body read. Shopify's product webhooks are a few KB. */
 export const MAX_WEBHOOK_BYTES = 1024 * 1024;
@@ -52,7 +52,7 @@ type WebhookOutcome = { action: SyncAction } | { action: 'failed'; error: unknow
 /** The part of the sync engine a webhook drives. */
 interface WebhookSync {
   syncById: (id: string) => Promise<{ action: SyncAction }>;
-  queueRetry: (id: string, error: unknown) => Promise<void>;
+  queueRetry: (id: string, error: unknown, options: QueueRetryOptions) => Promise<void>;
 }
 
 interface WebhookLog {
@@ -189,7 +189,7 @@ export async function handleShopifyWebhook(
     } catch (error) {
       // Shopify won't send it again (it was answered 200), so the next reconcile retries it.
       log?.error?.(`webhook ${topic} ${id} failed: ${messageOf(error)}`);
-      await sync.queueRetry(id, error).catch((queueError: unknown) => {
+      await sync.queueRetry(id, error, { deletion: topic === 'products/delete' }).catch((queueError: unknown) => {
         log?.error?.(
           `webhook ${topic} ${id}: retry not queued (${messageOf(queueError)}); the reconcile's cursor finds an update, never a deletion`,
         );
