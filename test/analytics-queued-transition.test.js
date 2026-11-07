@@ -1,54 +1,73 @@
-// A page transition (Barba, Swup) before the analytics part has loaded: the product of the page left counts for it.
+// A page transition (Barba, Swup) before the analytics part has started: the product of the page left counts for it.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { Tether, cfg, rendered } from './astro-harness.js';
+import { Tether, rendered } from './astro-harness.js';
+import { graphqlRequest, jsonResponse, operationName } from './fixtures.js';
 import { waitFor } from '../server/test/mocks.js';
 
-test("analytics: a page transition before the part loaded sends each container's page view and its product's view", async () => {
-  /** @type {string[]} */
-  const published = [];
-  Reflect.set(window, 'Shopify', {
-    analytics: {
-      getConfig: () => ({
-        shop: { shopId: 'gid://shopify/Shop/1', channel: 'headless' },
-        consent: { mode: 'no-banner' },
-      }),
-      /** @param {string} event */
-      publish: (event) => published.push(event),
-      addDestination: () => () => {},
-    },
-  });
-  cfg.analytics = { shopify: true };
-  const { queueAnalyticsEvents, PAGE_LEFT, PAGE_MOUNT } = await import('../src/analytics-queue.ts');
-  const analytics = await import('../src/analytics.ts');
+/** @typedef {import('../src/analytics-shopify.ts').AnalyticsBus} AnalyticsBus */
+
+test("analytics: a page transition before the part started sends each container's page view and its product's view", async () => {
+  /**
+   * `window.Shopify` without a bus, so the part sets up its own, and with consent given.
+   *
+   * @type {{ analytics?: AnalyticsBus, customerPrivacy: Record<string, unknown> }}
+   */
+  const shopify = { customerPrivacy: { consentStatus: 'loaded', analyticsProcessingAllowed: () => true } };
+  Reflect.set(window, 'Shopify', shopify);
+  /** @returns {AnalyticsBus | undefined} The bus the part set up, once it has started. */
+  const partBus = () => shopify.analytics;
+  // The part starts once Shopify has answered the shop id, which the test holds back meanwhile.
   /** @type {() => void} */
-  let loadPart = () => {};
-  const queue = queueAnalyticsEvents(
-    () =>
-      new Promise((resolve) => {
-        loadPart = () => {
-          resolve(analytics);
-        };
-      }),
-  );
+  let answerShopId = () => {};
+  const shopFetch = globalThis.fetch;
+  globalThis.fetch = (url, init) => {
+    if (operationName(graphqlRequest(init).query) !== 'TetherShopId') return shopFetch(url, init);
+    return new Promise((resolve) => {
+      answerShopId = () => {
+        resolve(jsonResponse({ data: { shop: { id: 'gid://shopify/Shop/1' } } }));
+      };
+    });
+  };
+  await Tether.init({
+    domain: 'shop.test',
+    token: 't',
+    autoMount: false,
+    country: 'NL',
+    locale: 'nl-NL',
+    analytics: { shopify: true },
+  });
   /** @returns {HTMLElement} A page container with a product, mounted. */
   const enter = () => {
     const container = document.createElement('main');
     container.innerHTML = '<div tether-product="coffee-box"></div>';
     document.body.append(container);
-    // What `mount()` queues when `init()` made the queue.
-    queue.push(new window.CustomEvent(PAGE_MOUNT, { detail: container }));
     Tether.mount(container);
     return container;
   };
   const first = enter();
   await rendered();
-  queue.push(new window.Event(PAGE_LEFT));
+  Tether.unmount();
   first.remove();
   enter();
   await rendered();
-  assert.deepEqual(published, [], 'nothing before the part has loaded');
-  loadPart();
+  assert.equal(partBus(), undefined, 'the part has not started');
+
+  answerShopId();
+  await waitFor(() => partBus() !== undefined, 'the bus');
+  const bus = partBus();
+  assert.ok(bus);
+  /** @type {string[]} */
+  const published = [];
+  bus.addDestination({
+    name: 'test',
+    setup: ({ subscribe }) => {
+      ['page_viewed', 'product_viewed'].forEach((event) => {
+        subscribe(event, () => published.push(event));
+      });
+    },
+  });
   await waitFor(() => published.length === 4, 'the buffered page views');
   assert.deepEqual(published, ['page_viewed', 'product_viewed', 'page_viewed', 'product_viewed']);
+  globalThis.fetch = shopFetch;
 });

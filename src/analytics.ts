@@ -177,13 +177,16 @@ let viewed = new WeakSet<Element>();
 let viewedBody: HTMLElement | undefined;
 /** The body each queued `astro:page-load` came for, from the core's queue. */
 let bodies = new WeakMap<Event, HTMLElement>();
-/** The container of the page being viewed: the first one mounted, then each new page's. */
+/**
+ * The container of the page being viewed: the document once `mount(document)` has run, else the first container
+ * mounted, widened by a mount around it, then each new page's.
+ */
 let pageRoot: Document | Element | null = null;
 /**
  * A page transition in the same body, which Astro's navigation never makes (it closes the cart without `unmount()`,
  * as its `astro:page-load` starts the page view): `'left'` after `unmount()`, until the next container mounts; or a
- * container mounted outside `pageRoot` before `unmount()`, which `unmount()` then makes the new page, as Barba's sync
- * mode mounts the next page while the old one is still in the document.
+ * container mounted next to `pageRoot` (a child of the same element) before `unmount()`, which `unmount()` then makes
+ * the new page, as Barba's sync mode adds the next page's container to the wrapper the old one is still in.
  */
 let transition: 'left' | Document | Element | null = null;
 
@@ -337,11 +340,23 @@ function enterPage(root: Document | Element): void {
   startPageView();
 }
 
+/** Whether `root` is a child of the element `page` is in, as the container of the page coming in is. */
+const isBeside = (root: Node, page: Node): boolean =>
+  root.parentElement !== null && root.parentElement === page.parentElement;
+
+/**
+ * `mount(document)` makes the whole document the page, with no page view of its own, as `astro:page-load` sends that.
+ * Between pages (`'left'`), the container mounted is the new page. Otherwise a mount around the page's container widens
+ * it and one next to it is the page coming in; any other mount (products added later, an island) is part of the page
+ * being viewed.
+ */
 function onPageMount(root: Document | Element): void {
-  if (root === document) transition = null;
-  else if (transition === 'left') enterPage(root);
-  else if (!pageRoot) pageRoot = root;
-  else if (!containerOf(root)) transition = root;
+  if (root === document) {
+    pageRoot = document;
+    transition = null;
+  } else if (transition === 'left') enterPage(root);
+  else if (!pageRoot || root.contains(pageRoot)) pageRoot = root;
+  else if (isBeside(root, pageRoot)) transition = root;
 }
 
 function onPageLeft(): void {

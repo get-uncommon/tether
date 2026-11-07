@@ -52,7 +52,10 @@ Shopify's script builds and sends them, so the data format stays Shopify's.
   client-side navigation, or with page transitions (Barba, Swup) each new page's container
   `Tether.mount(container)` mounts with a `Tether.unmount()` for the page left, before or after
   the mount, as in the [page transitions setup](reference.md#with-page-transitions-barba-swup-). A
-  page transition that skips `Tether.unmount()` sends no page view.
+  container mounted before `Tether.unmount()` is a new page only when it sits next to the old one,
+  in the same parent element (Barba's `sync: true`). A page transition that skips
+  `Tether.unmount()` sends no page view, and so does `Tether.mount(el)` for a part of the page
+  (products added later, an island).
 - **Consent:** nothing is sent until the Customer Privacy API allows analytics (the visitor's
   choice, and your region settings under Settings → Customer privacy). Options:
   `consent: 'no-banner'` (default: your own banner calls `Shopify.customerPrivacy.setTrackingConsent`),
