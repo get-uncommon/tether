@@ -22,7 +22,10 @@ export type { JsonLdOptions } from './storefront/json-ld.js';
 export type Storefront = ReturnType<typeof createStorefront>;
 /** The options only a storefront has. */
 interface ServerOptions {
-    /** Replaces the global `fetch` (tests, caching). */
+    /**
+     * Replaces the global `fetch` (tests, caching). It must pass `init.signal` on to the request: `requestTimeout` ends a
+     * stalled request through that signal, and a request that ignores it is never ended.
+     */
     fetch?: typeof fetch;
     /** Products per request for `allProducts()` (default 25). */
     pageSize?: number;
@@ -78,9 +81,7 @@ export declare function createStorefront(options?: StorefrontOptions): {
         pageInfo: import("./loader.js").PageInfo;
     }) | null>;
     allCollections: () => Promise<import("./loader.js").Collection[]>;
-    getRecommendations: (product: string | number | {
-        id: string;
-    } | null | undefined, intent?: "RELATED" | "COMPLEMENTARY") => Promise<Product[]>;
+    getRecommendations: (product: import("./shopify-values.js").ProductRef | null | undefined, intent?: import("./shopify-values.js").RecommendationIntent) => Promise<Product[]>;
     config: ServerConfig;
     query: (query: string, variables?: Record<string, unknown>, requestOptions?: {
         context?: boolean;

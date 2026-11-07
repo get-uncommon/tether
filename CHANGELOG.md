@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.9.0 (unreleased)
+## 0.9.0 (2026-11-07)
 
 A minor release: the package exports fewer paths, and self-hosted script tags need one more file.
 

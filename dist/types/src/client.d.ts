@@ -30,7 +30,7 @@ export declare class TetherError extends Error {
     constructor(message: string, { status, errors, userErrors, code }?: TetherErrorDetails);
 }
 /** What a request needs from a config: the browser's `cfg`, or a config the server helpers build. */
-export type StorefrontConfig = Pick<TetherConfig, 'domain' | 'token' | 'apiVersion' | 'country' | 'language' | 'maxAge' | 'retries'> & {
+export type StorefrontConfig = Pick<TetherConfig, 'domain' | 'token' | 'apiVersion' | 'country' | 'language' | 'maxAge' | 'retries' | 'requestTimeout'> & {
     fetch?: typeof fetch;
 };
 /** Checks a query's `data` before its caller reads it as a `T`. */
@@ -113,11 +113,11 @@ export declare function withContext(query: string, ctx?: {
  * `conf.retries`; which failures are retried is the operation's (`Operation`).
  *
  * @param isData Checks that `data` has what the caller then reads, so a malformed answer fails here.
- * @throws {TetherError} `NOT_CONFIGURED` without a domain or token, `NETWORK` when the store can't be reached or
- *   the answer's body stops arriving, `INVALID_RESPONSE` for a 2xx whose body isn't valid (not JSON, not in the
- *   GraphQL shape, or `data` that `isData` refuses), `SERVER_ERROR` for a 2xx whose GraphQL errors leave open
- *   whether Shopify ran it (a top-level `INTERNAL_SERVER_ERROR`, or a mutation's errors without `data`),
- *   `HTTP_<status>` for any other HTTP or GraphQL failure.
+ * @throws {TetherError} `NOT_CONFIGURED` without a domain or token, `NETWORK` when the store can't be reached, the
+ *   answer's body stops arriving or the whole answer takes longer than `conf.requestTimeout`, `INVALID_RESPONSE` for
+ *   a 2xx whose body isn't valid (not JSON, not in the GraphQL shape, or `data` that `isData` refuses),
+ *   `SERVER_ERROR` for a 2xx whose GraphQL errors leave open whether Shopify ran it (a top-level
+ *   `INTERNAL_SERVER_ERROR`, or a mutation's errors without `data`), `HTTP_<status>` for any other HTTP or GraphQL failure.
  */
 export declare function request<T>(conf: StorefrontConfig, query: QueryText, variables: Record<string, unknown>, isData: DataCheck<T>, { context, operation }?: RequestOptions): Promise<T>;
 /** `request` with the browser's shared config. */

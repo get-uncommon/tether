@@ -1,8 +1,4 @@
-/** A mounted `ListScope`. */
-interface MountedList {
-    root: Element;
-    load: (more?: boolean) => Promise<unknown>;
-}
+import type { MountedList } from './collection.js';
 export declare const mountedProducts: WeakSet<Element>;
 export declare const mountedLists: WeakSet<Element>;
 /** Product roots to re-render after a country switch; pruned once disconnected. */
@@ -43,4 +39,3 @@ export declare function settleMarket(): void;
  *   added elements for `observe`.
  */
 export declare function hydrateFromPage(root?: Document | Element): void;
-export {};

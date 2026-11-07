@@ -98,6 +98,12 @@ export interface TetherConfig {
      * already have applied the change.
      */
     retries: number;
+    /**
+     * Milliseconds a Storefront request may take, its body included, before it counts as a network error (0: no limit;
+     * at most 2147483647, the longest delay a timer keeps). A query is then retried; a mutation isn't, and a cart change
+     * loads the cart again.
+     */
+    requestTimeout: number;
     /** Refresh server-rendered products once in the background. */
     revalidate: boolean;
     /** The localStorage key of the cart id (default `<prefix>:cart:<domain>`). */

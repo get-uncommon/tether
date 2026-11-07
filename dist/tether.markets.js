@@ -20,7 +20,7 @@
 
   // tether-core:client.ts
   var m2 = window.Tether.__core["client.ts"];
-  var [endpoint, gql, orNull, shaped, TetherError] = m2;
+  var [endpoint, gql, matches, orNull, shaped, TetherError] = m2;
 
   // tether-core:cart.ts
   var m3 = window.Tether.__core["cart.ts"];
@@ -32,11 +32,11 @@
 
   // tether-core:loader.ts
   var m5 = window.Tether.__core["loader.ts"];
-  var [clearProductCache, getProduct] = m5;
+  var [clearProductCache, getProduct, normalizeProductKey, primeProduct, withProductFragment] = m5;
 
   // tether-core:dom.ts
   var m6 = window.Tether.__core["dom.ts"];
-  var [ANALYTICS_EVENTS, attr, attributesFromJson, emit, formatDate, formatMoney, get, has, hasTemplate, isOwnEvent, parseJSONAttr, productUrl, qsa, repeat, sel, setImage, setText, show] = m6;
+  var [ANALYTICS_EVENTS, attr, attributesFromJson, busy, emit, formatDate, formatMoney, get, has, hasTemplate, isOwnEvent, notifyLayoutChanged, parseJSONAttr, productUrl, qsa, repeat, scoped, sel, setImage, setStoreHtml, setText, show] = m6;
 
   // tether-core:mounting.ts
   var m7 = window.Tether.__core["mounting.ts"];

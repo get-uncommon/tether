@@ -1,6 +1,6 @@
 /// <reference path="./globals.d.ts" />
 import { query, TetherError, withContext } from './client.js';
-import { getProduct, getProducts, getRecommendations, clearProductCache, primeProduct } from './loader.js';
+import { getProduct, clearProductCache, primeProduct } from './loader.js';
 import * as plans from './selling-plans.js';
 import { resolveProductKey } from './status.js';
 import { formatMoney, imageUrl } from './dom.js';
@@ -12,6 +12,7 @@ import type { ShopifyCart } from './cart/store.js';
 import type { ProductScope } from './product.js';
 import type { DiagnoseOptions } from './diagnose.js';
 import type { TetherEvents } from './markup.js';
+import type { ProductQuery } from './loader.js';
 export { addGroup, setCountry, VERSION };
 export type { TetherOptions as TetherConfig, TetherConfig as ResolvedTetherConfig } from './config.js';
 export type { MarketsConfig, CartWarning } from './config.js';
@@ -111,8 +112,8 @@ declare const publicApi: {
         toggle: typeof import("./cart/drawer.js").toggleCart;
     };
     getProduct: typeof getProduct;
-    getProducts: typeof getProducts;
-    getRecommendations: typeof getRecommendations;
+    getProducts: (query?: ProductQuery) => Promise<import("./loader.js").ProductPage>;
+    getRecommendations: typeof import("./lists.js").getRecommendations;
     getScope: typeof getScope;
     addGroup: (button: Element) => Promise<ShopifyCart | null>;
     account: {
