@@ -1,5 +1,8 @@
 // In-memory fake Shopify Admin API + Webflow Data API v2 behind one fetch().
 import assert from 'node:assert/strict';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { isRecord } from '../src/shared/json.ts';
 
 // Readers for the parsed JSON a fake receives or a store holds, which is `unknown`: each asserts the shape the test
@@ -435,6 +438,18 @@ export function answeredStep(report, title) {
   const step = recordsAt(report, 'steps').find((candidate) => candidate['title'] === title);
   assert.ok(step, `no "${title}" step`);
   return step;
+}
+
+/**
+ * A new folder in the system's temp folder, removed with everything in it once the test is done, passed or failed.
+ *
+ * @param {Pick<import('node:test').TestContext, 'after'>} t
+ * @param {string} prefix
+ */
+export async function tempFolder(t, prefix) {
+  const folder = await mkdtemp(join(tmpdir(), prefix));
+  t.after(() => rm(folder, { recursive: true, force: true }));
+  return folder;
 }
 
 /**

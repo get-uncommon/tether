@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { after } from 'node:test';
 import { setTimeout as setNodeTimeout } from 'node:timers';
 import { asRecord, listAt, numberAt, parseJson, recordAt, recordsAt, stringAt, within } from '../server/test/mocks.js';
@@ -280,6 +281,55 @@ export const apparel = {
     ],
   },
 };
+
+/** How long a git command in a scratch repository may run: execFileSync blocks the event loop, so no test timeout can. */
+const GIT_TIMEOUT_MS = 120_000;
+
+/**
+ * The environment that keeps this machine's git settings out of a scratch repository: no system or global config, which
+ * can sign commits, run hooks or add a template, and, as if given with `-c`, commits and tags unsigned, no hooks, and
+ * `config`. Git for Windows reads `/dev/null` as the null device too, and can't open Node's `os.devNull` (`\\.\nul`).
+ *
+ * @param {Record<string, string>} [config]
+ */
+export function isolatedGitEnv(config = {}) {
+  const settings = Object.entries({
+    'commit.gpgSign': 'false',
+    'tag.gpgSign': 'false',
+    'core.hooksPath': '',
+    ...config,
+  });
+  return {
+    GIT_CONFIG_NOSYSTEM: '1',
+    GIT_CONFIG_GLOBAL: '/dev/null',
+    GIT_CONFIG_COUNT: String(settings.length),
+    ...Object.fromEntries(
+      settings.flatMap(([key, value], index) => [
+        [`GIT_CONFIG_KEY_${String(index)}`, key],
+        [`GIT_CONFIG_VALUE_${String(index)}`, value],
+      ]),
+    ),
+  };
+}
+
+/**
+ * Git in the scratch repository `cwd`, with {@link isolatedGitEnv} and a test identity, so its commits are the same on
+ * every machine.
+ *
+ * @param {string} cwd
+ * @param {Record<string, string>} [config] Settings for every command, as for {@link isolatedGitEnv}.
+ * @returns {(...args: string[]) => string} Runs git with `args` and returns its output, trimmed.
+ */
+export function isolatedGit(cwd, config = {}) {
+  const env = { ...process.env, ...isolatedGitEnv(config) };
+  return (...args) =>
+    execFileSync('git', ['-c', 'user.name=Tether test', '-c', 'user.email=test@shop.test', ...args], {
+      cwd,
+      env,
+      encoding: 'utf8',
+      timeout: GIT_TIMEOUT_MS,
+    }).trim();
+}
 
 /**
  * Keeps Tether's own console warnings (`[tether] …`, which every reported failure logs) out of the test output, for a

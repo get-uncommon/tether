@@ -215,7 +215,7 @@ test('a 401 from Shopify (session ended there) ends it here too', async () => {
   assert.deepEqual(await orders.json(), { loggedIn: false, orders: [] });
 });
 
-test('a session without a refresh token lasts as long as its access token, without asking Shopify again', async () => {
+test('a session without a refresh token lasts as long as its access token, without asking Shopify again', async (t) => {
   /**
    * @param {Fetch} inner
    * @returns {Fetch}
@@ -232,9 +232,10 @@ test('a session without a refresh token lasts as long as its access token, witho
   const realNow = Date.now;
   Date.now = () => realNow() + 2 * 3600e3;
   try {
-    const started = performance.now();
+    const timers = t.mock.method(globalThis, 'setTimeout');
     assert.equal(fieldOf(await jsonOf(await run(req('/me', { origin: SITE, cookie }))), 'loggedIn'), false);
-    assert.ok(performance.now() - started < 250, 'no wait for a parallel refresh');
+    assert.equal(timers.mock.callCount(), 0, 'no wait for a parallel refresh');
+    timers.mock.restore();
   } finally {
     Date.now = realNow;
   }

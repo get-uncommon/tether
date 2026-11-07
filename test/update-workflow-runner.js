@@ -13,6 +13,7 @@ import { promisify } from 'node:util';
 import { parse } from 'yaml';
 import { WORKFLOW_PATH } from '../server/scripts/workflow-check.ts';
 import { asList, asRecord, asString, fieldOf } from '../server/test/mocks.js';
+import { isolatedGit, isolatedGitEnv } from './fixtures.js';
 
 /** The deployed copy's own repository on GitHub. */
 export const COPY_REPOSITORY = 'shop-owner/tether-sync';
@@ -225,28 +226,17 @@ async function outputsIn(file) {
  */
 async function deployedRepository(deployed, work) {
   const origin = join(work, 'origin.git');
-  const gitConfig = join(work, 'gitconfig');
   await mkdir(work, { recursive: true });
-  await writeFile(gitConfig, '');
-  const env = {
-    GIT_CONFIG_NOSYSTEM: '1',
-    GIT_CONFIG_GLOBAL: gitConfig,
-    GIT_CONFIG_COUNT: '1',
-    // The publish job pushes to the copy's repository on github.com with the workflow's token.
-    GIT_CONFIG_KEY_0: `url.${slashed(origin)}.insteadOf`,
-    GIT_CONFIG_VALUE_0: `https://x-access-token:${WORKFLOW_TOKEN}@github.com/${COPY_REPOSITORY}.git`,
+  // The publish job pushes to the copy's repository on github.com with the workflow's token.
+  const config = {
+    [`url.${slashed(origin)}.insteadOf`]: `https://x-access-token:${WORKFLOW_TOKEN}@github.com/${COPY_REPOSITORY}.git`,
   };
+  const env = isolatedGitEnv(config);
   /**
    * @param {string} cwd
    * @param {string[]} args
    */
-  const git = (cwd, args) =>
-    execFileSync('git', ['-c', 'user.name=Owner', '-c', 'user.email=owner@shop.test', ...args], {
-      cwd,
-      env: { ...process.env, ...env },
-      encoding: 'utf8',
-      timeout: CHILD_TIMEOUT_MS,
-    }).trim();
+  const git = (cwd, args) => isolatedGit(cwd, config)(...args);
   git(deployed, ['init', '--quiet', '--initial-branch=main']);
   // Every later command commits, configures or pushes: refuse to go on unless they act on the copy's own repository.
   const gitDir = git(deployed, ['rev-parse', '--absolute-git-dir']).replaceAll('\\', '/');
@@ -380,7 +370,17 @@ export async function runWorkflow(deployed, work, updateEnv, testFiles) {
         script = script.replace(ALL_TESTS, `node --test ${testFiles}`);
       }
       const extra = step.id === UPDATE_STEP_ID ? updateEnv : {};
-      const env = { ...base, ...expanded(step.env, context), ...extra, RUNNER_TEMP: slashed(temp) };
+      // The job's temp folder is also the steps' system temp folder, which GitHub throws away with the runner and the
+      // test with `work`.
+      const env = {
+        ...base,
+        ...expanded(step.env, context),
+        ...extra,
+        RUNNER_TEMP: slashed(temp),
+        TMPDIR: temp,
+        TEMP: temp,
+        TMP: temp,
+      };
       const file = join(temp, `${String(index)}.sh`);
       const result = await runScript(script, step.shell, { label, file, cwd: runner.checkout, env });
       logs.set(label, result.stdout);

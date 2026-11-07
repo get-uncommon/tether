@@ -49,14 +49,29 @@ function assetFor(name: keyof typeof linters): Asset & { version: string } {
   return { ...asset, version };
 }
 
+/** How long one download, its whole body included, may take: a stalled one would otherwise hang the push. */
+const DOWNLOAD_TIMEOUT_MS = 120_000;
+
+async function download(url: string): Promise<Buffer> {
+  try {
+    const response = await fetch(url, { signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS) });
+    if (!response.ok) throw new LintSetupError(`${url} answered ${String(response.status)}`);
+    return Buffer.from(await response.arrayBuffer());
+  } catch (error) {
+    // The timeout rejects `fetch`, or the body's read once the answer has started, with a `TimeoutError`.
+    if (error instanceof DOMException && error.name === 'TimeoutError') {
+      throw new LintSetupError(`${url}: not downloaded within ${String(DOWNLOAD_TIMEOUT_MS / 1000)} s`);
+    }
+    throw error;
+  }
+}
+
 /** The folder a verified download of `url` was unpacked into, unpacking it first if this cache doesn't have it. */
 async function unpacked(name: string, url: string, asset: Asset): Promise<string> {
   const folder = join(CACHE, `${name}-${asset.sha256.slice(0, 16)}`);
   if (existsSync(folder)) return folder;
   console.log(`lint-workflows: downloading ${asset.file}`);
-  const response = await fetch(url);
-  if (!response.ok) throw new LintSetupError(`${url} answered ${String(response.status)}`);
-  const bytes = Buffer.from(await response.arrayBuffer());
+  const bytes = await download(url);
   const sha256 = createHash('sha256').update(bytes).digest('hex');
   if (sha256 !== asset.sha256) {
     throw new LintSetupError(`${asset.file} has sha256 ${sha256}, not the pinned ${asset.sha256}: not using it`);
@@ -168,8 +183,12 @@ function pushTouchesWorkflows(): boolean {
  * developer's own GitHub CLI login. CI sets GH_TOKEN, so the online audits always run there.
  */
 function githubToken(): string | null {
-  const fromEnv = process.env['GH_TOKEN'] ?? process.env['GITHUB_TOKEN'];
-  return fromEnv !== undefined && fromEnv !== '' ? fromEnv : null;
+  for (const name of ['GH_TOKEN', 'GITHUB_TOKEN']) {
+    const token = process.env[name];
+    // An empty one, as a workflow sets a secret that isn't there, is no token, and doesn't hide the other.
+    if (token !== undefined && token !== '') return token;
+  }
+  return null;
 }
 
 function run(command: string, args: string[], env: NodeJS.ProcessEnv = process.env): boolean {

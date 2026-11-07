@@ -3,16 +3,15 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { mkdtemp, readdir, readFile, rm, stat, utimes, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { readdir, readFile, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { pathToFileURL } from 'node:url';
 import { fileStore, loadConfig, takeOverStaleLock } from '../src/node.ts';
-import { asRecord, parseJson, waitFor, within } from './mocks.js';
+import { asRecord, parseJson, tempFolder, waitFor, within } from './mocks.js';
 
-test('file store: a state file removed by another process leaves what this process holds', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'tether-sync-'));
+test('file store: a state file removed by another process leaves what this process holds', async (t) => {
+  const dir = await tempFolder(t, 'tether-sync-');
   const path = join(dir, 'state.json');
   const store = fileStore(path, { delayMs: 10_000 });
   await store.put('cursor', 'x');
@@ -24,8 +23,8 @@ test('file store: a state file removed by another process leaves what this proce
   assert.deepEqual(JSON.parse(await readFile(path, 'utf8')), { other: 1 }, 'the next write recreates the file');
 });
 
-test('file store: a timed write that fails is logged, and kept for the next flush', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'tether-sync-'));
+test('file store: a timed write that fails is logged, and kept for the next flush', async (t) => {
+  const dir = await tempFolder(t, 'tether-sync-');
   /** @type {unknown[]} */
   const errors = [];
   const store = fileStore(join(dir, 'missing-dir', 'state.json'), {
@@ -41,8 +40,8 @@ test('file store: a timed write that fails is logged, and kept for the next flus
   await assert.rejects(store.flush(), 'the key is still waiting to be written');
 });
 
-test('file store: a state file that is not a JSON object is an error, never overwritten', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'tether-sync-'));
+test('file store: a state file that is not a JSON object is an error, never overwritten', async (t) => {
+  const dir = await tempFolder(t, 'tether-sync-');
   const path = join(dir, 'state.json');
   await writeFile(path, '[1, 2]');
   const store = fileStore(path, { delayMs: 10_000 });
@@ -93,7 +92,7 @@ async function writerInAnotherProcess(t, path) {
 }
 
 test('file store: two processes writing at once both keep every key', async (t) => {
-  const dir = await mkdtemp(join(tmpdir(), 'tether-sync-'));
+  const dir = await tempFolder(t, 'tether-sync-');
   const path = join(dir, 'state.json');
   const rounds = 40;
   const here = fileStore(path, { delayMs: 10_000 });
@@ -137,8 +136,8 @@ function countLockWaits() {
   };
 }
 
-test('file store: a write waits for the lock another process holds, and takes over one left by a dead process', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'tether-sync-'));
+test('file store: a write waits for the lock another process holds, and takes over one left by a dead process', async (t) => {
+  const dir = await tempFolder(t, 'tether-sync-');
   const path = join(dir, 'state.json');
   const store = fileStore(path, { delayMs: 10_000 });
   await writeFile(`${path}.lock`, '');
@@ -175,8 +174,8 @@ test('file store: a write waits for the lock another process holds, and takes ov
   assert.deepEqual(await markers(), [], 'the next write removes the old marker');
 });
 
-test('file store: of the waiters that find one lock stale, only the first takes it over', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'tether-sync-'));
+test('file store: of the waiters that find one lock stale, only the first takes it over', async (t) => {
+  const dir = await tempFolder(t, 'tether-sync-');
   const lockPath = join(dir, 'state.json.lock');
   const longAgo = new Date(Date.now() - 3600e3);
   await writeFile(lockPath, '');
@@ -199,8 +198,8 @@ test('file store: of the waiters that find one lock stale, only the first takes 
   assert.equal((await readdir(dir)).includes(marker), false, 'the next takeover removes an old marker');
 });
 
-test('file store: writes that all find the lock stale at once keep every key', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'tether-sync-'));
+test('file store: writes that all find the lock stale at once keep every key', async (t) => {
+  const dir = await tempFolder(t, 'tether-sync-');
   const path = join(dir, 'state.json');
   const longAgo = new Date(Date.now() - 3600e3);
   await writeFile(`${path}.lock`, '');
@@ -211,8 +210,8 @@ test('file store: writes that all find the lock stale at once keep every key', a
   const disk = asRecord(parseJson(await readFile(path, 'utf8')), 'the state file');
   assert.equal(Object.keys(disk).length, stores.length, 'no write lost');
 });
-test('config file: a value of the wrong type is named when the config loads', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'tether-sync-'));
+test('config file: a value of the wrong type is named when the config loads', async (t) => {
+  const dir = await tempFolder(t, 'tether-sync-');
   const path = join(dir, 'tether-sync.config.json');
   await writeFile(path, JSON.stringify({ shopify: { apiVersion: 202607 }, webflow: [], fields: { name: 'title' } }));
   await assert.rejects(loadConfig(path), /shopify\.apiVersion must be a string; webflow must be an object/);
@@ -220,8 +219,8 @@ test('config file: a value of the wrong type is named when the config loads', as
   assert.equal((await loadConfig(path)).config.shopify?.domain, 'shop.myshopify.com');
 });
 
-test('file store: batched writes, merged with another process, survives a failed write', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'tether-sync-'));
+test('file store: batched writes, merged with another process, survives a failed write', async (t) => {
+  const dir = await tempFolder(t, 'tether-sync-');
   const path = join(dir, 'state.json');
   const first = fileStore(path, { delayMs: 10_000 });
   const second = fileStore(path, { delayMs: 10_000 });

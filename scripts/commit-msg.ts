@@ -4,12 +4,15 @@
  * `MAX_SUBJECT` characters, and a body is set off from it by a blank line. Merge commits keep git's own subject, and
  * `fixup!` and `squash!` commits are folded into another before they land, so neither is checked.
  */
+import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 
 /** The longest subject the history has is 118 characters; Prettier's print width is the limit. */
 const MAX_SUBJECT = 120;
-/** git's verbose-commit marker: it drops everything from this line on. */
-const SCISSORS = '# ------------------------ >8 ------------------------';
+/** What follows git's comment string on its verbose-commit marker: git drops everything from that line on. */
+const SCISSORS = ' ------------------------ >8 ------------------------';
+/** The characters git picks from for `core.commentChar=auto`, in its order. */
+const AUTO_COMMENT_CHARS = '#;@!$%^&|:';
 const CONVENTIONAL_TYPE = /^(?:feat|fix|chore|docs|style|refactor|perf|tests?|build|ci|revert)(?:\([^)]*\))?!?:/;
 /**
  * A subject may open in lower case with a name as written in the code: an identifier with a capital or a digit
@@ -17,31 +20,53 @@ const CONVENTIONAL_TYPE = /^(?:feat|fix|chore|docs|style|refactor|perf|tests?|bu
  */
 const CODE_NAME = /^\S*[A-Z0-9]|^[a-z][\w.-]*:\s/;
 
-/** The message as git stores it: no comment lines, nothing after the scissors, no trailing blank lines. */
-function cleaned(text: string): string[] {
-  const lines = text.replace(/\r\n/g, '\n').split('\n');
-  const scissors = lines.indexOf(SCISSORS);
-  const kept = (scissors === -1 ? lines : lines.slice(0, scissors)).filter((line) => !line.startsWith('#'));
-  while (kept.length > 0 && kept.at(-1)?.trim() === '') kept.pop();
-  while (kept.length > 0 && kept[0]?.trim() === '') kept.shift();
-  return kept;
+/** A git setting of the repository the hook runs in, or `null` when it isn't set. */
+function gitSetting(key: string): string | null {
+  const result = spawnSync('git', ['config', '--get', key], { encoding: 'utf8' });
+  return result.status === 0 ? result.stdout.replace(/\r?\n$/, '') : null;
 }
 
+/**
+ * What starts git's comment lines in `lines`: `core.commentString`, or `core.commentChar`, or `#`. With `auto`, git
+ * takes the first of {@link AUTO_COMMENT_CHARS} that starts no line of the message it is given, and writes its comments
+ * after that message: the last line that starts with one of them is git's.
+ */
+function commentPrefix(lines: readonly string[]): string {
+  const setting = gitSetting('core.commentString') ?? gitSetting('core.commentChar') ?? '#';
+  if (setting !== 'auto') return setting;
+  const last = lines.findLast((line) => line !== '' && AUTO_COMMENT_CHARS.includes(line.charAt(0)));
+  return last === undefined ? '#' : last.charAt(0);
+}
+
+/** The message as git stores it: no comment lines, nothing after the scissors, no leading or trailing blank lines. */
+function cleaned(text: string): string[] {
+  const lines = text.replace(/\r\n/g, '\n').split('\n');
+  const comment = commentPrefix(lines);
+  const scissors = lines.indexOf(`${comment}${SCISSORS}`);
+  const kept = (scissors === -1 ? lines : lines.slice(0, scissors)).filter((line) => !line.startsWith(comment));
+  const first = kept.findIndex((line) => line.trim() !== '');
+  const last = kept.findLastIndex((line) => line.trim() !== '');
+  return first === -1 ? [] : kept.slice(first, last + 1);
+}
+
+/** The rules the message breaks, each said as what the message must do. */
 function problemsOf(text: string): string[] {
   const [subject = '', second] = cleaned(text);
-  if (subject === '') return ['the message is empty'];
+  if (subject === '') return ['the message must not be empty'];
   if (/^(?:Merge |fixup! |squash! |amend! )/.test(subject)) return [];
   const problems: string[] = [];
   if (CONVENTIONAL_TYPE.test(subject)) {
-    problems.push('the subject has a conventional-commit type: say what changed in plain English instead');
+    problems.push('the subject must not start with a conventional-commit type: say what changed in plain English');
   } else if (!/^[A-Z0-9]/.test(subject) && !CODE_NAME.test(subject)) {
-    problems.push('the subject starts with a capital letter, unless it opens with a name from the code');
+    problems.push('the subject must start with a capital letter, unless it opens with a name from the code');
   }
-  if (subject.endsWith('.')) problems.push("the subject doesn't end with a full stop");
+  if (subject.endsWith('.')) problems.push('the subject must not end with a full stop');
   if (subject.length > MAX_SUBJECT) {
-    problems.push(`the subject is ${subject.length} characters: keep it to ${MAX_SUBJECT}`);
+    problems.push(`the subject must be at most ${String(MAX_SUBJECT)} characters; it is ${String(subject.length)}`);
   }
-  if (second !== undefined && second.trim() !== '') problems.push('a blank line separates the subject from the body');
+  if (second !== undefined && second.trim() !== '') {
+    problems.push('a blank line must separate the subject from the body');
+  }
   return problems;
 }
 

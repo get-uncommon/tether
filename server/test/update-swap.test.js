@@ -2,17 +2,20 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
-import { mkdtemp, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { join, sep } from 'node:path';
 import { install, RollbackError } from '../scripts/update-tether.ts';
+import { tempFolder } from './mocks.js';
 
 /** The managed entries both folders hold, so a half-done swap shows as a mix of `old` and `new`. */
 const ENTRIES = ['src/entry.js', 'bin/tether-sync.js', 'scripts/update-tether.mjs', 'package.json'];
 
-/** @param {'old' | 'new'} content */
-async function folderWith(content) {
-  const folder = await mkdtemp(join(tmpdir(), `tether-swap-${content}-`));
+/**
+ * @param {import('node:test').TestContext} t
+ * @param {'old' | 'new'} content
+ */
+async function folderWith(t, content) {
+  const folder = await tempFolder(t, `tether-swap-${content}-`);
   for (const entry of ENTRIES) {
     await mkdir(join(folder, entry, '..'), { recursive: true });
     await writeFile(join(folder, entry), content);
@@ -45,31 +48,31 @@ function renameFailing(failing) {
   };
 }
 
-test('swap: a release replaces every managed entry and leaves no work folder', async () => {
-  const root = await folderWith('old');
-  await install(await folderWith('new'), { root, rename });
+test('swap: a release replaces every managed entry and leaves no work folder', async (t) => {
+  const root = await folderWith(t, 'old');
+  await install(await folderWith(t, 'new'), { root, rename });
   assert.deepEqual(await contents(root), ['new', 'new', 'new', 'new']);
   assert.deepEqual(await workFolders(root), []);
 });
 
-test('swap: a rename failing part-way puts every entry already swapped back, and the work folder goes', async () => {
-  const root = await folderWith('old');
+test('swap: a rename failing part-way puts every entry already swapped back, and the work folder goes', async (t) => {
+  const root = await folderWith(t, 'old');
   // Calls 1 and 2 swap src; call 3 moves the copy's bin out, call 4 would move the release's bin in.
   const failOnFourth = renameFailing((_from, call) => call === 4);
-  await assert.rejects(install(await folderWith('new'), { root, rename: failOnFourth }), /injected failure/);
+  await assert.rejects(install(await folderWith(t, 'new'), { root, rename: failOnFourth }), /injected failure/);
   assert.deepEqual(await contents(root), ['old', 'old', 'old', 'old']);
   assert.deepEqual(await workFolders(root), []);
 });
 
-test("swap: when putting the copy back fails too, the error says so and the copy's own files are kept", async () => {
-  const root = await folderWith('old');
+test("swap: when putting the copy back fails too, the error says so and the copy's own files are kept", async (t) => {
+  const root = await folderWith(t, 'old');
   const previousFolder = `${sep}old${sep}`;
   let swapFailed = false;
   const failing = renameFailing((from, call) => {
     if (call === 4) swapFailed = true;
     return call === 4 || (swapFailed && from.includes(previousFolder));
   });
-  const failure = await install(await folderWith('new'), { root, rename: failing }).then(
+  const failure = await install(await folderWith(t, 'new'), { root, rename: failing }).then(
     () => assert.fail('the install succeeded'),
     /** @param {unknown} error */ (error) => error,
   );
@@ -82,13 +85,13 @@ test("swap: when putting the copy back fails too, the error says so and the copy
   assert.equal(await readFile(join(root, work, 'old', 'bin', 'tether-sync.js'), 'utf8'), 'old');
 });
 
-test('swap: a managed entry the release dropped is removed, and what belongs to the copy stays', async () => {
-  const root = await folderWith('old');
+test('swap: a managed entry the release dropped is removed, and what belongs to the copy stays', async (t) => {
+  const root = await folderWith(t, 'old');
   await mkdir(join(root, 'docs'));
   await writeFile(join(root, 'docs', 'dropped.md'), 'old');
   await writeFile(join(root, 'notes.md'), 'the owner');
   await writeFile(join(root, 'tether-sync.config.js'), 'the mapping');
-  await install(await folderWith('new'), { root, rename });
+  await install(await folderWith(t, 'new'), { root, rename });
   assert.deepEqual(await contents(root), ['new', 'new', 'new', 'new']);
   assert.ok(!existsSync(join(root, 'docs')), 'docs/ is managed, and the release has none');
   assert.equal(await readFile(join(root, 'notes.md'), 'utf8'), 'the owner');
@@ -96,20 +99,20 @@ test('swap: a managed entry the release dropped is removed, and what belongs to 
   assert.deepEqual(await workFolders(root), []);
 });
 
-test('swap: a failed swap puts back a managed entry the release dropped', async () => {
-  const root = await folderWith('old');
+test('swap: a failed swap puts back a managed entry the release dropped', async (t) => {
+  const root = await folderWith(t, 'old');
   await mkdir(join(root, 'docs'));
   await writeFile(join(root, 'docs', 'dropped.md'), 'old');
   // package.json is swapped after docs/, which the release doesn't have.
   const failOnPackage = renameFailing((from) => from.endsWith(`${sep}new${sep}package.json`));
-  await assert.rejects(install(await folderWith('new'), { root, rename: failOnPackage }), /injected failure/);
+  await assert.rejects(install(await folderWith(t, 'new'), { root, rename: failOnPackage }), /injected failure/);
   assert.deepEqual(await contents(root), ['old', 'old', 'old', 'old']);
   assert.equal(await readFile(join(root, 'docs', 'dropped.md'), 'utf8'), 'old');
 });
 
-test('swap: a release without the files every workflow runs is refused before the copy changes', async () => {
-  const root = await folderWith('old');
-  const release = await folderWith('new');
+test('swap: a release without the files every workflow runs is refused before the copy changes', async (t) => {
+  const root = await folderWith(t, 'old');
+  const release = await folderWith(t, 'new');
   await rm(join(release, 'scripts'), { recursive: true });
   await assert.rejects(install(release, { root, rename }), /the release has no scripts\/update-tether\.mjs/);
   assert.deepEqual(await contents(root), ['old', 'old', 'old', 'old']);

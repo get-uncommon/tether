@@ -45,7 +45,7 @@
     "test:types": "tsc -p test/types/tsconfig.json",
     "smoke": "node --experimental-strip-types scripts/smoke.ts",
     "pretest": "node --experimental-strip-types scripts/build.ts --out .test-dist",
-    "presmoke": "node --experimental-strip-types scripts/build.ts",
+    "presmoke": "node --experimental-strip-types scripts/build.ts --out .test-dist",
     "release": "node --experimental-strip-types scripts/release.ts",
     "e2e:build": "npm run build && node --experimental-strip-types scripts/e2e-build.ts && cd examples/astro && npm install --no-save --no-audit --no-fund --ignore-scripts ../.. && npx astro build",
     "e2e": "npm run e2e:build && playwright test -c test/e2e/playwright.config.js"
