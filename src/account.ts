@@ -18,7 +18,7 @@
  */
 import { cfg, log, reportError } from './config.ts';
 import { TetherError } from './client.ts';
-import { sel, get, qsa, setText, show, emit } from './dom.ts';
+import { sel, get, qsa, setText, show, emit, isElement } from './dom.ts';
 import { Cart } from './cart.ts';
 import { loadPart } from './lazy.ts';
 import type { Parts } from './lazy.ts';
@@ -229,7 +229,7 @@ export const requestReturn = (orderId: string | number, lines: ReturnLine[]): Pr
 
 function onClick(event: MouseEvent): void {
   const target = event.target;
-  if (!(target instanceof window.Element)) return;
+  if (!isElement(target)) return;
   if (target.closest(sel('account-login'))) {
     event.preventDefault();
     login().catch((error: unknown) => {

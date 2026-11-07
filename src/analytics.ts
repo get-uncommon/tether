@@ -172,6 +172,8 @@ let lastLines: Map<string, CartLine> | null = null;
 let lastCart: AnalyticsCart | null = null;
 /** Product roots whose view_item was sent on this page. */
 let viewed = new WeakSet<Element>();
+/** The body the last page_viewed was for: Astro's first `astro:page-load` comes after the landing page's. */
+let viewedBody: HTMLElement | null = null;
 
 /** @param name The GA4 event. */
 function send(name: string, data: Record<string, unknown>, shopifyEvent?: string, shopifyPayload?: EventPayload): void {
@@ -282,15 +284,21 @@ function report<Name extends AnalyticsEventName>(event: CustomEvent<TetherEvents
   REPORTERS[name](event.detail);
 }
 
+function publishPageView(): void {
+  viewedBody = document.body;
+  bus?.publish('page_viewed', {});
+}
+
 /**
  * Turns one buffered event into analytics events: a Tether event from `ANALYTICS_EVENTS`, or Astro's `astro:page-load`
- * for a client-side navigation, which starts a new page view. Only events Tether created count (`isOwnEvent`): a
- * look-alike another script dispatches, whatever its detail, sends nothing.
+ * for a client-side navigation to a new body, which starts a new page view. Only events Tether created count
+ * (`isOwnEvent`): a look-alike another script dispatches, whatever its detail, sends nothing.
  */
 function handle(event: Event): void {
   if (event.type === 'astro:page-load') {
+    if (viewedBody === document.body) return;
     viewed = new WeakSet();
-    bus?.publish('page_viewed', {});
+    publishPageView();
     return;
   }
   ANALYTICS_EVENTS.forEach((name) => {
@@ -308,7 +316,7 @@ export async function startAnalytics(queue: Event[]): Promise<void> {
       return null;
     });
   }
-  bus?.publish('page_viewed', {});
+  publishPageView();
   queue.splice(0).forEach(handle);
   queue.push = (...events) => {
     events.forEach(handle);
