@@ -26,7 +26,9 @@ export interface ServerRequest {
  */
 export declare function serverFetch(path: string, { method, body }?: ServerRequest): Promise<ServerAnswer>;
 /**
- * Who is logged in, asked once and then kept; the "may be logged in" hint follows the answer.
+ * Who is logged in, asked once (callers at the same time share the request) and then kept; the "may be logged in"
+ * hint follows the answer. An answer to a request sent before a logout or a change of the customer's data can be
+ * from before it: it is dropped, and the Worker asked again.
  *
  * @throws {TetherError} When the Worker can't be reached or fails: that says nothing about the login.
  */

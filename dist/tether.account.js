@@ -160,6 +160,7 @@
 
   // src/account/server-client.ts
   var known = null;
+  var asking = null;
   function serverBase() {
     const server = cfg.account?.server;
     if (!server) {
@@ -211,17 +212,28 @@
     }
     return { kind: "answer", data };
   }
+  async function askWhoIsLoggedIn() {
+    const answer = await serverFetch("/me");
+    return answer.kind === "answer" && answer.data["loggedIn"] === true ? { loggedIn: true, customer: toAccountCustomer(answer.data["customer"]) } : { loggedIn: false };
+  }
   async function serverLogin() {
-    if (!known) {
-      const answer = await serverFetch("/me");
-      known = answer.kind === "answer" && answer.data["loggedIn"] === true ? { loggedIn: true, customer: toAccountCustomer(answer.data["customer"]) } : { loggedIn: false };
+    const request = asking ?? (asking = askWhoIsLoggedIn());
+    let login2;
+    try {
+      login2 = await request;
+    } catch (error) {
+      if (asking === request) asking = null;
+      throw error;
     }
-    setLoginHint(known.loggedIn);
-    return known;
+    if (asking !== request) return serverLogin();
+    known = login2;
+    setLoginHint(login2.loggedIn);
+    return login2;
   }
   var isServerLoggedIn = () => known?.loggedIn === true;
   function forgetServerLogin() {
     known = null;
+    asking = null;
   }
   function navigate(url) {
     const replacement = cfg.account?.navigate;
@@ -246,7 +258,7 @@
   }
   async function serverLogout(returnTo) {
     const answer = await serverFetch("/logout", { method: "POST", body: { returnTo, cartId: Cart.id() } });
-    known = null;
+    forgetServerLogin();
     setLoginHint(false);
     emit("account-logout", {});
     const logoutUrl = answer.kind === "answer" ? textOrNull(answer.data["logoutUrl"]) : null;
