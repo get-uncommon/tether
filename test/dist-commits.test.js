@@ -64,6 +64,14 @@ test('a release commit deletes the note files it wrote into CHANGELOG.md, and ad
   assert.deepEqual(reasons(distProblems(release, adding, history)), ['Tether 0.9.3: it also changes .changes/next.md']);
 });
 
+test('a release commit may delete a note file whose name is not ASCII, which git quotes without -z', async (t) => {
+  const { git, commit, pkg, history } = await scratchRepository(t);
+  const notes = await commit('Fix the café', { '.changes/café.md': '- Fix: the café.\n' });
+  git('rm', '--quiet', '.changes/café.md');
+  const release = await commit('Tether 0.9.2', { 'package.json': pkg('0.9.2'), 'dist/tether.js': 'two' });
+  assert.deepEqual(distProblems(notes, release, history), []);
+});
+
 test('a commit titled as a release is not one when it changes other files or leaves the version', async (t) => {
   const { commit, pkg, base, history } = await scratchRepository(t);
   await commit('Tether 0.9.2', { 'package.json': pkg('0.9.2'), 'dist/tether.js': 'two', 'src/cart.ts': 'b' });

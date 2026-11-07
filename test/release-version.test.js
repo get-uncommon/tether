@@ -133,6 +133,16 @@ test('the release refuses to release without note files, or with a file that is 
   assert.equal(await text(folder, `${NOTES_FOLDER}/new.md`), NOTES['new.md']);
 });
 
+test('the rewrite reads only the note files, past the .DS_Store Finder writes and a folder, and leaves those', async (t) => {
+  const folder = await scratchTree(t);
+  await writeFile(join(folder, NOTES_FOLDER, '.DS_Store'), 'Bud1');
+  await mkdir(join(folder, NOTES_FOLDER, 'drafts'));
+  assert.deepEqual((await readNotes(folder)).map((note) => note.name).sort(), Object.keys(NOTES).sort());
+  await applyReleaseVersion(folder, '41.9.0', '2026-12-01');
+  assert.match(await text(folder, 'CHANGELOG.md'), /^## 41\.9\.0 \(2026-12-01\)\n\n- Fix: the cart,$/m);
+  assert.deepEqual((await readdir(join(folder, NOTES_FOLDER))).sort(), ['.DS_Store', 'drafts']);
+});
+
 test('a note file with CRLF line ends, as core.autocrlf checks it out, is written with LF', async (t) => {
   const folder = await scratchTree(t);
   await writeFile(join(folder, NOTES_FOLDER, 'cart.md'), NOTES['cart.md'].replaceAll('\n', '\r\n'));
@@ -147,9 +157,7 @@ test('the rewrite refuses a CHANGELOG that already has the version', async (t) =
 
 test('a release commit may delete note files, and change only the release files besides', () => {
   const changes = fileChanges(
-    ['M\tpackage.json', 'D\t.changes/cart.md', 'M\tdist/tether.min.js', 'A\t.changes/new.md', 'M\tsrc/cart.ts'].join(
-      '\n',
-    ),
+    'M\0package.json\0D\0.changes/café.md\0M\0dist/tether.min.js\0A\0.changes/new.md\0M\0src/cart.ts\0',
   );
   assert.deepEqual(
     changes.filter((change) => !isReleaseCommitChange(change.path, change.deleted)).map((change) => change.path),

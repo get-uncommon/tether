@@ -27,9 +27,9 @@
  * it, works at every commit. A release on an older minor line leaves main's starter alone.
  *
  * Needs the release's note files in .changes/ first (they become its dated section in CHANGELOG.md, which the
- * GitHub Release's notes come from, and the release commit deletes them), a clean working tree, and HEAD at the branch the release goes on (a detached checkout works, so a
- * worktree can release). The version is set in package.json and written from there into every copy (`versions.ts`);
- * dist/ is rebuilt from it.
+ * GitHub Release's notes come from, and the release commit deletes them), a clean working tree, and HEAD at the
+ * branch the release goes on (a detached checkout works, so a worktree can release). The version is set in
+ * package.json and written from there into every copy (`versions.ts`); dist/ is rebuilt from it.
  *
  * A version on main's minor line or a newer one is released from main. An older minor line gets a maintenance release
  * from its branch `release/X.Y`, made once from that line's last tag (`git push origin vX.Y.Z:refs/heads/release/X.Y`);
@@ -243,13 +243,13 @@ function howToRehearse(version: string): string {
 
 /**
  * Exits when the working tree changed anything but what the version rewrite changes: the files `applyReleaseVersion`
- * writes, the lockfile's copy of the version, the rebuilt dist/ and the note files it deleted. CI passed on HEAD, so the release commit is that
- * tree with only the new version in it.
+ * writes, the lockfile's copy of the version, the rebuilt dist/ and the note files it deleted. CI passed on HEAD, so
+ * the release commit is that tree with only the new version in it.
  */
 function checkOnlyVersionChanged(): void {
-  const untracked = output('git', ['ls-files', '--others', '--exclude-standard']).split('\n').filter(Boolean);
+  const untracked = output('git', ['ls-files', '--others', '--exclude-standard', '-z']).split('\0').filter(Boolean);
   const changed = [
-    ...fileChanges(output('git', ['diff', '--name-status', '--no-renames', 'HEAD'])),
+    ...fileChanges(output('git', ['diff', '--name-status', '--no-renames', '-z', 'HEAD'])),
     ...untracked.map((path) => ({ path, deleted: false })),
   ]
     .filter((change) => !isReleaseCommitChange(change.path, change.deleted))

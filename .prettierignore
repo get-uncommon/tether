@@ -1,4 +1,7 @@
 dist/
+# What an interrupted build leaves beside its output folder (scripts/replace-folder.ts).
+.dist-building-*/
+.test-dist-building-*/
 node_modules/
 package-lock.json
 examples/astro/.astro/

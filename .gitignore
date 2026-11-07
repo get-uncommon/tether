@@ -5,3 +5,6 @@ node_modules
 test-results/
 playwright-report/
 .test-dist/
+# What an interrupted build leaves beside its output folder (scripts/replace-folder.ts).
+/.dist-building-*/
+/.test-dist-building-*/
