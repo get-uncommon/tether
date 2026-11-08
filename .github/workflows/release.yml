@@ -1,45 +1,252 @@
 # Publishes a release when a version tag is pushed (made by `npm run release -- X.Y.Z`):
-# tests, npm publish with provenance (trusted publishing: no token in the repo), GitHub Release.
+# the gate, the GitHub Release, npm publish with provenance (trusted publishing: no token in the repo), and a purge
+# of jsDelivr's cached alias URLs after each of those two.
+# The Release carries tether-server-X.Y.Z.tar.gz, the sync Worker's server/ folder with a GitHub artifact
+# attestation from this workflow: deployed copies install an update only from that file, after
+# `gh attestation verify --signer-workflow <repo>/.github/workflows/release.yml` (server/scripts/release-asset.ts).
+# Renaming this file or the asset stops every copy's updates. Copies skip a tag until its Release carries the file,
+# so the Release comes before npm: a failed npm publish doesn't hold back the Worker copies, and is run again alone.
+#
+# A maintenance release (a version below the newest tag, from a `release/X.Y` branch) is not marked as GitHub's latest
+# release, and goes to npm under the `latest-X.Y` dist-tag instead of `latest`. The `check` job refuses a tag that
+# isn't in main's history, or not on its `release/X.Y` branch when there is one, before anything is published.
+#
+# Only the `check` job installs the dependencies, and it can only read the repository. The jobs that can sign
+# (`server-asset`, `npm`) or write (`github-release`) run no dependency's code: an install script can't reach their
+# tokens. The `npm` job installs only npm itself, at an exact version, for trusted publishing.
 name: release
 
 on:
   push:
     tags: ['v*.*.*']
 
-permissions:
-  contents: write   # the GitHub Release
-  id-token: write   # npm trusted publishing + provenance
+permissions: {}
 
 jobs:
-  release:
+  check:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
+      # The whole history, every branch and every tag: the check below needs main's and release/X.Y's history, and
+      # test/upgrade-from-released.test.js installs this tree into copies made from the release tags.
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      # Deployed copies install only a tag whose commit is in main's history (server/scripts/update-tether.ts), and
+      # one they refuse would block every copy in its range. A maintenance release's commit is on release/X.Y too,
+      # and main has it through the merge commit `npm run release` makes.
+      - name: Tag is on main, and on release/X.Y when that branch exists
+        shell: bash
+        run: |
+          V="${GITHUB_REF_NAME#v}"
+          branches=(main)
+          if git rev-parse --verify --quiet "refs/remotes/origin/release/${V%.*}" > /dev/null; then branches+=("release/${V%.*}"); fi
+          for branch in "${branches[@]}"; do
+            git merge-base --is-ancestor "$GITHUB_SHA" "origin/$branch" || { echo "::error::$GITHUB_REF_NAME ($GITHUB_SHA) is not on $branch: deployed copies would refuse it"; exit 1; }
+          done
+      # No dependency cache: a cache written by another workflow's run must not reach what this one publishes.
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: 22
-          registry-url: https://registry.npmjs.org
-      - name: npm with trusted publishing
-        run: npm install -g npm@^11.5
+          package-manager-cache: false
       - run: npm ci
       - name: Tag matches package.json
         run: |
           test "v$(node -p "require('./package.json').version")" = "$GITHUB_REF_NAME" || { echo "::error::tag $GITHUB_REF_NAME doesn't match package.json"; exit 1; }
-      - run: npm test
+      # npm and the Release ship the committed dist/ (dist/types/ included), so it must be what this tag's source builds.
+      - name: Committed dist/ matches a fresh build
+        shell: bash
+        run: |
+          npm run build
+          if ! git diff --exit-code --stat -- dist/ || [ -n "$(git status --porcelain --untracked-files=all -- dist/)" ]; then
+            git status --short -- dist/
+            echo "::error::dist/ differs from a fresh npm run build: rebuild and commit it"
+            exit 1
+          fi
+      - run: npm run check
       - run: npm run smoke
-      - name: Publish to npm
-        run: npm publish --provenance --access public
-      - name: GitHub Release
+
+  # git archive of the tagged commit: the same bytes on every run (file times are the commit's), and only what is
+  # committed. The top folder is stripped by the updater, which reads server/ inside it.
+  server-asset:
+    needs: check
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      id-token: write # the attestation's signing certificate
+      attestations: write # the server asset's attestation
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - name: Server asset for the sync Worker's updates
+        shell: bash
+        run: |
+          V="${GITHUB_REF_NAME#v}"
+          git archive --format=tar.gz --prefix="tether-server-$V/" -o "tether-server-$V.tar.gz" HEAD -- server
+          echo "SERVER_ASSET=tether-server-$V.tar.gz" >> "$GITHUB_ENV"
+      - name: Attest the server asset
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: ${{ env.SERVER_ASSET }}
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        with:
+          name: server-asset
+          path: ${{ env.SERVER_ASSET }}
+          if-no-files-found: error
+          retention-days: 1
+
+  # Whether this tag is the newest release: only then is it GitHub's latest release and npm's `latest`.
+  channel:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      latest: ${{ steps.channel.outputs.latest }}
+      npm-tag: ${{ steps.channel.outputs.npm-tag }}
+    steps:
+      - name: Newest release tag
+        id: channel
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           V="${GITHUB_REF_NAME#v}"
+          newest=$(gh api --paginate "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/v" --jq '.[].ref | ltrimstr("refs/tags/v")' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1)
+          if [ "$newest" = "$V" ]; then
+            echo "latest=true" >> "$GITHUB_OUTPUT"
+            echo "npm-tag=latest" >> "$GITHUB_OUTPUT"
+          else
+            echo "v$V is a maintenance release: v$newest is newer"
+            echo "latest=false" >> "$GITHUB_OUTPUT"
+            echo "npm-tag=latest-${V%.*}" >> "$GITHUB_OUTPUT"
+          fi
+
+  github-release:
+    needs: [server-asset, channel]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write # the GitHub Release
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+        with:
+          name: server-asset
+          path: ${{ runner.temp }}/server-asset
+      # gh uploads the assets to a draft and publishes it after the last one, so the Release never shows without
+      # the server asset.
+      - name: GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LATEST: ${{ needs.channel.outputs.latest }}
+          NPM_TAG: ${{ needs.channel.outputs.npm-tag }}
+        run: |
+          V="${GITHUB_REF_NAME#v}"
+          SERVER_ASSET="$RUNNER_TEMP/server-asset/tether-server-$V.tar.gz"
+          PACKAGE="@occluze/tether"
+          if [ "$NPM_TAG" != latest ]; then PACKAGE="@occluze/tether@$NPM_TAG"; fi
           awk -v v="$V" '$0 ~ "^## "v"( |$)" {f=1; next} /^## / && f {exit} f' CHANGELOG.md > notes.md
           {
             echo; echo '**Use it:**'; echo
             echo '```html'; echo "<script src=\"https://cdn.jsdelivr.net/gh/${GITHUB_REPOSITORY}@${V%.*}/dist/tether.min.js\" defer></script>"; echo '```'; echo
-            echo '```bash'; echo 'npm install @occluze/tether'; echo '```'
+            echo '```bash'; echo "npm install $PACKAGE"; echo '```'
           } >> notes.md
-          gh release create "$GITHUB_REF_NAME" --title "Tether $V" --notes-file notes.md --latest \
-            dist/tether.min.js dist/tether.markets.min.js dist/tether.diagnose.min.js dist/tether.search.min.js dist/tether.account.min.js dist/tether.analytics.min.js dist/tether.extras.min.js dist/tether.esm.js
+          # Every script next to the core, so a site can self-host the folder: the core loads its parts from beside it.
+          # The ES module build (dist/esm/ and tether.esm.js, which re-exports it) is left out: its chunks import each
+          # other by path, which flat Release assets don't keep. Bundlers take it from npm.
+          mapfile -t assets < <(find dist -maxdepth 1 -type f ! -name tether.esm.js | sort)
+          gh release create "$GITHUB_REF_NAME" --title "Tether $V" --notes-file notes.md --latest="$LATEST" "${assets[@]}" "$SERVER_ASSET"
+
+  # Publishes the committed files as they are: `--ignore-scripts`, because the lifecycle scripts need the
+  # devDependencies this job never installs.
+  npm:
+    needs: [github-release, channel]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      id-token: write # npm trusted publishing + provenance
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+      # Trusted publishing needs npm 11.5.1 or newer; the exact version keeps a new npm release out of this job.
+      - name: npm with trusted publishing
+        run: npm install -g npm@11.21.1 # zizmor: ignore[adhoc-packages] npm itself, at an exact version
+      - name: Publish to npm
+        env:
+          NPM_TAG: ${{ needs.channel.outputs.npm-tag }}
+        run: npm publish --provenance --access public --ignore-scripts --tag "$NPM_TAG"
+
+  # jsDelivr caches each version-alias URL (`@X.Y`, `@latest`, no version) for up to 7 days, so until then an alias can
+  # serve the previous release's core while parts already resolve to this one; a core loads its parts from its exact
+  # release folder, but older cores don't. Only the newest release moves `@latest`, `@X` and the bare URL. The `gh/`
+  # URLs, which the README's script tag uses, come from the tag, and are purged once the GitHub Release exists, so a
+  # failed npm publish doesn't leave them stale; the `npm/` URLs are purged once npm has the version. The purge API is
+  # public, and a failed purge only means the cache expires on its own, so it warns instead of failing the release.
+  # dist/types/ is left out: only npm installs read it.
+  purge-cdn-gh:
+    needs: [github-release, channel]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - name: Purge jsDelivr's gh/ alias URLs
+        shell: bash
+        env:
+          LATEST: ${{ needs.channel.outputs.latest }}
+          PACKAGE: gh/${{ github.repository }}
+        run: |
+          V="${GITHUB_REF_NAME#v}"
+          aliases=("@${V%.*}")
+          if [ "$LATEST" = true ]; then aliases+=("@${V%%.*}" "@latest" ""); fi
+          urls=()
+          while IFS= read -r file; do
+            for alias in "${aliases[@]}"; do urls+=("https://purge.jsdelivr.net/$PACKAGE$alias/$file"); done
+          done < <(find dist -type f -not -path 'dist/types/*' | sort)
+          printf '%s\n' "${urls[@]}" | xargs -P 8 -n 1 curl -fsS --max-time 30 --retry 2 -o /dev/null ||
+            echo "::warning::Some of jsDelivr's ${#urls[@]} purges of $PACKAGE failed: their alias URLs update within 7 days"
+
+  purge-cdn-npm:
+    needs: [npm, channel]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - name: Purge jsDelivr's npm/ alias URLs
+        shell: bash
+        env:
+          LATEST: ${{ needs.channel.outputs.latest }}
+          PACKAGE: npm/@occluze/tether
+        run: |
+          V="${GITHUB_REF_NAME#v}"
+          aliases=("@${V%.*}")
+          if [ "$LATEST" = true ]; then aliases+=("@${V%%.*}" "@latest" ""); fi
+          urls=()
+          while IFS= read -r file; do
+            for alias in "${aliases[@]}"; do urls+=("https://purge.jsdelivr.net/$PACKAGE$alias/$file"); done
+          done < <(find dist -type f -not -path 'dist/types/*' | sort)
+          printf '%s\n' "${urls[@]}" | xargs -P 8 -n 1 curl -fsS --max-time 30 --retry 2 -o /dev/null ||
+            echo "::warning::Some of jsDelivr's ${#urls[@]} purges of $PACKAGE failed: their alias URLs update within 7 days"

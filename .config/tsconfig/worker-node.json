@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  // The sync's Node CLI and scripts, with the Worker modules they import: Node's globals, with no DOM.
+  "extends": "./base.json",
+  "compilerOptions": {
+    "tsBuildInfoFile": "../../node_modules/.cache/tsc/worker-node.tsbuildinfo",
+    "lib": ["ES2023"],
+    "types": ["node"]
+  },
+  "include": ["../../server/src/node.ts", "../../server/bin/*.ts", "../../server/scripts/*.ts"]
+}

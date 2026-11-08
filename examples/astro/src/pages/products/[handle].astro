@@ -52,7 +52,9 @@ const hide = (k) => !state.show[k];
         {state.available ? 'Add to cart' : 'Sold out'}
       </button>
       <p tether-show="low-stock" hidden={hide('low-stock')}>Only a few left</p>
-      <div tether-bind="description" set:html={product.descriptionHtml} />
+      {/* Plain text in the static HTML: descriptionHtml is written by anyone who can edit products, and Node has no
+          DOM to clean it with. Tether's script replaces it with the cleaned HTML. */}
+      <div tether-bind="description">{product.description}</div>
     </div>
   </article>
   <Fragment set:html={shop.hydrate(product)} />

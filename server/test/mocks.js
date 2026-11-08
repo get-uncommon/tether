@@ -1,11 +1,103 @@
 // In-memory fake Shopify Admin API + Webflow Data API v2 behind one fetch().
+import assert from 'node:assert/strict';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { isRecord } from '../src/shared/json.ts';
+import { firstKeys } from '../src/store.ts';
+import { signShopify } from '../src/hmac.ts';
 
-export function shopifyProduct(n, over = {}) {
+// Readers for the parsed JSON a fake receives or a store holds, which is `unknown`: each asserts the shape the test
+// reads, so a request of the wrong shape fails the test where it is read instead of reading as `undefined`.
+
+/**
+ * @param {unknown} value
+ * @param {string} what Names the value in the failure.
+ * @returns {Record<string, unknown>}
+ */
+export function asRecord(value, what) {
+  assert.ok(isRecord(value), `${what} is an object`);
+  return value;
+}
+
+/**
+ * @param {unknown} value
+ * @param {string} what Names the value in the failure.
+ * @returns {unknown[]}
+ */
+export function asList(value, what) {
+  assert.ok(Array.isArray(value), `${what} is a list`);
+  return value;
+}
+
+/**
+ * @param {unknown} value
+ * @param {string} what Names the value in the failure.
+ */
+export function asString(value, what) {
+  assert.ok(typeof value === 'string', `${what} is a string`);
+  return value;
+}
+
+/**
+ * @param {unknown} value
+ * @param {string} what Names the value in the failure.
+ */
+export function asNumber(value, what) {
+  assert.ok(typeof value === 'number', `${what} is a number`);
+  return value;
+}
+
+/**
+ * @param {unknown} value An object.
+ * @param {string} key
+ * @returns {unknown} Its field `key`.
+ */
+export const fieldOf = (value, key) => asRecord(value, `the object with ${key}`)[key];
+
+/** @param {unknown} value An object. @param {string} key */
+export const recordAt = (value, key) => asRecord(fieldOf(value, key), key);
+/** @param {unknown} value An object. @param {string} key */
+export const listAt = (value, key) => asList(fieldOf(value, key), key);
+/** @param {unknown} value An object. @param {string} key */
+export const stringAt = (value, key) => asString(fieldOf(value, key), key);
+/** @param {unknown} value An object. @param {string} key */
+export const numberAt = (value, key) => asNumber(fieldOf(value, key), key);
+/** @param {unknown} value An object. @param {string} key A list of objects. */
+export const recordsAt = (value, key) => listAt(value, key).map((item, i) => asRecord(item, `${key}[${i}]`));
+
+/**
+ * @param {string} text JSON.
+ * @returns {unknown} What it holds, for the readers above to check.
+ */
+export const parseJson = (text) => JSON.parse(text);
+
+/**
+ * @param {Response} response
+ * @returns {Promise<unknown>} Its JSON body, for the readers above to check.
+ */
+export async function jsonOf(response) {
+  /** @type {unknown} */
+  const body = await response.json();
+  return body;
+}
+
+/**
+ * @param {RequestInfo | URL} input What a fake `fetch` was called with.
+ * @returns {string} The URL it asks for.
+ */
+export const urlOf = (input) => (input instanceof Request ? input.url : String(input));
+
+/**
+ * @param {number} number Numbers the product's ids, handle and title.
+ * @param {Record<string, unknown>} [over] Fields that replace the defaults.
+ */
+export function shopifyProduct(number, over = {}) {
   return {
-    id: `gid://shopify/Product/${n}`,
-    legacyResourceId: String(n),
-    handle: `product-${n}`,
-    title: `Product ${n}`,
+    id: `gid://shopify/Product/${number}`,
+    legacyResourceId: String(number),
+    handle: `product-${number}`,
+    title: `Product ${number}`,
     description: 'Desc',
     descriptionHtml: '<p>Desc</p>',
     vendor: 'Acme',
@@ -13,131 +105,485 @@ export function shopifyProduct(n, over = {}) {
     tags: ['a', 'b'],
     status: 'ACTIVE',
     createdAt: '2026-01-01T00:00:00Z',
-    updatedAt: `2026-11-01T00:00:${String(n).padStart(2, '0')}Z`,
+    updatedAt: `2026-11-01T00:00:${String(number).padStart(2, '0')}Z`,
     publishedAt: '2026-01-01T00:00:00Z',
     onlineStoreUrl: null,
     seo: { title: null, description: null },
-    priceRangeV2: { minVariantPrice: { amount: '12.5', currencyCode: 'EUR' }, maxVariantPrice: { amount: '20.0', currencyCode: 'EUR' } },
-    compareAtPriceRange: { minVariantCompareAtPrice: { amount: '15.0', currencyCode: 'EUR' }, maxVariantCompareAtPrice: { amount: '15.0', currencyCode: 'EUR' } },
-    featuredMedia: { preview: { image: { url: `https://cdn.test/${n}.jpg`, altText: 'alt' } } },
-    media: { nodes: [{ mediaContentType: 'IMAGE', preview: { image: { url: `https://cdn.test/${n}.jpg`, altText: 'alt' } } }] },
+    priceRangeV2: {
+      minVariantPrice: { amount: '12.5', currencyCode: 'EUR' },
+      maxVariantPrice: { amount: '20.0', currencyCode: 'EUR' },
+    },
+    compareAtPriceRange: {
+      minVariantCompareAtPrice: { amount: '15.0', currencyCode: 'EUR' },
+      maxVariantCompareAtPrice: { amount: '15.0', currencyCode: 'EUR' },
+    },
+    featuredMedia: { preview: { image: { url: `https://cdn.test/${number}.jpg`, altText: 'alt' } } },
+    media: {
+      nodes: [
+        { mediaContentType: 'IMAGE', preview: { image: { url: `https://cdn.test/${number}.jpg`, altText: 'alt' } } },
+      ],
+    },
     options: [{ name: 'Size', optionValues: [{ name: 'S' }] }],
-    variants: { nodes: [{ id: `gid://shopify/ProductVariant/${n}0`, legacyResourceId: `${n}0`, title: 'S', sku: `SKU${n}`, price: '12.5', compareAtPrice: '15.0', availableForSale: true }] },
+    variants: {
+      nodes: [
+        {
+          id: `gid://shopify/ProductVariant/${number}0`,
+          legacyResourceId: `${number}0`,
+          title: 'S',
+          sku: `SKU${number}`,
+          price: '12.5',
+          compareAtPrice: '15.0',
+          availableForSale: true,
+        },
+      ],
+    },
     mf0: { value: 'Oak', type: 'single_line_text_field' },
     ...over,
   };
 }
 
-export function createMockApis({ products = [], items = [], failCreateFor = null, rateLimitOnce = false, maxFirst = Infinity } = {}) {
-  const shop = { products: new Map(products.map((p) => [p.id, p])), webhooks: [] };
-  const wf = { items: new Map(items.map((it) => [it.id, it])), live: new Set(), nextId: 1 };
+/**
+ * KV's `list` over a fake namespace's keys: the first `limit` keys with the prefix, in key order.
+ *
+ * @param {() => Iterable<string>} keys
+ * @returns {import('../src/env.ts').KvBinding['list']}
+ */
+export const kvList =
+  (keys) =>
+  async ({ prefix, limit }) => ({
+    keys: firstKeys(keys(), prefix, limit).map((name) => ({ name })),
+  });
+
+/**
+ * A KV namespace in memory, holding the texts it is given.
+ *
+ * @returns {import('../src/env.ts').KvBinding & { map: Map<string, string> }}
+ */
+export function memoryKv() {
+  /** @type {Map<string, string>} */
+  const map = new Map();
+  return {
+    map,
+    async get(key, type) {
+      const value = map.get(key);
+      if (value === undefined) return null;
+      return type === 'json' ? parseJson(value) : value;
+    },
+    async put(key, value) {
+      map.set(key, value);
+    },
+    async delete(key) {
+      map.delete(key);
+    },
+    list: kvList(() => map.keys()),
+  };
+}
+
+/** @typedef {ReturnType<typeof shopifyProduct>} MockProduct */
+/**
+ * @typedef {{ id: string, isArchived?: boolean | undefined, isDraft?: boolean | undefined,
+ *   fieldData: Record<string, unknown> }} MockItem
+ */
+/** @typedef {{ products: Map<string, MockProduct>, webhooks: { id: string, topic: string, uri: string }[] }} MockShop */
+/** @typedef {{ items: Map<string, MockItem>, live: Set<string>, nextId: number }} MockWebflow */
+
+/**
+ * @param {number} status
+ * @param {unknown} body
+ * @param {Record<string, string>} [headers]
+ */
+const json = (status, body, headers = {}) =>
+  new Response(body == null ? null : JSON.stringify(body), {
+    status,
+    headers: { 'content-type': 'application/json', ...headers },
+  });
+
+/**
+ * @param {unknown} body A request body.
+ * @param {string} key A flag the body may set.
+ */
+function flagAt(body, key) {
+  const value = fieldOf(body, key);
+  assert.ok(value === undefined || typeof value === 'boolean', `${key} is a boolean`);
+  return value;
+}
+
+/**
+ * A product's place in the `UPDATED_AT` order, ties broken by id. Shopify's cursors encode this place, not an index,
+ * so a cursor still points between the same two products after others were edited and moved to the end.
+ *
+ * @param {MockProduct} product
+ * @returns {[string, number]}
+ */
+const sortPlace = (product) => [product.updatedAt, Number(product.legacyResourceId)];
+
+/** @param {[string, number]} a @param {[string, number]} b */
+const comparePlaces = (a, b) => a[0].localeCompare(b[0]) || a[1] - b[1];
+
+/**
+ * @param {MockShop} shop
+ * @param {Record<string, unknown>} variables
+ */
+function productsPage(shop, variables) {
+  let list = [...shop.products.values()].sort((a, b) => comparePlaces(sortPlace(a), sortPlace(b)));
+  const search = variables['query'];
+  const updatedSince = typeof search === 'string' ? /updated_at:>='([^']+)'/.exec(search)?.[1] : undefined;
+  if (updatedSince) list = list.filter((product) => product.updatedAt >= updatedSince);
+  const after = variables['after'];
+  if (typeof after === 'string') {
+    const [updatedAt, id] = asList(parseJson(after), 'a cursor');
+    /** @type {[string, number]} */
+    const place = [asString(updatedAt, "a cursor's updatedAt"), Number(id)];
+    list = list.filter((product) => comparePlaces(sortPlace(product), place) > 0);
+  }
+  const page = list.slice(0, numberAt(variables, 'first'));
+  const edges = page.map((node) => ({ cursor: JSON.stringify(sortPlace(node)), node }));
+  return json(200, {
+    data: {
+      products: {
+        edges,
+        pageInfo: { hasNextPage: page.length < list.length, endCursor: edges.at(-1)?.cursor ?? null },
+      },
+    },
+  });
+}
+
+/**
+ * The Admin GraphQL API, by operation name.
+ * @param {MockShop} shop
+ * @param {unknown} body
+ * @param {number} maxFirst
+ */
+function answerShopify(shop, body, maxFirst) {
+  const op = /(?:query|mutation)\s+(\w+)/.exec(stringAt(body, 'query'))?.[1];
+  const variables = asRecord(fieldOf(body, 'variables') ?? {}, 'variables');
+  if (op === 'TetherSyncWebhooks') return json(200, { data: { webhookSubscriptions: { nodes: shop.webhooks } } });
+  if (op === 'TetherSyncWebhookCreate') {
+    const webhook = {
+      id: `gid://shopify/WebhookSubscription/${shop.webhooks.length + 1}`,
+      topic: stringAt(variables, 'topic'),
+      uri: stringAt(recordAt(variables, 'sub'), 'uri'),
+    };
+    shop.webhooks.push(webhook);
+    return json(200, { data: { webhookSubscriptionCreate: { webhookSubscription: webhook, userErrors: [] } } });
+  }
+  if (op === 'TetherSyncGetProduct')
+    return json(200, { data: { product: shop.products.get(stringAt(variables, 'id')) ?? null } });
+  if (op === 'TetherSyncShop')
+    return json(200, { data: { shop: { name: 'Shop', myshopifyDomain: 'shop.myshopify.com' } } });
+  if (op === 'TetherSyncProducts' && numberAt(variables, 'first') > maxFirst) {
+    return json(200, {
+      errors: [
+        {
+          message: 'Query cost is 1500, which exceeds the single query max cost limit (1000).',
+          extensions: { code: 'MAX_COST_EXCEEDED' },
+        },
+      ],
+    });
+  }
+  if (op === 'TetherSyncProducts') return productsPage(shop, variables);
+  throw new Error(`unexpected Shopify op ${op}`);
+}
+
+const COLLECTION = {
+  id: 'col',
+  displayName: 'Products',
+  fields: [
+    { slug: 'name', type: 'PlainText', isRequired: true },
+    { slug: 'slug', type: 'PlainText', isRequired: true },
+    { slug: 'shopify-id', type: 'PlainText' },
+    { slug: 'price', type: 'Number' },
+    { slug: 'main-image', type: 'Image' },
+    { slug: 'description', type: 'RichText' },
+    { slug: 'material', type: 'PlainText' },
+  ],
+};
+
+/**
+ * POST /items.
+ * @param {MockWebflow} wf
+ * @param {unknown} body
+ * @param {string | null} failCreateFor The slug whose create fails validation.
+ */
+function createItem(wf, body, failCreateFor) {
+  const fieldData = recordAt(body, 'fieldData');
+  if (failCreateFor && fieldData['slug'] === failCreateFor)
+    return json(400, { message: 'Validation Error', details: [{ param: 'name' }] });
+  // Webflow slugs are unique within a collection.
+  if ([...wf.items.values()].some((item) => item.fieldData['slug'] === fieldData['slug'])) {
+    return json(409, {
+      message: 'Conflict',
+      details: [{ param: 'slug', description: 'Unique value is already in database' }],
+    });
+  }
+  const id = `item${wf.nextId++}`;
+  const item = { id, isArchived: flagAt(body, 'isArchived'), isDraft: flagAt(body, 'isDraft'), fieldData };
+  wf.items.set(id, item);
+  return json(202, item);
+}
+
+/**
+ * GET, PATCH or DELETE /items/{id}.
+ * @param {MockWebflow} wf
+ * @param {string} itemId
+ * @param {string} method
+ * @param {unknown} body
+ */
+function answerItem(wf, itemId, method, body) {
+  const item = wf.items.get(itemId);
+  if (!item) return json(404, { message: 'Item not found' });
+  if (method === 'GET') return json(200, item);
+  if (method === 'PATCH') {
+    const patch = asRecord(body, 'the PATCH body');
+    if ('isArchived' in patch) item.isArchived = flagAt(body, 'isArchived');
+    if ('isDraft' in patch) item.isDraft = flagAt(body, 'isDraft');
+    Object.assign(item.fieldData, asRecord(patch['fieldData'] ?? {}, 'fieldData'));
+    return json(200, item);
+  }
+  if (method === 'DELETE') {
+    wf.items.delete(itemId);
+    return json(204, null);
+  }
+  return null;
+}
+
+/**
+ * The Webflow Data API's collection routes.
+ * @param {{ wf: MockWebflow, failCreateFor: string | null, failPublish: boolean, refusePublishFor: string | null }} state
+ * @param {URL} target
+ * @param {string} method
+ * @param {unknown} body
+ */
+function answerWebflow({ wf, failCreateFor, failPublish, refusePublishFor }, target, method, body) {
+  const path = target.pathname.replace(/^\/v2\/collections\/[^/]+/, '');
+  if (path === '' && method === 'GET') return json(200, COLLECTION);
+  if (path === '/items' && method === 'GET') {
+    const all = [...wf.items.values()];
+    const offset = Number(target.searchParams.get('offset') || 0);
+    const limit = Number(target.searchParams.get('limit') || 100);
+    return json(200, { items: all.slice(offset, offset + limit), pagination: { limit, offset, total: all.length } });
+  }
+  if (path === '/items' && method === 'POST') return createItem(wf, body, failCreateFor);
+  if (path === '/items/publish' && method === 'POST') {
+    if (failPublish) return json(500, { message: 'publish failed' });
+    const itemIds = listAt(body, 'itemIds').map((id, i) => asString(id, `itemIds[${i}]`));
+    const refused = itemIds.filter((id) => wf.items.get(id)?.fieldData['slug'] === refusePublishFor);
+    const published = itemIds.filter((id) => !refused.includes(id));
+    published.forEach((id) => wf.live.add(id));
+    return json(202, { publishedItemIds: published, errors: refused.map((itemId) => ({ itemId })) });
+  }
+  const liveId = /^\/items\/([^/]+)\/live$/.exec(path)?.[1];
+  if (liveId && method === 'DELETE') {
+    if (!wf.live.has(liveId)) return json(404, { message: 'not live' });
+    wf.live.delete(liveId);
+    return json(204, null);
+  }
+  const itemId = /^\/items\/([^/]+)$/.exec(path)?.[1];
+  const answer = itemId ? answerItem(wf, itemId, method, body) : null;
+  if (answer) return answer;
+  throw new Error(`unexpected Webflow ${method} ${path}`);
+}
+
+/**
+ * @param {{ products?: MockProduct[], items?: MockItem[], failCreateFor?: string | null, rateLimitOnce?: boolean,
+ *   maxFirst?: number }} [options]
+ */
+export function createMockApis({
+  products = [],
+  items = [],
+  failCreateFor = null,
+  rateLimitOnce = false,
+  maxFirst = Infinity,
+} = {}) {
+  /** @type {MockShop} */
+  const shop = { products: new Map(products.map((product) => [product.id, product])), webhooks: [] };
+  /** @type {MockWebflow} */
+  const wf = { items: new Map(items.map((item) => [item.id, item])), live: new Set(), nextId: 1 };
+  /** @type {{ host: string, method: string, path: string, body: unknown, headers: HeadersInit | undefined }[]} */
   const calls = [];
   let limited = !rateLimitOnce;
-  const flags = { failPublish: false };
+  /** @type {{ failPublish: boolean, refusePublishFor: string | null }} `refusePublishFor`: a slug Webflow won't publish. */
+  const flags = { failPublish: false, refusePublishFor: null };
 
-  const json = (status, body, headers = {}) => new Response(body == null ? null : JSON.stringify(body), { status, headers: { 'content-type': 'application/json', ...headers } });
-
+  /**
+   * @param {RequestInfo | URL} url
+   * @param {RequestInit} [init]
+   */
   async function fetch(url, init = {}) {
-    const u = new URL(url);
+    const target = new URL(urlOf(url));
     const method = init.method || 'GET';
-    const body = init.body && typeof init.body === 'string' && init.body.startsWith('{') ? JSON.parse(init.body) : init.body;
-    calls.push({ host: u.host, method, path: u.pathname + u.search, body, headers: init.headers });
+    /** @type {unknown} A JSON body parsed, any other body as sent. */
+    const body =
+      init.body && typeof init.body === 'string' && init.body.startsWith('{') ? JSON.parse(init.body) : init.body;
+    calls.push({ host: target.host, method, path: target.pathname + target.search, body, headers: init.headers });
 
-    if (u.pathname === '/admin/oauth/access_token') return json(200, { access_token: 'shpat_fresh', scope: 'read_products', expires_in: 86399 });
-
-    if (u.pathname.startsWith('/admin/api/')) {
-      const op = body.query.match(/(?:query|mutation)\s+(\w+)/)[1];
-      if (op === 'TetherSyncWebhooks') return json(200, { data: { webhookSubscriptions: { nodes: shop.webhooks } } });
-      if (op === 'TetherSyncWebhookCreate') {
-        const w = { id: `gid://shopify/WebhookSubscription/${shop.webhooks.length + 1}`, topic: body.variables.topic, uri: body.variables.sub.uri };
-        shop.webhooks.push(w);
-        return json(200, { data: { webhookSubscriptionCreate: { webhookSubscription: w, userErrors: [] } } });
+    if (target.pathname === '/admin/oauth/access_token')
+      return json(200, { access_token: 'shpat_fresh', scope: 'read_products', expires_in: 86399 });
+    if (target.pathname.startsWith('/admin/api/')) return answerShopify(shop, body, maxFirst);
+    if (target.host === 'api.webflow.com') {
+      if (!limited) {
+        limited = true;
+        return json(429, { message: 'Too Many Requests' }, { 'retry-after': '2' });
       }
-      if (op === 'TetherSyncGetProduct') return json(200, { data: { product: shop.products.get(body.variables.id) || null } });
-      if (op === 'TetherSyncShop') return json(200, { data: { shop: { name: 'Shop', myshopifyDomain: 'shop.myshopify.com' } } });
-      if (op === 'TetherSyncProducts' && body.variables.first > maxFirst) {
-        return json(200, { errors: [{ message: 'Query cost is 1500, which exceeds the single query max cost limit (1000).', extensions: { code: 'MAX_COST_EXCEEDED' } }] });
-      }
-      if (op === 'TetherSyncProducts') {
-        let list = [...shop.products.values()].sort((a, b) => a.updatedAt.localeCompare(b.updatedAt));
-        const q = body.variables.query;
-        const m = q && q.match(/updated_at:>='([^']+)'/);
-        if (m) list = list.filter((p) => p.updatedAt >= m[1]);
-        const start = body.variables.after ? Number(body.variables.after) : 0;
-        const page = list.slice(start, start + body.variables.first);
-        const end = start + page.length;
-        return json(200, { data: { products: { nodes: page, pageInfo: { hasNextPage: end < list.length, endCursor: String(end) } } } });
-      }
-      throw new Error(`unexpected Shopify op ${op}`);
+      return answerWebflow({ wf, failCreateFor, ...flags }, target, method, body);
     }
-
-    if (u.host === 'api.webflow.com') {
-      if (!limited) { limited = true; return json(429, { message: 'Too Many Requests' }, { 'retry-after': '2' }); }
-      const p = u.pathname.replace(/^\/v2\/collections\/[^/]+/, '');
-      if (p === '' && method === 'GET') return json(200, { id: 'col', displayName: 'Products', fields: [
-        { slug: 'name', type: 'PlainText', isRequired: true }, { slug: 'slug', type: 'PlainText', isRequired: true },
-        { slug: 'shopify-id', type: 'PlainText' }, { slug: 'price', type: 'Number' }, { slug: 'main-image', type: 'Image' },
-        { slug: 'description', type: 'RichText' }, { slug: 'material', type: 'PlainText' },
-      ] });
-      if (p === '/items' && method === 'GET') {
-        const all = [...wf.items.values()];
-        const offset = Number(u.searchParams.get('offset') || 0);
-        const limit = Number(u.searchParams.get('limit') || 100);
-        return json(200, { items: all.slice(offset, offset + limit), pagination: { limit, offset, total: all.length } });
-      }
-      if (p === '/items' && method === 'POST') {
-        if (failCreateFor && body.fieldData.slug === failCreateFor) return json(400, { message: 'Validation Error', details: [{ param: 'name' }] });
-        // Webflow slugs are unique within a collection.
-        if ([...wf.items.values()].some((it) => it.fieldData.slug === body.fieldData.slug)) {
-          return json(409, { message: 'Conflict', details: [{ param: 'slug', description: 'Unique value is already in database' }] });
-        }
-        const id = `item${wf.nextId++}`;
-        const item = { id, isArchived: body.isArchived, isDraft: body.isDraft, fieldData: body.fieldData };
-        wf.items.set(id, item);
-        return json(202, item);
-      }
-      if (p === '/items/publish' && method === 'POST') {
-        if (flags.failPublish) return json(500, { message: 'publish failed' });
-        body.itemIds.forEach((id) => wf.live.add(id));
-        return json(202, { publishedItemIds: body.itemIds, errors: [] });
-      }
-      let m = p.match(/^\/items\/([^/]+)\/live$/);
-      if (m && method === 'DELETE') {
-        if (!wf.live.has(m[1])) return json(404, { message: 'not live' });
-        wf.live.delete(m[1]);
-        return json(204, null);
-      }
-      m = p.match(/^\/items\/([^/]+)$/);
-      if (m) {
-        const it = wf.items.get(m[1]);
-        if (!it) return json(404, { message: 'Item not found' });
-        if (method === 'GET') return json(200, it);
-        if (method === 'PATCH') {
-          if ('isArchived' in body) it.isArchived = body.isArchived;
-          if ('isDraft' in body) it.isDraft = body.isDraft;
-          Object.assign(it.fieldData, body.fieldData);
-          return json(200, it);
-        }
-        if (method === 'DELETE') { wf.items.delete(m[1]); return json(204, null); }
-      }
-      throw new Error(`unexpected Webflow ${method} ${p}`);
-    }
-    throw new Error(`unexpected fetch ${url}`);
+    throw new Error(`unexpected fetch ${target.href}`);
   }
 
-  const webflowWrites = () => calls.filter((c) => c.host === 'api.webflow.com' && c.method !== 'GET');
+  const webflowWrites = () => calls.filter((call) => call.host === 'api.webflow.com' && call.method !== 'GET');
   return { fetch, shop, wf, calls, webflowWrites, flags };
 }
 
+/** @type {import('../src/mapping.ts').RawConfig} */
 export const baseConfig = {
   shopify: { domain: 'shop.myshopify.com' },
   webflow: { collectionId: 'col', perMinute: 0 },
   fields: {
-    name: 'title', slug: 'handle', price: 'price', 'main-image': 'image',
-    description: 'descriptionHtml', material: 'metafield:custom.material',
+    name: 'title',
+    slug: 'handle',
+    price: 'price',
+    'main-image': 'image',
+    description: 'descriptionHtml',
+    material: 'metafield:custom.material',
   },
   webflowOwned: ['description'],
 };
 
 export const env = { SHOPIFY_ADMIN_TOKEN: 'shpat_test', WEBFLOW_TOKEN: 'wf_test', SHOPIFY_WEBHOOK_SECRET: 'whsec' };
 export const instantSleep = async () => {};
+
+/** A Worker context for requests that hand nothing to `waitUntil`. */
+export const noWaitUntil = {
+  waitUntil() {
+    throw new Error('unexpected waitUntil');
+  },
+};
+
+/**
+ * @param {{ steps: import('../src/check/steps.ts').CheckStep[] }} report A `/check` report.
+ * @param {string} title
+ */
+export function checkStep(report, title) {
+  const step = report.steps.find((candidate) => candidate.title === title);
+  assert.ok(step, `no "${title}" step`);
+  return step;
+}
+
+/**
+ * @param {unknown} report A `/check` report as the Worker answers it, in JSON.
+ * @param {string} title
+ */
+export function answeredStep(report, title) {
+  const step = recordsAt(report, 'steps').find((candidate) => candidate['title'] === title);
+  assert.ok(step, `no "${title}" step`);
+  return step;
+}
+
+/**
+ * A new folder in the system's temp folder, removed with everything in it once the test is done, passed or failed.
+ *
+ * @param {Pick<import('node:test').TestContext, 'after'>} t
+ * @param {string} prefix
+ */
+export async function tempFolder(t, prefix) {
+  const folder = await mkdtemp(join(tmpdir(), prefix));
+  t.after(() => rm(folder, { recursive: true, force: true }));
+  return folder;
+}
+
+/**
+ * Waits until `condition` holds, for work that finishes on its own schedule (a lazy import, a timed write), instead of
+ * sleeping a fixed time that a busy machine can overrun.
+ *
+ * @param {() => boolean} condition
+ * @param {string} what Named in the failure when it never holds.
+ */
+export async function waitFor(condition, what, timeoutMs = 5000) {
+  const deadline = Date.now() + timeoutMs;
+  while (!condition()) {
+    assert.ok(Date.now() < deadline, `timed out waiting for ${what}`);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+}
+
+/**
+ * Settles as `promise` does, or rejects once `ms` have passed, so a wait for an event that never comes fails the test
+ * with what it waited for instead of hanging the run.
+ *
+ * @template T
+ * @param {number} ms
+ * @param {Promise<T>} promise
+ * @param {string} what Named in the failure.
+ * @returns {Promise<T>}
+ */
+export function within(ms, promise, what) {
+  /** @type {ReturnType<typeof setTimeout> | undefined} */
+  let timer;
+  /** @type {Promise<never>} */
+  const deadline = new Promise((_resolve, reject) => {
+    timer = setTimeout(() => {
+      reject(new Error(`timed out after ${String(ms / 1000)}s waiting for ${what}`));
+    }, ms);
+  });
+  return Promise.race([promise, deadline]).finally(() => {
+    clearTimeout(timer);
+  });
+}
+
+/**
+ * The ports `fetch` refuses without connecting ("bad port" in the Fetch standard), from 1024 up, where the system picks
+ * a port for `listen(0)`. Linux picks above them, but Windows can be set to pick from 1024 on.
+ */
+const FETCH_BAD_PORTS = new Set([
+  1719, 1720, 1723, 2049, 3659, 4045, 4190, 5060, 5061, 6000, 6566, 6665, 6666, 6667, 6668, 6669, 6679, 6697, 10080,
+]);
+
+/**
+ * Listens on a free loopback port that `fetch` can reach, picking again while the system hands out one it refuses.
+ *
+ * @param {import('node:net').Server} server
+ * @returns {Promise<number>} The port.
+ */
+export async function listenForFetch(server) {
+  for (;;) {
+    await new Promise((resolve, reject) => {
+      server.once('error', reject);
+      server.listen(0, '127.0.0.1', () => {
+        server.off('error', reject);
+        resolve(undefined);
+      });
+    });
+    const address = server.address();
+    assert.ok(address && typeof address === 'object');
+    if (!FETCH_BAD_PORTS.has(address.port)) return address.port;
+    await new Promise((resolve) => server.close(resolve));
+  }
+}
+
+/**
+ * Delivers a signed product webhook to the Worker and waits for its work.
+ *
+ * @param {ReturnType<typeof import('../src/index.ts').createWorker>} worker
+ * @param {Record<string, unknown>} wenv
+ * @param {string} topic
+ * @param {number} id
+ */
+export async function deliverWebhook(worker, wenv, topic, id) {
+  /** @type {Promise<unknown>[]} */
+  const tasks = [];
+  const body = JSON.stringify({ id });
+  await worker.fetch(
+    new Request('https://w.test/webhooks/shopify', {
+      method: 'POST',
+      body,
+      headers: {
+        'x-shopify-topic': topic,
+        'x-shopify-hmac-sha256': await signShopify(body, 'whsec'),
+        'x-shopify-shop-domain': 'shop.myshopify.com',
+      },
+    }),
+    wenv,
+    { waitUntil: (/** @type {Promise<unknown>} */ promise) => tasks.push(promise) },
+  );
+  await Promise.all(tasks);
+}

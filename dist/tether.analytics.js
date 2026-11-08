@@ -5,255 +5,433 @@
       __defProp(target, name, { get: all[name], enumerable: true });
   };
 
-  // src/analytics.js
+  // src/analytics.ts
   var analytics_exports = {};
   __export(analytics_exports, {
     startAnalytics: () => startAnalytics
   });
 
-  // tether-core:config.js
-  var m = window.Tether.__core["config.js"];
-  var { DEFAULTS, cfg, configure, isConfigured, log, reportError, warn } = m;
+  // tether-core:config.ts
+  var m = window.Tether.__core["config.ts"];
+  var [cfg, isConfigured, log, MARKET_SOURCES, parseMarkets, reportError, warn] = m;
 
-  // tether-core:client.js
-  var m2 = window.Tether.__core["client.js"];
-  var { TetherError, endpoint, gql, request, unwrap, withContext } = m2;
+  // tether-core:dom.ts
+  var m2 = window.Tether.__core["dom.ts"];
+  var [ANALYTICS_EVENTS, attr, attributesFromJson, busy, emit, formatDate, formatMoney, get, has, hasTemplate, integerAttribute, isElement, isField, isOwnEvent, notifyLayoutChanged, parseJSONAttr, productUrl, qsa, repeat, scoped, sel, setImage, setStoreHtml, setText, show] = m2;
 
-  // tether-core:dom.js
-  var m3 = window.Tether.__core["dom.js"];
-  var { attr, busy, cdnUrl, dataKey, emit, formatDate, formatMoney, formatPercent, get, has, hasTemplate, imageUrl, notifyLayoutChanged, parseJSONAttr, productUrl, qsa, readText, repeat, repeatKeyed, sameImage, scoped, sel, setImage, setSelected, setText, setTextTracked, show, toAttributes, watchImages } = m3;
+  // tether-core:cart.ts
+  var m3 = window.Tether.__core["cart.ts"];
+  var [Cart] = m3;
 
-  // tether-core:cart.js
-  var m4 = window.Tether.__core["cart.js"];
-  var { Cart, focusables, toLineInput } = m4;
+  // tether-core:product.ts
+  var m4 = window.Tether.__core["product.ts"];
+  var [scopes] = m4;
 
-  // src/analytics.js
-  var num = (m5) => m5 ? parseFloat(m5.amount) : 0;
-  var id = (gid) => String(gid || "").split("/").pop();
-  function itemFromVariant(p, v, quantity = 1, index) {
+  // tether-core:client.ts
+  var m5 = window.Tether.__core["client.ts"];
+  var [endpoint, gql, matches, orNull, shaped, TetherError, withTimeout] = m5;
+
+  // src/analytics-shopify.ts
+  var BUFFER_SIZE = 500;
+  var CONSENT_SCRIPTS = {
+    "default-banner": "https://cdn.shopify.com/shopifycloud/privacy-banner/storefront-banner.js",
+    other: "https://cdn.shopify.com/shopifycloud/consent-tracking-api/v0.2/consent-tracking-api.js"
+  };
+  var ANALYTICS_SCRIPT = "https://cdn.shopify.com/storefront/analytics/shopify.js";
+  var page = () => window;
+  var shopifyGlobal = () => page().Shopify;
+  function shopifyOptions() {
+    const shopify = cfg.analytics?.shopify;
+    return typeof shopify === "object" ? shopify : {};
+  }
+  function trackingAllowed() {
+    try {
+      const privacy = shopifyGlobal()?.customerPrivacy;
+      return privacy?.consentStatus === "loaded" && privacy.currentVisitorConsent?.()?.analytics !== "no" && Boolean(privacy.analyticsProcessingAllowed?.());
+    } catch {
+      return false;
+    }
+  }
+  function destinationContext(name) {
+    const tag = `hydrogen:${name}`;
     return {
-      item_id: v?.sku || id(v?.id) || id(p.id),
-      item_name: p.title,
-      item_variant: v?.title === "Default Title" ? void 0 : v?.title,
-      item_brand: p.vendor || void 0,
-      item_category: p.productType || void 0,
-      price: num(v?.price || p.priceRange?.minVariantPrice),
-      quantity,
-      ...index != null ? { index } : {}
-    };
-  }
-  function itemFromLine(l, quantity = l.quantity) {
-    const m5 = l.merchandise || {};
-    return itemFromVariant({ ...m5.product || {}, title: m5.product?.title }, m5, quantity);
-  }
-  var value = (items) => Math.round(items.reduce((s, i) => s + (i.price || 0) * (i.quantity || 1), 0) * 100) / 100;
-  function ga(event, ecommerce) {
-    const name = typeof cfg.analytics.dataLayer === "string" ? cfg.analytics.dataLayer : "dataLayer";
-    const dl = window[name] = window[name] || [];
-    if (ecommerce) dl.push({ ecommerce: null });
-    dl.push(ecommerce ? { event, ecommerce } : { event });
-  }
-  var bus = null;
-  function shopifyBus(shopId) {
-    const destinations = [];
-    const buffer = [];
-    const privacy = () => window.Shopify?.customerPrivacy;
-    const canTrack = () => {
-      try {
-        const p = privacy();
-        return p?.consentStatus === "loaded" && p.currentVisitorConsent?.()?.analytics !== "no" && Boolean(p.analyticsProcessingAllowed?.());
-      } catch {
-        return false;
+      getTrackingValues: () => {
+        const internal = trackingAllowed() ? shopifyGlobal()?.customerPrivacy?.__internal : void 0;
+        return {
+          uniqueToken: internal?.uniqueToken?.({ generateFallback: true, tag }) ?? "",
+          visitToken: internal?.visitToken?.({ generateFallback: true, tag }) ?? ""
+        };
       }
     };
-    const config = { shop: { shopId, channel: "headless" }, consent: { mode: cfg.analytics.shopify?.consent || "no-banner" } };
-    const deliver = () => {
-      if (!canTrack()) return;
-      destinations.forEach((d) => {
-        while (d.next < buffer.length) {
-          const { event, payload } = buffer[d.next++];
-          (d.subs.get(event) || []).forEach((cb) => {
-            try {
-              cb(payload, d.context);
-            } catch (err) {
-              reportError(err, `analytics ${d.name}`);
-            }
-          });
-        }
-      });
+  }
+  var subscriberOf = (destination) => (event, subscriber) => {
+    const subscribers = destination.subscribers.get(event) ?? /* @__PURE__ */ new Set();
+    destination.subscribers.set(event, subscribers);
+    subscribers.add(subscriber);
+    return () => destination.subscribers.get(event)?.delete(subscriber);
+  };
+  function createBus(shopId) {
+    const destinations = [];
+    const buffer = [];
+    const config = {
+      shop: { shopId, channel: "headless" },
+      consent: { mode: shopifyOptions().consent || "no-banner" }
     };
-    const api = {
+    const deliver = () => {
+      if (!trackingAllowed()) return;
+      for (const destination of destinations) {
+        for (; destination.next < buffer.length; destination.next += 1) {
+          const buffered = buffer[destination.next];
+          if (buffered) deliverTo(destination, buffered);
+        }
+      }
+    };
+    const bus2 = {
       getConfig: () => config,
       publish(event, payload = {}) {
         buffer.push({ event, payload: { shop: config.shop, url: window.location.href, ...payload } });
-        if (buffer.length > 500) {
+        if (buffer.length > BUFFER_SIZE) {
           buffer.shift();
-          destinations.forEach((d) => {
-            d.next = Math.max(0, d.next - 1);
-          });
+          for (const destination of destinations) destination.next = Math.max(0, destination.next - 1);
         }
         deliver();
       },
-      addDestination(dest) {
-        const tag = `hydrogen:${dest.name}`;
-        const d = {
-          name: dest.name,
+      addDestination(spec) {
+        const destination = {
+          name: spec.name,
           next: 0,
-          subs: /* @__PURE__ */ new Map(),
-          context: {
-            getTrackingValues: () => {
-              const i = canTrack() ? privacy()?.__internal : null;
-              return { uniqueToken: i?.uniqueToken?.({ generateFallback: true, tag }) ?? "", visitToken: i?.visitToken?.({ generateFallback: true, tag }) ?? "" };
-            }
-          }
+          subscribers: /* @__PURE__ */ new Map(),
+          context: destinationContext(spec.name)
         };
-        const subscribe = (event, cb) => {
-          if (!d.subs.has(event)) d.subs.set(event, /* @__PURE__ */ new Set());
-          d.subs.get(event).add(cb);
-          return () => d.subs.get(event)?.delete(cb);
-        };
-        Promise.resolve(dest.setup?.({ subscribe, getConfig: api.getConfig })).then(() => {
-          destinations.push(d);
+        Promise.resolve(spec.setup?.({ subscribe: subscriberOf(destination), getConfig: bus2.getConfig })).then(() => {
+          destinations.push(destination);
           deliver();
-        }).catch((err) => reportError(err, `analytics ${dest.name}`));
+        }).catch((error) => {
+          reportError(error, `analytics ${spec.name}`);
+        });
         return () => {
-          const i = destinations.indexOf(d);
-          if (i >= 0) destinations.splice(i, 1);
+          const index = destinations.indexOf(destination);
+          if (index >= 0) destinations.splice(index, 1);
         };
       }
     };
     document.addEventListener("consentTrackingApiLoaded", deliver);
     document.addEventListener("visitorConsentCollected", deliver);
-    return api;
+    return bus2;
+  }
+  function deliverTo(destination, { event, payload }) {
+    destination.subscribers.get(event)?.forEach((subscriber) => {
+      try {
+        subscriber(payload, destination.context);
+      } catch (error) {
+        reportError(error, `analytics ${destination.name}`);
+      }
+    });
   }
   function loadScript(src) {
-    const s = document.createElement("script");
-    s.src = src;
-    s.async = true;
-    document.head.appendChild(s);
+    const script = document.createElement("script");
+    script.src = src;
+    script.async = true;
+    document.head.appendChild(script);
   }
-  async function startShopify() {
-    if (window.Shopify?.analytics) {
-      bus = window.Shopify.analytics;
-      return;
-    }
-    const data = await gql("query TetherShopId { shop { id } }", {}, { context: false });
-    const country = String(cfg.country || "US").toUpperCase();
-    const S = window.Shopify = window.Shopify || {};
-    Object.assign(S, {
-      country,
-      locale: (cfg.locale || "en").split("-")[0].toLowerCase(),
-      // required by Shopify's script
-      shop: cfg.domain,
-      routes: { root: "/", match: () => ({ pageTemplateName: mainProduct() ? "product" : "page" }), ...S.routes || {} }
-    });
-    const proxy = cfg.analytics.shopify?.proxy;
-    S.customerPrivacy = {
-      ...S.customerPrivacy || {},
+  async function startShopifyAnalytics(isProductPage2) {
+    const existing = shopifyGlobal();
+    if (existing?.analytics) return existing.analytics;
+    const data = await gql(
+      "query TetherShopId { shop { id } }",
+      {},
+      shaped({ shop: { id: "string" } }),
+      { context: false }
+    );
+    const shopify = shopifyGlobal() ?? {};
+    page().Shopify = shopify;
+    shopify.country = cfg.country ?? "US";
+    const [language = "en"] = (cfg.locale || "en").split("-");
+    shopify.locale = language.toLowerCase();
+    shopify.shop = cfg.domain;
+    shopify.routes = {
+      root: "/",
+      match: () => ({ pageTemplateName: isProductPage2() ? "product" : "page" }),
+      ...shopify.routes
+    };
+    const { proxy, consent } = shopifyOptions();
+    shopify.customerPrivacy = {
+      ...shopify.customerPrivacy,
       config: proxy ? { isHeadless: true, asyncConsent: true, asyncVisitorState: true, consentDomain: window.location.host } : { isHeadless: true, storefrontAccessToken: cfg.token, checkoutRootDomain: cfg.domain }
     };
-    bus = shopifyBus(data.shop.id);
-    S.analytics = bus;
-    loadScript(cfg.analytics.shopify?.consent === "default-banner" ? "https://cdn.shopify.com/shopifycloud/privacy-banner/storefront-banner.js" : "https://cdn.shopify.com/shopifycloud/consent-tracking-api/v0.2/consent-tracking-api.js");
-    loadScript("https://cdn.shopify.com/storefront/analytics/shopify.js");
+    const bus2 = createBus(data.shop.id);
+    shopify.analytics = bus2;
+    loadScript(consent === "default-banner" ? CONSENT_SCRIPTS["default-banner"] : CONSENT_SCRIPTS.other);
+    loadScript(ANALYTICS_SCRIPT);
     log("shopify analytics ready", data.shop.id);
+    return bus2;
   }
-  var productPayload = (p, v, quantity = 1) => ({
-    id: p.id,
-    title: p.title,
-    price: v.price,
-    vendor: p.vendor || "",
-    variantId: v.id,
-    variantTitle: v.title,
+
+  // src/analytics-queue.ts
+  var PAGE_MOUNT = "page-mount";
+  var PAGE_LEFT = "page-left";
+
+  // src/analytics.ts
+  var DEFAULT_VARIANT_TITLE = "Default Title";
+  var CENTS_PER_UNIT = 100;
+  var MAX_LIST_ITEMS = 200;
+  var amountOf = (money) => money ? parseFloat(money.amount) : 0;
+  var numericId = (gid) => (gid ?? "").split("/").pop() ?? "";
+  function itemFromVariant(product, variant, quantity = 1, index) {
+    const item = {
+      item_id: variant?.sku || numericId(variant?.id) || numericId(product.id),
+      item_name: product.title,
+      item_variant: variant?.title === DEFAULT_VARIANT_TITLE ? void 0 : variant?.title,
+      item_brand: product.vendor || void 0,
+      item_category: product.productType || void 0,
+      price: amountOf(variant?.price ?? product.priceRange?.minVariantPrice),
+      quantity
+    };
+    if (index != null) item.index = index;
+    return item;
+  }
+  var itemFromLine = (line, quantity = line.quantity) => itemFromVariant(line.merchandise.product, line.merchandise, quantity);
+  function totalValue(items) {
+    const total = items.reduce((sum, item) => sum + item.price * (item.quantity || 1), 0);
+    return Math.round(total * CENTS_PER_UNIT) / CENTS_PER_UNIT;
+  }
+  var productPayload = (product, variant, quantity = 1) => ({
+    id: product.id,
+    title: product.title,
+    price: variant.price,
+    vendor: product.vendor || "",
+    variantId: variant.id,
+    variantTitle: variant.title,
     quantity,
-    sku: v.sku || void 0,
-    productType: p.productType || void 0
+    sku: variant.sku || void 0,
+    productType: product.productType || void 0
   });
-  function analyticsLine(l) {
-    const m5 = l.merchandise || {};
-    return { id: l.id, quantity: l.quantity, merchandise: { id: m5.id, title: m5.title, price: m5.price, sku: m5.sku, product: { id: m5.product?.id, title: m5.product?.title, vendor: m5.product?.vendor || "", handle: m5.product?.handle } } };
+  var linePayload = (line) => ({
+    id: line.id,
+    quantity: line.quantity,
+    merchandise: {
+      id: line.merchandise.id,
+      title: line.merchandise.title,
+      price: line.merchandise.price,
+      sku: line.merchandise.sku,
+      product: {
+        id: line.merchandise.product.id,
+        title: line.merchandise.product.title,
+        vendor: line.merchandise.product.vendor || "",
+        handle: line.merchandise.product.handle
+      }
+    }
+  });
+  function dataLayer() {
+    const { dataLayer: option } = cfg.analytics ?? {};
+    const name = typeof option === "string" ? option : "dataLayer";
+    const existing = Reflect.get(window, name);
+    if (Array.isArray(existing)) return existing;
+    const created = [];
+    Reflect.set(window, name, created);
+    return created;
   }
-  function mainProduct() {
-    const el = document.querySelector(sel("product"));
-    return el && !el.closest(`${sel("collection")},${sel("products")},${sel("recommendations")}`) ? window.Tether?.getScope(el) : null;
+  function pushToDataLayer(event, ecommerce) {
+    const layer = dataLayer();
+    if (!ecommerce) {
+      layer.push({ event });
+      return;
+    }
+    layer.push({ ecommerce: null });
+    layer.push({ event, ecommerce });
   }
-  var send = (name, data, shopifyEvent, shopifyPayload) => {
-    if (cfg.analytics.dataLayer) ga(name, data);
+  var bus = null;
+  var lastLines = null;
+  var lastCart = null;
+  var viewed = /* @__PURE__ */ new WeakSet();
+  var viewedBody;
+  var bodies = /* @__PURE__ */ new WeakMap();
+  var pageRoot = null;
+  var transition = null;
+  function containerOf(node) {
+    if (pageRoot?.contains(node)) return pageRoot;
+    if (transition !== "left" && transition?.contains(node)) return transition;
+    return null;
+  }
+  function send(name, data, shopifyEvent, shopifyPayload) {
+    if (cfg.analytics?.dataLayer) pushToDataLayer(name, data);
     if (bus && shopifyEvent) bus.publish(shopifyEvent, shopifyPayload);
     try {
-      cfg.analytics.onEvent?.(name, data);
-    } catch (err) {
-      reportError(err, "analytics onEvent");
-    }
-  };
-  var lastLines = null;
-  var viewed = /* @__PURE__ */ new WeakSet();
-  function handle(e) {
-    const name = e.type.slice(cfg.prefix.length + 1);
-    const d = e.detail || {};
-    if (name === "product-ready") {
-      const scope = d.scope;
-      if (!scope || viewed.has(scope.root) || mainProduct() !== scope) return;
-      viewed.add(scope.root);
-      const v = scope.variant || d.product.variants.nodes[0];
-      const items = [itemFromVariant(d.product, v)];
-      send("view_item", { currency: v?.price?.currencyCode, value: value(items), items }, "product_viewed", { products: [productPayload(d.product, v)] });
-    } else if (name === "list-ready") {
-      const items = (d.products || []).slice(0, 200).map((p, i) => itemFromVariant(p, p.variants?.nodes?.[0], 1, i));
-      const list = { item_list_id: d.collection?.handle || "products", item_list_name: d.collection?.title || "Products" };
-      send("view_item_list", { ...list, items }, d.collection ? "collection_viewed" : null, d.collection ? { collection: { id: d.collection.id, handle: d.collection.handle } } : null);
-    } else if (name === "cart-updated") {
-      const cart = d.cart;
-      const now = new Map((cart?.lines?.nodes || []).map((l) => [l.merchandise?.id, l]));
-      if (lastLines && d.reason !== "load" && d.reason !== "pending") {
-        const currency = cart?.cost?.totalAmount?.currencyCode;
-        now.forEach((l, k) => {
-          const diff = l.quantity - (lastLines.get(k)?.quantity || 0);
-          if (diff > 0) {
-            const items = [itemFromLine(l, diff)];
-            send("add_to_cart", { currency, value: value(items), items }, "product_added_to_cart", {
-              cart,
-              prevCart: lastCart,
-              currentLine: analyticsLine(l),
-              prevLine: lastLines.get(k) ? analyticsLine(lastLines.get(k)) : void 0
-            });
-          }
-        });
-        lastLines.forEach((l, k) => {
-          const diff = l.quantity - (now.get(k)?.quantity || 0);
-          if (diff > 0) {
-            const items = [itemFromLine(l, diff)];
-            send("remove_from_cart", { currency, value: value(items), items });
-          }
-        });
-      }
-      lastLines = now;
-      lastCart = cart;
-    } else if (name === "cart-toggled" && d.open) {
-      const items = Cart.lines.map((l) => itemFromLine(l));
-      send("view_cart", { currency: Cart.state?.cost?.totalAmount?.currencyCode, value: value(items), items });
-    } else if (name === "checkout") {
-      const items = (d.cart?.lines?.nodes || []).map((l) => itemFromLine(l));
-      const coupon = (d.cart?.discountCodes || []).filter((c) => c.applicable).map((c) => c.code).join(",") || void 0;
-      send("begin_checkout", { currency: d.cart?.cost?.totalAmount?.currencyCode, value: value(items), coupon, items });
-    } else if (name === "search" && d.term) {
-      send("search", { search_term: d.term }, "search_viewed", { searchTerm: d.term });
-    } else if (name === "page") {
-      viewed = /* @__PURE__ */ new WeakSet();
-      if (bus) bus.publish("page_viewed", {});
+      cfg.analytics?.onEvent?.(name, data);
+    } catch (error) {
+      reportError(error, "analytics onEvent");
     }
   }
-  var lastCart = null;
-  async function startAnalytics(queue) {
-    if (cfg.analytics.shopify) await startShopify().catch((err) => reportError(err, "shopify analytics"));
-    if (bus) bus.publish("page_viewed", {});
+  function mainProductRoot(page2) {
+    const el = page2.querySelector(sel("product"));
+    return el?.closest(`${sel("collection")},${sel("products")},${sel("recommendations")}`) ? null : el;
+  }
+  function isProductPage() {
+    const root = mainProductRoot(document);
+    return root !== null && scopes.has(root);
+  }
+  function pageOf(el) {
+    const container = containerOf(el);
+    if (container) return container;
+    let page2 = el;
+    while (page2.parentElement) page2 = page2.parentElement;
+    return page2;
+  }
+  function onProductReady({ product, scope }) {
+    if (viewed.has(scope.root) || mainProductRoot(pageOf(scope.root)) !== scope.root) return;
+    viewed.add(scope.root);
+    const variant = scope.variant ?? product.variants.nodes[0];
+    const items = [itemFromVariant(product, variant)];
+    const products = variant ? [productPayload(product, variant)] : [];
+    send("view_item", { currency: variant?.price.currencyCode, value: totalValue(items), items }, "product_viewed", {
+      products
+    });
+  }
+  function onListReady({ products, collection }) {
+    const items = products.slice(0, MAX_LIST_ITEMS).map((product, index) => itemFromVariant(product, product.variants.nodes[0], 1, index));
+    const list = { item_list_id: collection?.handle || "products", item_list_name: collection?.title || "Products" };
+    if (!collection) {
+      send("view_item_list", { ...list, items });
+      return;
+    }
+    send("view_item_list", { ...list, items }, "collection_viewed", {
+      collection: { id: collection.id, handle: collection.handle }
+    });
+  }
+  function sendCartChanges(cart, now, before) {
+    const currency = cart?.cost.totalAmount.currencyCode;
+    now.forEach((line, variantId) => {
+      const previous = before.get(variantId);
+      const added = line.quantity - (previous?.quantity ?? 0);
+      if (added <= 0) return;
+      const items = [itemFromLine(line, added)];
+      send("add_to_cart", { currency, value: totalValue(items), items }, "product_added_to_cart", {
+        cart,
+        prevCart: lastCart,
+        currentLine: linePayload(line),
+        prevLine: previous ? linePayload(previous) : void 0
+      });
+    });
+    before.forEach((line, variantId) => {
+      const removed = line.quantity - (now.get(variantId)?.quantity ?? 0);
+      if (removed <= 0) return;
+      const items = [itemFromLine(line, removed)];
+      send("remove_from_cart", { currency, value: totalValue(items), items });
+    });
+  }
+  function onCartUpdated({ cart, reason }) {
+    const now = new Map((cart?.lines.nodes ?? []).map((line) => [line.merchandise.id, line]));
+    if (lastLines && reason !== "load" && reason !== "pending") sendCartChanges(cart, now, lastLines);
+    lastLines = now;
+    lastCart = cart;
+  }
+  function onCartOpened() {
+    const items = Cart.lines.map((line) => itemFromLine(line));
+    send("view_cart", { currency: Cart.state?.cost.totalAmount.currencyCode, value: totalValue(items), items });
+  }
+  function onCheckout({ cart }) {
+    if (!cart) return;
+    const items = cart.lines.nodes.map((line) => itemFromLine(line));
+    const coupons = cart.discountCodes.filter((discount) => discount.applicable).map((discount) => discount.code);
+    send("begin_checkout", {
+      currency: cart.cost.totalAmount.currencyCode,
+      value: totalValue(items),
+      coupon: coupons.join(",") || void 0,
+      items
+    });
+  }
+  var REPORTERS = {
+    "product-ready": onProductReady,
+    "list-ready": onListReady,
+    "cart-updated": onCartUpdated,
+    "cart-toggled": ({ open }) => {
+      if (open) onCartOpened();
+    },
+    checkout: onCheckout,
+    search: ({ term }) => {
+      if (term) send("search", { search_term: term }, "search_viewed", { searchTerm: term });
+    }
+  };
+  function report(event, name) {
+    REPORTERS[name](event.detail);
+  }
+  function startPageView() {
+    viewed = /* @__PURE__ */ new WeakSet();
+    bus?.publish("page_viewed", {});
+  }
+  function enterPage(root) {
+    pageRoot = root;
+    transition = null;
+    startPageView();
+  }
+  var isBeside = (root, page2) => root.parentElement !== null && root.parentElement === page2.parentElement;
+  function onPageMount(root) {
+    if (root === document) {
+      pageRoot = document;
+      transition = null;
+    } else if (transition === "left") enterPage(root);
+    else if (!pageRoot || root.contains(pageRoot)) pageRoot = root;
+    else if (isBeside(root, pageRoot)) transition = root;
+  }
+  function onPageLeft() {
+    if (transition && transition !== "left") enterPage(transition);
+    else transition = "left";
+  }
+  var isPageMount = (event) => event.type === PAGE_MOUNT;
+  function handle(event) {
+    if (isPageMount(event)) {
+      onPageMount(event.detail);
+      return;
+    }
+    if (event.type === PAGE_LEFT) {
+      onPageLeft();
+      return;
+    }
+    if (event.type === "astro:page-load") {
+      const body = bodies.get(event);
+      if (body === viewedBody) return;
+      viewedBody = body;
+      startPageView();
+      return;
+    }
+    ANALYTICS_EVENTS.forEach((name) => {
+      if (isOwnEvent(event, name)) report(event, name);
+    });
+  }
+  async function startAnalytics(queue, pageLoads, landing) {
+    bodies = pageLoads;
+    if (cfg.analytics?.shopify) {
+      bus = await startShopifyAnalytics(isProductPage).catch((error) => {
+        reportError(error, "shopify analytics");
+        return null;
+      });
+    }
+    viewedBody = landing;
+    startPageView();
     queue.splice(0).forEach(handle);
-    queue.push = (e) => {
-      handle(e);
-      return 0;
+    queue.push = (...events) => {
+      events.forEach(handle);
+      return queue.length;
     };
   }
 
-  // src/parts/analytics.js
-  window.Tether.__parts.analytics = analytics_exports;
+  // server/src/shared/json.ts
+  function isRecord(value) {
+    return value !== null && typeof value === "object" && !Array.isArray(value);
+  }
+
+  // src/part-registry.ts
+  function isTetherInternals(value) {
+    return isRecord(value) && isRecord(value["__core"]) && isRecord(value["__parts"]);
+  }
+  function registerPart(name, part) {
+    const tether = Reflect.get(window, "Tether");
+    if (!isTetherInternals(tether)) {
+      throw new Error(`tether.${name}.js runs after the Tether script, which loads it, and needs its window.Tether`);
+    }
+    tether.__parts[name] = part;
+  }
+
+  // src/parts/analytics.ts
+  registerPart("analytics", analytics_exports);
 })();

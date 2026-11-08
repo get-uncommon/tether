@@ -69,6 +69,7 @@ takes the keys it knows from `import.meta.env`, so spreading it is safe.
 
 Every [config option](reference.md#config) works in `shop.config.js`, except functions
 (`onError`, `formatMoney`, hooks): set those in `window.TETHER_CONFIG` in your layout, they are merged in.
+So do `createStorefront()`'s own `siteUrl` and `pageSize`: the integration leaves them out of the page.
 In dev, a change to `src/shop.config.js` restarts the dev server, so the browser and the server
 render agree (another file: `tether({ ...shopConfig, watch: ['config/shop.js'] })`). `.env` follows
 Astro's `--mode` (`.env.staging` with `astro build --mode staging`), and the two store variables
@@ -132,7 +133,7 @@ const state = shop.initialState(product); // what Tether will show first
   `tether-soldout-text`), `is-subscription` on the product when a plan is selected. Low stock is 5 or fewer.
 - Subscriptions: `state.plans` (`name`, `price`, `savings`, `selected`, `available`) and
   `shop.formatPercent(state.savings)` fill `tether-plan-list` and `tether-bind="subscription-savings"`
-(`30%`, or `30 %` in German and French, as Tether writes it); the
+  (`30%`, or `30 %` in German and French, as Tether writes it); the
   [starter's product page](https://github.com/ravi-klaassens/tether/blob/main/examples/astro/src/pages/products/%5Bhandle%5D.astro)
   has a complete block. A product that can only be bought on a subscription shows the one-time
   price as the compare-at price.
@@ -375,22 +376,43 @@ and the markup, and tells you what to fix.
 
 `createStorefront(options)` from `@occluze/tether/server` (Node, Workers, Deno; no browser needed):
 
-| Method | Returns |
-|---|---|
-| `getProduct(handleOrId)` | a product, or `null`. Accepts a handle, numeric id, gid or product URL |
-| `getProducts({ first, after, query, collection, sortKey, reverse })` | `{ products, pageInfo, collection }` |
-| `allProducts({ query, collection })` | every product, page by page (for `getStaticPaths`) |
-| `getCollection(handle, { first, sortKey, … })` | the collection with `products` and `pageInfo`, or `null` |
-| `allCollections()` | every collection (`handle`, `title`, `description`, `image`, `seo`) |
-| `getRecommendations(handleOrId)` | related products |
-| `initialState(product, { variant })` | what Tether shows first: `variant`, `selected`, `price`, `compareAtPrice`, `available`, `purchase`, `plan`, `plans`, `savings`, `show`, `isUnavailable()` |
-| `hydrate(products, { card, images })` | the `<script>` tag for the browser (see above); cards keep 2 images by default |
-| `jsonLd(product, { url })`, `jsonLdData(product)` | schema.org Product / ProductGroup for search engines |
-| `formatMoney(money)`, `formatPercent(n)`, `productUrl(handle)`, `imageUrl(url, { width })` | strings, same rules as the browser |
-| `query(graphql, variables)` | any Storefront API query, in the configured market |
+| Method                                                               | Returns                                                                                                                                                   |
+| -------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `getProduct(handleOrId)`                                             | a product, or `null`. Accepts a handle, numeric id, gid or product URL                                                                                    |
+| `getProducts({ first, after, query, collection, sortKey, reverse })` | `{ products, pageInfo, collection }`                                                                                                                      |
+| `allProducts({ query, collection })`                                 | every product, page by page (for `getStaticPaths`)                                                                                                        |
+| `getCollection(handle, { first, sortKey, … })`                       | the collection with `products` and `pageInfo`, or `null`                                                                                                  |
+| `allCollections()`                                                   | every collection (`handle`, `title`, `description`, `image`, `seo`)                                                                                       |
+| `getRecommendations(handleOrId)`                                     | related products; rejects with `NOT_FOUND` for an empty, `null` or `undefined` product                                                                    |
+| `initialState(product, { variant })`                                 | what Tether shows first: `variant`, `selected`, `price`, `compareAtPrice`, `available`, `purchase`, `plan`, `plans`, `savings`, `show`, `isUnavailable()` |
+| `hydrate(products, { card, images })`                                | the `<script>` tag for the browser (see above); cards keep 2 images by default                                                                            |
+| `jsonLd(product, { url })`, `jsonLdData(product)`                    | schema.org Product / ProductGroup for search engines                                                                                                      |
+| `formatMoney(money)`, `formatPercent(n)`, `imageUrl(url, { width })` | strings, same rules as the browser                                                                                                                        |
+| `productUrl(handle)`                                                 | the product's link from `productPath`, or `null` for an empty handle                                                                                      |
+| `query(graphql, variables)`                                          | any Storefront API query, in the configured market; answers its `data` as an `object` you check                                                           |
+
+Besides the [config options](reference.md#config), `createStorefront()` takes `siteUrl` (for
+`jsonLd()` without `url`), `pageSize` (products per request of `allProducts()`, an integer from 1 to 250, Shopify's
+limit; default 25) and
+`fetch`, which replaces the global `fetch` (a cache, a test double). A `fetch` you pass must hand
+`init.signal` on to the request it makes: `requestTimeout` ends a stalled request through that
+signal, so a `fetch` that drops it waits as long as the connection does.
 
 A product is the Storefront API product, the same shape the browser uses: `title`, `handle`,
 `descriptionHtml`, `featuredImage`, `images.nodes`, `options[].optionValues[].name`,
 `variants.nodes` (`id`, `price`, `availableForSale`, `selectedOptions`), `priceRange`,
 `sellingPlanGroups.nodes`, `seo`, `metafields`. Full types: `ShopifyProduct` in the included
 TypeScript definitions (your editor shows them).
+`descriptionHtml` is the HTML as written in Shopify, by anyone who can edit products, including apps.
+Never put it in the page with `set:html` as it is: it can carry script that runs on your shop's
+domain. In the browser, `tether-bind="description"` cleans it through an allow-list. Tether has no
+cleaner for the build, because Node has no DOM, so the starter renders the plain-text `description`
+in that element and lets the script swap in the cleaned HTML:
+
+```astro
+<div tether-bind="description">{product.description}</div>
+```
+
+To render the HTML at build time instead, sanitize it first with a maintained library such as
+[sanitize-html](https://www.npmjs.com/package/sanitize-html), with an allow-list of tags and
+attributes, and only then use `set:html`.

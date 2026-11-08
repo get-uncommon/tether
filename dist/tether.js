@@ -1,468 +1,1375 @@
 (() => {
   var __defProp = Object.defineProperty;
+  var __defNormalProp = (obj, key, value) => key in obj ? __defProp(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
   var __export = (target, all) => {
     for (var name in all)
       __defProp(target, name, { get: all[name], enumerable: true });
   };
+  var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "symbol" ? key + "" : key, value);
 
-  // src/config.js
-  var config_exports = {};
-  __export(config_exports, {
-    DEFAULTS: () => DEFAULTS,
-    cfg: () => cfg,
-    configure: () => configure,
-    isConfigured: () => isConfigured,
-    log: () => log,
-    reportError: () => reportError,
-    warn: () => warn
-  });
+  // server/src/shared/api-versions.ts
+  var STOREFRONT_API_VERSION = "2026-07";
+
+  // src/api-version.ts
+  var QUARTERLY_VERSION = /^(\d{4})-(01|04|07|10)$/;
+  var AVERAGE_MONTH_MS = 30.44 * 24 * 3600 * 1e3;
+  function parseVersion(version) {
+    const match = QUARTERLY_VERSION.exec(typeof version === "string" ? version : "");
+    if (!match) return null;
+    return { year: Number(match[1]), month: Number(match[2]) };
+  }
+  var isQuarterlyVersion = (version) => parseVersion(version) !== null;
+
+  // server/src/shared/json.ts
+  function isRecord(value) {
+    return value !== null && typeof value === "object" && !Array.isArray(value);
+  }
+  function field(value, key) {
+    return isRecord(value) ? value[key] : void 0;
+  }
+
+  // server/src/shared/metafield-ref.ts
+  var METAFIELD_KEY = /^[A-Za-z0-9_.-]+$/;
+  var METAFIELD_NAMESPACE = /^(\$app(:[A-Za-z0-9_-]+)?|[A-Za-z0-9_.-]+)$/;
+  var isMetafieldIdentifier = (namespace, key) => METAFIELD_NAMESPACE.test(namespace) && METAFIELD_KEY.test(key);
+  function metafieldIdentifierOf(ref) {
+    const dot = ref.indexOf(".");
+    if (dot <= 0) return null;
+    const namespace = ref.slice(0, dot);
+    const key = ref.slice(dot + 1);
+    return isMetafieldIdentifier(namespace, key) ? { namespace, key } : null;
+  }
+
+  // src/config-sections.ts
+  var HOSTNAME = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/i;
+  var COOKIE_NAME = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
+  var GLOBAL_NAME = /^[A-Za-z_$][\w$]*$/;
+  var SITE_ORIGIN = "https://site.invalid";
+  var LOOPBACK_HOSTS = /* @__PURE__ */ new Set(["localhost", "127.0.0.1", "[::1]"]);
+  var MARKET_SOURCES = ["saved", "server", "webflow"];
+  var CONSENT_MODES = [
+    "no-banner",
+    "default-banner",
+    "custom-banner"
+  ];
+  var isText = (value) => typeof value === "string" && value !== "";
+  var isFunction = (value) => typeof value === "function";
+  function domainOption(value, invalid) {
+    if (typeof value !== "string" || !value) return "";
+    const host = value.replace(/^https?:\/\//, "").replace(/\/.*$/, "");
+    if (isHostname(host)) return host;
+    invalid("domain", value);
+    return "";
+  }
+  function isSiteOrHttpsUrl(value) {
+    if (!isText(value)) return false;
+    try {
+      const url2 = new URL(value, `${SITE_ORIGIN}/`);
+      if (url2.origin === SITE_ORIGIN) return true;
+      return url2.protocol === "https:" || url2.protocol === "http:" && LOOPBACK_HOSTS.has(url2.hostname);
+    } catch {
+      return false;
+    }
+  }
+  function partsUrlOption(value, invalid) {
+    if (value === void 0 || value === null || value === "") return null;
+    if (typeof value === "string" && (isSiteOrHttpsUrl(value) || isPageOrigin(value))) return value;
+    invalid("partsUrl", value);
+    return null;
+  }
+  function isPageOrigin(value) {
+    if (typeof location === "undefined") return false;
+    try {
+      return new URL(value).origin === location.origin;
+    } catch {
+      return false;
+    }
+  }
+  function toHttpsOrigin(value) {
+    if (typeof value !== "string") return null;
+    try {
+      const url2 = new URL(value);
+      return url2.protocol === "https:" && url2.href === new URL(url2.origin).href ? url2.origin : null;
+    } catch {
+      return null;
+    }
+  }
+  function embedOriginsOption(value, invalid) {
+    if (!Array.isArray(value)) {
+      invalid("embedOrigins", value);
+      return [];
+    }
+    const origins = [];
+    const entries = value;
+    for (const entry of entries) {
+      const origin = toHttpsOrigin(entry);
+      if (origin) origins.push(origin);
+      else invalid("embedOrigin", entry);
+    }
+    return origins;
+  }
+  function toMetafieldIdentifier(ref) {
+    if (typeof ref === "string") return metafieldIdentifierOf(ref);
+    if (typeof ref !== "object" || ref === null) return null;
+    const namespace = Reflect.get(ref, "namespace");
+    const key = Reflect.get(ref, "key");
+    if (typeof namespace !== "string" || typeof key !== "string") return null;
+    return isMetafieldIdentifier(namespace, key) ? { namespace, key } : null;
+  }
+  function metafieldsOption(value, invalid) {
+    if (!Array.isArray(value)) {
+      invalid("metafields", value);
+      return [];
+    }
+    const refs = [];
+    const entries = value;
+    for (const ref of entries) {
+      const identifier = toMetafieldIdentifier(ref);
+      if (identifier) refs.push(typeof ref === "string" ? ref : identifier);
+      else invalid("metafield", ref);
+    }
+    return refs;
+  }
+  var when = (check) => (value) => check(value) ? value : void 0;
+  var isHostname = (value) => isText(value) && HOSTNAME.test(value);
+  var isCookieName = (value) => isText(value) && COOKIE_NAME.test(value);
+  var isDataLayer = (value) => typeof value === "boolean" || isText(value) && GLOBAL_NAME.test(value);
+  var url = when(isSiteOrHttpsUrl);
+  var text = when(isText);
+  var flag = when((value) => typeof value === "boolean");
+  var hook = when(isFunction);
+  function sectionOption(name, value, schema, invalid) {
+    if (value === null || value === void 0) return null;
+    if (!isRecord(value)) {
+      invalid(name, value);
+      return null;
+    }
+    const section = {};
+    for (const key in schema) {
+      const field2 = value[key];
+      if (field2 === void 0) continue;
+      const parsed = schema[key](field2);
+      if (parsed === void 0) invalid(`${name}.${key}`, field2);
+      else section[key] = parsed;
+    }
+    return section;
+  }
+  var ACCOUNT = {
+    server: url,
+    orderUrl: url,
+    subscriptionsUrl: url,
+    paymentUrl: url,
+    logoutUrl: url,
+    locale: text,
+    navigate: hook
+  };
+  var ACCOUNT_NEEDS_SERVER = "customer accounts need the Worker since 0.7.0: set account.server";
+  var LOCALE_MARKET = { country: text, language: text, locale: text };
+  var MARKETS = {
+    // A single source name counts as a list of one.
+    detect: (value) => {
+      if (typeof value === "boolean") return value;
+      const names = Array.isArray(value) ? value : [value];
+      return typeof value === "string" || Array.isArray(value) ? MARKET_SOURCES.filter((source) => names.includes(source)) : void 0;
+    },
+    locales: (value) => {
+      if (!isRecord(value)) return void 0;
+      const locales = {};
+      for (const [locale, entry] of Object.entries(value)) {
+        const market = sectionOption(`markets.locales.${locale}`, entry, LOCALE_MARKET, () => void 0);
+        if (market) locales[locale] = market;
+      }
+      return locales;
+    },
+    cookie: when(isCookieName),
+    remember: flag,
+    strict: flag
+  };
+  var SHOPIFY_ANALYTICS = {
+    consent: (value) => CONSENT_MODES.find((mode) => mode === value),
+    proxy: (value) => value !== void 0 && Boolean(value)
+  };
+  var ANALYTICS = {
+    dataLayer: when(isDataLayer),
+    shopify: (value) => typeof value === "boolean" ? value : sectionOption("analytics.shopify", value, SHOPIFY_ANALYTICS, () => void 0) ?? void 0,
+    onEvent: hook
+  };
+  function accountOption(value, invalid, warn2) {
+    const account = sectionOption("account", value, ACCOUNT, invalid);
+    if (account === null) return null;
+    const { server } = account;
+    if (server === void 0) {
+      warn2(ACCOUNT_NEEDS_SERVER);
+      return null;
+    }
+    return { ...account, server };
+  }
+  var marketsOption = (value, invalid) => sectionOption("markets", value, MARKETS, invalid);
+  var analyticsOption = (value, invalid) => sectionOption("analytics", value, ANALYTICS, invalid);
+
+  // server/src/shared/market-codes.ts
+  var COUNTRY = /^[A-Z]{2}$/;
+  var NOT_A_COUNTRY = /* @__PURE__ */ new Set(["XX", "T1"]);
+  var REGIONAL_LANGUAGES = /* @__PURE__ */ new Set(["PT_BR", "PT_PT", "ZH_CN", "ZH_TW"]);
+  var LANGUAGE = /^[A-Z]{2,3}$/;
+  function toCountry(value) {
+    const code = (typeof value === "string" ? value : "").trim().toUpperCase();
+    if (!COUNTRY.test(code) || NOT_A_COUNTRY.has(code)) return null;
+    return code;
+  }
+  function toLanguage(value) {
+    const raw = (typeof value === "string" ? value : "").trim().replace("-", "_").toUpperCase();
+    if (REGIONAL_LANGUAGES.has(raw)) return raw;
+    const primary = raw.split("_")[0] ?? "";
+    return LANGUAGE.test(primary) ? primary : null;
+  }
+
+  // src/shopify-values.ts
+  var MAX_CONNECTION_SIZE = 250;
+  function isHttpsUrl(url2) {
+    if (typeof url2 !== "string") return false;
+    try {
+      return new URL(url2).protocol === "https:";
+    } catch {
+      return false;
+    }
+  }
+  function formatMoney(money, locale) {
+    if (!money) return "";
+    const amount = parseFloat(money.amount);
+    if (Number.isNaN(amount)) return "";
+    try {
+      return new Intl.NumberFormat(locale || void 0, { style: "currency", currency: money.currencyCode }).format(
+        amount
+      );
+    } catch {
+      return `${money.currencyCode} ${amount.toFixed(2)}`;
+    }
+  }
+  function productUrl(productPath, handle, id) {
+    if (!/\{(handle|id)\}/.test(productPath)) {
+      return handle ? `${productPath.replace(/\/$/, "")}/${encodeURIComponent(handle)}` : null;
+    }
+    const numericId2 = id ? id.split("/").at(-1) ?? "" : "";
+    if (productPath.includes("{handle}") && !handle) return null;
+    if (productPath.includes("{id}") && !numericId2) return null;
+    return productPath.replace(/\{handle\}/g, encodeURIComponent(handle ?? "")).replace(/\{id\}/g, encodeURIComponent(numericId2));
+  }
+  function productKey(raw) {
+    const value = String(raw ?? "").trim();
+    if (!value) return null;
+    if (value.startsWith("gid://")) return value;
+    if (/^\d+$/.test(value)) return `gid://shopify/Product/${value}`;
+    return /\/products\/([^/?#]+)/.exec(value)?.[1] ?? value;
+  }
+
+  // src/config.ts
   var DEFAULTS = {
-    // Shopify Storefront API
     domain: "",
-    // 'your-store.myshopify.com'
     token: "",
-    // public Storefront API access token
-    apiVersion: "2026-07",
+    apiVersion: STOREFRONT_API_VERSION,
     country: void 0,
-    // ISO code, e.g. 'NL' -> @inContext(country: NL)
     language: void 0,
-    // e.g. 'NL' -> @inContext(language: NL)
     locale: void 0,
-    // Intl locale for money/dates, e.g. 'nl-NL'
     markets: null,
-    // { detect: true, locales: { de: { country: 'DE', language: 'DE' } }, cookie, remember } (markets.js)
-    // Markup
     prefix: "tether",
-    // attribute prefix: tether-product, tether-bind, ...
     productPath: "/product",
-    // Webflow CMS template path for products
     collectionPath: "/collection",
-    // Fetching
     metafields: [],
-    // ['custom.material', { namespace, key }]
+    embedOrigins: [],
     imagesFirst: 25,
     variantsFirst: 100,
     sellingPlanGroupsFirst: 10,
     sellingPlansFirst: 25,
     collectionFirst: 24,
+    emptyQuery: "all",
     retries: 2,
+    requestTimeout: 15e3,
     revalidate: true,
-    // products from the server (tether/server hydrate()): refresh once in the background
-    // Cart
-    storageKey: null,
-    // defaults to `tether:cart:<domain>`
+    storageKey: "",
     cartDrawerOpenClass: "is-open",
     openCartOnAdd: true,
     cartFocus: true,
-    // move focus into the open cart, keep Tab inside it, restore it on close
     checkoutTarget: "_self",
-    // '_self' or '_blank'
-    // Subscriptions
     defaultPurchase: "one-time",
-    // 'one-time' | 'subscription'
     variantUrl: false,
-    // true: ?variant= follows the visitor's choice on the main product (shareable links)
     maxAge: 60,
-    // seconds a Shopify answer may be cached (0 = Shopify's own caching, can be hours)
     lowStock: 5,
-    // tether-show="low-stock" at this many or fewer (needs inventory access)
-    // Mounting
+    searchDelay: 150,
     autoMount: true,
-    // mount document on DOMContentLoaded
     observe: false,
-    // auto-mount nodes added later (CMS load-more, filters)
     astro: true,
-    // mount on Astro View Transitions (astro:page-load); false if you do it yourself
     partsUrl: null,
-    // folder of tether.markets/diagnose(.min).js for the <script> build (default: next to it)
-    // Formatting
+    analytics: null,
+    account: null,
+    warningText: null,
     formatMoney: null,
-    // (money, locale) => string
-    // Hooks (all optional)
     onLayoutChange: null,
-    // (reason) => void. Default refreshes ScrollTrigger if present
     onCartOpen: null,
-    // (drawers) => void, e.g. lock scroll
     onCartClose: null,
-    // (drawers) => void
     onLineEnter: null,
-    // (node) => void, animate a new cart line in
     onLineLeave: null,
-    // (node, done) => void, animate out, then call done()
     onValueChange: null,
-    // (el, previousText) => void, e.g. text scramble
     onError: null,
-    // (error, context) => void
     debug: false
   };
   var cfg = { ...DEFAULTS };
-  function configure(overrides = {}) {
-    Object.keys(cfg).forEach((k) => delete cfg[k]);
-    Object.assign(cfg, DEFAULTS, overrides);
-    if (cfg.domain) cfg.domain = String(cfg.domain).replace(/^https?:\/\//, "").replace(/\/.*$/, "");
-    if (!cfg.storageKey) cfg.storageKey = `${cfg.prefix}:cart:${cfg.domain}`;
-    if (cfg.apiVersion === "unstable") warn('apiVersion "unstable" changes without notice. Pin a dated version (e.g. 2026-07).');
-    return cfg;
+  var PREFIX = /^[a-z][a-z0-9-]*$/;
+  var SWITCH_OPTIONS = [
+    "revalidate",
+    "openCartOnAdd",
+    "cartFocus",
+    "variantUrl",
+    "autoMount",
+    "observe",
+    "astro",
+    "debug"
+  ];
+  var TEXT_OPTIONS = ["token", "productPath", "collectionPath"];
+  var COUNT_OPTIONS = [
+    "imagesFirst",
+    "variantsFirst",
+    "sellingPlanGroupsFirst",
+    "sellingPlansFirst",
+    "collectionFirst",
+    "retries",
+    "requestTimeout",
+    "maxAge",
+    "lowStock",
+    "searchDelay"
+  ];
+  var HOOK_OPTIONS = [
+    "warningText",
+    "formatMoney",
+    "onLayoutChange",
+    "onCartOpen",
+    "onCartClose",
+    "onLineEnter",
+    "onLineLeave",
+    "onValueChange",
+    "onError"
+  ];
+  function invalidOption(name, value, fallback) {
+    if (value !== void 0) warn(`invalid ${name} ${JSON.stringify(value)}: using ${JSON.stringify(fallback)}`);
+    return fallback;
+  }
+  function dropped(name, value) {
+    warn(`invalid ${name} ${JSON.stringify(value)}: ignored`);
+  }
+  function warnUnknownKeys(options) {
+    for (const key of Object.keys(options)) {
+      if (!Object.hasOwn(DEFAULTS, key)) warn(`unknown option ${JSON.stringify(key)}: ignored`);
+    }
+  }
+  function setHook(config, name, value) {
+    if (typeof value === "function") {
+      config[name] = value;
+    } else if (value !== void 0 && value !== null) {
+      dropped(name, value);
+    }
+  }
+  var MAX_TIMER_MS = 2147483647;
+  var MAX_RETRIES = 10;
+  var CONNECTION_RANGE = { min: 1, max: MAX_CONNECTION_SIZE };
+  var COUNT_RANGES = {
+    imagesFirst: CONNECTION_RANGE,
+    variantsFirst: CONNECTION_RANGE,
+    sellingPlanGroupsFirst: CONNECTION_RANGE,
+    sellingPlansFirst: CONNECTION_RANGE,
+    collectionFirst: CONNECTION_RANGE,
+    requestTimeout: { max: MAX_TIMER_MS },
+    searchDelay: { max: MAX_TIMER_MS },
+    retries: { max: MAX_RETRIES }
+  };
+  function countOption(name, value) {
+    const { min = 0, max: maximum } = COUNT_RANGES[name] ?? {};
+    if (typeof value !== "number" || !Number.isInteger(value) || value < min) {
+      return invalidOption(name, value, DEFAULTS[name]);
+    }
+    if (maximum === void 0 || value <= maximum) return value;
+    warn(`${name} ${String(value)} is more than its maximum: using ${String(maximum)}`);
+    return maximum;
+  }
+  function switchOption(name, value) {
+    return typeof value === "boolean" ? value : invalidOption(name, value, DEFAULTS[name]);
+  }
+  function textOption(name, value) {
+    return typeof value === "string" ? value : invalidOption(name, value, DEFAULTS[name]);
+  }
+  var CLASS_TOKEN = /^\S+$/;
+  function classOption(name, value) {
+    return typeof value === "string" && CLASS_TOKEN.test(value) ? value : invalidOption(name, value, DEFAULTS[name]);
+  }
+  function localeOption(value) {
+    if (value === void 0 || value === null || value === "") return void 0;
+    try {
+      if (typeof value === "string" && Intl.getCanonicalLocales(value).length) return value;
+    } catch {
+    }
+    dropped("locale", value);
+    return void 0;
+  }
+  function choiceOption(name, value, choices) {
+    return choices.find((choice) => choice === value) ?? invalidOption(name, value, choices[0]);
+  }
+  function apiVersionOption(value) {
+    if (value === "unstable") {
+      warn('apiVersion "unstable" changes without notice. Pin a dated version (e.g. 2026-07).');
+      return value;
+    }
+    return isQuarterlyVersion(value) ? value : invalidOption("apiVersion", value, DEFAULTS.apiVersion);
+  }
+  function codeOption(name, value, parse) {
+    if (value === void 0 || value === null || value === "") return void 0;
+    const code = parse(value);
+    if (code !== null) return code;
+    dropped(name, value);
+    return void 0;
+  }
+  function resolveConfig(options) {
+    warnUnknownKeys(options);
+    const domain = domainOption(options.domain, dropped);
+    const prefix = typeof options.prefix === "string" && PREFIX.test(options.prefix) ? options.prefix : invalidOption("prefix", options.prefix, DEFAULTS.prefix);
+    const resolved = {
+      ...DEFAULTS,
+      domain,
+      apiVersion: apiVersionOption(options.apiVersion),
+      country: codeOption("country", options.country, toCountry),
+      locale: localeOption(options.locale),
+      partsUrl: partsUrlOption(options.partsUrl, dropped),
+      language: codeOption("language", options.language, toLanguage),
+      markets: marketsOption(options.markets, dropped),
+      analytics: analyticsOption(options.analytics, dropped),
+      account: accountOption(options.account, dropped, warn),
+      prefix,
+      storageKey: typeof options.storageKey === "string" && options.storageKey ? options.storageKey : `${prefix}:cart:${domain}`,
+      metafields: metafieldsOption(options.metafields ?? [], dropped),
+      embedOrigins: embedOriginsOption(options.embedOrigins ?? [], dropped),
+      checkoutTarget: choiceOption("checkoutTarget", options.checkoutTarget, ["_self", "_blank"]),
+      emptyQuery: choiceOption("emptyQuery", options.emptyQuery, ["all", "none"]),
+      defaultPurchase: choiceOption("defaultPurchase", options.defaultPurchase, ["one-time", "subscription"]),
+      cartDrawerOpenClass: classOption("cartDrawerOpenClass", options.cartDrawerOpenClass)
+    };
+    for (const name of COUNT_OPTIONS) resolved[name] = countOption(name, options[name]);
+    for (const name of SWITCH_OPTIONS) resolved[name] = switchOption(name, options[name]);
+    for (const name of TEXT_OPTIONS) resolved[name] = textOption(name, options[name]);
+    for (const name of HOOK_OPTIONS) setHook(resolved, name, options[name]);
+    return resolved;
+  }
+  var parseMarkets = (value) => marketsOption(value, dropped);
+  function configure(options = {}) {
+    const resolved = resolveConfig(options);
+    for (const key of Object.keys(cfg)) {
+      if (!(key in resolved)) Reflect.deleteProperty(cfg, key);
+    }
+    return Object.assign(cfg, resolved);
   }
   var isConfigured = () => Boolean(cfg.domain && cfg.token);
-  function log(...a) {
-    if (cfg.debug) console.log(`[${cfg.prefix}]`, ...a);
+  function log(...args) {
+    if (cfg.debug) console.log(`[${cfg.prefix}]`, ...args);
   }
-  function warn(...a) {
-    console.warn(`[${cfg.prefix}]`, ...a);
+  function warn(...args) {
+    console.warn(`[${cfg.prefix}]`, ...args);
   }
-  function reportError(err, context) {
-    warn(context, err && (err.message || err.code) ? err.message || err.code : err);
-    if (typeof cfg.onError === "function") {
-      try {
-        cfg.onError(err, context);
-      } catch {
+  function reportError(error, context) {
+    warn(context, error instanceof Error && error.message ? error.message : error);
+    if (!cfg.onError) return;
+    try {
+      cfg.onError(error, context);
+    } catch (hookError) {
+      warn("onError threw", hookError);
+    }
+  }
+  function reportFailure(change, context) {
+    change.catch((error) => {
+      reportError(error, context);
+    });
+  }
+  var reportedHookFailures = /* @__PURE__ */ new Set();
+  var MAX_REMEMBERED_HOOK_FAILURES = 100;
+  function callHook(name, hook2, fallback) {
+    try {
+      return hook2();
+    } catch (error) {
+      const failure = error instanceof Error && `${name}: ${error.message}`;
+      if (!failure || !reportedHookFailures.has(failure)) {
+        if (failure && reportedHookFailures.size < MAX_REMEMBERED_HOOK_FAILURES) reportedHookFailures.add(failure);
+        reportError(error, name);
       }
+      return fallback?.();
     }
   }
 
-  // src/client.js
-  var client_exports = {};
-  __export(client_exports, {
-    TetherError: () => TetherError,
-    endpoint: () => endpoint,
-    gql: () => gql,
-    request: () => request,
-    unwrap: () => unwrap,
-    withContext: () => withContext
-  });
+  // src/config-view.ts
+  function refuseChange(key) {
+    warn(`Tether.config is read-only (${String(key)}): pass options to Tether.init() instead`);
+    return false;
+  }
+  var readOnlyViews = /* @__PURE__ */ new WeakMap();
+  var READ_ONLY = {
+    get: (object, key) => viewOf(Reflect.get(object, key)),
+    // A descriptor's value is the view too, so `Object.getOwnPropertyDescriptor` doesn't hand out the live object.
+    getOwnPropertyDescriptor(object, key) {
+      const descriptor = Reflect.getOwnPropertyDescriptor(object, key);
+      if (descriptor) descriptor.value = viewOf(descriptor.value);
+      return descriptor;
+    },
+    set: (_object, key) => refuseChange(key),
+    deleteProperty: (_object, key) => refuseChange(key),
+    defineProperty: (_object, key) => refuseChange(key)
+  };
+  function viewOf(value) {
+    return typeof value === "object" && value !== null ? readOnlyView(value) : value;
+  }
+  function readOnlyView(target) {
+    let view = readOnlyViews.get(target);
+    if (!view) {
+      view = new Proxy(target, READ_ONLY);
+      readOnlyViews.set(target, view);
+    }
+    return view;
+  }
+  var configView = new Proxy(cfg, READ_ONLY);
+
+  // server/src/shared/error-message.ts
+  function messageOf(error) {
+    return error instanceof Error ? error.message : String(error);
+  }
+
+  // src/client.ts
   var TetherError = class extends Error {
-    constructor(message, { status, errors, userErrors, code } = {}) {
+    constructor(message, { status: status2, errors, userErrors, code } = {}) {
       super(message);
-      this.name = "TetherError";
-      this.code = code || (status ? `HTTP_${status}` : "ERROR");
-      this.status = status;
+      __publicField(this, "name", "TetherError");
+      __publicField(this, "code");
+      __publicField(this, "status");
+      __publicField(this, "errors");
+      __publicField(this, "userErrors");
+      this.code = code ?? (status2 ? `HTTP_${status2}` : "ERROR");
+      this.status = status2;
       this.errors = errors;
       this.userErrors = userErrors;
     }
   };
+  function matches(value, shape) {
+    if (typeof shape === "function") return shape(value);
+    if (typeof shape === "string") return shape === "object" ? isRecord(value) : typeof value === shape;
+    if (isShapeList(shape)) return Array.isArray(value) && value.every((item) => matches(item, shape[0]));
+    return isRecord(value) && Object.entries(shape).every(([key, inner]) => inner === void 0 || matches(value[key], inner));
+  }
+  var isShapeList = (shape) => Array.isArray(shape);
+  var orNull = (shape) => (value) => value === null || matches(value, shape);
+  var shaped = (shape) => (data) => matches(data, shape);
   function endpoint(conf = cfg) {
     return `https://${conf.domain}/api/${conf.apiVersion}/graphql.json`;
   }
-  function withContext(query, ctx = cfg) {
+  var STRINGS_AND_COMMENTS = /"(?:\\.|[^"\\\n])*"|#[^\n]*/g;
+  var OPERATION_START = /^\s*(?:query|mutation)(?:\s+\w+)?\s*(?:\([^)]*\))?/;
+  function operationOf(document2) {
+    return /\bmutation\b/.test(document2.replace(STRINGS_AND_COMMENTS, "")) ? "mutation" : "query";
+  }
+  function inContext(query2, { country, language }) {
     const args = [];
-    if (ctx.country) args.push(`country: ${String(ctx.country).toUpperCase()}`);
-    if (ctx.language) args.push(`language: ${String(ctx.language).toUpperCase().replace("-", "_")}`);
-    if (!args.length || /@inContext/.test(query)) return query;
+    if (country) args.push(`country: ${country}`);
+    if (language) args.push(`language: ${language}`);
+    if (!args.length) return query2;
     const tag = `@inContext(${args.join(", ")})`;
-    if (/^\s*\{/.test(query)) return `query ${tag} ${query.trimStart()}`;
-    return query.replace(/^(\s*(?:query|mutation)(?:\s+\w+)?\s*(?:\([^)]*\))?)/, `$1 ${tag}`);
+    const blanked = query2.replace(STRINGS_AND_COMMENTS, (text2) => " ".repeat(text2.length));
+    const selectionStart = blanked.indexOf("{");
+    if (blanked.slice(0, selectionStart).includes("@inContext")) return query2;
+    if (blanked.trimStart().startsWith("{")) return `query ${tag} ${query2.slice(selectionStart)}`;
+    const header = OPERATION_START.exec(blanked);
+    if (!header) return query2;
+    const end = header[0].length;
+    return `${query2.slice(0, end).trimEnd()} ${tag} ${query2.slice(end).trimStart()}`;
   }
-  var sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-  function statusText(status, conf) {
-    if (status === 401 || status === 403) {
-      return `Shopify rejected the Storefront token for ${conf.domain} (${status}): use the public Storefront API token (Headless channel)${/^shpat_/.test(conf.token) ? ", not an Admin API token (shpat_\u2026)" : ""}`;
+  function withContext(query2, ctx = cfg) {
+    const country = toCountry(ctx.country) ?? void 0;
+    const language = toLanguage(ctx.language) ?? void 0;
+    return inContext(query2, { country, language });
+  }
+  var RETRY_BACKOFF_MS = 300;
+  var THROTTLE_BACKOFF_MS = 500;
+  var MAX_BACKOFF_MS = 3e4;
+  var SECURITY_REJECTION = 430;
+  var MS_PER_SECOND = 1e3;
+  var INVENTORY_FIELD = "quantityAvailable";
+  var storesWithoutInventory = /* @__PURE__ */ new Set();
+  var storeOf = (conf) => `${conf.domain} ${conf.apiVersion} ${conf.token}`;
+  function queryText(conf, query2, access, { context, operation }) {
+    const written = typeof query2 === "string" ? query2 : query2(access);
+    const text2 = context ? inContext(written, conf) : written;
+    if (conf.maxAge <= 0 || operation === "mutation") return text2;
+    return `${text2} #${Math.floor(Date.now() / (conf.maxAge * MS_PER_SECOND))}`;
+  }
+  var sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  function statusText(status2, conf) {
+    if (status2 === 401 || status2 === 403) {
+      const adminHint = conf.token.startsWith("shpat_") ? ", not an Admin API token (shpat_\u2026)" : "";
+      return `Shopify rejected the Storefront token for ${conf.domain} (${status2}): use the public Storefront API token (Headless channel)${adminHint}`;
     }
-    return status === 404 ? `Store or API version not found (404): check domain ${conf.domain} and apiVersion ${conf.apiVersion}` : `HTTP ${status} from ${conf.domain}`;
+    if (status2 === 404) {
+      return `Store or API version not found (404): check domain ${conf.domain} and apiVersion ${conf.apiVersion}`;
+    }
+    return `HTTP ${status2} from ${conf.domain}`;
   }
-  async function request(conf, query, variables = {}, { context = true } = {}) {
+  function toGraphQLError(value) {
+    const message = field(value, "message");
+    const code = field(field(value, "extensions"), "code");
+    const text2 = typeof message === "string" ? message : "";
+    return typeof code === "string" ? { message: text2, extensions: { code } } : { message: text2 };
+  }
+  function toGraphQLResponse(json) {
+    if (!isRecord(json)) return null;
+    const { data, errors } = json;
+    if (errors === void 0 || errors === null) return { data };
+    if (!Array.isArray(errors)) return null;
+    return { data, errors: errors.map(toGraphQLError) };
+  }
+  function invalidResponse(res, conf) {
+    return res.ok ? new TetherError(`Invalid response (${res.status})`, { code: "INVALID_RESPONSE", status: res.status }) : new TetherError(statusText(res.status, conf), { status: res.status });
+  }
+  function graphQLFailure(res, errors, conf, code) {
+    const message = errors.map((error) => error.message).filter(Boolean).join(" | ");
+    let text2 = message || "Storefront API error";
+    if (!res.ok) text2 = res.status === 401 || res.status === 403 || !message ? statusText(res.status, conf) : message;
+    return new TetherError(text2, { status: res.status, errors, code });
+  }
+  function networkFailure(error, retry) {
+    if (retry === "any") return { kind: "retry", backoffMs: RETRY_BACKOFF_MS };
+    throw new TetherError(`Network error: ${messageOf(error)}`, { code: "NETWORK" });
+  }
+  function graphQLOutcome(res, conf, query2, errors, data, retry, operation) {
+    if (query2.includes(INVENTORY_FIELD) && errors.some((error) => error.message.includes(INVENTORY_FIELD))) {
+      return { kind: "inventory-refused", error: graphQLFailure(res, errors, conf) };
+    }
+    const codes = errors.map((error) => error.extensions?.code);
+    if (retry !== "none" && codes.includes("THROTTLED")) return { kind: "retry", backoffMs: THROTTLE_BACKOFF_MS };
+    const serverError = codes.includes("INTERNAL_SERVER_ERROR");
+    if (retry === "any" && serverError) return { kind: "retry", backoffMs: RETRY_BACKOFF_MS };
+    const unclear = res.ok && (serverError || operation === "mutation" && data == null);
+    throw graphQLFailure(res, errors, conf, unclear ? "SERVER_ERROR" : void 0);
+  }
+  async function withTimeout(ms, send2) {
+    if (!ms) return send2(null);
+    const controller = new AbortController();
+    const timer = setTimeout(() => {
+      controller.abort(new DOMException("signal timed out", "TimeoutError"));
+    }, ms);
+    try {
+      return await send2(controller.signal);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  async function attempt(conf, query2, variables, isData, retry, operation, signal) {
+    let res;
+    try {
+      res = await (conf.fetch ?? fetch)(endpoint(conf), {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Shopify-Storefront-Access-Token": conf.token },
+        body: JSON.stringify({ query: query2, variables }),
+        // A `fetch` given to the server helpers has to honour the signal, as the platform's does.
+        signal
+      });
+    } catch (error) {
+      return networkFailure(error, retry);
+    }
+    if (res.status === SECURITY_REJECTION) {
+      throw new TetherError("Shopify security rejection (430)", { status: SECURITY_REJECTION });
+    }
+    if (retry !== "none" && res.status === 429 || retry === "any" && res.status >= 500) {
+      return { kind: "retry", backoffMs: RETRY_BACKOFF_MS };
+    }
+    let json;
+    try {
+      json = await res.json();
+    } catch (error) {
+      if (error instanceof SyntaxError) throw invalidResponse(res, conf);
+      return networkFailure(error, retry);
+    }
+    const body = toGraphQLResponse(json);
+    if (!body) throw invalidResponse(res, conf);
+    const { data, errors = [] } = body;
+    if (errors.length) return graphQLOutcome(res, conf, query2, errors, data, retry, operation);
+    if (!res.ok) throw new TetherError(statusText(res.status, conf), { status: res.status });
+    if (!isData(data)) throw invalidResponse(res, conf);
+    return { kind: "data", data };
+  }
+  async function request(conf, query2, variables, isData, { context = true, operation = "query" } = {}) {
     if (!conf.domain || !conf.token) {
       throw new TetherError("Tether is not configured: domain and token are required", { code: "NOT_CONFIGURED" });
     }
-    let text = context ? withContext(query, conf) : query;
-    const age = conf.maxAge ?? 60;
-    if (age > 0 && !/^\s*mutation\b/.test(text)) text += ` #${Math.floor(Date.now() / (age * 1e3))}`;
-    const body = JSON.stringify({ query: text, variables });
-    let attempt = 0;
+    const store = storeOf(conf);
+    const retryWhileLeft = operation === "mutation" ? "not-run" : "any";
+    let retries = 0;
     for (; ; ) {
-      let res;
-      try {
-        res = await (conf.fetch || fetch)(endpoint(conf), {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "X-Shopify-Storefront-Access-Token": conf.token
-          },
-          body
-        });
-      } catch (err) {
-        if (attempt++ < conf.retries) {
-          await sleep(300 * 2 ** attempt);
-          continue;
-        }
-        throw new TetherError(`Network error: ${err.message}`, { code: "NETWORK" });
+      const access = { inventory: !storesWithoutInventory.has(store) };
+      const sent = queryText(conf, query2, access, { context, operation });
+      const retry = retries < conf.retries ? retryWhileLeft : "none";
+      const outcome = await withTimeout(
+        conf.requestTimeout,
+        (signal) => attempt(conf, sent, variables, isData, retry, operation, signal)
+      );
+      switch (outcome.kind) {
+        case "data":
+          return outcome.data;
+        case "inventory-refused":
+          if (typeof query2 === "string" || !access.inventory) throw outcome.error;
+          log(`the token can't read inventory: ${INVENTORY_FIELD} is left out from now on`);
+          storesWithoutInventory.add(store);
+          break;
+        case "retry":
+          await sleep(Math.min(outcome.backoffMs * 2 ** retries, MAX_BACKOFF_MS));
+          retries += 1;
+          log("retry", retries);
+          break;
       }
-      if (res.status === 430) throw new TetherError("Shopify security rejection (430)", { status: 430 });
-      const retryable = res.status === 429 || res.status >= 500;
-      if (retryable && attempt++ < conf.retries) {
-        log("retry", res.status, attempt);
-        await sleep(300 * 2 ** attempt);
-        continue;
-      }
-      let json;
-      try {
-        json = await res.json();
-      } catch {
-        throw new TetherError(res.ok ? `Invalid response (${res.status})` : statusText(res.status, conf), { status: res.status });
-      }
-      if (json.errors?.length) {
-        const inventoryDenied = json.errors.some((e) => /quantityAvailable/.test(e.message || ""));
-        if (inventoryDenied && /\bquantityAvailable\b/.test(body)) {
-          log("no inventory permission, retrying without quantityAvailable");
-          return request(conf, query.replace(/\bquantityAvailable\b/g, ""), variables, { context });
-        }
-        if (json.errors.some((e) => /'warnings'/.test(e.message || "")) && /warnings \{ code message target \}/.test(query)) {
-          return request(conf, query.replace(/ warnings \{ code message target \}/g, ""), variables, { context });
-        }
-        const throttled = json.errors.some((e) => e.extensions?.code === "THROTTLED");
-        if (throttled && attempt++ < conf.retries) {
-          await sleep(500 * 2 ** attempt);
-          continue;
-        }
-        const message = json.errors.map((e) => e.message).filter(Boolean).join(" | ");
-        throw new TetherError(res.ok ? message || "Storefront API error" : res.status === 401 || res.status === 403 || !message ? statusText(res.status, conf) : message, {
-          status: res.status,
-          errors: json.errors
-        });
-      }
-      if (!res.ok) throw new TetherError(statusText(res.status, conf), { status: res.status });
-      return json.data;
     }
   }
-  var gql = (query, variables, opts) => request(cfg, query, variables, opts);
+  function gql(query2, variables, isData, options) {
+    return request(cfg, query2, variables, isData, options);
+  }
+  var hasData = (data) => typeof data === "object" && data !== null;
+  function untypedQuery(conf, text2, variables = {}, options) {
+    return request(conf, text2, variables, hasData, { ...options, operation: operationOf(text2) });
+  }
+  function query(text2, variables, options) {
+    return untypedQuery(cfg, text2, variables, options);
+  }
   function unwrap(payload, name) {
     if (!payload) throw new TetherError(`${name}: empty response`);
-    const errs = payload.userErrors || [];
-    if (errs.length) {
-      throw new TetherError(errs.map((e) => e.message).join(" | "), { userErrors: errs });
+    const userErrors = payload.userErrors ?? [];
+    if (userErrors.length) {
+      throw new TetherError(userErrors.map((error) => error.message).join(" | "), { userErrors });
     }
     return payload;
   }
 
-  // src/cart.js
-  var cart_exports = {};
-  __export(cart_exports, {
-    Cart: () => Cart,
-    focusables: () => focusables,
-    toLineInput: () => toLineInput
-  });
-
-  // src/fragments.js
-  var fragments_exports = {};
-  __export(fragments_exports, {
-    ALLOCATION_FIELDS: () => ALLOCATION_FIELDS,
-    SELLING_PLAN_FIELDS: () => SELLING_PLAN_FIELDS,
-    cartFragment: () => cartFragment,
-    collectionFields: () => collectionFields,
-    metafieldIdentifiers: () => metafieldIdentifiers,
-    productFragment: () => productFragment
-  });
-  var MONEY = "amount currencyCode";
-  var IMAGE = "url altText width height";
-  function metafieldIdentifiers(o = cfg) {
-    return (o.metafields || []).map((m) => {
-      if (typeof m === "string") {
-        const i = m.indexOf(".");
-        return { namespace: m.slice(0, i), key: m.slice(i + 1) };
-      }
-      return m;
-    }).filter((m) => m.namespace && m.key);
+  // src/markup.ts
+  var attr = (name) => `${cfg.prefix}-${name}`;
+  var sel = (name, value) => value === void 0 ? `[${attr(name)}]` : `[${attr(name)}="${value}"]`;
+  var get = (el, name) => el.getAttribute(attr(name));
+  var has = (el, name) => el.hasAttribute(attr(name));
+  function qsa(root, selector) {
+    if (!root) return [];
+    return [...root.querySelectorAll(selector)];
   }
-  function metafieldsField(o = cfg) {
-    const ids = metafieldIdentifiers(o);
-    if (!ids.length) return "";
-    const list = ids.map((m) => `{namespace: ${JSON.stringify(m.namespace)}, key: ${JSON.stringify(m.key)}}`).join(", ");
-    return `metafields(identifiers:[${list}]){namespace key type value reference{... on MediaImage{image{${IMAGE}}}}}`;
+  var scoped = (root, selector, scopeSelector) => qsa(root, selector).filter((el) => el.closest(scopeSelector) === root);
+  var ANALYTICS_EVENTS = [
+    "product-ready",
+    "list-ready",
+    "cart-updated",
+    "cart-toggled",
+    "checkout",
+    "search"
+  ];
+  var ownEvents = /* @__PURE__ */ new WeakMap();
+  function ownEvent(name, detail) {
+    const event = new CustomEvent(`${cfg.prefix}:${name}`, { detail, bubbles: true });
+    ownEvents.set(event, name);
+    return event;
+  }
+  function isOwnEvent(event, name) {
+    return ownEvents.get(event) === name;
+  }
+  function emit(name, detail, target = document) {
+    target.dispatchEvent(ownEvent(name, detail));
+  }
+
+  // src/store-html.ts
+  var HTML_NAMESPACE = "http://www.w3.org/1999/xhtml";
+  var ALLOWED_ELEMENTS = /* @__PURE__ */ new Set([
+    ...["h1", "h2", "h3", "h4", "h5", "h6", "p", "span", "div", "br", "hr", "blockquote", "code", "pre"],
+    ...["strong", "em", "b", "i", "u", "s", "small", "sub", "sup"],
+    ...["ul", "ol", "li", "dl", "dt", "dd"],
+    ...["table", "caption", "colgroup", "col", "thead", "tbody", "tfoot", "tr", "th", "td"],
+    ...["a", "img", "picture", "source", "video", "figure", "figcaption", "iframe"]
+  ]);
+  var REMOVED_WITH_CONTENT = /* @__PURE__ */ new Set(["script", "style", "template", "noscript", "textarea", "select", "title"]);
+  var GLOBAL_ATTRIBUTES = /* @__PURE__ */ new Set(["style", "title", "lang", "dir", "role", "align", "width", "height"]);
+  var ELEMENT_ATTRIBUTES = /* @__PURE__ */ new Map([
+    ["a", /* @__PURE__ */ new Set(["href", "target", "rel", "hreflang"])],
+    ["img", /* @__PURE__ */ new Set(["src", "srcset", "sizes", "alt", "loading", "decoding"])],
+    ["source", /* @__PURE__ */ new Set(["src", "srcset", "sizes", "type", "media"])],
+    ["video", /* @__PURE__ */ new Set(["src", "poster", "controls", "autoplay", "muted", "loop", "playsinline", "preload"])],
+    ["iframe", /* @__PURE__ */ new Set(["src", "allow", "allowfullscreen", "frameborder", "loading"])],
+    ["blockquote", /* @__PURE__ */ new Set(["cite"])],
+    ["ol", /* @__PURE__ */ new Set(["start", "type", "reversed"])],
+    ["li", /* @__PURE__ */ new Set(["value"])],
+    ["table", /* @__PURE__ */ new Set(["border", "cellpadding", "cellspacing", "summary"])],
+    ["col", /* @__PURE__ */ new Set(["span"])],
+    ["colgroup", /* @__PURE__ */ new Set(["span"])],
+    ["th", /* @__PURE__ */ new Set(["colspan", "rowspan", "headers", "scope", "valign"])],
+    ["td", /* @__PURE__ */ new Set(["colspan", "rowspan", "headers", "valign"])]
+  ]);
+  var URL_ATTRIBUTES = /* @__PURE__ */ new Set(["href", "src", "poster", "cite"]);
+  var SCRIPT_URL = /^(javascript|vbscript|data):/i;
+  var DATA_IMAGE = /^data:image\/(png|gif|jpeg|webp|avif);/i;
+  var OUT_OF_PLACE_PROPERTIES = /* @__PURE__ */ new Set([
+    "position",
+    "top",
+    "right",
+    "bottom",
+    "left",
+    "z-index",
+    "-webkit-box-reflect"
+  ]);
+  var OUT_OF_PLACE_PREFIXES = ["inset", "transform", "translate", "rotate", "scale", "offset"];
+  var VIEWPORT_LENGTH = /\d(?:[sld]?v|cq)(?:w|h|i|b|min|max)\b/i;
+  var PAINTS_BEYOND = /^(?:outline|box-shadow|text-shadow|filter|text-decoration|text-underline-offset|text-stroke)|^(?:border-image|mask-border|mask-box-image)(?:-outset)?$/;
+  var MAX_PAINT_PX = 40;
+  var NEGATIVE_LIMITS = /* @__PURE__ */ new Map([
+    ["letter-spacing", { px: 4, em: 0.25 }],
+    ["word-spacing", { px: 4, em: 0.25 }],
+    ["text-indent", { px: MAX_PAINT_PX }]
+  ]);
+  var NUMBER = /(?<![\w#.-])[+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?(%|[a-z]+)?/gi;
+  var NON_LENGTH_FUNCTION = /(?<![\w-])(?!drop-shadow\(|blur\()[\w-]+\([^()]*\)/g;
+  var COMPUTED_VALUE = /(?:var|calc|min|max|clamp|env|attr)\(/i;
+  var FETCHING_VALUE = /url\(|expression\(|@import/i;
+  var IGNORED_IN_SCHEME = /[\u0000- ]/g;
+  var IFRAME_SANDBOX = "allow-scripts allow-same-origin allow-popups allow-presentation";
+  var IFRAME_FEATURES = /* @__PURE__ */ new Set([
+    ...["autoplay", "encrypted-media", "picture-in-picture", "fullscreen", "clipboard-write"],
+    ...["accelerometer", "gyroscope", "web-share"]
+  ]);
+  var IFRAME_REFERRER_POLICY = "strict-origin-when-cross-origin";
+  var EMBED_ORIGINS = [
+    "https://www.youtube.com",
+    "https://www.youtube-nocookie.com",
+    "https://player.vimeo.com",
+    "https://www.loom.com",
+    "https://fast.wistia.net"
+  ];
+  function isAllowedAttribute(tag, name) {
+    return GLOBAL_ATTRIBUTES.has(name) || name.startsWith("aria-") || (ELEMENT_ATTRIBUTES.get(tag)?.has(name) ?? false);
+  }
+  function isSafeUrl(tag, name, value) {
+    const url2 = value.replace(IGNORED_IN_SCHEME, "");
+    if (!SCRIPT_URL.test(url2)) return true;
+    return tag === "img" && name === "src" && DATA_IMAGE.test(url2);
+  }
+  function urlOrNull(value, base) {
+    try {
+      return new URL(value, base);
+    } catch {
+      return null;
+    }
+  }
+  function pageOf(document2, styleParser, embedOrigins) {
+    const baseUrl = document2.baseURI;
+    const origin = urlOrNull(baseUrl)?.origin ?? "null";
+    return {
+      origin: origin === "null" ? null : origin,
+      baseUrl,
+      styleParser,
+      embedOrigins: /* @__PURE__ */ new Set([...EMBED_ORIGINS, ...embedOrigins])
+    };
+  }
+  function isAllowedEmbed(value, page) {
+    const url2 = urlOrNull(value.trim(), page.baseUrl);
+    return url2 !== null && url2.origin !== page.origin && page.embedOrigins.has(url2.origin);
+  }
+  function allowedFeatures(value) {
+    const features = value.split(";").map((directive) => directive.trim().split(/\s+/)[0]?.toLowerCase() ?? "");
+    return [...new Set(features.filter((feature) => IFRAME_FEATURES.has(feature)))].join("; ");
+  }
+  function isOutOfPlace(property, value) {
+    if (OUT_OF_PLACE_PROPERTIES.has(property) || OUT_OF_PLACE_PREFIXES.some((prefix) => property.startsWith(prefix))) {
+      return true;
+    }
+    if (VIEWPORT_LENGTH.test(value)) return true;
+    const limits = NEGATIVE_LIMITS.get(property);
+    if (limits) return COMPUTED_VALUE.test(value) || movesBackTooFar(value, limits);
+    return property.startsWith("margin") && value.includes("-");
+  }
+  function movesBackTooFar(value, limits) {
+    return [...value.matchAll(NUMBER)].some(([number = "", unit = ""]) => {
+      const amount = parseFloat(number);
+      if (amount >= 0) return false;
+      const limit = limits[unit.toLowerCase()];
+      return limit === void 0 || -amount > limit;
+    });
+  }
+  function paintsTooFar(property, value) {
+    if (!PAINTS_BEYOND.test(property.replace(/^-webkit-/, ""))) return false;
+    if (COMPUTED_VALUE.test(value)) return true;
+    return [...value.replace(NON_LENGTH_FUNCTION, "").matchAll(NUMBER)].some(([number = "", unit = ""]) => {
+      const amount = Math.abs(parseFloat(number));
+      return amount !== 0 && (unit.toLowerCase() !== "px" || amount > MAX_PAINT_PX);
+    });
+  }
+  function cleanStyle(value, styleParser) {
+    const style = styleParser.style;
+    style.cssText = value;
+    const properties = Array.from({ length: style.length }, (_, index) => style.item(index));
+    for (const property of properties) {
+      const value2 = style.getPropertyValue(property);
+      const remove = isOutOfPlace(property, value2) || paintsTooFar(property, value2) || FETCHING_VALUE.test(value2);
+      if (remove) style.removeProperty(property);
+    }
+    const cleaned = style.cssText;
+    styleParser.removeAttribute("style");
+    return cleaned;
+  }
+  function cleanAttributes(element, page) {
+    const tag = element.localName;
+    for (const attribute of [...element.attributes]) {
+      const name = attribute.name.toLowerCase();
+      const isUrl = URL_ATTRIBUTES.has(name);
+      const keep = isAllowedAttribute(tag, name) && (!isUrl || isSafeUrl(tag, name, attribute.value));
+      if (!keep) element.removeAttribute(attribute.name);
+    }
+    const style = element.getAttribute("style");
+    if (style === null) return;
+    const cleaned = cleanStyle(style, page.styleParser);
+    if (cleaned === "") element.removeAttribute("style");
+    else element.setAttribute("style", cleaned);
+  }
+  var SAME_TAB_TARGETS = /* @__PURE__ */ new Set(["", "_self", "_parent", "_top"]);
+  function hardenEmbedsAndLinks(element) {
+    if (element.localName === "iframe") {
+      const allow = allowedFeatures(element.getAttribute("allow") ?? "");
+      if (allow === "") element.removeAttribute("allow");
+      else element.setAttribute("allow", allow);
+      element.setAttribute("sandbox", IFRAME_SANDBOX);
+      element.setAttribute("referrerpolicy", IFRAME_REFERRER_POLICY);
+      return;
+    }
+    if (element.localName !== "a") return;
+    const target = element.getAttribute("target");
+    if (target === null || SAME_TAB_TARGETS.has(target.toLowerCase())) return;
+    const rel = new Set((element.getAttribute("rel") ?? "").split(/\s+/).filter(Boolean));
+    rel.add("noopener");
+    rel.add("noreferrer");
+    element.setAttribute("rel", [...rel].join(" "));
+  }
+  function cleanElement(element, page) {
+    const tag = element.localName;
+    const isHtml = element.namespaceURI === HTML_NAMESPACE;
+    if (isHtml && REMOVED_WITH_CONTENT.has(tag)) {
+      element.remove();
+      return;
+    }
+    if (!isHtml || !ALLOWED_ELEMENTS.has(tag)) {
+      element.replaceWith(...element.childNodes);
+      return;
+    }
+    if (tag === "iframe" && !isAllowedEmbed(element.getAttribute("src") ?? "", page)) {
+      element.remove();
+      return;
+    }
+    cleanAttributes(element, page);
+    hardenEmbedsAndLinks(element);
+  }
+  function storeHtmlFragment(html, document2 = globalThis.document, embedOrigins = []) {
+    const template = document2.createElement("template");
+    template.innerHTML = html ?? "";
+    const page = pageOf(document2, template, embedOrigins);
+    for (const element of [...template.content.querySelectorAll("*")]) cleanElement(element, page);
+    return template.content;
+  }
+
+  // src/images.ts
+  function imageUrl(url2, { width, height, crop } = {}) {
+    if (!url2) return url2;
+    let parsed;
+    try {
+      parsed = new URL(url2);
+    } catch (error) {
+      if (error instanceof TypeError) return url2;
+      throw error;
+    }
+    if (width) parsed.searchParams.set("width", String(width));
+    if (height) parsed.searchParams.set("height", String(height));
+    if (crop) parsed.searchParams.set("crop", crop);
+    return parsed.toString();
+  }
+  function sizeAttribute(el, name) {
+    return el.getAttribute(name) ?? el.getAttribute(attr(name)) ?? el.getAttribute(`data-${name}`);
+  }
+  function cdnUrl(url2, el) {
+    if (!url2 || !el) return url2;
+    const width = sizeAttribute(el, "max-width");
+    const height = sizeAttribute(el, "max-height");
+    return imageUrl(url2, { width, height, crop: width || height ? sizeAttribute(el, "crop") : null });
+  }
+  var withoutQuery = (url2) => url2.replace(/\?.*$/, "");
+  function sameImage(a, b) {
+    if (!a || !b) return false;
+    return withoutQuery(a) === withoutQuery(b);
+  }
+  function cssUrl(url2) {
+    const hasScheme = /^\s*[a-z][a-z0-9+.-]*:/i.test(url2);
+    if (hasScheme && !/^\s*(https?:|data:image\/)/i.test(url2)) return "none";
+    const escaped = url2.replace(/["\\\n\r\f]/g, (char) => `\\${char.charCodeAt(0).toString(16)} `);
+    return `url("${escaped}")`;
+  }
+  function setImage(el, url2, alt) {
+    if (!url2) return;
+    const src = cdnUrl(url2, el);
+    if (el.tagName !== "IMG") {
+      el.style.backgroundImage = cssUrl(src);
+      return;
+    }
+    if (sameImage(el.getAttribute("src"), src)) {
+      if (alt != null && !el.getAttribute("alt")) el.setAttribute("alt", alt);
+      return;
+    }
+    el.removeAttribute("srcset");
+    el.removeAttribute("sizes");
+    el.setAttribute("src", src);
+    if (alt != null) el.setAttribute("alt", alt);
+    if (!el.getAttribute("loading")) el.setAttribute("loading", "lazy");
+  }
+
+  // src/repeaters.ts
+  var templates = /* @__PURE__ */ new WeakMap();
+  var hasTemplate = (container) => Boolean(templates.get(container));
+  var copyOf = (template) => template.cloneNode(true);
+  function templateOf(container) {
+    const known = templates.get(container);
+    if (known !== void 0) return known;
+    const first = container.firstElementChild;
+    const template = first ? copyOf(first) : null;
+    templates.set(container, template);
+    container.replaceChildren();
+    return template;
+  }
+  function repeat(container, items, render2) {
+    const template = templateOf(container);
+    if (!template) {
+      if (items.length) warn("repeater without a template child", container);
+      return;
+    }
+    container.replaceChildren();
+    items.forEach((item, index) => {
+      const node = copyOf(template);
+      render2(node, item, index);
+      container.appendChild(node);
+    });
+  }
+  function leave(node, onLeave) {
+    const done = () => {
+      node.remove();
+    };
+    if (!onLeave) {
+      done();
+      return;
+    }
+    callHook(
+      "repeater onLeave",
+      () => {
+        onLeave(node, done);
+      },
+      done
+    );
+  }
+  function insertFresh(container, wanted, fresh, onEnter) {
+    wanted.forEach((node, index) => {
+      if (!fresh.has(node)) return;
+      const previous = wanted[index - 1];
+      if (previous?.parentNode === container) previous.after(node);
+      else container.prepend(node);
+      if (!onEnter) return;
+      callHook("repeater onEnter", () => {
+        onEnter(node);
+      });
+    });
+  }
+  function repeatKeyed(container, items, keyOf, render2, { onEnter, onLeave } = {}) {
+    const template = templateOf(container);
+    if (!template) {
+      warn("repeater without a template child", container);
+      return;
+    }
+    const keyAttribute = `data-${cfg.prefix}-key`;
+    const leavingAttribute = `data-${cfg.prefix}-leaving`;
+    const live = () => [...container.children].filter(
+      (node) => node.hasAttribute(keyAttribute) && !node.hasAttribute(leavingAttribute)
+    );
+    const existing = new Map(live().map((node) => [node.getAttribute(keyAttribute), node]));
+    const wanted = [];
+    const fresh = /* @__PURE__ */ new Set();
+    items.forEach((item, index) => {
+      const key = String(keyOf(item, index));
+      let node = existing.get(key);
+      if (node) existing.delete(key);
+      else {
+        node = copyOf(template);
+        node.setAttribute(keyAttribute, key);
+        fresh.add(node);
+      }
+      render2(node, item, index, fresh.has(node));
+      wanted.push(node);
+    });
+    const staying = wanted.filter((node) => !fresh.has(node));
+    const current = live().filter((node) => staying.includes(node));
+    const inOrder = current.length === staying.length && current.every((node, index) => node === staying[index]);
+    if (!inOrder) {
+      existing.forEach((node) => {
+        node.remove();
+      });
+      wanted.forEach((node) => container.appendChild(node));
+      return;
+    }
+    insertFresh(container, wanted, fresh, onEnter);
+    existing.forEach((node) => {
+      node.setAttribute(leavingAttribute, "");
+      node.removeAttribute(keyAttribute);
+      node.style.pointerEvents = "none";
+      node.inert = true;
+      leave(node, onLeave);
+    });
+  }
+
+  // src/dom.ts
+  var SEEN = "data-tether-seen";
+  var SHOWN = "data-tether-shown";
+  var PREVIOUS_DISPLAY = "data-tether-prev-display";
+  var LAYOUT_DEBOUNCE_MS = 120;
+  function productUrl2(handle, id) {
+    return productUrl(cfg.productPath || "/product", handle, id);
+  }
+  function formatOr(format, fallback) {
+    try {
+      return format();
+    } catch (error) {
+      if (error instanceof RangeError) return fallback;
+      throw error;
+    }
+  }
+  function formatPercent(percentage, locale = cfg.locale) {
+    if (!percentage) return "";
+    const format = () => new Intl.NumberFormat(locale || void 0, { style: "percent", maximumFractionDigits: 0 }).format(percentage / 100);
+    return formatOr(format, `${percentage}%`);
+  }
+  function formatMoney2(money) {
+    if (!money) return "";
+    const { formatMoney: siteFormat, locale } = cfg;
+    const builtIn = () => formatMoney(money, locale);
+    return siteFormat ? callHook("formatMoney", () => siteFormat(money, locale), builtIn) : builtIn();
+  }
+  function formatDate(iso) {
+    if (!iso) return "";
+    return formatOr(() => new Date(iso).toLocaleDateString(cfg.locale || void 0), "");
+  }
+  function setStoreHtml(el, html) {
+    el.replaceChildren(storeHtmlFragment(html, el.ownerDocument, cfg.embedOrigins));
+  }
+  var isInput = (el) => el.tagName === "INPUT";
+  var isTextField = (el) => isInput(el) || el.tagName === "TEXTAREA";
+  var isField = (el) => isTextField(el) || el.tagName === "SELECT";
+  var isElement = (target) => target instanceof window.Element;
+  function setText(el, value) {
+    const text2 = value == null ? "" : String(value);
+    if (isTextField(el)) el.value = text2;
+    else el.textContent = text2;
+  }
+  var readText = (el) => isTextField(el) ? el.value : el.textContent;
+  function setTextTracked(el, value) {
+    const before = readText(el);
+    setText(el, value);
+    if (before !== readText(el) && el.hasAttribute(SEEN)) {
+      callHook("onValueChange", () => cfg.onValueChange?.(el, before));
+    }
+    el.setAttribute(SEEN, "1");
+  }
+  function reveal(el) {
+    if (el.hasAttribute(SHOWN)) return;
+    el.setAttribute(SHOWN, "");
+    el.removeAttribute("hidden");
+    const previous = el.getAttribute(PREVIOUS_DISPLAY);
+    if (previous !== null) {
+      el.style.display = previous;
+      el.removeAttribute(PREVIOUS_DISPLAY);
+    } else if (el.style.display === "none") {
+      el.style.display = "";
+    }
+    if (typeof getComputedStyle === "function" && getComputedStyle(el).display === "none") {
+      el.style.display = el.getAttribute(attr("display")) || "block";
+    }
+  }
+  function show(el, visible) {
+    if (visible) {
+      reveal(el);
+      return;
+    }
+    el.removeAttribute(SHOWN);
+    if (!el.hasAttribute(PREVIOUS_DISPLAY) && el.style.display !== "none") {
+      el.setAttribute(PREVIOUS_DISPLAY, el.style.display);
+    }
+    el.style.display = "none";
+  }
+  var CHECKABLE = 'input[type="radio"],input[type="checkbox"]';
+  var CHECKED_ROLES = ["radio", "checkbox", "switch", "menuitemradio", "menuitemcheckbox"];
+  var BUTTON_INPUTS = ["button", "submit", "reset"];
+  function chosenState(el) {
+    const role = el.getAttribute("role");
+    if (role === "button") return "aria-pressed";
+    if (role && CHECKED_ROLES.includes(role)) return "aria-checked";
+    if (role === "option" || role === "tab") return "aria-selected";
+    if (role) return null;
+    if (isInput(el)) return BUTTON_INPUTS.includes(el.type) ? "aria-pressed" : null;
+    return el.querySelector(CHECKABLE) ? null : "aria-pressed";
+  }
+  function setSelected(el, selected) {
+    el.classList.toggle("is-selected", selected);
+    const state = chosenState(el);
+    if (state === "aria-pressed" && el.tagName !== "BUTTON" && !isInput(el)) {
+      el.setAttribute("role", "button");
+      if (!el.hasAttribute("tabindex")) el.setAttribute("tabindex", "0");
+    }
+    if (state) el.setAttribute(state, String(selected));
+    if (isInput(el) && el.matches(CHECKABLE)) el.checked = selected;
+    const input = el.querySelector(CHECKABLE);
+    if (input && isInput(input)) input.checked = selected;
+  }
+  var UNAVAILABLE_NOTE = "tether-unavailable";
+  function describeUnavailable(control, unavailable) {
+    if (unavailable && !document.getElementById(UNAVAILABLE_NOTE)) {
+      const note = document.createElement("span");
+      note.id = UNAVAILABLE_NOTE;
+      note.hidden = true;
+      note.textContent = "Unavailable";
+      document.body.append(note);
+    }
+    const ids = (control.getAttribute("aria-describedby") ?? "").split(" ").filter((id) => id && id !== UNAVAILABLE_NOTE);
+    if (unavailable) ids.push(UNAVAILABLE_NOTE);
+    if (ids.length) control.setAttribute("aria-describedby", ids.join(" "));
+    else control.removeAttribute("aria-describedby");
+  }
+  function setUnavailable(el, unavailable, choosing) {
+    el.classList.toggle("is-unavailable", unavailable);
+    const isControl = chosenState(el) !== null || isInput(el);
+    const control = isControl ? el : el.querySelector(CHECKABLE);
+    if (!control) return;
+    if (choosing === "picks-closest") describeUnavailable(control, unavailable);
+    else control.setAttribute("aria-disabled", String(unavailable));
+  }
+  var layoutTimer;
+  var pageGlobal = (name) => Reflect.get(window, name);
+  function refreshScrollTrigger() {
+    const scrollTrigger = pageGlobal("ScrollTrigger");
+    if (typeof scrollTrigger !== "function") return;
+    const refresh = Reflect.get(scrollTrigger, "refresh");
+    if (typeof refresh === "function") Reflect.apply(refresh, scrollTrigger, []);
+  }
+  function notifyLayoutChanged(reason) {
+    clearTimeout(layoutTimer);
+    layoutTimer = setTimeout(() => {
+      callHook("layout-changed", () => {
+        if (cfg.onLayoutChange) cfg.onLayoutChange(reason);
+        else refreshScrollTrigger();
+      });
+      emit("layout-changed", { reason });
+    }, LAYOUT_DEBOUNCE_MS);
+  }
+  function watchImages(root, reason) {
+    const loading = [...root.querySelectorAll("img")].filter((img) => !img.complete);
+    let left = loading.length;
+    const done = () => {
+      left -= 1;
+      if (left === 0) notifyLayoutChanged(`${reason}:images`);
+    };
+    loading.forEach((img) => {
+      img.addEventListener("load", done, { once: true });
+      img.addEventListener("error", done, { once: true });
+    });
+  }
+  function busy(el, task) {
+    if (el.getAttribute("aria-busy") === "true") return Promise.resolve(void 0);
+    el.setAttribute("aria-busy", "true");
+    return Promise.resolve().then(task).finally(() => {
+      el.removeAttribute("aria-busy");
+    });
+  }
+  function parseJSONAttr(el, name) {
+    const raw = el ? get(el, name) : null;
+    if (!raw) return null;
+    try {
+      const json = JSON.parse(raw);
+      return json;
+    } catch {
+      warn(`invalid JSON in ${attr(name)}`, el);
+      return null;
+    }
+  }
+  var INTEGER_TEXT = /^-?\d+$/;
+  var invalidIntegerAttributes = /* @__PURE__ */ new WeakMap();
+  function warnInvalidAttribute(el, name, message) {
+    const warned = invalidIntegerAttributes.get(el) ?? /* @__PURE__ */ new Set();
+    invalidIntegerAttributes.set(el, warned);
+    if (warned.has(name)) return;
+    warned.add(name);
+    warn(`${attr(name)} ${message}`, el);
+  }
+  function integerAttribute(el, name, { min, max, fallback }) {
+    const raw = get(el, name)?.trim();
+    if (!raw) return fallback;
+    const value = INTEGER_TEXT.test(raw) ? Number(raw) : Number.NaN;
+    if (Number.isNaN(value) || value < min) {
+      warnInvalidAttribute(
+        el,
+        name,
+        `${JSON.stringify(raw)} is not a whole number from ${String(min)}: using ${String(fallback)}`
+      );
+      return fallback;
+    }
+    if (max === void 0 || value <= max) return value;
+    warnInvalidAttribute(el, name, `${raw} is more than its maximum: using ${String(max)}`);
+    return max;
+  }
+  function attributeText(value) {
+    if (value === null || value === void 0) return "";
+    if (typeof value === "string") return value;
+    if (typeof value === "number" || typeof value === "boolean") return String(value);
+    return JSON.stringify(value);
+  }
+  function attributesFromJson(json) {
+    if (Array.isArray(json)) {
+      const entries = json;
+      return entries.filter(isRecord).map((entry) => ({ key: attributeText(entry["key"]), value: attributeText(entry["value"]) }));
+    }
+    if (!isRecord(json)) return [];
+    return Object.entries(json).map(([key, value]) => ({ key, value: attributeText(value) }));
+  }
+  function toAttributes(attributes) {
+    if (!attributes) return [];
+    if (Array.isArray(attributes)) {
+      return attributes.map((attribute) => ({ key: String(attribute.key), value: String(attribute.value ?? "") }));
+    }
+    return Object.entries(attributes).map(([key, value]) => ({ key, value: String(value ?? "") }));
+  }
+
+  // src/shopify-fields.ts
+  var IMAGE_FIELDS = "url altText width height";
+
+  // src/fragments.ts
+  var MONEY = "amount currencyCode";
+  var FULL_ACCESS = { inventory: true };
+  var inventoryField = (access) => access.inventory ? "quantityAvailable" : "";
+  function metafieldsField(metafields) {
+    const identifiers = [];
+    for (const ref of metafields) {
+      const identifier = toMetafieldIdentifier(ref);
+      if (identifier) identifiers.push(identifier);
+    }
+    if (!identifiers.length) return "";
+    const list = identifiers.map(({ namespace, key }) => `{namespace: ${JSON.stringify(namespace)}, key: ${JSON.stringify(key)}}`).join(", ");
+    return `metafields(identifiers:[${list}]){namespace key type value reference{... on MediaImage{image{${IMAGE_FIELDS}}}}}`;
   }
   var SELLING_PLAN_FIELDS = ` id name description recurringDeliveries options{name value}priceAdjustments{orderCount adjustmentValue{__typename ... on SellingPlanPercentagePriceAdjustment{adjustmentPercentage}... on SellingPlanFixedAmountPriceAdjustment{adjustmentAmount{${MONEY}}}... on SellingPlanFixedPriceAdjustment{price{${MONEY}}}}}`;
   var ALLOCATION_FIELDS = ` sellingPlan{id}checkoutChargeAmount{${MONEY}}remainingBalanceChargeAmount{${MONEY}}priceAdjustments{price{${MONEY}}compareAtPrice{${MONEY}}perDeliveryPrice{${MONEY}}unitPrice{${MONEY}}}`;
-  function productFragment(o = cfg) {
-    return ` fragment TetherProduct on Product{id handle title description descriptionHtml productType vendor tags availableForSale publishedAt onlineStoreUrl requiresSellingPlan seo{title description}featuredImage{${IMAGE}}images(first:${o.imagesFirst}){nodes{${IMAGE}}}options{name optionValues{name swatch{color image{previewImage{${IMAGE}}}}}}priceRange{minVariantPrice{${MONEY}}maxVariantPrice{${MONEY}}}compareAtPriceRange{minVariantPrice{${MONEY}}maxVariantPrice{${MONEY}}}${metafieldsField(o)} sellingPlanGroups(first:${o.sellingPlanGroupsFirst}){nodes{name appName options{name values}sellingPlans(first:${o.sellingPlansFirst}){nodes{${SELLING_PLAN_FIELDS}}}}}variants(first:${o.variantsFirst}){nodes{id title availableForSale currentlyNotInStock quantityAvailable sku barcode selectedOptions{name value}image{${IMAGE}}price{${MONEY}}compareAtPrice{${MONEY}}unitPrice{${MONEY}}sellingPlanAllocations(first:${o.sellingPlansFirst}){nodes{${ALLOCATION_FIELDS}}}}}}`;
+  function productFragment(o = cfg, access = FULL_ACCESS) {
+    return ` fragment TetherProduct on Product{id handle title description descriptionHtml productType vendor tags availableForSale publishedAt onlineStoreUrl requiresSellingPlan seo{title description}featuredImage{${IMAGE_FIELDS}}images(first:${o.imagesFirst}){nodes{${IMAGE_FIELDS}}}options{name optionValues{name swatch{color image{previewImage{${IMAGE_FIELDS}}}}}}priceRange{minVariantPrice{${MONEY}}maxVariantPrice{${MONEY}}}compareAtPriceRange{minVariantPrice{${MONEY}}maxVariantPrice{${MONEY}}}${metafieldsField(o.metafields)} sellingPlanGroups(first:${o.sellingPlanGroupsFirst}){nodes{name appName options{name values}sellingPlans(first:${o.sellingPlansFirst}){nodes{${SELLING_PLAN_FIELDS}}}}}variants(first:${o.variantsFirst}){nodes{id title availableForSale currentlyNotInStock ${inventoryField(access)} sku barcode selectedOptions{name value}image{${IMAGE_FIELDS}}price{${MONEY}}compareAtPrice{${MONEY}}unitPrice{${MONEY}}sellingPlanAllocations(first:${o.sellingPlansFirst}){nodes{${ALLOCATION_FIELDS}}}}}}`;
   }
-  function cartFragment() {
-    return ` fragment TetherCart on Cart{id checkoutUrl totalQuantity note createdAt updatedAt attributes{key value}buyerIdentity{countryCode email}discountCodes{code applicable}cost{subtotalAmount{${MONEY}}totalAmount{${MONEY}}checkoutChargeAmount{${MONEY}}}lines(first:100){nodes{id quantity attributes{key value}cost{totalAmount{${MONEY}}subtotalAmount{${MONEY}}amountPerQuantity{${MONEY}}compareAtAmountPerQuantity{${MONEY}}}discountAllocations{discountedAmount{${MONEY}}}sellingPlanAllocation{sellingPlan{id name description recurringDeliveries options{name value}}checkoutChargeAmount{${MONEY}}priceAdjustments{price{${MONEY}}compareAtPrice{${MONEY}}perDeliveryPrice{${MONEY}}}}merchandise{... on ProductVariant{id title sku availableForSale requiresShipping quantityAvailable image{${IMAGE}}price{${MONEY}}compareAtPrice{${MONEY}}selectedOptions{name value}product{id title handle vendor featuredImage{${IMAGE}}}}}... on ComponentizableCartLine{lineComponents{id quantity merchandise{... on ProductVariant{id title product{title handle}}}}}}}}`;
-  }
-  function collectionFields() {
-    return `
-  id handle title description descriptionHtml
-  image { ${IMAGE} }
-  seo { title description }`;
+  function cartFragment(access = FULL_ACCESS) {
+    return ` fragment TetherCart on Cart{id checkoutUrl totalQuantity note createdAt updatedAt attributes{key value}buyerIdentity{countryCode email}discountCodes{code applicable}cost{subtotalAmount{${MONEY}}totalAmount{${MONEY}}checkoutChargeAmount{${MONEY}}}lines(first:100){nodes{id quantity attributes{key value}cost{totalAmount{${MONEY}}subtotalAmount{${MONEY}}amountPerQuantity{${MONEY}}compareAtAmountPerQuantity{${MONEY}}}discountAllocations{discountedAmount{${MONEY}}}sellingPlanAllocation{sellingPlan{id name description recurringDeliveries options{name value}}checkoutChargeAmount{${MONEY}}priceAdjustments{price{${MONEY}}compareAtPrice{${MONEY}}perDeliveryPrice{${MONEY}}}}merchandise{... on ProductVariant{id title sku availableForSale requiresShipping ${inventoryField(access)} image{${IMAGE_FIELDS}}price{${MONEY}}compareAtPrice{${MONEY}}selectedOptions{name value}product{id title handle vendor featuredImage{${IMAGE_FIELDS}}}}}... on ComponentizableCartLine{lineComponents{id quantity merchandise{... on ProductVariant{id title product{title handle}}}}}}}}`;
   }
 
-  // src/loader.js
-  var loader_exports = {};
-  __export(loader_exports, {
-    clearProductCache: () => clearProductCache,
-    getProduct: () => getProduct,
-    getProducts: () => getProducts,
-    getRecommendations: () => getRecommendations,
-    hydrateProducts: () => hydrateProducts,
-    normalizeProductKey: () => normalizeProductKey,
-    primeProduct: () => primeProduct,
-    refreshProducts: () => refreshProducts,
-    takeStale: () => takeStale
-  });
-  var productCache = /* @__PURE__ */ new Map();
-  var pending = [];
-  var resolvers = /* @__PURE__ */ new Map();
-  var scheduled = false;
-  var generation = 0;
-  var isGid = (v) => typeof v === "string" && v.startsWith("gid://");
-  function normalizeProductKey(raw) {
-    const v = String(raw ?? "").trim();
-    if (!v) return null;
-    if (isGid(v)) return v;
-    if (/^\d+$/.test(v)) return `gid://shopify/Product/${v}`;
-    const m = v.match(/\/products\/([^/?#]+)/);
-    return m ? m[1] : v;
-  }
-  function primeProduct(product) {
-    if (!product) return;
-    const p = Promise.resolve(product);
-    productCache.set(product.handle, p);
-    productCache.set(product.id, p);
-  }
-  function getProduct(rawKey) {
-    const key = normalizeProductKey(rawKey);
-    if (!key) return Promise.reject(new TetherError("empty product key", { code: "NOT_FOUND" }));
-    if (productCache.has(key)) return productCache.get(key);
-    const p = new Promise((resolve, reject) => {
-      resolvers.set(key, { resolve, reject });
-      pending.push(key);
-      if (!scheduled) {
-        scheduled = true;
-        setTimeout(flush, 0);
-      }
-    });
-    productCache.set(key, p);
-    return p;
-  }
-  async function flush() {
-    scheduled = false;
-    const gen = generation;
-    const keys = pending.splice(0);
-    if (!keys.length) return;
-    const ids = keys.filter(isGid);
-    const handles = keys.filter((k) => !isGid(k));
-    const defs = [];
-    const parts2 = [];
-    const vars = {};
-    if (ids.length) {
-      defs.push("$ids: [ID!]!");
-      vars.ids = ids;
-      parts2.push("byId: nodes(ids: $ids) { ... on Product { ...TetherProduct } }");
-    }
-    handles.forEach((h, i) => {
-      defs.push(`$h${i}: String!`);
-      vars[`h${i}`] = h;
-      parts2.push(`h${i}: product(handle: $h${i}) { ...TetherProduct }`);
-    });
-    const query = `query TetherProducts(${defs.join(",")}){${parts2.join(" ")}}${productFragment()}`;
-    log("fetch products", keys);
-    const settle = (k, fn) => {
-      const r = resolvers.get(k);
-      resolvers.delete(k);
-      if (r) fn(r);
-    };
-    try {
-      const data = await gql(query, vars);
-      const got = /* @__PURE__ */ new Map();
-      (data.byId || []).forEach((p) => {
-        if (p) got.set(p.id, p);
-      });
-      handles.forEach((h, i) => {
-        if (data[`h${i}`]) got.set(h, data[`h${i}`]);
-      });
-      keys.forEach((k) => settle(k, (r) => {
-        if (got.has(k)) {
-          const p = got.get(k);
-          if (gen === generation) {
-            primeProduct(p);
-            freshAt.set(p.handle, Date.now());
-            freshAt.set(p.id, Date.now());
-          }
-          r.resolve(p);
-        } else {
-          const miss = productCache.get(k);
-          if (gen === generation) setTimeout(() => {
-            if (productCache.get(k) === miss) productCache.delete(k);
-          }, 1e4);
-          r.reject(new TetherError(`Product not found: ${k}`, { code: "NOT_FOUND" }));
-        }
-      }));
-    } catch (err) {
-      keys.forEach((k) => settle(k, (r) => {
-        if (gen === generation) productCache.delete(k);
-        r.reject(err);
-      }));
-    }
-  }
-  function clearProductCache() {
-    productCache.clear();
-    generation++;
-    stale.clear();
-    freshAt.clear();
-  }
-  var stale = /* @__PURE__ */ new Set();
-  var freshAt = /* @__PURE__ */ new Map();
-  var FRESH_MS = 6e4;
-  function hydrateProducts(products) {
-    (products || []).forEach((p) => {
-      if (!p?.id || !p.handle) return;
-      if (Date.now() - (freshAt.get(p.handle) || 0) < FRESH_MS && productCache.has(p.handle)) return;
-      primeProduct(p);
-      stale.add(p.handle);
-      stale.add(p.id);
-    });
-  }
-  function takeStale(key) {
-    const k = normalizeProductKey(key);
-    if (!stale.has(k)) return false;
-    const p = productCache.get(k);
-    stale.delete(k);
-    p?.then?.((x) => {
-      stale.delete(x.handle);
-      stale.delete(x.id);
-    });
-    return true;
-  }
-  function refreshProducts(keys) {
-    keys.forEach((k) => productCache.delete(normalizeProductKey(k)));
-    return keys.map((k) => getProduct(k));
-  }
-  async function getProducts({
-    collection,
-    query,
-    first = cfg.collectionFirst,
-    after = null,
-    sortKey,
-    reverse = false,
-    filters
-  } = {}) {
-    const fragment = productFragment();
-    if (collection) {
-      const data2 = await gql(`query TetherCollection($handle:String!,$first:Int!,$after:String,$sortKey:ProductCollectionSortKeys,$reverse:Boolean,$filters:[ProductFilter!]){collection(handle:$handle){${collectionFields()} products(first:$first,after:$after,sortKey:$sortKey,reverse:$reverse,filters:$filters){nodes{...TetherProduct}pageInfo{hasNextPage endCursor}}}}${fragment}`, {
-        handle: collection,
-        first,
-        after,
-        sortKey: sortKey || void 0,
-        reverse,
-        filters: filters || void 0
-      });
-      if (!data2.collection) throw new TetherError(`Collection not found: ${collection}`, { code: "NOT_FOUND" });
-      const { products, ...rest } = data2.collection;
-      products.nodes.forEach(primeProduct);
-      return { collection: rest, products: products.nodes, pageInfo: products.pageInfo };
-    }
-    const data = await gql(`query TetherSearch($first:Int!,$after:String,$query:String,$sortKey:ProductSortKeys,$reverse:Boolean){products(first:$first,after:$after,query:$query,sortKey:$sortKey,reverse:$reverse){nodes{...TetherProduct}pageInfo{hasNextPage endCursor}}}${fragment}`, { first, after, query: query || void 0, sortKey: sortKey || void 0, reverse });
-    data.products.nodes.forEach(primeProduct);
-    return { collection: null, products: data.products.nodes, pageInfo: data.products.pageInfo };
-  }
-  async function getRecommendations(product, intent = "RELATED") {
-    const key = normalizeProductKey(typeof product === "object" ? product?.id : product);
-    const byId = key?.startsWith("gid://");
-    const data = await gql(`query TetherRecs(${byId ? "$id: ID!" : "$handle: String!"},$intent:ProductRecommendationIntent){productRecommendations(${byId ? "productId: $id" : "productHandle: $handle"},intent:$intent){...TetherProduct}}${productFragment()}`, byId ? { id: key, intent } : { handle: key, intent });
-    const list = data.productRecommendations || [];
-    list.forEach(primeProduct);
-    return list;
-  }
-
-  // src/selling-plans.js
+  // src/selling-plans.ts
   var selling_plans_exports = {};
   __export(selling_plans_exports, {
     GID: () => GID,
@@ -477,62 +1384,108 @@
     plansForVariant: () => plansForVariant,
     toGid: () => toGid
   });
-  var GID = {
-    product: (v) => toGid(v, "Product"),
-    variant: (v) => toGid(v, "ProductVariant"),
-    sellingPlan: (v) => toGid(v, "SellingPlan")
-  };
-  function toGid(value, type) {
-    const v = String(value ?? "").trim();
-    if (!v) return null;
-    if (v.startsWith("gid://")) return v;
-    if (/^\d+$/.test(v)) return `gid://shopify/${type}/${v}`;
-    return v;
+
+  // src/amounts.ts
+  var DECIMAL = /^(-?)(\d+)(?:\.(\d+))?$/;
+  function toScaledInteger(amount, fractionDigits) {
+    const match = DECIMAL.exec(amount.trim());
+    if (!match) return null;
+    const [, sign = "", whole = "0", fraction = ""] = match;
+    const digits = BigInt(`${whole}${fraction.padEnd(fractionDigits, "0")}`);
+    return sign === "-" ? -digits : digits;
   }
+  var fractionLength = (amount) => amount.split(".")[1]?.length ?? 0;
+  function isGreaterAmount(amount, other) {
+    if (amount == null || other == null) return false;
+    const fractionDigits = Math.max(fractionLength(amount.trim()), fractionLength(other.trim()));
+    const scaled = toScaledInteger(amount, fractionDigits);
+    const scaledOther = toScaledInteger(other, fractionDigits);
+    if (scaled === null || scaledOther === null) return false;
+    return scaled > scaledOther;
+  }
+  var DEFAULT_FRACTION_DIGITS = 2;
+  var fractionDigitsByCurrency = /* @__PURE__ */ new Map();
+  function currencyFractionDigits(currencyCode) {
+    const known = fractionDigitsByCurrency.get(currencyCode);
+    if (known !== void 0) return known;
+    let digits = DEFAULT_FRACTION_DIGITS;
+    try {
+      const format = new Intl.NumberFormat("en", { style: "currency", currency: currencyCode });
+      digits = format.resolvedOptions().maximumFractionDigits ?? DEFAULT_FRACTION_DIGITS;
+    } catch {
+    }
+    fractionDigitsByCurrency.set(currencyCode, digits);
+    return digits;
+  }
+  function toMinorUnits(money) {
+    return Math.round(parseFloat(money.amount) * 10 ** currencyFractionDigits(money.currencyCode));
+  }
+  function fromMinorUnits(minorUnits, currencyCode) {
+    const digits = currencyFractionDigits(currencyCode);
+    return { amount: (minorUnits / 10 ** digits).toFixed(digits), currencyCode };
+  }
+
+  // src/selling-plans.ts
+  var PERCENT = 100;
+  function toGid(value, type) {
+    const text2 = typeof value === "string" || typeof value === "number" ? String(value).trim() : "";
+    if (!text2) return null;
+    if (text2.startsWith("gid://")) return text2;
+    if (/^\d+$/.test(text2)) return `gid://shopify/${type}/${text2}`;
+    return text2;
+  }
+  var GID = {
+    product: (value) => toGid(value, "Product"),
+    variant: (value) => toGid(value, "ProductVariant"),
+    sellingPlan: (value) => toGid(value, "SellingPlan")
+  };
   function allPlans(product) {
-    const groups = product?.sellingPlanGroups?.nodes || [];
-    return groups.flatMap((g) => (g.sellingPlans?.nodes || []).map((p) => ({ ...p, group: g })));
+    const groups = product?.sellingPlanGroups?.nodes ?? [];
+    return groups.flatMap((group) => group.sellingPlans.nodes.map((plan) => ({ ...plan, group })));
   }
   function hasPlans(product) {
     return allPlans(product).length > 0;
   }
   function allocationFor(variant, planId) {
     if (!variant || !planId) return null;
-    return (variant.sellingPlanAllocations?.nodes || []).find((a) => a.sellingPlan?.id === planId) || null;
+    const allocations = variant.sellingPlanAllocations?.nodes ?? [];
+    return allocations.find((allocation) => allocation.sellingPlan.id === planId) ?? null;
   }
   function plansForVariant(product, variant) {
-    return allPlans(product).filter((p) => allocationFor(variant, p.id));
+    return allPlans(product).filter((plan) => allocationFor(variant, plan.id));
   }
   function planPrice(variant, planId) {
-    const a = allocationFor(variant, planId);
-    const adj = a?.priceAdjustments?.[0];
-    return adj?.perDeliveryPrice || adj?.price || variant?.price || null;
+    const adjustment = allocationFor(variant, planId)?.priceAdjustments[0];
+    return adjustment?.perDeliveryPrice ?? adjustment?.price ?? variant?.price ?? null;
   }
   function planCheckoutCharge(variant, planId) {
-    const a = allocationFor(variant, planId);
-    return a?.checkoutChargeAmount || a?.priceAdjustments?.[0]?.price || variant?.price || null;
+    const allocation = allocationFor(variant, planId);
+    return allocation?.checkoutChargeAmount ?? allocation?.priceAdjustments[0]?.price ?? variant?.price ?? null;
   }
   function planSavings(variant, planId) {
-    const base = parseFloat(variant?.price?.amount);
-    const sub = parseFloat(planPrice(variant, planId)?.amount);
-    if (!Number.isFinite(base) || !Number.isFinite(sub) || base <= 0 || sub >= base) {
+    const onPlanPrice = planPrice(variant, planId);
+    if (!variant || !onPlanPrice) return { amount: null, percentage: 0 };
+    const oneTime = parseFloat(variant.price.amount);
+    const onPlan = parseFloat(onPlanPrice.amount);
+    if (!Number.isFinite(oneTime) || !Number.isFinite(onPlan) || oneTime <= 0 || onPlan >= oneTime) {
       return { amount: null, percentage: 0 };
     }
+    const saved = toMinorUnits(variant.price) - toMinorUnits(onPlanPrice);
     return {
-      amount: { amount: (base - sub).toFixed(2), currencyCode: variant.price.currencyCode },
-      percentage: Math.round((1 - sub / base) * 100)
+      amount: fromMinorUnits(saved, variant.price.currencyCode),
+      percentage: Math.round((1 - onPlan / oneTime) * PERCENT)
     };
   }
   function planAdjustment(plan) {
-    const v = plan?.priceAdjustments?.[0]?.adjustmentValue;
-    if (!v) return null;
-    switch (v.__typename) {
+    const value = plan?.priceAdjustments[0]?.adjustmentValue;
+    if (!value) return null;
+    switch (value.__typename) {
       case "SellingPlanPercentagePriceAdjustment":
-        return { type: "percentage", value: v.adjustmentPercentage };
+        return { type: "percentage", value: value.adjustmentPercentage };
       case "SellingPlanFixedAmountPriceAdjustment":
-        return { type: "amount", value: v.adjustmentAmount };
+        return { type: "amount", value: value.adjustmentAmount };
       case "SellingPlanFixedPriceAdjustment":
-        return { type: "price", value: v.price };
+        return { type: "price", value: value.price };
       default:
         return null;
     }
@@ -541,954 +1494,1707 @@
     if (!ref) return null;
     const plans = allPlans(product);
     const gid = GID.sellingPlan(ref);
-    const needle = String(ref).trim().toLowerCase();
-    return plans.find((p) => p.id === gid) || plans.find((p) => p.name.toLowerCase() === needle) || plans.find((p) => (p.options || []).some((o) => String(o.value).toLowerCase() === needle)) || null;
+    const needle = ref.trim().toLowerCase();
+    return plans.find((plan) => plan.id === gid) ?? plans.find((plan) => plan.name.toLowerCase() === needle) ?? plans.find((plan) => plan.options.some((option) => option.value.toLowerCase() === needle)) ?? null;
   }
 
-  // src/dom.js
-  var dom_exports = {};
-  __export(dom_exports, {
-    attr: () => attr,
-    busy: () => busy,
-    cdnUrl: () => cdnUrl,
-    dataKey: () => dataKey,
-    emit: () => emit,
-    formatDate: () => formatDate,
-    formatMoney: () => formatMoney,
-    formatPercent: () => formatPercent,
-    get: () => get,
-    has: () => has,
-    hasTemplate: () => hasTemplate,
-    imageUrl: () => imageUrl,
-    notifyLayoutChanged: () => notifyLayoutChanged,
-    parseJSONAttr: () => parseJSONAttr,
-    productUrl: () => productUrl,
-    qsa: () => qsa,
-    readText: () => readText,
-    repeat: () => repeat,
-    repeatKeyed: () => repeatKeyed,
-    sameImage: () => sameImage,
-    scoped: () => scoped,
-    sel: () => sel,
-    setImage: () => setImage,
-    setSelected: () => setSelected,
-    setText: () => setText,
-    setTextTracked: () => setTextTracked,
-    show: () => show,
-    toAttributes: () => toAttributes,
-    watchImages: () => watchImages
-  });
-  var attr = (name) => `${cfg.prefix}-${name}`;
-  var sel = (name, value) => value === void 0 ? `[${attr(name)}]` : `[${attr(name)}="${value}"]`;
-  var get = (el, name) => el.getAttribute(attr(name));
-  var has = (el, name) => el.hasAttribute(attr(name));
-  var dataKey = () => `data-${cfg.prefix}-key`;
-  function productUrl(handle, id) {
-    const path = cfg.productPath || "/product";
-    if (!/\{(handle|id)\}/.test(path)) return `${path.replace(/\/$/, "")}/${handle}`;
-    const numeric = id ? String(id).split("/").pop() : "";
-    return path.replace(/\{handle\}/g, encodeURIComponent(handle || "")).replace(/\{id\}/g, encodeURIComponent(numeric));
+  // src/product-shape.ts
+  var MONEY2 = { amount: "string", currencyCode: "string" };
+  var PRODUCT = {
+    id: "string",
+    handle: "string",
+    title: "string",
+    options: ["object"],
+    images: { nodes: ["object"] },
+    priceRange: { minVariantPrice: MONEY2, maxVariantPrice: MONEY2 },
+    variants: { nodes: [{ id: "string", price: MONEY2, selectedOptions: ["object"] }] }
+  };
+  var isProductShape = (value) => field(value, "id") !== "" && field(value, "handle") !== "" && matches(value, PRODUCT);
+  var PRODUCT_NODE = (node) => isRecord(node) && (node["id"] === void 0 || matches(node, PRODUCT));
+
+  // src/cart/cart-shape.ts
+  var LINE = {
+    id: "string",
+    quantity: "number",
+    attributes: ["object"],
+    cost: { totalAmount: MONEY2, subtotalAmount: MONEY2, amountPerQuantity: MONEY2 },
+    merchandise: { id: "string", selectedOptions: ["object"], product: "object" }
+  };
+  var CART = {
+    id: "string",
+    checkoutUrl: "string",
+    totalQuantity: "number",
+    attributes: ["object"],
+    discountCodes: ["object"],
+    cost: { totalAmount: MONEY2, subtotalAmount: MONEY2 },
+    lines: { nodes: [LINE] }
+  };
+
+  // src/cart/drawer.ts
+  var FOCUSABLE = 'a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
+  var FOCUS_AFTER_OPEN_MS = 60;
+  var openWithoutDrawer = false;
+  var announcedOpen = false;
+  var returnFocus = null;
+  var pageWatcher = null;
+  var isFocusable = (el) => el !== null && "focus" in el;
+  var focusables = (drawer) => qsa(drawer, FOCUSABLE).filter((el) => el.offsetParent !== null || el === document.activeElement);
+  var drawers = () => qsa(document, sel("cart-drawer"));
+  var isOpenDrawer = (drawer) => drawer.classList.contains(cfg.cartDrawerOpenClass);
+  var hasFocusInside = (all) => all.some((drawer) => drawer.contains(document.activeElement));
+  var isManual = (drawer) => get(drawer, "cart-drawer") === "manual";
+  function isOpen() {
+    const openClassed = [...document.getElementsByClassName(cfg.cartDrawerOpenClass)];
+    return openClassed.some((el) => el.matches(sel("cart-drawer"))) || openWithoutDrawer && !drawers().length;
   }
-  var qsa = (root, s) => root ? [...root.querySelectorAll(s)] : [];
-  var scoped = (root, s, scopeSelector) => qsa(root, s).filter((el) => el.closest(scopeSelector) === root);
-  function emit(name, detail, target = document) {
-    target.dispatchEvent(new CustomEvent(`${cfg.prefix}:${name}`, { detail, bubbles: true }));
+  function announceChange() {
+    const open = isOpen();
+    if (open === announcedOpen) return;
+    const all = drawers();
+    if (open) announceOpen(all.filter(isOpenDrawer));
+    else announceClosed(all, document.activeElement === document.body || hasFocusInside(all));
   }
-  function formatPercent(n, locale = cfg.locale) {
-    if (!n) return "";
-    try {
-      return new Intl.NumberFormat(locale || void 0, { style: "percent", maximumFractionDigits: 0 }).format(n / 100);
-    } catch {
-      return `${n}%`;
+  function syncDrawerAria() {
+    qsa(document, sel("cart-open")).forEach((button) => {
+      button.setAttribute("aria-expanded", String(isOpen()));
+    });
+    drawers().forEach((drawer) => {
+      if (!drawer.hasAttribute("role")) drawer.setAttribute("role", "dialog");
+      if (!drawer.hasAttribute("aria-label") && !drawer.hasAttribute("aria-labelledby")) {
+        drawer.setAttribute("aria-label", get(drawer, "cart-label") || "Cart");
+      }
+      const open = isOpenDrawer(drawer);
+      drawer.setAttribute("aria-modal", String(open));
+      drawer.setAttribute("aria-hidden", String(!open));
+      drawer.inert = !open;
+    });
+    if (pageWatcher) return;
+    pageWatcher = new MutationObserver(announceChange);
+    pageWatcher.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["class"],
+      childList: true,
+      subtree: true
+    });
+  }
+  function focusInto(drawer) {
+    const target = focusables(drawer)[0] ?? drawer;
+    if (target === drawer && !drawer.hasAttribute("tabindex")) drawer.tabIndex = -1;
+    target.focus({ preventScroll: true });
+  }
+  function announceOpen(opened) {
+    announcedOpen = true;
+    syncDrawerAria();
+    const [first] = opened;
+    if (cfg.cartFocus && first) {
+      returnFocus = isFocusable(document.activeElement) ? document.activeElement : null;
+      setTimeout(() => {
+        focusInto(first);
+      }, FOCUS_AFTER_OPEN_MS);
     }
+    callHook("onCartOpen", () => cfg.onCartOpen?.(opened));
+    emit("cart-toggled", { open: true });
   }
-  function formatMoney(money) {
-    if (!money) return "";
-    if (typeof cfg.formatMoney === "function") return cfg.formatMoney(money, cfg.locale);
-    const amount = parseFloat(money.amount);
-    if (Number.isNaN(amount)) return "";
-    try {
-      return new Intl.NumberFormat(cfg.locale || void 0, {
-        style: "currency",
-        currency: money.currencyCode
-      }).format(amount);
-    } catch {
-      return `${money.currencyCode} ${amount.toFixed(2)}`;
+  function announceClosed(all, hadFocus) {
+    announcedOpen = false;
+    openWithoutDrawer = false;
+    syncDrawerAria();
+    if (hadFocus && returnFocus?.isConnected) returnFocus.focus({ preventScroll: true });
+    returnFocus = null;
+    callHook("onCartClose", () => cfg.onCartClose?.(all));
+    emit("cart-toggled", { open: false });
+  }
+  function openCart() {
+    if (isOpen()) return;
+    const all = drawers();
+    const opened = all.filter((drawer) => !isManual(drawer));
+    if (all.length && !opened.length) return;
+    openWithoutDrawer = !all.length;
+    opened.forEach((drawer) => {
+      drawer.classList.add(cfg.cartDrawerOpenClass);
+    });
+    announceOpen(opened);
+  }
+  function closeCart() {
+    if (!isOpen()) return;
+    const all = drawers();
+    const hadFocus = hasFocusInside(all);
+    all.forEach((drawer) => {
+      drawer.classList.remove(cfg.cartDrawerOpenClass);
+    });
+    announceClosed(all, hadFocus);
+  }
+  function toggleCart() {
+    if (isOpen()) closeCart();
+    else openCart();
+  }
+  function trapFocus(event) {
+    if (event.key !== "Tab" || !cfg.cartFocus || !isOpen()) return;
+    const drawer = drawers().find(isOpenDrawer);
+    if (!drawer) return;
+    const inside = focusables(drawer);
+    const first = inside[0];
+    const last = inside.at(-1);
+    if (!first || !last) return;
+    const active = document.activeElement;
+    const leaving = event.shiftKey ? active === first : active === last;
+    if (drawer.contains(active) && !leaving) return;
+    event.preventDefault();
+    (event.shiftKey ? last : first).focus();
+  }
+
+  // src/loader.ts
+  var MISS_CACHE_MS = 1e4;
+  var FRESH_MS = 6e4;
+  var productCache = /* @__PURE__ */ new Map();
+  var stale = /* @__PURE__ */ new Set();
+  var freshAt = /* @__PURE__ */ new Map();
+  var queued = /* @__PURE__ */ new Map();
+  var flushScheduled = false;
+  var generation = 0;
+  var isGid = (key) => key.startsWith("gid://");
+  var normalizeProductKey = productKey;
+  function primeProduct(product) {
+    if (!product) return;
+    const loaded = Promise.resolve(product);
+    productCache.set(product.handle, loaded);
+    productCache.set(product.id, loaded);
+  }
+  function getProduct(rawKey) {
+    const key = normalizeProductKey(rawKey);
+    if (!key) return Promise.reject(new TetherError("empty product key", { code: "NOT_FOUND" }));
+    const cached = productCache.get(key);
+    if (cached) return cached;
+    const loading = new Promise((resolve, reject) => {
+      queued.set(key, { resolve, reject });
+      if (!flushScheduled) {
+        flushScheduled = true;
+        setTimeout(() => void flush(), 0);
+      }
+    });
+    productCache.set(key, loading);
+    return loading;
+  }
+  var withProductFragment = (operation) => (access) => `${operation}${productFragment(cfg, access)}`;
+  function batchQuery(keys) {
+    const ids = keys.filter(isGid);
+    const handles = keys.filter((key) => !isGid(key));
+    const definitions = [];
+    const selections = [];
+    const variables = {};
+    if (ids.length) {
+      definitions.push("$ids: [ID!]!");
+      variables["ids"] = ids;
+      selections.push(`byId:nodes(ids:$ids){... on Product{...TetherProduct}}`);
     }
+    handles.forEach((handle, index) => {
+      definitions.push(`$h${index}: String!`);
+      variables[`h${index}`] = handle;
+      selections.push(`h${index}:product(handle:$h${index}){...TetherProduct}`);
+    });
+    const query2 = withProductFragment(`query TetherProducts(${definitions.join(",")}){${selections.join(" ")}}`);
+    return { query: query2, variables, handles };
   }
-  function formatDate(iso) {
-    if (!iso) return "";
+  function forgetMissLater(key, batchGeneration) {
+    if (batchGeneration !== generation) return;
+    const miss = productCache.get(key);
+    setTimeout(() => {
+      if (productCache.get(key) === miss) productCache.delete(key);
+    }, MISS_CACHE_MS);
+  }
+  function isBatchData(data) {
+    if (!isRecord(data)) return false;
+    const { byId = [], ...byHandle } = data;
+    return matches(byId, [orNull(PRODUCT_NODE)]) && Object.values(byHandle).every(orNull(PRODUCT));
+  }
+  async function flush() {
+    flushScheduled = false;
+    const batchGeneration = generation;
+    const batch = [...queued];
+    queued.clear();
+    const keys = batch.map(([key]) => key);
+    const { query: query2, variables, handles } = batchQuery(keys);
+    log("fetch products", keys);
+    let data;
     try {
-      return new Date(iso).toLocaleDateString(cfg.locale || void 0);
-    } catch {
-      return "";
-    }
-  }
-  function imageUrl(url, { width, height, crop } = {}) {
-    if (!url) return url;
-    try {
-      const u = new URL(url);
-      if (width) u.searchParams.set("width", String(width));
-      if (height) u.searchParams.set("height", String(height));
-      if (crop) u.searchParams.set("crop", crop);
-      return u.toString();
-    } catch {
-      return url;
-    }
-  }
-  function cdnUrl(url, el) {
-    if (!url || !el) return url;
-    const g = (k) => el.getAttribute(k) ?? el.getAttribute(`${cfg.prefix}-${k}`) ?? el.getAttribute(`data-${k}`);
-    return imageUrl(url, { width: g("max-width"), height: g("max-height"), crop: g("max-width") || g("max-height") ? g("crop") : null });
-  }
-  var sameImage = (a, b) => Boolean(a && b) && a.split("?")[0] === b.split("?")[0];
-  function setImage(el, url, alt) {
-    if (!url) return;
-    const src = cdnUrl(url, el);
-    if (el.tagName === "IMG" && sameImage(el.getAttribute("src"), src)) {
-      if (alt != null && !el.getAttribute("alt")) el.setAttribute("alt", alt);
+      data = await gql(query2, variables, isBatchData);
+    } catch (error) {
+      batch.forEach(([key, waiter]) => {
+        if (batchGeneration === generation) productCache.delete(key);
+        waiter.reject(error);
+      });
       return;
     }
-    if (el.tagName === "IMG") {
-      el.removeAttribute("srcset");
-      el.removeAttribute("sizes");
-      el.setAttribute("src", src);
-      if (alt != null) el.setAttribute("alt", alt);
-      if (!el.getAttribute("loading")) el.setAttribute("loading", "lazy");
-    } else {
-      el.style.backgroundImage = `url("${src}")`;
-    }
-  }
-  function setText(el, v) {
-    const text = v == null ? "" : String(v);
-    if (el.tagName === "INPUT" || el.tagName === "TEXTAREA") el.value = text;
-    else el.textContent = text;
-  }
-  var readText = (el) => el.tagName === "INPUT" || el.tagName === "TEXTAREA" ? el.value : el.textContent;
-  function setTextTracked(el, v) {
-    const before = readText(el);
-    setText(el, v);
-    const after = readText(el);
-    if (before !== after && el.dataset.tetherSeen && typeof cfg.onValueChange === "function") {
-      try {
-        cfg.onValueChange(el, before);
-      } catch {
+    const found = /* @__PURE__ */ new Map();
+    for (const product of data.byId ?? []) if (product?.id) found.set(product.id, product);
+    handles.forEach((handle, index) => {
+      const product = data[`h${index}`];
+      if (product) found.set(handle, product);
+    });
+    const now = Date.now();
+    batch.forEach(([key, waiter]) => {
+      const product = found.get(key);
+      if (!product) {
+        forgetMissLater(key, batchGeneration);
+        waiter.reject(new TetherError(`Product not found: ${key}`, { code: "NOT_FOUND" }));
+        return;
       }
-    }
-    el.dataset.tetherSeen = "1";
-  }
-  function show(el, visible) {
-    const k = "tetherPrevDisplay";
-    if (visible) {
-      if (el.dataset.tetherShown !== void 0) return;
-      el.dataset.tetherShown = "";
-      el.removeAttribute("hidden");
-      if (el.dataset[k] !== void 0) {
-        el.style.display = el.dataset[k];
-        delete el.dataset[k];
-      } else if (el.style.display === "none") {
-        el.style.display = "";
+      if (batchGeneration === generation) {
+        primeProduct(product);
+        freshAt.set(product.handle, now);
+        freshAt.set(product.id, now);
       }
-      if (typeof getComputedStyle === "function" && getComputedStyle(el).display === "none") {
-        el.style.display = el.getAttribute(`${cfg.prefix}-display`) || "block";
-      }
-    } else {
-      delete el.dataset.tetherShown;
-      if (el.dataset[k] === void 0 && el.style.display !== "none") el.dataset[k] = el.style.display || "";
-      el.style.display = "none";
+      waiter.resolve(product);
+    });
+  }
+  function clearProductCache() {
+    for (const key of productCache.keys()) if (!queued.has(key)) productCache.delete(key);
+    generation += 1;
+    stale.clear();
+    freshAt.clear();
+  }
+  function hydrateProducts(products) {
+    for (const product of products ?? []) {
+      if (!product.id || !product.handle) continue;
+      const loadedAgo = Date.now() - (freshAt.get(product.handle) ?? 0);
+      if (loadedAgo < FRESH_MS && productCache.has(product.handle)) continue;
+      primeProduct(product);
+      stale.add(product.handle);
+      stale.add(product.id);
     }
   }
-  function setSelected(el, selected) {
-    el.classList.toggle("is-selected", selected);
-    el.setAttribute("aria-pressed", selected ? "true" : "false");
-    if (el.tagName === "INPUT" && (el.type === "radio" || el.type === "checkbox")) el.checked = selected;
-    const input = el.querySelector?.('input[type="radio"],input[type="checkbox"]');
-    if (input) input.checked = selected;
+  function takeStale(rawKey) {
+    const key = normalizeProductKey(rawKey);
+    if (!key || !stale.has(key)) return false;
+    stale.delete(key);
+    void productCache.get(key)?.then((product) => {
+      stale.delete(product.handle);
+      stale.delete(product.id);
+    }, failureIsReportedByTheRender);
+    return true;
   }
-  var templates = /* @__PURE__ */ new WeakMap();
-  var hasTemplate = (container) => Boolean(templates.get(container));
-  function template(container) {
-    if (!templates.has(container)) {
-      const tpl = container.firstElementChild?.cloneNode(true) ?? null;
-      templates.set(container, tpl);
-      container.innerHTML = "";
-    }
-    return templates.get(container);
+  function failureIsReportedByTheRender() {
   }
-  function repeat(container, items, render) {
-    const tpl = template(container);
-    if (!tpl) {
-      if (items.length) warn("repeater without a template child", container);
+  function refreshProduct(key) {
+    const normalized = normalizeProductKey(key);
+    if (normalized) productCache.delete(normalized);
+    return getProduct(key);
+  }
+
+  // src/product-render.ts
+  var NTH_IMAGE_BIND = /^image:(\d+)$/;
+  var METAFIELD_BIND = "metafield:";
+  var MULTI_LINE_METAFIELD = /^(rich_text|multi_line_text)_field$/;
+  var ALL_PLAN_GROUPS = ["", "true", "all", "*"];
+  var isSelect = (el) => el.tagName === "SELECT";
+  var selectsIn = (scope, selector) => scope.$(`select${selector}`).filter(isSelect);
+  function renderGallery(el, product) {
+    const images = product.images.nodes;
+    const rendered = [...el.children].map((node) => node.tagName === "IMG" ? node : node.querySelector("img"));
+    const same = !hasTemplate(el) && rendered.length === images.length && rendered.every((img, index) => sameImage(img?.getAttribute("src"), images[index]?.url));
+    if (same) return;
+    repeat(el, images, (node, image) => {
+      const target = node.matches(`img,${sel("bind", "image")}`) ? node : qsa(node, "img")[0] ?? node;
+      setImage(target, image.url, image.altText || product.title);
+    });
+  }
+  function renderMetafield(el, product, ref) {
+    const dot = ref.indexOf(".");
+    const namespace = ref.slice(0, dot);
+    const key = ref.slice(dot + 1);
+    const metafield = (product.metafields ?? []).find((field2) => field2?.namespace === namespace && field2.key === key);
+    if (!metafield) {
+      setText(el, "");
       return;
     }
-    container.innerHTML = "";
-    items.forEach((item, i) => {
-      const node = tpl.cloneNode(true);
-      render(node, item, i);
-      container.appendChild(node);
-    });
-  }
-  function repeatKeyed(container, items, keyOf, render, { onEnter, onLeave } = {}) {
-    const tpl = template(container);
-    if (!tpl) {
-      warn("repeater without a template child", container);
+    const image = metafield.reference?.image;
+    if (image) {
+      setImage(el, image.url, image.altText);
       return;
     }
-    const KEY = dataKey();
-    const LEAVING = `data-${cfg.prefix}-leaving`;
-    const live = () => [...container.children].filter((n) => n.hasAttribute(KEY) && !n.hasAttribute(LEAVING));
-    const existing = new Map(live().map((n) => [n.getAttribute(KEY), n]));
-    const wanted = [];
-    const fresh = /* @__PURE__ */ new Set();
-    items.forEach((item, i) => {
-      const k = String(keyOf(item, i));
-      let node = existing.get(k);
-      if (node) existing.delete(k);
-      else {
-        node = tpl.cloneNode(true);
-        node.setAttribute(KEY, k);
-        fresh.add(node);
-      }
-      render(node, item, i, fresh.has(node));
-      wanted.push(node);
+    if (MULTI_LINE_METAFIELD.test(metafield.type)) el.style.whiteSpace = "pre-line";
+    setText(el, metafield.value);
+  }
+  var PRODUCT_TEXTS = new Map(
+    Object.entries({
+      title: (product) => product.title,
+      "description-text": (product) => product.description,
+      vendor: (product) => product.vendor,
+      type: (product) => product.productType,
+      handle: (product) => product.handle,
+      "published-at": (product) => formatDate(product.publishedAt),
+      "min-price": (product) => formatMoney2(product.priceRange.minVariantPrice),
+      "max-price": (product) => formatMoney2(product.priceRange.maxVariantPrice)
+    })
+  );
+  function renderTags(el, product) {
+    const exclude = (el.getAttribute("exclude") ?? "").split(",").map((tag) => tag.trim()).filter(Boolean);
+    const tags = product.tags.filter((tag) => !exclude.includes(tag));
+    repeat(el, tags, (node, tag) => {
+      setText(node, tag);
     });
-    const staying = wanted.filter((n) => !fresh.has(n));
-    const current = live().filter((n) => staying.includes(n));
-    const orderOk = current.length === staying.length && current.every((n, i) => n === staying[i]);
-    if (!orderOk) {
-      existing.forEach((n) => n.remove());
-      wanted.forEach((n) => container.appendChild(n));
+  }
+  function renderProductBind(el, key, product) {
+    const text2 = PRODUCT_TEXTS.get(key);
+    if (text2) {
+      setText(el, text2(product));
       return;
     }
-    wanted.forEach((node, i) => {
-      if (!fresh.has(node)) return;
-      const prev = wanted[i - 1];
-      if (prev && prev.parentNode === container) prev.after(node);
-      else container.prepend(node);
-      if (onEnter) {
-        try {
-          onEnter(node);
-        } catch {
-        }
+    switch (key) {
+      case "description":
+        setStoreHtml(el, product.descriptionHtml);
+        break;
+      case "featured-image":
+        setImage(el, product.featuredImage?.url, product.featuredImage?.altText || product.title);
+        break;
+      case "url":
+      case "link": {
+        const url2 = productUrl2(product.handle, product.id);
+        if (url2) el.setAttribute("href", url2);
+        if (key === "url" && !el.firstElementChild && !el.textContent.trim()) setText(el, product.title);
+        break;
       }
+      case "images":
+        renderGallery(el, product);
+        break;
+      case "tags":
+        renderTags(el, product);
+        break;
+      default:
+        renderIndexedBind(el, key, product);
+    }
+  }
+  function renderIndexedBind(el, key, product) {
+    const nth = NTH_IMAGE_BIND.exec(key);
+    if (nth) {
+      const image = product.images.nodes[Number(nth[1]) - 1] ?? product.featuredImage;
+      setImage(el, image?.url, image?.altText || product.title);
+    } else if (key.startsWith(METAFIELD_BIND)) {
+      renderMetafield(el, product, key.slice(METAFIELD_BIND.length));
+    }
+  }
+  function renderOptionLists(scope) {
+    const { product } = scope;
+    scope.$(sel("option-list")).forEach((container) => {
+      const name = scope.optName(get(container, "option-list"));
+      const option = product.options.find((candidate) => candidate.name === name);
+      if (!option || option.optionValues.length <= 1 && has(container, "hide-single")) {
+        show(container, false);
+        return;
+      }
+      repeat(container, option.optionValues, (node, value) => {
+        node.setAttribute(attr("option-value"), value.name);
+        const text2 = qsa(node, sel("bind", "option-value"))[0];
+        if (text2) setText(text2, value.name);
+        else if (!node.firstElementChild) setText(node, value.name);
+        const swatchEl = qsa(node, sel("bind", "swatch"))[0];
+        const { swatch } = value;
+        if (!swatchEl || !swatch) return;
+        if (swatch.color) swatchEl.style.backgroundColor = swatch.color;
+        if (swatch.image?.previewImage) setImage(swatchEl, swatch.image.previewImage.url, value.name);
+      });
     });
-    existing.forEach((node) => {
-      node.setAttribute(LEAVING, "");
-      node.removeAttribute(KEY);
-      node.style.pointerEvents = "none";
-      node.inert = true;
-      const done = () => node.remove();
-      if (onLeave) {
-        try {
-          onLeave(node, done);
-        } catch {
-          done();
-        }
-      } else done();
+  }
+  function renderSelects(scope) {
+    const { product } = scope;
+    selectsIn(scope, sel("option")).forEach((select) => {
+      const option = product.options.find((candidate) => candidate.name === scope.optName(get(select, "option")));
+      if (!option) {
+        show(select, false);
+        return;
+      }
+      select.replaceChildren(...option.optionValues.map((value) => new Option(value.name, value.name)));
+    });
+    selectsIn(scope, sel("variant-select")).forEach((select) => {
+      select.replaceChildren(...product.variants.nodes.map((variant) => new Option(variant.title, variant.id)));
+    });
+    selectsIn(scope, sel("plan")).forEach((select) => {
+      const plans = scope.plans.map((plan) => new Option(plan.name, plan.id));
+      const oneTime = !product.requiresSellingPlan && get(select, "plan") !== "subscription-only";
+      const oneTimeLabel = select.getAttribute(attr("one-time-label")) || "One-time purchase";
+      select.replaceChildren(...oneTime ? [new Option(oneTimeLabel, "")] : [], ...plans);
     });
   }
-  var layoutTimer = null;
-  function notifyLayoutChanged(reason) {
-    clearTimeout(layoutTimer);
-    layoutTimer = setTimeout(() => {
-      if (typeof cfg.onLayoutChange === "function") cfg.onLayoutChange(reason);
-      else if (window.ScrollTrigger?.refresh) window.ScrollTrigger.refresh();
-      emit("layout-changed", { reason });
-    }, 120);
-  }
-  function watchImages(root, reason) {
-    const imgs = qsa(root, "img").filter((i) => !i.complete);
-    if (!imgs.length) return;
-    let left = imgs.length;
-    const done = () => {
-      if (--left === 0) notifyLayoutChanged(`${reason}:images`);
-    };
-    imgs.forEach((img) => {
-      img.addEventListener("load", done, { once: true });
-      img.addEventListener("error", done, { once: true });
+  function renderPlanLists(scope) {
+    scope.$(sel("plan-list")).forEach((container) => {
+      const raw = (get(container, "plan-list") ?? "").trim();
+      const group = ALL_PLAN_GROUPS.includes(raw.toLowerCase()) ? null : raw;
+      const plans = scope.plans.filter((plan) => !group || plan.group.name === group);
+      repeat(container, plans, (node, plan) => {
+        node.setAttribute(attr("plan-value"), plan.id);
+        if (!node.firstElementChild && !node.querySelector(sel("plan-bind"))) setText(node, plan.name);
+      });
     });
   }
-  function busy(el, fn) {
-    if (el.getAttribute("aria-busy") === "true") return Promise.resolve();
-    el.setAttribute("aria-busy", "true");
-    return Promise.resolve().then(fn).finally(() => el.removeAttribute("aria-busy"));
+  function writeProduct(scope) {
+    scope.$(sel("bind")).forEach((el) => {
+      renderProductBind(el, get(el, "bind") ?? "", scope.product);
+    });
+    renderOptionLists(scope);
+    renderSelects(scope);
+    renderPlanLists(scope);
   }
-  function parseJSONAttr(el, name) {
-    const raw = el && get(el, name);
-    if (!raw) return null;
+
+  // src/cart/render.ts
+  var DEFAULT_TITLE = "Default Title";
+  var quantityOf = (line, pending) => pending.get(line.id)?.quantity ?? line.quantity;
+  var numericId = (gid) => gid.split("/").pop() ?? gid;
+  function lineUrl(line) {
+    const variant = line.merchandise;
+    const base = productUrl2(variant.product.handle, variant.product.id);
+    if (!base) return null;
+    const query2 = new URLSearchParams();
+    query2.set("variant", numericId(variant.id));
+    const planId = line.sellingPlanAllocation?.sellingPlan.id;
+    if (planId) query2.set("selling_plan", numericId(planId));
+    return `${base}${base.includes("?") ? "&" : "?"}${query2.toString()}`;
+  }
+  var productTitle = (line) => line.merchandise.product.title;
+  var LINE_TEXT = {
+    title: productTitle,
+    "product-title": productTitle,
+    "variant-title": (line) => line.merchandise.title === DEFAULT_TITLE ? "" : line.merchandise.title,
+    options: (line) => line.merchandise.selectedOptions.filter((option) => option.value !== DEFAULT_TITLE).map((option) => `${option.name}: ${option.value}`).join(", "),
+    vendor: (line) => line.merchandise.product.vendor,
+    sku: (line) => line.merchandise.sku ?? "",
+    price: (line) => formatMoney2(line.cost.amountPerQuantity),
+    "compare-at-price": (line) => formatMoney2(line.cost.compareAtAmountPerQuantity ?? line.merchandise.compareAtPrice),
+    "line-total": (line) => formatMoney2(line.cost.totalAmount),
+    "line-subtotal": (line) => formatMoney2(line.cost.subtotalAmount),
+    quantity: (line, view) => quantityOf(line, view.pending),
+    plan: (line) => line.sellingPlanAllocation?.sellingPlan.name ?? "",
+    "plan-description": (line) => line.sellingPlanAllocation?.sellingPlan.description ?? "",
+    components: (line) => (line.lineComponents ?? []).map((component) => `${component.quantity} \xD7 ${component.merchandise.product.title}`).join(", ")
+  };
+  var ATTRIBUTE_KEY = "attribute:";
+  function lineValue(line, key, view) {
+    if (Object.hasOwn(LINE_TEXT, key)) return LINE_TEXT[key]?.(line, view);
+    if (!key.startsWith(ATTRIBUTE_KEY)) return void 0;
+    const name = key.slice(ATTRIBUTE_KEY.length);
+    return line.attributes.find((attribute) => attribute.key === name)?.value ?? "";
+  }
+  function fillPlanSelect(select, line, product) {
+    const plans = allPlans(product);
+    const allowOneTime = !product.requiresSellingPlan && get(select, "line-plan") !== "subscription-only";
+    const oneTime = { value: "", label: select.getAttribute(attr("one-time-label")) || "One-time purchase" };
+    const choices = [...allowOneTime ? [oneTime] : [], ...plans.map((plan) => ({ value: plan.id, label: plan.name }))];
+    const signature = choices.map((choice) => choice.value).join("|");
+    if (select.dataset["tetherSig"] !== signature) {
+      select.replaceChildren(
+        ...choices.map((choice) => {
+          const option = document.createElement("option");
+          option.value = choice.value;
+          option.textContent = choice.label;
+          return option;
+        })
+      );
+      select.dataset["tetherSig"] = signature;
+    }
+    select.value = line.sellingPlanAllocation?.sellingPlan.id ?? "";
+    show(select, plans.length > 0);
+  }
+  function renderLineState(node, line, view) {
+    const isSubscription = Boolean(line.sellingPlanAllocation);
+    node.classList.toggle("is-subscription", isSubscription);
+    const warning = view.warnings.find((candidate) => candidate.target === line.id);
+    node.classList.toggle("is-warning", Boolean(warning));
+    const pending = view.pending.has(line.id);
+    node.classList.toggle("is-busy", pending);
+    if (pending) node.setAttribute("aria-busy", "true");
+    else node.removeAttribute("aria-busy");
+    qsa(node, sel("line", "warning")).forEach((el) => {
+      setTextTracked(el, warning?.message ?? "");
+    });
+    const conditions = /* @__PURE__ */ new Map([
+      ["subscription", isSubscription],
+      ["one-time", !isSubscription],
+      ["on-sale", isGreaterAmount(line.cost.compareAtAmountPerQuantity?.amount, line.cost.amountPerQuantity.amount)],
+      ["has-components", (line.lineComponents ?? []).length > 0],
+      ["warning", Boolean(warning)]
+    ]);
+    qsa(node, sel("line-show")).forEach((el) => {
+      const key = get(el, "line-show");
+      const visible = key === null ? void 0 : conditions.get(key);
+      if (visible !== void 0) show(el, visible);
+    });
+  }
+  function renderLine(node, line, view) {
+    const variant = line.merchandise;
+    node.setAttribute(attr("line-id"), line.id);
+    qsa(node, sel("line")).forEach((el) => {
+      const key = get(el, "line") ?? "";
+      if (key === "image") {
+        setImage(el, variant.image?.url ?? variant.product.featuredImage?.url, variant.product.title);
+        return;
+      }
+      if (key === "url") {
+        const url2 = lineUrl(line);
+        if (url2) el.setAttribute("href", url2);
+        return;
+      }
+      const value = lineValue(line, key, view);
+      if (value !== void 0) setTextTracked(el, value);
+    });
+    renderLineState(node, line, view);
+    const planSelects = qsa(node, sel("line-plan")).filter(isSelect);
+    planSelects.forEach((select) => {
+      reportFailure(
+        getProduct(variant.product.handle).then((product) => {
+          fillPlanSelect(select, line, product);
+        }),
+        "line plan options"
+      );
+    });
+  }
+  function renderConditions(cart, view) {
+    const count = cart?.totalQuantity ?? 0;
+    const hasSubscription = (cart?.lines.nodes ?? []).some((line) => line.sellingPlanAllocation);
+    const conditions = /* @__PURE__ */ new Map([
+      ["cart-empty", count === 0],
+      ["cart-filled", count > 0],
+      ["cart-has-subscription", hasSubscription],
+      ["cart-no-subscription", !hasSubscription],
+      ["cart-has-discount", (cart?.discountCodes ?? []).some((code) => code.applicable)],
+      ["cart-error", view.failed],
+      ["cart-warning", view.warnings.length > 0]
+    ]);
+    qsa(document, sel("show")).forEach((el) => {
+      const key = get(el, "show");
+      const visible = key === null ? void 0 : conditions.get(key);
+      if (visible === void 0 || el.closest(sel("product"))) return;
+      show(el, visible);
+    });
+    qsa(document, sel("checkout")).forEach((el) => {
+      el.classList.toggle("is-disabled", !count);
+      el.setAttribute("aria-disabled", String(!count));
+    });
+  }
+  function renderFields(cart) {
+    qsa(document, `textarea${sel("cart-note")},input${sel("cart-note")}`).forEach((el) => {
+      if (document.activeElement !== el) setText(el, cart?.note ?? "");
+    });
+    qsa(document, sel("cart-discounts")).forEach((container) => {
+      repeat(container, cart?.discountCodes ?? [], (node, discount) => {
+        node.setAttribute(attr("discount-code"), discount.code);
+        const target = node.querySelector(sel("discount", "code")) ?? (node.firstElementChild ? null : node);
+        if (target) setText(target, discount.code);
+        node.classList.toggle("is-inapplicable", !discount.applicable);
+      });
+    });
+  }
+  function renderCart(view) {
+    const { cart } = view;
+    const money = (key) => cart ? formatMoney2(cart.cost[key]) : "";
+    syncDrawerAria();
+    qsa(document, sel("cart-count")).forEach((el) => {
+      setTextTracked(el, cart?.totalQuantity ?? 0);
+    });
+    qsa(document, sel("cart-subtotal")).forEach((el) => {
+      setTextTracked(el, money("subtotalAmount"));
+    });
+    qsa(document, sel("cart-total")).forEach((el) => {
+      setTextTracked(el, money("totalAmount"));
+    });
+    qsa(document, sel("cart-checkout-charge")).forEach((el) => {
+      setTextTracked(el, money("checkoutChargeAmount"));
+    });
+    renderConditions(cart, view);
+    qsa(document, sel("cart-warning")).forEach((el) => {
+      if (!el.hasAttribute("role")) el.setAttribute("role", "status");
+      setTextTracked(el, [...new Set(view.warnings.map((warning) => warning.message))].join(" "));
+    });
+    renderFields(cart);
+    qsa(document, sel("cart-lines")).forEach((container) => {
+      repeatKeyed(
+        container,
+        cart?.lines.nodes ?? [],
+        (line) => line.id,
+        (node, line) => {
+          renderLine(node, line, view);
+        },
+        { onEnter: cfg.onLineEnter, onLeave: cfg.onLineLeave }
+      );
+    });
+    if (cart) notifyLayoutChanged("cart");
+  }
+  function showSavedCount(count) {
+    qsa(document, sel("cart-count")).forEach((el) => {
+      if (/^\s*0?\s*$/.test(el.textContent)) el.textContent = String(count);
+    });
+  }
+
+  // src/storage.ts
+  function getStored(key, area = "localStorage") {
     try {
-      return JSON.parse(raw);
+      return window[area].getItem(key);
     } catch {
-      warn(`invalid JSON in ${attr(name)}`, el);
       return null;
     }
   }
-  function toAttributes(obj) {
-    if (!obj) return [];
-    if (Array.isArray(obj)) return obj.map((a) => ({ key: String(a.key), value: String(a.value ?? "") }));
-    return Object.entries(obj).map(([key, value]) => ({ key, value: String(value ?? "") }));
+  function setStored(key, value, area = "localStorage") {
+    try {
+      window[area].setItem(key, value);
+    } catch {
+    }
+  }
+  function removeStored(key, area = "localStorage") {
+    try {
+      window[area].removeItem(key);
+    } catch {
+    }
   }
 
-  // src/cart.js
-  function toLineInput(input, quantity = 1, opts = {}) {
-    const src = typeof input === "object" && input !== null ? input : { variantId: input, quantity, ...opts };
-    const merchandiseId = GID.variant(src.merchandiseId || src.variantId || src.id);
-    if (!merchandiseId) throw new TetherError("add(): variantId is required");
-    const line = { merchandiseId, quantity: Math.max(1, parseInt(src.quantity ?? 1, 10) || 1) };
-    const plan = src.sellingPlanId || src.sellingPlan;
-    if (plan) line.sellingPlanId = GID.sellingPlan(plan);
-    const attrs = toAttributes(src.attributes);
-    if (attrs.length) line.attributes = attrs;
-    return line;
+  // server/src/shared/cart-id.ts
+  var CART_ID = /^gid:\/\/shopify\/Cart\/[\w-]+(\?key=[\w-]+)?$/;
+
+  // server/src/shared/serial.ts
+  var settled = () => void 0;
+  function createSerialQueue() {
+    let tail = Promise.resolve();
+    return (task) => {
+      const result = tail.then(task);
+      tail = result.then(settled, settled);
+      return result;
+    };
   }
-  function mutation(name, args, inner) {
-    return `mutation Tether_${name}(${args}){${name}(${inner}){cart{...TetherCart}userErrors{field message}warnings{code message target}}}${cartFragment()}`;
+
+  // src/cart/store.ts
+  var status = { kind: "unknown" };
+  var warnings = [];
+  var pendingQuantities = /* @__PURE__ */ new Map();
+  var cartStatus = () => status;
+  function currentCart() {
+    switch (status.kind) {
+      case "ready":
+      case "error":
+        return status.cart;
+      case "unknown":
+      case "empty":
+        return null;
+    }
   }
-  var FOCUSABLE = 'a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
-  var returnFocus = null;
-  var focusables = (d) => qsa(d, FOCUSABLE).filter((el) => el.offsetParent !== null || el === document.activeElement);
-  function ariaState(open) {
-    qsa(document, sel("cart-open")).forEach((b) => b.setAttribute("aria-expanded", String(open)));
-    qsa(document, sel("cart-drawer")).forEach((d) => {
-      if (!d.hasAttribute("role")) d.setAttribute("role", "dialog");
-      if (!d.hasAttribute("aria-label") && !d.hasAttribute("aria-labelledby")) d.setAttribute("aria-label", get(d, "cart-label") || "Cart");
-      d.setAttribute("aria-modal", String(open));
-      if (!d.classList.contains(cfg.cartDrawerOpenClass)) {
-        d.setAttribute("aria-hidden", "true");
-        if (cfg.cartFocus !== false) d.inert = true;
-      }
+  var currentWarnings = () => warnings;
+  var statusOf = (cart) => cart ? { kind: "ready", cart } : { kind: "empty" };
+  var seenKey = () => `${cfg.storageKey}:seen`;
+  function savedCartId() {
+    const stored = getStored(cfg.storageKey);
+    if (!stored) return null;
+    if (CART_ID.test(stored)) return stored;
+    forgetSavedCart();
+    return null;
+  }
+  function forgetSavedCart() {
+    removeStored(cfg.storageKey);
+  }
+  function keepQuietly(cart) {
+    status = statusOf(cart);
+    if (cart) setStored(cfg.storageKey, cart.id);
+  }
+  function render() {
+    renderCart({
+      cart: currentCart(),
+      warnings,
+      pending: pendingQuantities,
+      failed: status.kind === "error"
     });
   }
-  var isMissingCart = (err) => /does not exist|not found|invalid id/i.test(err?.message || "");
-  var Cart = {
-    state: null,
-    _chain: Promise.resolve(),
-    id() {
-      try {
-        return localStorage.getItem(cfg.storageKey);
-      } catch {
-        return null;
-      }
-    },
-    _setId(id) {
-      try {
-        if (id) localStorage.setItem(cfg.storageKey, id);
-        else localStorage.removeItem(cfg.storageKey);
-      } catch {
-      }
-    },
-    get lines() {
-      return this.state?.lines?.nodes || [];
-    },
-    get count() {
-      return this.state?.totalQuantity || 0;
-    },
-    lastError: null,
-    /** Set by the account part while a customer is logged in (Customer Account API token). */
-    customerAccessToken: null,
-    /** line id -> { qty, done }: what quick +/- clicks asked for, shown until Shopify has answered. */
-    pendingQty: /* @__PURE__ */ new Map(),
-    /** Shopify's notes on the last change, e.g. less stock than asked: [{ code, message }]. */
-    warnings: [],
-    /** true once the saved cart (or the absence of one) is known. */
-    loaded: false,
-    _take(payload, name) {
-      const p = unwrap(payload, name);
-      this.warnings = (p.warnings || []).filter((w, i, all) => all.findIndex((x) => x.message === w.message) === i).map((w) => ({ ...w, message: typeof cfg.warningText === "function" && cfg.warningText(w) || w.message }));
-      if (this.warnings.length) emit("cart-warning", { warnings: this.warnings });
-      return p.cart;
-    },
-    _queue(fn) {
-      const run = this._chain.then(fn, fn).then((value) => {
-        if (this.lastError) {
-          this.lastError = null;
-          this.render();
+  function announce(reason) {
+    render();
+    emit("cart-updated", { cart: currentCart(), reason });
+  }
+  function commit(cart, reason) {
+    keepQuietly(cart);
+    setStored(seenKey(), `${Date.now()}|${cart?.totalQuantity ?? 0}`);
+    announce(reason);
+    return cart;
+  }
+  function settleLoad(outcome) {
+    status = outcome.kind === "loaded" ? statusOf(outcome.cart) : { kind: "error", error: outcome.error, cart: currentCart() };
+    announce("load");
+  }
+  function lastKnownCount() {
+    const text2 = getStored(seenKey())?.split("|")[1] ?? "";
+    const count = Number(text2);
+    return /^\d+$/.test(text2) && Number.isSafeInteger(count) ? count : null;
+  }
+  function showLastKnownCount() {
+    if (status.kind !== "unknown") return;
+    const count = lastKnownCount();
+    if (count !== null) showSavedCount(count);
+  }
+  function setWarnings(notes) {
+    const siteText = (note) => callHook(
+      "warningText",
+      () => cfg.warningText?.(note),
+      () => null
+    );
+    warnings = notes.filter((note, index) => notes.findIndex((other) => other.message === note.message) === index).map((note) => ({ ...note, message: siteText(note) || note.message }));
+    if (warnings.length) emit("cart-warning", { warnings });
+  }
+  var runInOrder = createSerialQueue();
+  var fillingTasks = 0;
+  function queueFilling(enqueueTask) {
+    fillingTasks++;
+    return enqueueTask().finally(() => {
+      fillingTasks--;
+    });
+  }
+  var mayFill = () => fillingTasks > 0;
+  function enqueue(task) {
+    return runInOrder(task).then(
+      (value) => {
+        if (status.kind === "error") {
+          status = statusOf(status.cart);
+          render();
         }
         return value;
-      }, (err) => {
-        this.lastError = err;
-        this.render();
-        emit("cart-error", { error: err });
-        throw err;
-      });
-      this._chain = run.catch(() => {
-      });
-      return run;
-    },
-    _commit(cart, reason) {
-      this.state = cart;
-      if (cart?.id) this._setId(cart.id);
-      try {
-        localStorage.setItem(`${cfg.storageKey}:seen`, `${Date.now()}|${cart?.totalQuantity || 0}`);
-      } catch {
+      },
+      (error) => {
+        status = { kind: "error", error, cart: currentCart() };
+        render();
+        emit("cart-error", { error });
+        throw error;
       }
-      this.render();
-      emit("cart-updated", { cart, reason });
-      return cart;
-    },
-    async init() {
-      const id = this.id();
-      if (!id) {
-        this.state = null;
-        this.loaded = true;
-        this.render();
-        emit("cart-updated", { cart: null, reason: "load" });
+    );
+  }
+  var pendingQuantityOf = (line) => quantityOf(line, pendingQuantities);
+  var meta = () => ({
+    open: isOpen(),
+    count: currentCart()?.totalQuantity ?? 0,
+    loaded: status.kind !== "unknown",
+    warnings: [...warnings]
+  });
+  function subscribe(listener) {
+    const events = ["cart-updated", "cart-toggled"].map((name) => `${cfg.prefix}:${name}`);
+    const call = () => {
+      listener(currentCart(), meta());
+    };
+    events.forEach((name) => {
+      document.addEventListener(name, call);
+    });
+    call();
+    return () => {
+      events.forEach((name) => {
+        document.removeEventListener(name, call);
+      });
+    };
+  }
+
+  // src/cart/mutations.ts
+  var UNKNOWN_CART_MESSAGE = /does not exist|not found|invalid id/i;
+  var isPayloadOf = (name) => shaped({ [name]: orNull({ cart: orNull(CART) }) });
+  function isCartGone(error) {
+    if (!(error instanceof TetherError)) return false;
+    if (error.userErrors?.some((userError) => userError.field?.[0] === "cartId")) return true;
+    return (error.errors ?? []).some((graphQLError) => UNKNOWN_CART_MESSAGE.test(graphQLError.message));
+  }
+  function isUnclearFailure(error) {
+    if (!(error instanceof TetherError)) return false;
+    const { code, status: status2 = 0 } = error;
+    return code === "NETWORK" || code === "INVALID_RESPONSE" || code === "SERVER_ERROR" || status2 >= 500;
+  }
+  function toLineInput(input, quantity = 1, options = {}) {
+    const spec = typeof input === "object" && input !== null ? input : { ...options, quantity, ...input === null || input === void 0 ? {} : { variantId: input } };
+    const merchandiseId = GID.variant(spec.merchandiseId || spec.variantId || spec.id);
+    if (!merchandiseId) throw new TetherError("add(): variantId is required");
+    const asked = parseInt(String(spec.quantity ?? 1), 10);
+    const line = { merchandiseId, quantity: Math.max(1, asked || 1) };
+    const planId = GID.sellingPlan(spec.sellingPlanId || spec.sellingPlan);
+    if (planId) line.sellingPlanId = planId;
+    const attributes = toAttributes(spec.attributes);
+    if (attributes.length) line.attributes = attributes;
+    return line;
+  }
+  function mutationText(name, args, inner) {
+    return (access) => `mutation Tether_${name}(${args}){${name}(${inner}){cart{...TetherCart}userErrors{field message}warnings{code message target}}}${cartFragment(access)}`;
+  }
+  async function send(name, args, inner, variables) {
+    const data = await gql(mutationText(name, args, inner), variables, isPayloadOf(name), { operation: "mutation" });
+    const payload = unwrap(data[name], name);
+    setWarnings(payload.warnings ?? []);
+    return payload.cart;
+  }
+  function createCart(input) {
+    const withIdentity = cfg.country ? { buyerIdentity: { countryCode: cfg.country }, ...input } : input;
+    return send("cartCreate", "$input: CartInput!", "input: $input", { input: withIdentity });
+  }
+  async function mutateCart({ name, variable, type, value, create }) {
+    const createInput = create ? { [variable]: value } : null;
+    const cartId = savedCartId();
+    if (!cartId) return createInput ? createCart(createInput) : null;
+    try {
+      return await send(name, `$cartId: ID!, $${variable}: ${type}`, `cartId: $cartId, ${variable}: $${variable}`, {
+        [variable]: value,
+        cartId
+      });
+    } catch (error) {
+      if (!isCartGone(error)) throw error;
+      forgetSavedCart();
+      if (!createInput) throw error;
+      log("cart expired, creating a new one");
+      return createCart(createInput);
+    }
+  }
+  async function fetchCart(id) {
+    const data = await gql(
+      (access) => `query TetherCart($id:ID!){cart(id:$id){...TetherCart}}${cartFragment(access)}`,
+      { id },
+      shaped({ cart: orNull(CART) })
+    );
+    return data.cart;
+  }
+  async function fetchCheckoutUrl(id) {
+    const data = await gql(
+      `query TetherCheckout($id:ID!){cart(id:$id){checkoutUrl}}`,
+      { id },
+      shaped({ cart: orNull({ checkoutUrl: "string" }) })
+    );
+    return data.cart?.checkoutUrl ?? null;
+  }
+  function toLineUpdate(lineId, patch) {
+    const change = typeof patch === "number" ? { quantity: patch } : patch;
+    const line = { id: lineId };
+    if (change.quantity !== void 0) line["quantity"] = change.quantity;
+    if ("sellingPlanId" in change)
+      line["sellingPlanId"] = change.sellingPlanId ? GID.sellingPlan(change.sellingPlanId) : null;
+    if (change.attributes) line["attributes"] = toAttributes(change.attributes);
+    const variantId = change.merchandiseId || change.variantId;
+    if (variantId) line["merchandiseId"] = GID.variant(variantId);
+    return line;
+  }
+  var updateLines = (lines) => mutateCart({
+    name: "cartLinesUpdate",
+    variable: "lines",
+    type: "[CartLineUpdateInput!]!",
+    value: lines,
+    create: false
+  });
+  var removeLines = (lineIds) => mutateCart({
+    name: "cartLinesRemove",
+    variable: "lineIds",
+    type: "[ID!]!",
+    value: lineIds,
+    create: false
+  });
+  var setLineQuantity = (lineId, target) => target > 0 ? updateLines([{ id: lineId, quantity: target }]) : removeLines([lineId]);
+
+  // src/cart/checkout.ts
+  var resolveAccountCheckout = null;
+  function setCheckoutResolver(resolver) {
+    resolveAccountCheckout = resolver;
+  }
+  var askCheckoutUrl = (cartId) => fetchCheckoutUrl(cartId).then(
+    (url2) => ({ kind: "url", url: url2 }),
+    (error) => ({ kind: "failed", error })
+  );
+  async function accountCheckoutUrl() {
+    if (!resolveAccountCheckout) return null;
+    try {
+      const url2 = await resolveAccountCheckout();
+      return url2 && `${url2}${url2.includes("?") ? "&" : "?"}logged_in=true`;
+    } catch (error) {
+      reportError(error, "account checkout");
+      return null;
+    }
+  }
+  async function checkoutUrl(cartId) {
+    const cartAnswer = askCheckoutUrl(cartId);
+    const accountUrl = await accountCheckoutUrl();
+    if (accountUrl) return accountUrl;
+    const answer = await cartAnswer;
+    if (answer.kind === "failed") throw answer.error;
+    if (!answer.url) throw new TetherError("No checkoutUrl (cart empty or expired)");
+    return answer.url;
+  }
+  function detachOpenerIfAllowed(tab) {
+    try {
+      tab.opener = null;
+    } catch {
+    }
+  }
+  function cartToCheckOut() {
+    const cart = currentCart();
+    return cart && !cart.totalQuantity ? null : savedCartId();
+  }
+  async function checkout(target = cfg.checkoutTarget) {
+    if (!cartToCheckOut() && !mayFill()) return null;
+    const tab = target === "_blank" ? window.open("", "_blank") : null;
+    if (tab) detachOpenerIfAllowed(tab);
+    try {
+      await runInOrder(() => Promise.resolve());
+      const cartId = cartToCheckOut();
+      const url2 = cartId && await checkoutUrl(cartId);
+      if (!url2) {
+        tab?.close();
         return null;
       }
-      if (!this.loaded) {
-        try {
-          const n = (localStorage.getItem(`${cfg.storageKey}:seen`) || "").split("|")[1];
-          if (n) qsa(document, sel("cart-count")).forEach((el) => {
-            if (/^\s*0?\s*$/.test(el.textContent)) el.textContent = n;
-          });
-        } catch {
-        }
-      }
-      try {
-        const data = await gql(`query TetherCart($id:ID!){cart(id:$id){...TetherCart}}${cartFragment()}`, { id });
-        if (!data.cart) {
-          this._setId(null);
-          this.state = null;
-        } else this.state = data.cart;
-      } catch (err) {
-        reportError(err, "cart load failed");
-        this.lastError = err;
-        if (isMissingCart(err)) this._setId(null);
-        this.state = null;
-      }
-      this.loaded = true;
-      this.render();
-      emit("cart-updated", { cart: this.state, reason: "load" });
-      return this.state;
-    },
-    async _create(input = {}) {
-      const buyerIdentity = cfg.country || this.customerAccessToken ? {
-        ...cfg.country ? { countryCode: String(cfg.country).toUpperCase() } : {},
-        ...this.customerAccessToken ? { customerAccessToken: this.customerAccessToken } : {}
-      } : void 0;
-      const data = await gql(
-        mutation("cartCreate", "$input: CartInput!", "input: $input"),
-        { input: { buyerIdentity, ...input } }
-      );
-      return this._take(data.cartCreate, "cartCreate");
-    },
-    /** Runs a cart mutation; creates a fresh cart if ours expired. */
-    async _mutate(name, args, inner, variables, createInput) {
-      const cartId = this.id();
-      if (!cartId) return createInput ? this._create(createInput) : null;
-      try {
-        const data = await gql(mutation(name, `$cartId: ID!, ${args}`, `cartId: $cartId, ${inner}`), { ...variables, cartId });
-        return this._take(data[name], name);
-      } catch (err) {
-        if (createInput && isMissingCart(err)) {
-          log("cart expired, creating a new one");
-          this._setId(null);
-          return this._create(createInput);
-        }
-        throw err;
-      }
-    },
-    /**
-     * add('gid://shopify/ProductVariant/1', 2)
-     * add({ variantId, quantity, sellingPlanId, attributes })
-     * add([line, line])   // bundles / build-a-box in one request
-     */
-    add(input, quantity = 1, opts = {}) {
-      const lines = (Array.isArray(input) ? input : [input]).map((l) => toLineInput(l, quantity, opts));
-      return this._queue(async () => {
-        const cart = await this._mutate("cartLinesAdd", "$lines: [CartLineInput!]!", "lines: $lines", { lines }, { lines });
-        this._commit(cart, "add");
-        emit("added", { cart, lines });
-        if (cfg.openCartOnAdd) this.open();
+      if (!isHttpsUrl(url2)) throw new TetherError("The checkout URL is not https: not opened");
+      if (tab?.closed) return null;
+      emit("checkout", { url: url2, cart: currentCart() });
+      (tab ?? window).location.href = url2;
+      return url2;
+    } catch (error) {
+      tab?.close();
+      reportError(error, "checkout failed");
+      return null;
+    }
+  }
+
+  // src/cart.ts
+  var currentLines = () => currentCart()?.lines.nodes ?? [];
+  async function reloadAfterUnclearFailure() {
+    const id = savedCartId();
+    if (!id) return;
+    try {
+      const cart = await fetchCart(id);
+      if (!cart) forgetSavedCart();
+      commit(cart, "load");
+    } catch (error) {
+      reportError(error, "cart reload after a failed change");
+    }
+  }
+  var queuedLoad = null;
+  function runChange(task) {
+    queuedLoad = null;
+    return enqueue(
+      () => task().catch(async (error) => {
+        if (isUnclearFailure(error)) await reloadAfterUnclearFailure();
+        throw error;
+      })
+    );
+  }
+  function changeQuantity(lineId, delta) {
+    const line = currentLines().find((candidate) => candidate.id === lineId);
+    if (!line) return Promise.resolve(currentCart());
+    const target = Math.max(0, pendingQuantityOf(line) + delta);
+    const job = { quantity: target };
+    pendingQuantities.set(lineId, job);
+    announce("pending");
+    const isLatest = () => pendingQuantities.get(lineId) === job;
+    const sent = runChange(async () => {
+      if (!isLatest()) return currentCart();
+      const now = currentLines().find((candidate) => candidate.id === lineId);
+      if (now?.quantity === target) return currentCart();
+      const cart = await setLineQuantity(lineId, target);
+      if (!isLatest()) {
+        keepQuietly(cart);
         return cart;
-      });
+      }
+      return commit(cart, target > 0 ? "update" : "remove");
+    });
+    return sent.finally(() => {
+      if (!isLatest()) return;
+      pendingQuantities.delete(lineId);
+      announce("settled");
+    });
+  }
+  function discountCodesFrom(codes) {
+    const current = (currentCart()?.discountCodes ?? []).map((discount) => discount.code);
+    const list = typeof codes === "function" ? codes(current) : codes;
+    return (Array.isArray(list) ? list : [list]).map((code) => code.trim()).filter(Boolean);
+  }
+  function mergedAttributes(attributes) {
+    const merged = new Map((currentCart()?.attributes ?? []).map((attribute) => [attribute.key, attribute.value]));
+    toAttributes(attributes).forEach((attribute) => merged.set(attribute.key, attribute.value));
+    return [...merged].filter(([, value]) => value !== "").map(([key, value]) => ({ key, value }));
+  }
+  async function load() {
+    const id = savedCartId();
+    if (!id) {
+      settleLoad({ kind: "loaded", cart: null });
+      return null;
+    }
+    showLastKnownCount();
+    try {
+      const cart = await fetchCart(id);
+      if (!cart) forgetSavedCart();
+      settleLoad({ kind: "loaded", cart });
+    } catch (error) {
+      reportError(error, "cart load failed");
+      if (isCartGone(error)) {
+        forgetSavedCart();
+        keepQuietly(null);
+      }
+      settleLoad({ kind: "failed", error });
+    }
+    return currentCart();
+  }
+  function reload() {
+    const queueLoad = () => runInOrder(() => {
+      queuedLoad = null;
+      return load();
+    });
+    queuedLoad ?? (queuedLoad = savedCartId() ? queueFilling(queueLoad) : queueLoad());
+    return queuedLoad;
+  }
+  var Cart = {
+    init: reload,
+    /** The saved cart's id. */
+    id: savedCartId,
+    get status() {
+      return cartStatus();
+    },
+    get state() {
+      return currentCart();
+    },
+    /** The cart's lines, a copy: changing it changes nothing in the cart. */
+    get lines() {
+      return [...currentLines()];
+    },
+    get count() {
+      return currentCart()?.totalQuantity ?? 0;
+    },
+    /** True once the saved cart, or that there is none, is known. */
+    get loaded() {
+      return cartStatus().kind !== "unknown";
     },
     /**
-     * updateLine(lineId, 3)
-     * updateLine(lineId, { quantity, sellingPlanId, attributes })
-     * sellingPlanId: null switches a line back to one-time purchase.
+     * The failure of the last load or change, until a change succeeds. Requests fail with an `Error`; anything else
+     * thrown is wrapped, so the public type holds.
+     */
+    get lastError() {
+      const current = cartStatus();
+      if (current.kind !== "error") return null;
+      return current.error instanceof Error ? current.error : new Error(String(current.error));
+    },
+    /** Shopify's notes on the last change, a copy. */
+    get warnings() {
+      return [...currentWarnings()];
+    },
+    /** Line id → the quantity quick clicks asked for. */
+    get pendingQty() {
+      return pendingQuantities;
+    },
+    /**
+     * Sets where a logged-in customer checks out, or clears it with `null`: the account part's resolver answers the
+     * customer's checkout URL for the cart (`null` uses the cart's own).
+     */
+    setCheckoutResolver,
+    /**
+     * Forgets the saved cart on this device, as if there were none: the page shows an empty cart and
+     * `tether:cart-updated` fires with reason `load`. The next add starts a new cart.
+     */
+    forgetSaved() {
+      forgetSavedCart();
+      settleLoad({ kind: "loaded", cart: null });
+    },
+    render,
+    subscribe,
+    /**
+     * `add(variantId, 2)`, `add({ variantId, quantity, sellingPlanId, attributes })`, or `add([line, line])` for
+     * bundles in one request. Creates the cart when there is none.
+     *
+     * @throws {TetherError} (rejected) When the add fails, or Shopify answers it without a cart.
+     */
+    add(input, quantity = 1, options = {}) {
+      const lines = (Array.isArray(input) ? input : [input]).map(
+        (line) => toLineInput(line, quantity, options)
+      );
+      return queueFilling(
+        () => runChange(async () => {
+          const cart = await mutateCart({
+            name: "cartLinesAdd",
+            variable: "lines",
+            type: "[CartLineInput!]!",
+            value: lines,
+            create: true
+          });
+          if (!cart) throw new TetherError("Shopify answered the add without a cart");
+          commit(cart, "add");
+          emit("added", { cart, lines });
+          if (cfg.openCartOnAdd) openCart();
+          return cart;
+        })
+      );
+    },
+    /**
+     * `updateLine(lineId, 3)` or `updateLine(lineId, { quantity, sellingPlanId, attributes })`.
+     *
+     * @param patch A quantity of 0 or less removes the line.
      */
     updateLine(lineId, patch) {
-      const p = typeof patch === "number" ? { quantity: patch } : { ...patch };
-      if (p.quantity !== void 0 && p.quantity <= 0) return this.removeLine(lineId);
-      const line = { id: lineId };
-      if (p.quantity !== void 0) line.quantity = p.quantity;
-      if ("sellingPlanId" in p) line.sellingPlanId = p.sellingPlanId ? GID.sellingPlan(p.sellingPlanId) : null;
-      if (p.attributes) line.attributes = toAttributes(p.attributes);
-      if (p.merchandiseId || p.variantId) line.merchandiseId = GID.variant(p.merchandiseId || p.variantId);
-      return this._queue(async () => this._commit(
-        await this._mutate("cartLinesUpdate", "$lines: [CartLineUpdateInput!]!", "lines: $lines", { lines: [line] }),
-        "update"
-      ));
+      const quantity = typeof patch === "number" ? patch : patch.quantity;
+      if (quantity !== void 0 && quantity <= 0) return Cart.removeLine(lineId);
+      const line = toLineUpdate(lineId, patch);
+      return runChange(async () => commit(await updateLines([line]), "update"));
     },
-    /**
-     * +1 / -1 for a line. Quick clicks add up: each builds on the quantity the last click asked for,
-     * which shows at once (tether-line="quantity", Cart.lines) until Shopify has answered.
-     */
-    changeQuantity(lineId, delta) {
-      const current = this.lines.find((l) => l.id === lineId);
-      if (!current) return Promise.resolve(this.state);
-      const target = Math.max(0, (this.pendingQty.get(lineId)?.qty ?? current.quantity) + delta);
-      const job = { qty: target, done: false };
-      this.pendingQty.set(lineId, job);
-      this.render();
-      emit("cart-updated", { cart: this.state, reason: "pending" });
-      const latest = () => this.pendingQty.get(lineId) === job;
-      return this._queue(async () => {
-        if (!latest()) return this.state;
-        const now = this.lines.find((l) => l.id === lineId);
-        if (now && now.quantity === target) return this.state;
-        const cart = target > 0 ? await this._mutate("cartLinesUpdate", "$lines: [CartLineUpdateInput!]!", "lines: $lines", { lines: [{ id: lineId, quantity: target }] }) : await this._mutate("cartLinesRemove", "$lineIds: [ID!]!", "lineIds: $lineIds", { lineIds: [lineId] });
-        if (!latest()) {
-          this.state = cart;
-          if (cart?.id) this._setId(cart.id);
-          return cart;
-        }
-        return this._commit(cart, target > 0 ? "update" : "remove");
-      }).finally(() => {
-        if (latest()) {
-          this.pendingQty.delete(lineId);
-          this.render();
-          emit("cart-updated", { cart: this.state, reason: "settled" });
-        }
-      });
-    },
-    /** Quantity to show for a line: the one asked for while an update is on its way. */
-    quantityOf(line) {
-      return this.pendingQty.get(line.id)?.qty ?? line.quantity;
-    },
+    changeQuantity,
+    /** The quantity to show: the one asked for while an update is on its way. */
+    quantityOf: pendingQuantityOf,
     removeLine(lineIds) {
       const ids = Array.isArray(lineIds) ? lineIds : [lineIds];
-      return this._queue(async () => this._commit(
-        await this._mutate("cartLinesRemove", "$lineIds: [ID!]!", "lineIds: $lineIds", { lineIds: ids }),
-        "remove"
-      ));
+      return runChange(async () => commit(await removeLines(ids), "remove"));
     },
+    /** Removes the lines the cart has when the change runs, so one queued just before it is cleared too. */
     clear() {
-      const ids = this.lines.map((l) => l.id);
-      if (!ids.length) return Promise.resolve(this.state);
-      return this.removeLine(ids);
-    },
-    setNote(note) {
-      return this._queue(async () => this._commit(
-        await this._mutate("cartNoteUpdate", "$note: String!", "note: $note", { note: note ?? "" }, { note: note ?? "" }),
-        "note"
-      ));
-    },
-    /** Cart-level attributes, merged with existing ones. Value '' removes a key. */
-    setAttributes(obj) {
-      const add = toAttributes(obj);
-      return this._queue(async () => {
-        const merged = new Map((this.state?.attributes || []).map((a) => [a.key, a.value]));
-        add.forEach((a) => merged.set(a.key, a.value));
-        const attributes = [...merged].filter(([, v]) => v !== "").map(([key, value]) => ({ key, value }));
-        return this._commit(
-          await this._mutate("cartAttributesUpdate", "$attributes: [AttributeInput!]!", "attributes: $attributes", { attributes }, { attributes }),
-          "attributes"
-        );
+      return runChange(async () => {
+        const ids = currentLines().map((line) => line.id);
+        if (!ids.length) return currentCart();
+        return commit(await removeLines(ids), "remove");
       });
     },
-    /** Replaces the discount codes. Pass [] to remove all. */
+    setNote(note) {
+      return runChange(
+        async () => commit(
+          await mutateCart({
+            name: "cartNoteUpdate",
+            variable: "note",
+            type: "String!",
+            value: note ?? "",
+            create: true
+          }),
+          "note"
+        )
+      );
+    },
+    /**
+     * Cart attributes, merged with the cart's (as it is when the change runs, so quick calls don't drop each other).
+     *
+     * @param attributes The value `''` removes a key.
+     */
+    setAttributes(attributes) {
+      return runChange(async () => {
+        const cart = await mutateCart({
+          name: "cartAttributesUpdate",
+          variable: "attributes",
+          type: "[AttributeInput!]!",
+          value: mergedAttributes(attributes),
+          create: true
+        });
+        return commit(cart, "attributes");
+      });
+    },
+    /** Replaces the discount codes; `[]` removes them all. */
     setDiscountCodes(codes) {
-      return this._queue(async () => {
-        const list = typeof codes === "function" ? codes((this.state?.discountCodes || []).map((d) => d.code)) : codes;
-        const discountCodes = (Array.isArray(list) ? list : [list]).map((c) => String(c).trim()).filter(Boolean);
-        return this._commit(
-          await this._mutate("cartDiscountCodesUpdate", "$discountCodes: [String!]!", "discountCodes: $discountCodes", { discountCodes }, { discountCodes }),
-          "discount"
-        );
+      return runChange(async () => {
+        const cart = await mutateCart({
+          name: "cartDiscountCodesUpdate",
+          variable: "discountCodes",
+          type: "[String!]!",
+          value: discountCodesFrom(codes),
+          create: true
+        });
+        return commit(cart, "discount");
       });
     },
     /**
-     * Adds a code. A code Shopify doesn't accept isn't kept in the cart (it would warn on every change):
-     * it's removed again and the promise rejects with code INVALID_DISCOUNT.
+     * Adds a code. A code Shopify doesn't accept is removed again, so it doesn't warn on every later change.
+     *
+     * @throws {TetherError} `INVALID_DISCOUNT` (rejected) when Shopify doesn't accept the code, or it is blank.
      */
-    async applyDiscount(code) {
-      const cart = await this.setDiscountCodes((current) => [.../* @__PURE__ */ new Set([...current, code])]);
-      const hit = (cart?.discountCodes || []).find((d) => d.code.toLowerCase() === String(code).toLowerCase());
-      if (hit?.applicable) return cart;
-      await this.removeDiscount(code).catch(() => {
-      });
+    async applyDiscount(typed) {
+      const code = typed.trim();
+      if (!code) throw new TetherError("No discount code", { code: "INVALID_DISCOUNT" });
+      const cart = await Cart.setDiscountCodes((current) => [.../* @__PURE__ */ new Set([...current, code])]);
+      const wanted = code.toLowerCase();
+      const applied = (cart?.discountCodes ?? []).find((discount) => discount.code.toLowerCase() === wanted);
+      if (applied?.applicable) return cart;
+      try {
+        await Cart.removeDiscount(code);
+      } catch (error) {
+        reportError(error, "removing a discount code Shopify refused");
+      }
       throw new TetherError(`Discount code not valid: ${code}`, { code: "INVALID_DISCOUNT" });
     },
     removeDiscount(code) {
-      const k = String(code).toLowerCase();
-      return this.setDiscountCodes((current) => current.filter((c) => c.toLowerCase() !== k));
+      const unwanted = code.trim().toLowerCase();
+      return Cart.setDiscountCodes((current) => current.filter((existing) => existing.toLowerCase() !== unwanted));
     },
-    /** { countryCode, email, phone } — changes currency/prices for that market. */
+    /**
+     * Sets who is buying; a country changes the cart's currency and prices to that market's.
+     *
+     * @param options `create: false` forgets an expired cart instead of creating an empty one.
+     */
     setBuyerIdentity(buyerIdentity, { create = true } = {}) {
-      return this._queue(async () => {
-        const cart = await this._mutate("cartBuyerIdentityUpdate", "$buyerIdentity: CartBuyerIdentityInput!", "buyerIdentity: $buyerIdentity", { buyerIdentity }, create ? { buyerIdentity } : null).catch((err) => {
-          if (create || !isMissingCart(err)) throw err;
-          this._setId(null);
+      return runChange(async () => {
+        const cart = await mutateCart({
+          name: "cartBuyerIdentityUpdate",
+          variable: "buyerIdentity",
+          type: "CartBuyerIdentityInput!",
+          value: buyerIdentity,
+          create
+        }).catch((error) => {
+          if (create || !isCartGone(error)) throw error;
           return null;
         });
-        return this._commit(cart, "buyer-identity");
+        return commit(cart, "buyer-identity");
       });
     },
-    /**
-     * Goes to Shopify checkout. With checkoutTarget '_blank' the tab is opened
-     * inside the click (Safari blocks window.open after an await) and gets its
-     * URL once we have it.
-     */
-    async checkout(target = cfg.checkoutTarget) {
-      const id = this.id();
-      if (!id || this.state && !this.count) return null;
-      const tab = target === "_blank" ? window.open("", "_blank") : null;
-      if (tab) {
-        try {
-          tab.opener = null;
-        } catch {
-        }
-      }
-      try {
-        const fresh = gql("query TetherCheckout($id: ID!) { cart(id: $id) { checkoutUrl } }", { id }).then((d) => d.cart?.checkoutUrl);
-        fresh.catch(() => {
-        });
-        let url = this.beforeCheckout && await this.beforeCheckout().catch(() => null) || await fresh;
-        if (url && this.customerAccessToken) url += `${url.includes("?") ? "&" : "?"}logged_in=true`;
-        if (!url) throw new TetherError("No checkoutUrl (cart empty or expired)");
-        emit("checkout", { url, cart: this.state });
-        if (tab && !tab.closed) tab.location.href = url;
-        else window.location.href = url;
-        return url;
-      } catch (err) {
-        if (tab) tab.close();
-        reportError(err, "checkout failed");
-        return null;
-      }
-    },
-    // -------------------------------------------------------------- drawer
-    drawers() {
-      return qsa(document, sel("cart-drawer"));
-    },
-    /** Without a tether-cart-drawer (a React/Svelte/Vue cart), open/close still work: as state for subscribe. */
-    _open: false,
-    isOpen() {
-      const ds = this.drawers();
-      return ds.length ? ds.some((d) => d.classList.contains(cfg.cartDrawerOpenClass)) : this._open;
-    },
-    open() {
-      if (this.isOpen()) return;
-      this._open = true;
-      const ds = this.drawers().filter((d) => get(d, "cart-drawer") !== "manual");
-      ds.forEach((d) => {
-        d.inert = false;
-        d.classList.add(cfg.cartDrawerOpenClass);
-        d.setAttribute("aria-hidden", "false");
-      });
-      ariaState(true);
-      if (cfg.cartFocus !== false && ds[0]) {
-        returnFocus = document.activeElement;
-        setTimeout(() => {
-          const target = focusables(ds[0])[0] || ds[0];
-          if (target === ds[0] && !ds[0].hasAttribute("tabindex")) ds[0].tabIndex = -1;
-          target.focus?.({ preventScroll: true });
-        }, 60);
-      }
-      if (typeof cfg.onCartOpen === "function") cfg.onCartOpen(ds);
-      emit("cart-toggled", { open: true });
-    },
-    close() {
-      if (!this.isOpen()) return;
-      this._open = false;
-      const ds = this.drawers();
-      const hadFocus = ds.some((d) => d.contains(document.activeElement));
-      ds.forEach((d) => {
-        d.classList.remove(cfg.cartDrawerOpenClass);
-        d.setAttribute("aria-hidden", "true");
-        if (cfg.cartFocus !== false) d.inert = true;
-      });
-      ariaState(false);
-      if (hadFocus && returnFocus?.isConnected) returnFocus.focus({ preventScroll: true });
-      returnFocus = null;
-      if (typeof cfg.onCartClose === "function") cfg.onCartClose(ds);
-      emit("cart-toggled", { open: false });
-    },
-    toggle() {
-      if (this.isOpen()) this.close();
-      else this.open();
-    },
-    /**
-     * For framework islands (React, Svelte, Vue): fn(cart, { open }) now and on every change.
-     * Returns a function that stops listening.
-     */
-    subscribe(fn) {
-      const call = () => fn(this.state, { open: this.isOpen(), count: this.count, loaded: this.loaded, warnings: this.warnings });
-      const h = () => call();
-      ["cart-updated", "cart-toggled"].forEach((e) => document.addEventListener(`${cfg.prefix}:${e}`, h));
-      call();
-      return () => ["cart-updated", "cart-toggled"].forEach((e) => document.removeEventListener(`${cfg.prefix}:${e}`, h));
-    },
-    // -------------------------------------------------------------- render
-    render() {
-      const cart = this.state;
-      const count = cart ? cart.totalQuantity : 0;
-      const money = (k) => cart ? formatMoney(cart.cost?.[k]) : "";
-      ariaState(this.isOpen());
-      qsa(document, sel("cart-count")).forEach((el) => setTextTracked(el, count));
-      qsa(document, sel("cart-subtotal")).forEach((el) => setTextTracked(el, money("subtotalAmount")));
-      qsa(document, sel("cart-total")).forEach((el) => setTextTracked(el, money("totalAmount")));
-      qsa(document, sel("cart-checkout-charge")).forEach((el) => setTextTracked(el, money("checkoutChargeAmount")));
-      const hasSub = this.lines.some((l) => l.sellingPlanAllocation);
-      const conds = {
-        "cart-empty": count === 0,
-        "cart-filled": count > 0,
-        "cart-has-subscription": hasSub,
-        "cart-no-subscription": !hasSub,
-        "cart-has-discount": (cart?.discountCodes || []).some((d) => d.applicable),
-        "cart-error": Boolean(this.lastError),
-        "cart-warning": this.warnings.length > 0
-      };
-      qsa(document, sel("cart-warning")).forEach((el) => setTextTracked(el, [...new Set(this.warnings.map((w) => w.message))].join(" ")));
-      qsa(document, sel("show")).forEach((el) => {
-        const k = get(el, "show");
-        if (k in conds && !el.closest(sel("product"))) show(el, conds[k]);
-      });
-      qsa(document, sel("checkout")).forEach((el) => {
-        el.classList.toggle("is-disabled", !count);
-        el.setAttribute("aria-disabled", String(!count));
-      });
-      qsa(document, `textarea${sel("cart-note")},input${sel("cart-note")}`).forEach((el) => {
-        if (document.activeElement !== el) el.value = cart?.note || "";
-      });
-      qsa(document, sel("cart-discounts")).forEach((container) => {
-        repeat(container, cart?.discountCodes || [], (node, d) => {
-          node.setAttribute(attr("discount-code"), d.code);
-          const t = node.querySelector(sel("discount", "code")) || (node.firstElementChild ? null : node);
-          if (t) setText(t, d.code);
-          node.classList.toggle("is-inapplicable", !d.applicable);
-        });
-      });
-      qsa(document, sel("cart-lines")).forEach((container) => {
-        repeatKeyed(container, this.lines, (l) => l.id, (node, line) => renderLine(node, line), {
-          onEnter: cfg.onLineEnter,
-          onLeave: cfg.onLineLeave
-        });
-      });
-      if (cart) notifyLayoutChanged("cart");
-    }
+    checkout,
+    drawers,
+    isOpen,
+    open: openCart,
+    close: closeCart,
+    toggle: toggleCart
   };
-  function lineValue(line, key) {
-    const m = line.merchandise || {};
-    const plan = line.sellingPlanAllocation?.sellingPlan;
-    switch (key) {
-      case "title":
-        return m.product?.title;
-      case "product-title":
-        return m.product?.title;
-      case "variant-title":
-        return m.title === "Default Title" ? "" : m.title;
-      case "options":
-        return (m.selectedOptions || []).filter((o) => o.value !== "Default Title").map((o) => `${o.name}: ${o.value}`).join(", ");
-      case "vendor":
-        return m.product?.vendor;
-      case "sku":
-        return m.sku;
-      case "price":
-        return formatMoney(line.cost?.amountPerQuantity || m.price);
-      case "compare-at-price":
-        return formatMoney(line.cost?.compareAtAmountPerQuantity || m.compareAtPrice);
-      case "line-total":
-        return formatMoney(line.cost?.totalAmount);
-      case "line-subtotal":
-        return formatMoney(line.cost?.subtotalAmount);
-      case "quantity":
-        return Cart.quantityOf(line);
-      case "plan":
-        return plan?.name || "";
-      case "plan-description":
-        return plan?.description || "";
-      case "components":
-        return (line.lineComponents || []).map((c) => `${c.quantity} \xD7 ${c.merchandise?.product?.title || ""}`).join(", ");
-      default:
-        if (key.startsWith("attribute:")) {
-          const k = key.slice("attribute:".length);
-          return (line.attributes || []).find((a) => a.key === k)?.value || "";
-        }
-        return void 0;
-    }
+
+  // src/product-state.ts
+  var PERCENT2 = 100;
+  var timesQuantity = (money, quantity) => fromMinorUnits(toMinorUnits(money) * quantity, money.currencyCode);
+  var selectionOf = (variant) => Object.fromEntries(variant.selectedOptions.map((option) => [option.name, option.value]));
+  function findVariant(product, selected) {
+    return product.variants.nodes.find(
+      (variant) => variant.selectedOptions.every((option) => selected[option.name] === option.value)
+    ) ?? null;
   }
-  function renderLine(node, line) {
-    const m = line.merchandise || {};
-    const isSub = Boolean(line.sellingPlanAllocation);
-    node.setAttribute(attr("line-id"), line.id);
-    node.classList.toggle("is-subscription", isSub);
-    qsa(node, sel("line")).forEach((el) => {
-      const key = get(el, "line");
-      if (key === "image") return setImage(el, m.image?.url || m.product?.featuredImage?.url, m.product?.title);
-      if (key === "url") {
-        const u = productUrl(m.product?.handle, m.product?.id);
-        const q = new URLSearchParams();
-        if (m.id) q.set("variant", String(m.id).split("/").pop());
-        const plan = line.sellingPlanAllocation?.sellingPlan?.id;
-        if (plan) q.set("selling_plan", plan.split("/").pop());
-        const qs = q.toString();
-        return el.setAttribute("href", qs ? `${u}${u.includes("?") ? "&" : "?"}${qs}` : u);
-      }
-      const v = lineValue(line, key);
-      if (v !== void 0) setTextTracked(el, v);
-      return void 0;
-    });
-    const warning = Cart.warnings.find((w) => w.target === line.id);
-    node.classList.toggle("is-warning", Boolean(warning));
-    const pending2 = Cart.pendingQty.has(line.id);
-    node.classList.toggle("is-busy", pending2);
-    if (pending2) node.setAttribute("aria-busy", "true");
-    else node.removeAttribute("aria-busy");
-    qsa(node, sel("line", "warning")).forEach((el) => setTextTracked(el, warning?.message || ""));
-    const lineConds = {
-      subscription: isSub,
-      "one-time": !isSub,
-      "on-sale": parseFloat(line.cost?.compareAtAmountPerQuantity?.amount) > parseFloat(line.cost?.amountPerQuantity?.amount),
-      "has-components": (line.lineComponents || []).length > 0,
-      warning: Boolean(warning)
+  function isValueAvailable(product, selected, name, value) {
+    return product.variants.nodes.some(
+      (variant) => variant.availableForSale && variant.selectedOptions.every(
+        (option) => option.name === name ? option.value === value : selected[option.name] === option.value
+      )
+    );
+  }
+  var purchasePlanId = (purchase) => purchase.kind === "subscription" ? purchase.planId : purchase.offeredPlanId;
+  function linePurchase(purchase, variant) {
+    if (purchase.kind === "subscription" && allocationFor(variant, purchase.planId)) return purchase;
+    return { kind: "one-time" };
+  }
+  function normalisePurchase(product, variant, kind, preferredPlanId) {
+    const plans = allPlans(product);
+    const known = plans.find((plan) => plan.id === preferredPlanId) ?? plans[0];
+    if (!known) return { kind: "one-time", offeredPlanId: null };
+    const onVariant = allocationFor(variant, known.id) ? known : plans.find((plan) => allocationFor(variant, plan.id)) ?? known;
+    if (product.requiresSellingPlan || kind === "subscription") return { kind: "subscription", planId: onVariant.id };
+    return { kind: "one-time", offeredPlanId: onVariant.id };
+  }
+  function initialChoice(product, { variant, sellingPlan, defaultPlan, defaultPurchase }) {
+    const variants = product.variants.nodes;
+    const wantedId = GID.variant(variant);
+    const start = variants.find((candidate) => candidate.id === wantedId) ?? variants.find((candidate) => candidate.availableForSale) ?? variants[0] ?? null;
+    const fromUrl = findPlan(product, sellingPlan);
+    const offered = fromUrl ?? findPlan(product, defaultPlan);
+    const kind = fromUrl || defaultPurchase === "subscription" ? "subscription" : "one-time";
+    return {
+      selected: start ? selectionOf(start) : {},
+      purchase: normalisePurchase(product, start, kind, offered?.id ?? null)
     };
-    qsa(node, sel("line-show")).forEach((el) => {
-      const k = get(el, "line-show");
-      if (k in lineConds) show(el, lineConds[k]);
-    });
-    qsa(node, `select${sel("line-plan")}`).forEach((select) => {
-      const handle = m.product?.handle;
-      if (!handle) return;
-      getProduct(handle).then((product) => {
-        const plans = allPlans(product);
-        const allowOneTime = !product.requiresSellingPlan && get(select, "line-plan") !== "subscription-only";
-        const want = [
-          ...allowOneTime ? [{ value: "", label: select.getAttribute(attr("one-time-label")) || "One-time purchase" }] : [],
-          ...plans.map((p) => ({ value: p.id, label: p.name }))
-        ];
-        const sig = want.map((w) => w.value).join("|");
-        if (select.dataset.tetherSig !== sig) {
-          select.innerHTML = "";
-          want.forEach((w) => {
-            const o = document.createElement("option");
-            o.value = w.value;
-            o.textContent = w.label;
-            select.appendChild(o);
-          });
-          select.dataset.tetherSig = sig;
-        }
-        select.value = line.sellingPlanAllocation?.sellingPlan?.id || "";
-        show(select, plans.length > 0);
-      }).catch((err) => reportError(err, "line plan options"));
-    });
+  }
+  function showConditions(variant, lowStock, variantCount, sale, requiresSellingPlan) {
+    const stock = variant.quantityAvailable;
+    const low = stock != null && stock > 0 && stock <= lowStock;
+    const onSale = sale.compareAtPrice !== null;
+    const onPlan = sale.line.kind === "subscription";
+    return {
+      "in-stock": variant.availableForSale,
+      "out-of-stock": !variant.availableForSale,
+      backorder: variant.availableForSale && variant.currentlyNotInStock,
+      "on-sale": onSale,
+      "not-on-sale": !onSale,
+      "has-variants": variantCount > 1,
+      "single-variant": variantCount === 1,
+      "low-stock": low,
+      "plenty-in-stock": variant.availableForSale && !low,
+      "subscription-available": sale.subscriptionAvailable,
+      "subscription-unavailable": !sale.subscriptionAvailable,
+      "subscription-only": requiresSellingPlan,
+      "one-time-available": !requiresSellingPlan,
+      "subscription-selected": onPlan,
+      "one-time-selected": !onPlan,
+      "has-savings": onPlan ? sale.savings.percentage > 0 : onSale
+    };
+  }
+  function productView(product, choice, lowStock) {
+    const exact = findVariant(product, choice.selected);
+    const variant = exact ?? product.variants.nodes[0];
+    if (!variant) return null;
+    const purchase = normalisePurchase(product, variant, choice.purchase.kind, purchasePlanId(choice.purchase));
+    const planId = purchasePlanId(purchase);
+    const plans = allPlans(product);
+    const line = linePurchase(purchase, variant);
+    const allocation = line.kind === "subscription" ? allocationFor(variant, line.planId) : null;
+    const price = allocation ? planPrice(variant, planId) ?? variant.price : variant.price;
+    const compareAt = allocation?.priceAdjustments[0]?.compareAtPrice ?? variant.compareAtPrice;
+    const sale = {
+      line,
+      subscriptionAvailable: plans.some((plan) => allocationFor(variant, plan.id)),
+      compareAtPrice: compareAt && parseFloat(compareAt.amount) > parseFloat(price.amount) ? compareAt : null,
+      savings: planSavings(variant, planId)
+    };
+    return {
+      ...sale,
+      variant,
+      selected: exact ? choice.selected : selectionOf(variant),
+      purchase,
+      plan: plans.find((plan) => plan.id === planId) ?? null,
+      quantity: choice.quantity,
+      price,
+      show: showConditions(variant, lowStock, product.variants.nodes.length, sale, product.requiresSellingPlan)
+    };
+  }
+  function variantBindTexts(view, format) {
+    const { variant, plan, price, compareAtPrice, quantity } = view;
+    const planId = purchasePlanId(view.purchase);
+    const forQuantity = (money) => timesQuantity(money, Math.max(1, quantity));
+    const checkoutCharge = () => {
+      const charge = view.line.kind === "subscription" ? planCheckoutCharge(variant, planId) ?? price : price;
+      return format.money(forQuantity(charge));
+    };
+    const discountPercentage = () => {
+      if (!compareAtPrice) return "0%";
+      return `${Math.round((1 - parseFloat(price.amount) / parseFloat(compareAtPrice.amount)) * PERCENT2)}%`;
+    };
+    const discountAmount = () => {
+      if (!compareAtPrice) return "";
+      return format.money(fromMinorUnits(toMinorUnits(compareAtPrice) - toMinorUnits(price), price.currencyCode));
+    };
+    const texts = {
+      price: () => format.money(price),
+      "total-price": () => format.money(forQuantity(price)),
+      "one-time-price": () => format.money(variant.price),
+      "subscription-price": () => format.money(planId ? planPrice(variant, planId) : null),
+      "subscription-savings": () => format.percent(view.savings.percentage),
+      "subscription-savings-amount": () => format.money(view.savings.amount),
+      "checkout-charge": checkoutCharge,
+      "plan-name": () => plan?.name,
+      "plan-description": () => plan?.description,
+      "plan-group": () => plan?.group.name,
+      "compare-at-price": () => format.money(compareAtPrice),
+      "unit-price": () => format.money(variant.unitPrice),
+      "discount-percentage": discountPercentage,
+      "discount-amount": discountAmount,
+      "variant-title": () => variant.title,
+      "variant-id": () => variant.id,
+      sku: () => variant.sku,
+      barcode: () => variant.barcode,
+      stock: () => variant.quantityAvailable,
+      quantity: () => quantity
+    };
+    return new Map(Object.entries(texts));
+  }
+  function planBindTexts(variant, planId, plan, format) {
+    const adjustmentText = () => {
+      const adjustment = planAdjustment(plan);
+      if (!adjustment) return "";
+      return adjustment.type === "percentage" ? `${adjustment.value}%` : format.money(adjustment.value);
+    };
+    const texts = {
+      name: () => plan?.name,
+      // The option values alone ("1 month"), without the price text a store may put in the plan name.
+      option: () => (plan?.options ?? []).map((option) => option.value).join(", "),
+      description: () => plan?.description,
+      price: () => format.money(planPrice(variant, planId)),
+      savings: () => format.percent(planSavings(variant, planId).percentage),
+      "savings-amount": () => format.money(planSavings(variant, planId).amount),
+      adjustment: adjustmentText
+    };
+    return new Map(Object.entries(texts));
   }
 
-  // src/product.js
-  var product_exports = {};
-  __export(product_exports, {
-    ProductScope: () => ProductScope,
-    rememberOptionNames: () => rememberOptionNames,
-    scopes: () => scopes
-  });
-
-  // src/status.js
-  var status_exports = {};
-  __export(status_exports, {
-    STATUS_KEYS: () => STATUS_KEYS,
-    boundary: () => boundary,
-    isNotFound: () => isNotFound,
-    ownedBy: () => ownedBy,
-    resolveProductKey: () => resolveProductKey,
-    setScopeStatus: () => setScopeStatus
-  });
-  function resolveProductKey(el, location = window.location, name = "product") {
-    const raw = (get(el, name) || "").trim();
-    if (!raw.toLowerCase().startsWith("url:")) return { key: raw || null, fromUrl: false, raw };
-    const what = raw.slice(4).trim();
-    let key = null;
-    if (what.toLowerCase() === "path") {
-      const parts2 = location.pathname.split("/").filter(Boolean);
-      key = parts2.length ? safeDecode(parts2[parts2.length - 1]) : null;
-    } else {
-      key = new URLSearchParams(location.search).get(what || "handle");
-    }
-    key = key && key.trim() ? key.trim() : null;
-    return { key, fromUrl: true, raw };
-  }
-  function safeDecode(s) {
+  // src/uri.ts
+  function decodeOrKeep(text2) {
     try {
-      return decodeURIComponent(s);
-    } catch {
-      return s;
+      return decodeURIComponent(text2);
+    } catch (error) {
+      if (error instanceof URIError) return text2;
+      throw error;
     }
+  }
+
+  // src/status.ts
+  var URL_SOURCE = "url:";
+  function resolveProductKey(el, location2 = window.location, name = "product") {
+    const raw = (get(el, name) ?? "").trim();
+    if (!raw.toLowerCase().startsWith(URL_SOURCE)) return { key: raw || null, fromUrl: false, raw };
+    const source = raw.slice(URL_SOURCE.length).trim();
+    let key;
+    if (source.toLowerCase() === "path") {
+      const segments = location2.pathname.split("/").filter(Boolean);
+      const segment = segments[segments.length - 1];
+      key = segment === void 0 ? null : decodeOrKeep(segment);
+    } else {
+      key = new URLSearchParams(location2.search).get(source || "handle");
+    }
+    return { key: key?.trim() || null, fromUrl: true, raw };
   }
   var STATUS_KEYS = ["loading", "ready", "error", "not-found"];
-  var isNotFound = (err) => err?.code === "NOT_FOUND";
-  var boundary = () => ["product", "collection", "products", "recommendations"].map((n) => sel(n)).join(",");
+  var isScopeStatus = (value) => STATUS_KEYS.some((status2) => status2 === value);
+  var codeOf = (error) => typeof error === "object" && error !== null && "code" in error ? error.code : void 0;
+  var isNotFound = (error) => codeOf(error) === "NOT_FOUND";
+  var boundary = () => ["product", "collection", "products", "recommendations"].map((name) => sel(name)).join(",");
   var ownedBy = (el, root) => el === root || el.parentElement?.closest(boundary()) === root;
-  function setScopeStatus(root, status, err) {
-    const notFound = status === "not-found";
-    root.setAttribute(attr("state"), notFound ? "error" : status);
-    if (status === "error" || notFound) root.setAttribute(attr("error"), notFound ? "not-found" : err?.code || "error");
+  function errorCode(error) {
+    const code = codeOf(error);
+    return typeof code === "string" && code ? code : "error";
+  }
+  function setScopeStatus(root, status2, error) {
+    const notFound = status2 === "not-found";
+    const failed = status2 === "error" || notFound;
+    root.setAttribute(attr("state"), notFound ? "error" : status2);
+    if (failed) root.setAttribute(attr("error"), notFound ? "not-found" : errorCode(error));
     else root.removeAttribute(attr("error"));
     scoped(root, sel("show"), boundary()).forEach((el) => {
-      const k = get(el, "show");
-      if (!STATUS_KEYS.includes(k)) return;
-      show(el, k === status);
+      const shows = get(el, "show");
+      if (isScopeStatus(shows)) show(el, shows === status2);
     });
-    if (status === "error" || notFound) {
-      scoped(root, sel("add-to-cart"), boundary()).forEach((btn) => {
-        btn.classList.add("is-disabled");
-        btn.setAttribute("aria-disabled", "true");
-        if ("disabled" in btn) btn.disabled = true;
-      });
-    }
+    if (!failed) return;
+    scoped(root, sel("add-to-cart"), boundary()).forEach((button) => {
+      button.classList.add("is-disabled");
+      button.setAttribute("aria-disabled", "true");
+      if ("disabled" in button) button.disabled = true;
+    });
   }
 
-  // src/product.js
-  var scopes = /* @__PURE__ */ new WeakMap();
-  var productSel = () => sel("product");
-  function metafieldValue(product, ref) {
-    const i = ref.indexOf(".");
-    const ns = ref.slice(0, i);
-    const key = ref.slice(i + 1);
-    const mf = (product.metafields || []).find((m) => m && m.namespace === ns && m.key === key);
-    return mf || null;
+  // src/variant-render.ts
+  var FORMAT = { money: formatMoney2, percent: formatPercent };
+  function addButtonLabel(button) {
+    const label = qsa(button, sel("add-label"))[0] ?? button;
+    const original = label.dataset["tetherLabel"] ?? (isInput(label) ? label.value : label.textContent);
+    label.dataset["tetherLabel"] = original;
+    return { label, original };
   }
+  function renderOptionStates(scope, view) {
+    const { product } = scope;
+    const selectedValue = (authored) => view.selected[scope.optName(authored)] ?? "";
+    scope.$(sel("option-selected")).forEach((el) => {
+      setText(el, selectedValue(get(el, "option-selected")));
+    });
+    scope.$(sel("option-list")).forEach((container) => {
+      const name = scope.optName(get(container, "option-list"));
+      qsa(container, sel("option-value")).forEach((node) => {
+        const value = get(node, "option-value") ?? "";
+        setSelected(node, view.selected[name] === value);
+        const unavailable = !isValueAvailable(product, view.selected, name, value);
+        setUnavailable(node, unavailable, "picks-closest");
+        node.setAttribute("data-unavailable", unavailable ? "true" : "false");
+      });
+    });
+    selectsIn(scope, sel("option")).forEach((select) => {
+      select.value = selectedValue(get(select, "option"));
+    });
+    selectsIn(scope, sel("variant-select")).forEach((select) => {
+      select.value = view.variant.id;
+    });
+  }
+  function renderPurchaseStates(scope, view) {
+    const { variant, purchase, line } = view;
+    scope.$(sel("purchase")).forEach((el) => {
+      if (isSelect(el)) {
+        el.value = purchase.kind;
+        return;
+      }
+      const mode = get(el, "purchase");
+      setSelected(el, mode === purchase.kind);
+      setUnavailable(
+        el,
+        mode === "subscription" ? !view.subscriptionAvailable : scope.product.requiresSellingPlan,
+        "does-nothing"
+      );
+    });
+    scope.$(sel("plan-value")).forEach((node) => {
+      const planId = get(node, "plan-value") ?? "";
+      setSelected(node, line.kind === "subscription" && planId === line.planId);
+      setUnavailable(node, !allocationFor(variant, planId), "does-nothing");
+      const plan = scope.plans.find((candidate) => candidate.id === planId);
+      const texts = planBindTexts(variant, planId, plan, FORMAT);
+      qsa(node, sel("plan-bind")).forEach((el) => {
+        const text2 = texts.get(get(el, "plan-bind") ?? "");
+        if (text2) setText(el, text2());
+      });
+    });
+    selectsIn(scope, sel("plan")).forEach((select) => {
+      select.value = line.kind === "subscription" ? line.planId : "";
+    });
+  }
+  function renderConditions2(scope, view) {
+    const conditions = new Map(Object.entries(view.show));
+    STATUS_KEYS.forEach((status2) => conditions.set(status2, status2 === "ready"));
+    scope.$(sel("show")).forEach((el) => {
+      const key = get(el, "show") ?? "";
+      const visible = conditions.get(key);
+      if (visible === void 0) return;
+      if (STATUS_KEYS.some((status2) => status2 === key) && !ownedBy(el, scope.root)) return;
+      show(el, visible);
+    });
+  }
+  function renderAddButtons(scope, view) {
+    const disabled = !view.variant.availableForSale;
+    scope.$(sel("add-to-cart")).forEach((button) => {
+      button.classList.toggle("is-disabled", disabled);
+      button.setAttribute("aria-disabled", String(disabled));
+      if ("disabled" in button) button.disabled = disabled;
+      const soldOutText = get(button, "soldout-text");
+      const subscribeText = get(button, "subscribe-text");
+      if (!soldOutText && !subscribeText) return;
+      const { label, original } = addButtonLabel(button);
+      let text2 = original;
+      if (view.line.kind === "subscription" && subscribeText) text2 = subscribeText;
+      if (disabled && soldOutText) text2 = soldOutText;
+      if (button.getAttribute("aria-busy") !== "true") setText(label, text2);
+    });
+  }
+  function writeVariant(scope, view) {
+    const { variant } = view;
+    const { product } = scope;
+    const texts = variantBindTexts(view, FORMAT);
+    scope.$(sel("bind")).forEach((el) => {
+      const key = get(el, "bind") ?? "";
+      if (key === "variant-image") {
+        setImage(el, variant.image?.url || product.featuredImage?.url, variant.image?.altText || product.title);
+        return;
+      }
+      const text2 = texts.get(key);
+      if (text2) setText(el, text2());
+    });
+    renderOptionStates(scope, view);
+    renderPurchaseStates(scope, view);
+    renderConditions2(scope, view);
+    scope.root.classList.toggle("is-subscription", view.line.kind === "subscription");
+    scope.root.setAttribute(attr("purchase-mode"), view.line.kind);
+    renderAddButtons(scope, view);
+  }
+
+  // src/product-events.ts
+  var productSelector = () => sel("product");
+  function closestOwn(scope, target, selector) {
+    const el = target.closest(selector);
+    return el?.closest(productSelector()) === scope.root ? el : null;
+  }
+  function onAddClick(scope, button) {
+    const { label, original } = addButtonLabel(button);
+    const addingText = get(button, "adding-text");
+    const added = busy(button, async () => {
+      if (addingText) setText(label, addingText);
+      try {
+        await scope.addToCart();
+      } catch (error) {
+        reportError(error, "add to cart failed");
+        emit("error", { error, context: "add-to-cart" }, scope.root);
+      } finally {
+        if (addingText) setText(label, original);
+      }
+    });
+    reportFailure(
+      added.then(() => {
+        scope.renderVariant();
+      }),
+      "add to cart render"
+    );
+  }
+  function onClick(scope, event, target) {
+    const optionValue = closestOwn(scope, target, sel("option-value"));
+    const optionList = optionValue?.closest(sel("option-list"));
+    if (optionValue && optionList) {
+      event.preventDefault();
+      scope.select(scope.optName(get(optionList, "option-list")), get(optionValue, "option-value") ?? "");
+      return;
+    }
+    const plan = closestOwn(scope, target, sel("plan-value"));
+    if (plan) {
+      event.preventDefault();
+      scope.selectPlan(get(plan, "plan-value"));
+      return;
+    }
+    const purchase = closestOwn(scope, target, `${sel("purchase")}:not(select)`);
+    if (purchase) {
+      if (purchase.tagName !== "INPUT") event.preventDefault();
+      scope.setPurchase(purchaseKind(get(purchase, "purchase")));
+      return;
+    }
+    const plus = closestOwn(scope, target, sel("qty-plus"));
+    const minus = plus ? null : closestOwn(scope, target, sel("qty-minus"));
+    if (plus || minus) {
+      event.preventDefault();
+      scope.setQuantity(scope.quantity + (plus ? 1 : -1));
+      return;
+    }
+    const add = closestOwn(scope, target, sel("add-to-cart"));
+    if (add) {
+      event.preventDefault();
+      onAddClick(scope, add);
+    }
+  }
+  function onKeydown(event, target) {
+    const { key } = event;
+    const presses = key === " " || key === "Enter" && !target.matches("a[href]");
+    const pressable = `:is(${sel("option-value")},${sel("plan-value")},${sel("purchase")})[role=button]:not(button,input)`;
+    if (!presses || event.defaultPrevented || !target.matches(pressable)) return;
+    event.preventDefault();
+    target.click();
+  }
+  var purchaseKind = (value) => value === "subscription" ? "subscription" : "one-time";
+  function onChange(scope, target) {
+    const value = isField(target) ? target.value : "";
+    if (target.matches(`select${sel("option")}`)) {
+      scope.select(scope.optName(get(target, "option")), value);
+    } else if (target.matches(`select${sel("variant-select")}`)) {
+      scope.selectVariant(value);
+    } else if (target.matches(`select${sel("plan")}`)) {
+      if (value) scope.selectPlan(value);
+      else scope.setPurchase("one-time");
+    } else if (target.matches(`select${sel("purchase")}`)) {
+      scope.setPurchase(purchaseKind(value));
+    } else if (target.matches(sel("qty"))) {
+      scope.setQuantity(value);
+    }
+  }
+  function bindProductEvents(scope) {
+    scope.root.addEventListener("click", (event) => {
+      if (isElement(event.target)) onClick(scope, event, event.target);
+    });
+    scope.root.addEventListener("keydown", (event) => {
+      if (event.target instanceof window.HTMLElement) onKeydown(event, event.target);
+    });
+    scope.root.addEventListener("change", (event) => {
+      const { target } = event;
+      if (isElement(target) && target.closest(productSelector()) === scope.root) onChange(scope, target);
+    });
+  }
+
+  // src/product.ts
+  var scopes = /* @__PURE__ */ new WeakMap();
+  var productSelector2 = () => sel("product");
   var knownOptionNames = /* @__PURE__ */ new Map();
   function rememberOptionNames(products) {
-    (products || []).forEach((p) => {
-      if (p?.handle && !knownOptionNames.has(p.handle)) knownOptionNames.set(p.handle, (p.options || []).map((o) => o.name));
+    products.forEach((product) => {
+      if (!knownOptionNames.has(product.handle)) {
+        knownOptionNames.set(
+          product.handle,
+          product.options.map((option) => option.name)
+        );
+      }
     });
+  }
+  function lineAttributeValue(el) {
+    if (isInput(el) && el.type === "checkbox") {
+      if (!el.checked) return null;
+      return el.value && el.value !== "on" ? el.value : "Yes";
+    }
+    if (isInput(el) && el.type === "radio") return el.checked ? el.value : null;
+    return isField(el) && el.value || null;
   }
   var ProductScope = class {
     constructor(root, product) {
       this.root = root;
       this.product = product;
-      this.selected = {};
-      this.variant = null;
-      this.quantity = Math.max(0, parseInt(get(root, "quantity") ?? "1", 10) || (has(root, "quantity") ? 0 : 1));
       this.plans = allPlans(product);
-      this.purchase = "one-time";
-      this.planId = null;
+      const params = new URLSearchParams(window.location.search);
+      const choice = initialChoice(product, {
+        variant: params.get("variant") || get(root, "variant"),
+        sellingPlan: params.get("selling_plan"),
+        defaultPlan: get(root, "default-plan"),
+        defaultPurchase: get(root, "default-purchase") || cfg.defaultPurchase
+      });
+      this.selected = choice.selected;
+      this.purchase = choice.purchase;
+      this.variant = null;
+      this.quantity = has(root, "quantity") ? Math.max(0, parseInt(get(root, "quantity") ?? "", 10) || 0) : 1;
       scopes.set(root, this);
       root.setAttribute(attr("state"), "ready");
       root.removeAttribute(attr("error"));
-      this.initSelection();
-      this.initPurchase();
       this.renderProduct();
-      this.bind();
+      bindProductEvents(this);
       this.renderVariant();
       watchImages(root, "product");
       notifyLayoutChanged("product");
       emit("product-ready", { product, scope: this }, root);
     }
-    /** New data for the same product (e.g. after a country switch). Keeps the selection. */
+    /** New data for the same product (a country switch). Keeps the visitor's choice. */
     update(product) {
       const variantId = this.variant?.id;
       this.product = product;
       this.plans = allPlans(product);
-      if (this.planId && !this.plans.some((p) => p.id === this.planId)) this.planId = this.plans[0]?.id || null;
-      if (!this.plans.length && this.purchase === "subscription") this.purchase = "one-time";
-      const v = product.variants.nodes.find((x) => x.id === variantId);
-      if (v) {
-        this.selected = {};
-        v.selectedOptions.forEach((o) => {
-          this.selected[o.name] = o.value;
-        });
-      }
+      const same = product.variants.nodes.find((variant) => variant.id === variantId);
+      if (same) this.selected = selectionOf(same);
       this.root.setAttribute(attr("state"), "ready");
       this.root.removeAttribute(attr("error"));
       this.renderProduct();
@@ -1496,669 +3202,237 @@
       notifyLayoutChanged("product");
       emit("product-updated", { product, scope: this }, this.root);
     }
-    /** Matching elements in this scope, including the root itself (e.g. a card link with tether-bind="link"). */
-    $(s) {
-      const inner = scoped(this.root, s, productSel());
-      return this.root.matches(s) ? [this.root, ...inner] : inner;
+    /** @returns Matches in this scope, including the root itself (a card link with tether-bind="link"). */
+    $(selector) {
+      const inner = scoped(this.root, selector, productSelector2());
+      return this.root.matches(selector) ? [this.root, ...inner] : inner;
     }
-    // ------------------------------------------------------------ state
-    /** The product's option name for a name used in the markup (same name, or same position). */
+    /**
+     * @param authored An option name in the markup.
+     * @returns The product's option of that name, or at that position in the build's language.
+     */
     optName(authored) {
-      const opts = this.product?.options || [];
-      if (!authored || opts.some((o) => o.name === authored)) return authored;
-      const i = (knownOptionNames.get(this.product.handle) || []).indexOf(authored);
-      return i >= 0 && opts[i] ? opts[i].name : authored;
-    }
-    initSelection() {
-      const vs = this.product.variants.nodes;
-      const first = vs.find((v) => v.availableForSale) || vs[0];
-      if (first) first.selectedOptions.forEach((o) => {
-        this.selected[o.name] = o.value;
-      });
-      const param = new URLSearchParams(window.location.search).get("variant") || get(this.root, "variant");
-      if (param) {
-        const gid = GID.variant(param);
-        const match = vs.find((v) => v.id === gid);
-        if (match) {
-          this.selected = {};
-          match.selectedOptions.forEach((o) => {
-            this.selected[o.name] = o.value;
-          });
-        }
-      }
-    }
-    initPurchase() {
-      if (!this.plans.length) return;
-      const params = new URLSearchParams(window.location.search);
-      const fromUrl = findPlan(this.product, params.get("selling_plan"));
-      const fromAttr = findPlan(this.product, get(this.root, "default-plan"));
-      this.planId = (fromUrl || fromAttr || this.plans[0]).id;
-      const wanted = fromUrl ? "subscription" : get(this.root, "default-purchase") || cfg.defaultPurchase;
-      this.purchase = this.product.requiresSellingPlan || wanted === "subscription" ? "subscription" : "one-time";
-    }
-    findVariant() {
-      return this.product.variants.nodes.find((v) => v.selectedOptions.every((o) => this.selected[o.name] === o.value)) || null;
-    }
-    isValueAvailable(name, value) {
-      return this.product.variants.nodes.some((v) => v.availableForSale && v.selectedOptions.every((o) => o.name === name ? o.value === value : this.selected[o.name] === o.value));
+      if (!authored) return "";
+      const { options } = this.product;
+      if (options.some((option) => option.name === authored)) return authored;
+      const index = (knownOptionNames.get(this.product.handle) ?? []).indexOf(authored);
+      return options[index]?.name ?? authored;
     }
     get plan() {
-      return this.plans.find((p) => p.id === this.planId) || null;
+      const planId = purchasePlanId(this.purchase);
+      return this.plans.find((plan) => plan.id === planId) ?? null;
     }
-    /** True when the current variant can be bought on the selected plan. */
+    /** True when the current variant can be bought on a plan. */
     get subscriptionAvailable() {
-      return Boolean(this.variant && this.plans.some((p) => allocationFor(this.variant, p.id)));
+      return this.plans.some((plan) => allocationFor(this.variant, plan.id));
     }
+    /** True when the line is bought on a plan: subscribing, and the variant is on the plan. */
     get isSubscription() {
-      return this.purchase === "subscription" && Boolean(allocationFor(this.variant, this.planId));
+      return linePurchase(this.purchase, this.variant).kind === "subscription";
     }
-    /** What would be added to the cart right now. */
+    /** @returns What would be added to the cart right now. */
     getLine() {
       if (!this.variant) return null;
       const line = { merchandiseId: this.variant.id, quantity: this.quantity };
-      if (this.isSubscription) line.sellingPlanId = this.planId;
-      const attrs = this.collectAttributes();
-      if (attrs.length) line.attributes = attrs;
+      const bought = linePurchase(this.purchase, this.variant);
+      if (bought.kind === "subscription") line.sellingPlanId = bought.planId;
+      const attributes = this.collectAttributes();
+      if (attributes.length) line.attributes = attributes;
       return line;
     }
+    /** @returns `tether-line-attributes` and the filled `tether-line-attribute` fields. */
     collectAttributes() {
-      const fixed = toAttributes(parseJSONAttr(this.root, "line-attributes"));
-      const inputs = this.$(sel("line-attribute")).map((el) => {
-        const key = get(el, "line-attribute");
-        let value;
-        if (el.type === "checkbox") value = el.checked ? el.value && el.value !== "on" ? el.value : "Yes" : "";
-        else if (el.type === "radio") value = el.checked ? el.value : null;
-        else value = el.value;
-        return value == null || value === "" ? null : { key, value: String(value) };
-      }).filter(Boolean);
-      return [...fixed, ...inputs];
+      const fixed = attributesFromJson(parseJSONAttr(this.root, "line-attributes"));
+      const fields = this.$(sel("line-attribute")).flatMap((el) => {
+        const value = lineAttributeValue(el);
+        return value === null ? [] : [{ key: get(el, "line-attribute") ?? "", value }];
+      });
+      return [...fixed, ...fields];
     }
-    // ------------------------------------------------------------ actions
+    /**
+     * Selects an option value. A combination no variant has moves to the closest variant with the value: the most other
+     * choices kept, then one for sale.
+     */
     select(name, value) {
       if (this.selected[name] === value) return;
-      const vs = this.product.variants.nodes.filter((v) => v.selectedOptions.some((o) => o.name === name && o.value === value));
-      if (!vs.length) return;
+      const withValue = this.product.variants.nodes.filter(
+        (variant) => variant.selectedOptions.some((option) => option.name === name && option.value === value)
+      );
+      const [firstWithValue] = withValue;
+      if (!firstWithValue) return;
       const next = { ...this.selected, [name]: value };
-      if (!vs.some((v) => v.selectedOptions.every((o) => next[o.name] === o.value))) {
-        const score = (v) => v.selectedOptions.filter((o) => o.name !== name && this.selected[o.name] === o.value).length * 2 + (v.availableForSale ? 1 : 0);
-        const best = vs.reduce((a, b) => score(b) > score(a) ? b : a);
-        best.selectedOptions.forEach((o) => {
-          next[o.name] = o.value;
-        });
+      if (!withValue.some((variant) => variant.selectedOptions.every((option) => next[option.name] === option.value))) {
+        const score = (variant) => {
+          const kept = variant.selectedOptions.filter(
+            (option) => option.name !== name && this.selected[option.name] === option.value
+          ).length;
+          return kept * 2 + (variant.availableForSale ? 1 : 0);
+        };
+        const closest = withValue.reduce(
+          (best, variant) => score(variant) > score(best) ? variant : best,
+          firstWithValue
+        );
+        Object.assign(next, selectionOf(closest));
       }
       this.selected = next;
       this.renderVariant();
     }
+    /** @param id A variant gid or numeric id. */
     selectVariant(id) {
-      const v = this.product.variants.nodes.find((x) => x.id === GID.variant(id));
-      if (!v) return;
-      this.selected = {};
-      v.selectedOptions.forEach((o) => {
-        this.selected[o.name] = o.value;
-      });
+      const variant = this.product.variants.nodes.find((candidate) => candidate.id === GID.variant(id));
+      if (!variant) return;
+      this.selected = selectionOf(variant);
       this.renderVariant();
     }
-    setPurchase(mode) {
-      const next = mode === "subscription" ? "subscription" : "one-time";
-      if (next === "one-time" && this.product.requiresSellingPlan) return;
-      if (this.purchase === next) return;
+    setPurchase(kind) {
+      const next = normalisePurchase(this.product, this.variant, kind, purchasePlanId(this.purchase));
+      if (next.kind === this.purchase.kind) return;
       this.purchase = next;
       this.renderVariant();
     }
+    /** @param ref A plan id, numeric id, name or option value. */
     selectPlan(ref) {
-      const p = findPlan(this.product, ref);
-      if (!p) return;
-      this.planId = p.id;
-      this.purchase = "subscription";
+      const plan = findPlan(this.product, ref);
+      if (!plan) return;
+      this.purchase = { kind: "subscription", planId: plan.id };
       this.renderVariant();
     }
-    setQuantity(n) {
-      const min = has(this.root, "quantity") ? 0 : 1;
-      this.quantity = Math.max(min, parseInt(n, 10) || 0);
-      this.$(sel("qty")).forEach((i) => setText(i, this.quantity));
+    setQuantity(quantity) {
+      const minimum = has(this.root, "quantity") ? 0 : 1;
+      this.quantity = Math.max(minimum, parseInt(String(quantity), 10) || 0);
+      this.$(sel("qty")).forEach((el) => {
+        setText(el, this.quantity);
+      });
       this.renderVariant();
     }
+    /** @returns The cart after adding; `null` when the variant can't be added. */
     async addToCart() {
       if (!this.variant?.availableForSale) return null;
       const line = this.getLine();
       if (!line || line.quantity < 1) return null;
+      const added = { product: this.product, variant: this.variant, line };
       const cart = await Cart.add(line);
-      emit("product-added", { product: this.product, variant: this.variant, line }, this.root);
+      emit("product-added", added, this.root);
       return cart;
     }
-    // ------------------------------------------------------------ events
-    bind() {
-      const own = (el) => el && el.closest(productSel()) === this.root;
-      this.root.addEventListener("click", (e) => {
-        const t = e.target;
-        if (!t?.closest) return;
-        const opt = t.closest(sel("option-value"));
-        if (own(opt) && opt.closest(sel("option-list"))) {
-          e.preventDefault();
-          this.select(this.optName(get(opt.closest(sel("option-list")), "option-list")), get(opt, "option-value"));
-          return;
-        }
-        const plan = t.closest(sel("plan-value"));
-        if (own(plan)) {
-          e.preventDefault();
-          this.selectPlan(get(plan, "plan-value"));
-          return;
-        }
-        const purchase = t.closest(`${sel("purchase")}:not(select)`);
-        if (own(purchase)) {
-          if (purchase.tagName !== "INPUT") e.preventDefault();
-          this.setPurchase(get(purchase, "purchase"));
-          return;
-        }
-        const plus = t.closest(sel("qty-plus"));
-        if (own(plus)) {
-          e.preventDefault();
-          this.setQuantity(this.quantity + 1);
-          return;
-        }
-        const minus = t.closest(sel("qty-minus"));
-        if (own(minus)) {
-          e.preventDefault();
-          this.setQuantity(this.quantity - 1);
-          return;
-        }
-        const add = t.closest(sel("add-to-cart"));
-        if (own(add)) {
-          e.preventDefault();
-          this.onAddClick(add);
-        }
-      });
-      this.root.addEventListener("change", (e) => {
-        const t = e.target;
-        if (!own(t)) return;
-        if (t.matches(`select${sel("option")}`)) this.select(this.optName(get(t, "option")), t.value);
-        else if (t.matches(`select${sel("variant-select")}`)) this.selectVariant(t.value);
-        else if (t.matches(`select${sel("plan")}`)) {
-          if (t.value) this.selectPlan(t.value);
-          else this.setPurchase("one-time");
-        } else if (t.matches(`select${sel("purchase")}`)) this.setPurchase(t.value);
-        else if (t.matches(sel("qty"))) this.setQuantity(t.value);
-      });
-    }
-    onAddClick(btn) {
-      const label = btn.querySelector(sel("add-label")) || btn;
-      const busyText = get(btn, "adding-text");
-      const write = (txt) => setText(label, txt);
-      if (label.dataset.tetherLabel === void 0) label.dataset.tetherLabel = label.tagName === "INPUT" ? label.value : label.textContent;
-      busy(btn, async () => {
-        if (busyText) write(busyText);
-        try {
-          await this.addToCart();
-        } catch (err) {
-          reportError(err, "add to cart failed");
-          emit("error", { error: err, context: "add-to-cart" }, this.root);
-        } finally {
-          if (busyText) write(label.dataset.tetherLabel);
-        }
-      }).then(() => {
-        this.renderVariant();
-      });
-    }
-    // ------------------------------------------------------------ render
+    /** Learns the markup's option names when they are the product's, then writes the product. */
     renderProduct() {
-      const p0 = this.product;
-      if (!knownOptionNames.has(p0.handle)) {
-        const authored = this.$(`${sel("option-list")},select${sel("option")}`).map((e) => get(e, "option-list") || get(e, "option"));
-        if (authored.some((n) => p0.options.some((o) => o.name === n))) rememberOptionNames([p0]);
+      const { product } = this;
+      if (!knownOptionNames.has(product.handle)) {
+        const authored = this.$(`${sel("option-list")},select${sel("option")}`).map(
+          (el) => get(el, "option-list") || get(el, "option")
+        );
+        if (authored.some((name) => product.options.some((option) => option.name === name))) {
+          rememberOptionNames([product]);
+        }
       }
-      const p = this.product;
-      this.$(sel("bind")).forEach((el) => {
-        const key = get(el, "bind") || "";
-        const txt = {
-          title: p.title,
-          "description-text": p.description,
-          vendor: p.vendor,
-          type: p.productType,
-          handle: p.handle
-        }[key];
-        if (txt !== void 0) return setText(el, txt);
-        switch (key) {
-          case "description":
-            el.innerHTML = p.descriptionHtml || "";
-            return void 0;
-          case "published-at":
-            return setText(el, formatDate(p.publishedAt));
-          case "min-price":
-            return setText(el, formatMoney(p.priceRange.minVariantPrice));
-          case "max-price":
-            return setText(el, formatMoney(p.priceRange.maxVariantPrice));
-          case "featured-image":
-            return setImage(el, p.featuredImage?.url, p.featuredImage?.altText || p.title);
-          case "url":
-          case "link":
-            el.setAttribute("href", productUrl(p.handle, p.id));
-            if (key === "url" && !el.firstElementChild && !el.textContent.trim()) setText(el, p.title);
-            return void 0;
-          case "images":
-            {
-              const imgs = [...el.children].map((n) => n.tagName === "IMG" ? n : n.querySelector("img"));
-              if (!hasTemplate(el) && imgs.length === p.images.nodes.length && imgs.every((im, i) => sameImage(im?.getAttribute("src"), p.images.nodes[i].url))) return void 0;
-            }
-            return repeat(el, p.images.nodes, (node, img) => {
-              const target = node.matches(`img,${sel("bind", "image")}`) ? node : node.querySelector("img") || node;
-              setImage(target, img.url, img.altText || p.title);
-            });
-          case "tags": {
-            const exclude = (el.getAttribute("exclude") || "").split(",").map((s) => s.trim()).filter(Boolean);
-            return repeat(el, p.tags.filter((t) => !exclude.includes(t)), (node, tag) => setText(node, tag));
-          }
-          default:
-            if (/^image:\d+$/.test(key)) {
-              const img = p.images.nodes[key.slice(6) - 1] || p.featuredImage;
-              return setImage(el, img?.url, img?.altText || p.title);
-            }
-            if (key.startsWith("metafield:")) {
-              const mf = metafieldValue(p, key.slice(10));
-              if (!mf) return setText(el, "");
-              if (mf.reference?.image) return setImage(el, mf.reference.image.url, mf.reference.image.altText);
-              if (/^(rich_text|multi_line_text)_field$/.test(mf.type)) el.style.whiteSpace = "pre-line";
-              return setText(el, mf.value);
-            }
-            return void 0;
-        }
-      });
-      this.$(sel("option-list")).forEach((container) => {
-        const name = this.optName(get(container, "option-list"));
-        const opt = p.options.find((o) => o.name === name);
-        if (!opt || opt.optionValues.length <= 1 && has(container, "hide-single")) return show(container, false);
-        return repeat(container, opt.optionValues, (node, v) => {
-          node.setAttribute(attr("option-value"), v.name);
-          const t = node.querySelector(sel("bind", "option-value"));
-          if (t) setText(t, v.name);
-          else if (!node.firstElementChild) setText(node, v.name);
-          const sw = node.querySelector(sel("bind", "swatch"));
-          if (sw && v.swatch?.color) sw.style.backgroundColor = v.swatch.color;
-          if (sw && v.swatch?.image?.previewImage) setImage(sw, v.swatch.image.previewImage.url, v.name);
-        });
-      });
-      this.$(`select${sel("option")}`).forEach((s) => {
-        const opt = p.options.find((o) => o.name === this.optName(get(s, "option")));
-        if (!opt) return show(s, false);
-        s.innerHTML = "";
-        opt.optionValues.forEach((v) => s.appendChild(new Option(v.name, v.name)));
-        return void 0;
-      });
-      this.$(`select${sel("variant-select")}`).forEach((s) => {
-        s.innerHTML = "";
-        p.variants.nodes.forEach((v) => s.appendChild(new Option(v.title, v.id)));
-      });
-      this.$(sel("plan-list")).forEach((container) => {
-        const raw = (get(container, "plan-list") || "").trim();
-        const group = ["", "true", "all", "*"].includes(raw.toLowerCase()) ? null : raw;
-        const plans = this.plans.filter((pl) => !group || pl.group.name === group);
-        repeat(container, plans, (node, plan) => {
-          node.setAttribute(attr("plan-value"), plan.id);
-          if (!node.firstElementChild && !node.querySelector(sel("plan-bind"))) setText(node, plan.name);
-        });
-      });
-      this.$(`select${sel("plan")}`).forEach((s) => {
-        s.innerHTML = "";
-        if (!p.requiresSellingPlan && get(s, "plan") !== "subscription-only") {
-          s.appendChild(new Option(s.getAttribute(attr("one-time-label")) || "One-time purchase", ""));
-        }
-        this.plans.forEach((pl) => s.appendChild(new Option(pl.name, pl.id)));
-      });
+      writeProduct(this);
     }
+    /** Derives the view of the current choice, keeps its variant, selection and purchase, and writes it. */
     renderVariant() {
-      const p = this.product;
-      let v = this.findVariant();
-      if (!v) {
-        [v] = p.variants.nodes;
-        if (v) {
-          this.selected = {};
-          v.selectedOptions.forEach((o) => {
-            this.selected[o.name] = o.value;
-          });
-        }
+      const view = productView(
+        this.product,
+        { selected: this.selected, purchase: this.purchase, quantity: this.quantity },
+        cfg.lowStock
+      );
+      if (!view) {
+        this.variant = null;
+        return;
       }
-      this.variant = v;
-      if (!v) return;
-      if (this.plans.length && !allocationFor(v, this.planId)) {
-        const alt = this.plans.find((pl) => allocationFor(v, pl.id));
-        if (alt) this.planId = alt.id;
-      }
-      const sub = this.isSubscription;
-      const oneTimePrice = v.price;
-      const subPrice = this.planId ? planPrice(v, this.planId) : null;
-      const price = sub ? subPrice : oneTimePrice;
-      const compareAt = sub ? allocationFor(v, this.planId)?.priceAdjustments?.[0]?.compareAtPrice || v.compareAtPrice : v.compareAtPrice;
-      const onSale = compareAt && parseFloat(compareAt.amount) > parseFloat(price.amount);
-      const discountPct = onSale ? Math.round((1 - parseFloat(price.amount) / parseFloat(compareAt.amount)) * 100) : 0;
-      const savings = this.planId ? planSavings(v, this.planId) : { amount: null, percentage: 0 };
-      const plan = this.plan;
-      const total = { amount: (parseFloat(price.amount) * Math.max(1, this.quantity)).toFixed(2), currencyCode: price.currencyCode };
-      const fm = formatMoney;
-      const pct = (n) => formatPercent(n);
-      const text = {
-        price: () => fm(price),
-        "total-price": () => fm(total),
-        "one-time-price": () => fm(oneTimePrice),
-        "subscription-price": () => fm(subPrice),
-        "subscription-savings": () => pct(savings.percentage),
-        "subscription-savings-amount": () => fm(savings.amount),
-        // What the visitor pays today for the chosen quantity (prepaid plans charge more up front).
-        "checkout-charge": () => {
-          const c = sub ? planCheckoutCharge(v, this.planId) : price;
-          return c && fm({ amount: (parseFloat(c.amount) * Math.max(1, this.quantity)).toFixed(2), currencyCode: c.currencyCode });
+      this.variant = view.variant;
+      this.selected = view.selected;
+      this.purchase = view.purchase;
+      writeVariant(this, view);
+      emit(
+        "variant-changed",
+        {
+          product: this.product,
+          variant: view.variant,
+          selected: { ...view.selected },
+          purchase: view.purchase.kind,
+          sellingPlanId: view.line.kind === "subscription" ? view.line.planId : null
         },
-        "plan-name": () => plan?.name,
-        "plan-description": () => plan?.description,
-        "plan-group": () => plan?.group?.name,
-        "compare-at-price": () => onSale ? fm(compareAt) : "",
-        "unit-price": () => fm(v.unitPrice),
-        "discount-percentage": () => `${discountPct}%`,
-        "discount-amount": () => onSale ? fm({ amount: String(parseFloat(compareAt.amount) - parseFloat(price.amount)), currencyCode: price.currencyCode }) : "",
-        "variant-title": () => v.title,
-        "variant-id": () => v.id,
-        sku: () => v.sku,
-        barcode: () => v.barcode,
-        stock: () => v.quantityAvailable,
-        quantity: () => this.quantity
-      };
-      this.$(sel("bind")).forEach((el) => {
-        const k = get(el, "bind");
-        if (k === "variant-image") setImage(el, v.image?.url || p.featuredImage?.url, v.image?.altText || p.title);
-        else if (text[k]) setText(el, text[k]());
-      });
-      this.$(sel("option-selected")).forEach((el) => setText(el, this.selected[this.optName(get(el, "option-selected"))] || ""));
-      this.$(sel("option-list")).forEach((container) => {
-        const name = this.optName(get(container, "option-list"));
-        qsa(container, sel("option-value")).forEach((node) => {
-          const value = get(node, "option-value");
-          setSelected(node, this.selected[name] === value);
-          const unavailable = !this.isValueAvailable(name, value);
-          node.classList.toggle("is-unavailable", unavailable);
-          node.setAttribute("data-unavailable", unavailable ? "true" : "false");
-        });
-      });
-      this.$(`select${sel("option")}`).forEach((s) => {
-        s.value = this.selected[this.optName(get(s, "option"))] || "";
-      });
-      this.$(`select${sel("variant-select")}`).forEach((s) => {
-        s.value = v.id;
-      });
-      this.$(sel("purchase")).forEach((el) => {
-        if (el.tagName === "SELECT") {
-          el.value = this.purchase;
-          return;
-        }
-        const mode = get(el, "purchase");
-        setSelected(el, mode === this.purchase);
-        const unavailable = mode === "subscription" ? !this.subscriptionAvailable : p.requiresSellingPlan;
-        el.classList.toggle("is-unavailable", unavailable);
-      });
-      this.$(sel("plan-value")).forEach((node) => {
-        const id = get(node, "plan-value");
-        const planObj = this.plans.find((pl) => pl.id === id);
-        const inVariant = Boolean(allocationFor(v, id));
-        setSelected(node, sub && id === this.planId);
-        node.classList.toggle("is-unavailable", !inVariant);
-        qsa(node, sel("plan-bind")).forEach((el) => {
-          const adj = planAdjustment(planObj);
-          const s = planSavings(v, id);
-          const k = get(el, "plan-bind");
-          const val = {
-            name: () => planObj?.name,
-            option: () => (planObj?.options || []).map((o) => o.value).join(", "),
-            // e.g. "1 month", without the store's price text
-            description: () => planObj?.description,
-            price: () => fm(planPrice(v, id)),
-            savings: () => pct(s.percentage),
-            "savings-amount": () => fm(s.amount),
-            adjustment: () => !adj ? "" : adj.type === "percentage" ? `${adj.value}%` : fm(adj.value)
-          }[k];
-          if (val) setText(el, val());
-        });
-      });
-      this.$(`select${sel("plan")}`).forEach((s) => {
-        s.value = sub ? this.planId : "";
-      });
-      const low = v.quantityAvailable != null && v.quantityAvailable > 0 && v.quantityAvailable <= (cfg.lowStock ?? 5);
-      const conds = {
-        "in-stock": v.availableForSale,
-        "out-of-stock": !v.availableForSale,
-        "backorder": v.availableForSale && v.currentlyNotInStock,
-        "on-sale": Boolean(onSale),
-        "not-on-sale": !onSale,
-        "has-variants": p.variants.nodes.length > 1,
-        "single-variant": p.variants.nodes.length === 1,
-        "low-stock": low,
-        "plenty-in-stock": v.availableForSale && !low,
-        "subscription-available": this.subscriptionAvailable,
-        "subscription-unavailable": !this.subscriptionAvailable,
-        "subscription-only": Boolean(p.requiresSellingPlan),
-        "one-time-available": !p.requiresSellingPlan,
-        "subscription-selected": sub,
-        "one-time-selected": !sub,
-        "has-savings": sub ? savings.percentage > 0 : Boolean(onSale),
-        // scope state (see status.js)
-        "loading": false,
-        "ready": true,
-        "error": false,
-        "not-found": false
-      };
-      this.$(sel("show")).forEach((el) => {
-        const k = get(el, "show");
-        if (!(k in conds)) return;
-        if (STATUS_KEYS.includes(k) && !ownedBy(el, this.root)) return;
-        show(el, conds[k]);
-      });
-      this.root.classList.toggle("is-subscription", sub);
-      this.root.setAttribute(attr("purchase-mode"), sub ? "subscription" : "one-time");
-      this.$(sel("add-to-cart")).forEach((btn) => {
-        const disabled = !v.availableForSale;
-        btn.classList.toggle("is-disabled", disabled);
-        btn.setAttribute("aria-disabled", String(disabled));
-        if ("disabled" in btn) btn.disabled = disabled;
-        const soldOut = get(btn, "soldout-text");
-        const subText = get(btn, "subscribe-text");
-        if (soldOut || subText) {
-          const label = btn.querySelector(sel("add-label")) || btn;
-          if (label.dataset.tetherLabel === void 0) label.dataset.tetherLabel = label.tagName === "INPUT" ? label.value : label.textContent;
-          let text2 = label.dataset.tetherLabel;
-          if (sub && subText) text2 = subText;
-          if (disabled && soldOut) text2 = soldOut;
-          if (btn.getAttribute("aria-busy") !== "true") setText(label, text2);
-        }
-      });
-      emit("variant-changed", {
-        product: p,
-        variant: v,
-        selected: { ...this.selected },
-        purchase: this.purchase,
-        sellingPlanId: sub ? this.planId : null
-      }, this.root);
+        this.root
+      );
     }
   };
 
-  // src/collection.js
-  var collection_exports = {};
-  __export(collection_exports, {
-    ListScope: () => ListScope,
-    listSelector: () => listSelector
-  });
-  var listSelector = () => `${sel("collection")},${sel("products")},${sel("recommendations")}`;
-  var ListScope = class {
-    constructor(root) {
-      this.root = root;
-      this.products = [];
-      this.pageInfo = null;
-      this.collection = null;
-      setScopeStatus(root, "loading");
-      root.addEventListener("click", (e) => {
-        const more = e.target.closest?.(sel("load-more"));
-        if (more && more.closest(listSelector()) === root) {
-          e.preventDefault();
-          busy(more, () => this.load(true));
-        }
-      });
-    }
-    $(s) {
-      return scoped(this.root, s, listSelector());
-    }
-    options() {
-      const r = this.root;
-      const opts = {
-        first: parseInt(get(r, "limit") || "", 10) || void 0,
-        sortKey: get(r, "sort") || void 0,
-        reverse: get(r, "reverse") === "true"
-      };
-      if (has(r, "collection")) opts.collection = get(r, "collection");
-      else {
-        const raw = get(r, "products") || "";
-        opts.query = raw.startsWith("url:") ? new URL(window.location.href).searchParams.get(raw.slice(4)) || "" : raw;
-      }
-      return opts;
-    }
-    async load(more = false) {
-      const token = this.loadToken = (this.loadToken || 0) + 1;
-      const stale2 = () => token !== this.loadToken;
-      try {
-        if (has(this.root, "recommendations")) {
-          let { key } = resolveProductKey(this.root, window.location, "recommendations");
-          const scope = this.root.closest(sel("product"));
-          if (!key && scope) ({ key } = resolveProductKey(scope));
-          if (!key) throw new TetherError("No product for recommendations", { code: "NOT_FOUND" });
-          const recs = await getRecommendations(key, get(this.root, "intent") || "RELATED");
-          if (stale2()) return;
-          const limit = parseInt(get(this.root, "limit") || "", 10);
-          this.products = limit ? recs.slice(0, limit) : recs;
-        } else {
-          const res = await getProducts({ ...this.options(), after: more ? this.pageInfo?.endCursor : null });
-          if (stale2()) return;
-          this.collection = res.collection;
-          this.pageInfo = res.pageInfo;
-          this.products = more ? [...this.products, ...res.products] : res.products;
-        }
-        this.render();
-        setScopeStatus(this.root, "ready");
-        emit("list-ready", { products: this.products, collection: this.collection }, this.root);
-      } catch (err) {
-        if (stale2()) return;
-        if (!more) setScopeStatus(this.root, isNotFound(err) ? "not-found" : "error", err);
-        if (!(isNotFound(err) && has(this.root, "recommendations"))) reportError(err, "list load failed");
-        emit("error", { error: err, context: "list" }, this.root);
-      }
-    }
-    render() {
-      const c = this.collection;
-      this.$(sel("collection-bind")).forEach((el) => {
-        switch (get(el, "collection-bind")) {
-          case "title":
-            return setText(el, c?.title || "");
-          case "description":
-            el.innerHTML = c?.descriptionHtml || "";
-            return void 0;
-          case "image":
-            return setImage(el, c?.image?.url, c?.image?.altText || c?.title);
-          case "count":
-            return setText(el, this.products.length);
-          default:
-            return void 0;
-        }
-      });
-      this.$(sel("list")).forEach((container) => {
-        repeat(container, this.products, (node, p) => {
-          node.setAttribute(attr("product"), p.handle);
-          node.removeAttribute(attr("state"));
-        });
-        emit("list-rendered", { container }, this.root);
-      });
-      const empty = this.products.length === 0;
-      this.$(sel("show")).forEach((el) => {
-        const k = get(el, "show");
-        if (k === "list-empty") show(el, empty);
-        if (k === "list-filled") show(el, !empty);
-      });
-      this.$(sel("load-more")).forEach((el) => show(el, Boolean(this.pageInfo?.hasNextPage)));
-      notifyLayoutChanged("list");
-    }
-  };
-
-  // src/mounting.js
-  var mounting_exports = {};
-  __export(mounting_exports, {
-    hydrateFromPage: () => hydrateFromPage,
-    liveLists: () => liveLists,
-    liveProducts: () => liveProducts,
-    mountProduct: () => mountProduct,
-    mountedLists: () => mountedLists,
-    mountedProducts: () => mountedProducts,
-    pruneLive: () => pruneLive,
-    retryFailed: () => retryFailed,
-    settleMarket: () => settleMarket,
-    trackMarket: () => trackMarket,
-    within: () => within
-  });
+  // src/mounting.ts
+  var HYDRATE_SELECTOR = 'script[type="application/json"][data-tether-hydrate]';
   var mountedProducts = /* @__PURE__ */ new WeakSet();
   var mountedLists = /* @__PURE__ */ new WeakSet();
   var liveProducts = /* @__PURE__ */ new Set();
   var liveLists = /* @__PURE__ */ new Set();
-  var requestToken = /* @__PURE__ */ new WeakMap();
+  var latestRequest = /* @__PURE__ */ new WeakMap();
   function pruneLive() {
     liveProducts.forEach((el) => {
       if (!el.isConnected) liveProducts.delete(el);
     });
-    liveLists.forEach((l) => {
-      if (!l.root.isConnected) liveLists.delete(l);
+    liveLists.forEach((list) => {
+      if (!list.root.isConnected) liveLists.delete(list);
     });
   }
   function within(root, selector) {
-    return [...root.matches?.(selector) ? [root] : [], ...qsa(root, selector)];
+    const self = root.matches?.(selector) ? [root] : [];
+    return [...self, ...qsa(root, selector)];
+  }
+  function applyPageTitle(el, product) {
+    const template = get(el, "page-title");
+    if (!template || typeof document === "undefined") return;
+    const fields = /* @__PURE__ */ new Map([
+      ["title", product.title],
+      ["vendor", product.vendor || ""],
+      ["type", product.productType || ""]
+    ]);
+    document.title = template.replace(/\{(\w+)\}/g, (placeholder, name) => fields.get(name) ?? placeholder);
+  }
+  function mountWithoutKey(el, { fromUrl, raw }) {
+    if (fromUrl) {
+      mountedProducts.add(el);
+      setScopeStatus(el, "not-found");
+      emit("product-not-found", { key: null, source: raw }, el);
+    } else if (!el.closest(listSelector())) {
+      warn(`[${attr("product")}] without a value. Bind it to the Shopify handle field, or use "url:handle".`, el);
+    }
+  }
+  function showLoadFailure(el, key, { fromUrl, raw }, error) {
+    const notFound = isNotFound(error);
+    setScopeStatus(el, notFound ? "not-found" : "error", error);
+    if (!notFound) {
+      reportError(error, `product ${key}`);
+      emit("error", { error, context: "product", key }, el);
+      return;
+    }
+    emit("product-not-found", { key, source: raw }, el);
+    if (fromUrl) log(`product not found: ${key}`);
+    else reportError(error, `product ${key}`);
   }
   function mountProduct(el) {
     if (mountedProducts.has(el)) return false;
-    const { key, fromUrl, raw } = resolveProductKey(el);
+    const { key, ...source } = resolveProductKey(el);
     if (!key) {
-      if (fromUrl) {
-        mountedProducts.add(el);
-        setScopeStatus(el, "not-found");
-        emit("product-not-found", { key: null, source: raw }, el);
-      } else if (!el.closest(listSelector())) {
-        warn(`[${attr("product")}] without a value. Bind it to the Shopify handle field, or use "url:handle".`, el);
-      }
+      mountWithoutKey(el, source);
       return false;
     }
     mountedProducts.add(el);
     liveProducts.add(el);
-    const token = {};
-    requestToken.set(el, token);
-    const current = () => requestToken.get(el) === token;
-    if (!scopes.get(el)) setScopeStatus(el, "loading");
-    else el.setAttribute(attr("state"), "updating");
-    const loading = getProduct(key);
-    marketPending?.add(loading);
-    loading.then((p) => {
-      if (!current()) return;
+    const request2 = {};
+    latestRequest.set(el, request2);
+    const isLatest = () => latestRequest.get(el) === request2;
+    if (scopes.get(el)) el.setAttribute(attr("state"), "updating");
+    else setScopeStatus(el, "loading");
+    const loading = trackMarket(getProduct(key));
+    loading.then((product) => {
+      if (!isLatest()) return;
       const existing = scopes.get(el);
-      if (existing) existing.update(p);
-      else new ProductScope(el, p);
-      applyPageTitle(el, p);
-      if (cfg.revalidate !== false && takeStale(key)) queueRefresh(key);
-    }).catch((err) => {
-      if (!current()) return;
-      const notFound = isNotFound(err);
-      setScopeStatus(el, notFound ? "not-found" : "error", err);
-      if (notFound) {
-        emit("product-not-found", { key, source: raw }, el);
-        if (fromUrl) log(`product not found: ${key}`);
-        else reportError(err, `product ${key}`);
-      } else {
-        reportError(err, `product ${key}`);
-        emit("error", { error: err, context: "product", key }, el);
-      }
+      if (existing) existing.update(product);
+      else new ProductScope(el, product);
+      applyPageTitle(el, product);
+      if (cfg.revalidate && takeStale(key)) queueRefresh(key);
+    }).catch((error) => {
+      if (isLatest()) showLoadFailure(el, key, source, error);
     });
     return true;
-  }
-  function applyPageTitle(el, p) {
-    const tpl = get(el, "page-title");
-    if (!tpl || typeof document === "undefined") return;
-    document.title = tpl.replace(/\{title\}/g, p.title).replace(/\{vendor\}/g, p.vendor || "").replace(/\{type\}/g, p.productType || "");
   }
   function retryFailed() {
     pruneLive();
@@ -2173,420 +3447,793 @@
     if (!refreshQueue.size) setTimeout(flushRefresh, 0);
     refreshQueue.add(key);
   }
+  function applyRefresh(key, fresh) {
+    liveProducts.forEach((el) => {
+      const scope = scopes.get(el);
+      if (!scope || !el.isConnected) return;
+      const rootKey = resolveProductKey(el).key;
+      if (rootKey !== key && rootKey !== fresh.handle && rootKey !== fresh.id) return;
+      if (JSON.stringify(scope.product) !== JSON.stringify(fresh)) scope.update(fresh);
+    });
+  }
   function flushRefresh() {
     const keys = [...refreshQueue];
     refreshQueue = /* @__PURE__ */ new Set();
-    refreshProducts(keys).forEach((promise, i) => promise.then((fresh) => {
-      liveProducts.forEach((el) => {
-        const scope = scopes.get(el);
-        if (!scope || !el.isConnected) return;
-        const k = resolveProductKey(el).key;
-        if (k !== keys[i] && k !== fresh.handle && k !== fresh.id) return;
-        if (JSON.stringify(scope.product) !== JSON.stringify(fresh)) scope.update(fresh);
-      });
-    }).catch((err) => reportError(err, `refresh ${keys[i]}`)));
+    keys.forEach((key) => {
+      reportFailure(
+        refreshProduct(key).then((fresh) => {
+          applyRefresh(key, fresh);
+        }),
+        `refresh ${key}`
+      );
+    });
   }
-  var readScripts = /* @__PURE__ */ new WeakSet();
   var marketPending = null;
-  var trackMarket = (p) => {
-    marketPending?.add(p);
-    return p;
+  var trackMarket = (loading) => {
+    marketPending?.add(loading);
+    return loading;
   };
   function settleMarket() {
     if (!marketPending) return;
     const waits = [...marketPending];
-    Promise.allSettled(waits).then(() => {
-      if (!marketPending || waits.some((w) => !marketPending.has(w))) return;
-      if (waits.length === marketPending.size) {
-        marketPending = null;
-        document.documentElement.classList.remove(`${cfg.prefix}-market-pending`);
-      } else settleMarket();
+    void Promise.allSettled(waits).then(() => {
+      if (!marketPending || waits.some((wait) => !marketPending?.has(wait))) return;
+      if (waits.length !== marketPending.size) {
+        settleMarket();
+        return;
+      }
+      marketPending = null;
+      document.documentElement.classList.remove(`${cfg.prefix}-market-pending`);
     });
   }
+  function toHydratePayload(json) {
+    if (!isRecord(json)) return { country: void 0, language: void 0, products: [] };
+    const { products } = json;
+    const entries = Array.isArray(products) ? products : [];
+    return {
+      country: toCountry(json["country"]) ?? void 0,
+      language: toLanguage(json["language"]) ?? void 0,
+      products: entries.filter(isProductShape)
+    };
+  }
+  var readScripts = /* @__PURE__ */ new WeakSet();
   function hydrateFromPage(root = document) {
-    qsa(root.ownerDocument || root, 'script[type="application/json"][data-tether-hydrate]').forEach((s) => {
-      if (readScripts.has(s)) return;
-      readScripts.add(s);
+    within(root, HYDRATE_SELECTOR).forEach((script) => {
+      if (readScripts.has(script)) return;
+      readScripts.add(script);
+      let json;
       try {
-        const data = JSON.parse(s.textContent);
-        rememberOptionNames(data.products);
-        const same = (a, b) => String(a || "").toUpperCase() === String(b || "").toUpperCase();
-        if (same(data.country, cfg.country) && same(data.language, cfg.language)) hydrateProducts(data.products);
-        else {
-          log("hydration skipped: other market");
-          if (!marketPending) {
-            marketPending = /* @__PURE__ */ new Set();
-            document.documentElement.classList.add(`${cfg.prefix}-market-pending`);
-          }
-        }
-      } catch (err) {
-        warn("bad data-tether-hydrate", err);
+        json = JSON.parse(script.textContent);
+      } catch (error) {
+        warn("bad data-tether-hydrate", error);
+        return;
+      }
+      const { country, language, products } = toHydratePayload(json);
+      rememberOptionNames(products);
+      if (country === cfg.country && language === cfg.language) {
+        hydrateProducts(products);
+        return;
+      }
+      log("hydration skipped: other market");
+      if (!marketPending) {
+        marketPending = /* @__PURE__ */ new Set();
+        document.documentElement.classList.add(`${cfg.prefix}-market-pending`);
       }
     });
   }
 
-  // src/lazy-iife.js
-  var { cfg: cfg2 } = config_exports;
-  var coreModules = {
-    "config.js": config_exports,
-    "client.js": client_exports,
-    "dom.js": dom_exports,
-    "fragments.js": fragments_exports,
-    "loader.js": loader_exports,
-    "selling-plans.js": selling_plans_exports,
-    "status.js": status_exports,
-    "cart.js": cart_exports,
-    "product.js": product_exports,
-    "collection.js": collection_exports,
-    "mounting.js": mounting_exports
-  };
-  var self = typeof document !== "undefined" ? document.currentScript?.src || "" : "";
-  var parts = {};
-  function loadPart(name) {
-    if (parts[name]) return parts[name];
-    const base = cfg2.partsUrl || self.replace(/[^/]*$/, "");
-    const min = /\.min\.js(\?|$)/.test(self) || !self ? ".min" : "";
-    const url = `${base.replace(/\/?$/, "/")}tether.${name}${min}.js`;
-    parts[name] = new Promise((resolve, reject) => {
-      const s = document.createElement("script");
-      s.src = url;
-      s.async = true;
-      s.onload = () => window.Tether?.__parts?.[name] ? resolve(window.Tether.__parts[name]) : reject(new Error(`${url} did not register`));
-      s.onerror = () => {
-        delete parts[name];
-        reject(new Error(`Could not load ${url}. Host it next to the Tether script, or set partsUrl.`));
-      };
-      document.head.appendChild(s);
-    });
-    return parts[name];
+  // src/markets.ts
+  var storageKey = () => `${cfg.prefix}:market:${cfg.domain}`;
+  var pageStorage = { getItem: (key) => getStored(key) };
+  function parseJsonOrNull(text2) {
+    try {
+      return JSON.parse(text2);
+    } catch (error) {
+      if (error instanceof SyntaxError) return null;
+      throw error;
+    }
   }
-  coreModules["lazy.js"] = { loadPart, coreModules };
+  function toMarket(value) {
+    if (typeof value !== "object" || value === null) return null;
+    const country = toCountry(Reflect.get(value, "country"));
+    if (!country) return null;
+    const locale = Reflect.get(value, "locale");
+    return {
+      country,
+      language: toLanguage(Reflect.get(value, "language")) ?? void 0,
+      locale: typeof locale === "string" && locale ? locale : void 0
+    };
+  }
+  var parseSavedMarket = (text2) => toMarket(parseJsonOrNull(text2));
+  function readSavedMarket(storage = pageStorage) {
+    const text2 = storage.getItem(storageKey());
+    return text2 ? parseSavedMarket(text2) : null;
+  }
 
-  // src/index.js
-  var VERSION = "0.6.7";
-  var initPromise = null;
-  var observer = null;
-  var mountedBody = null;
-  function mount(root = document) {
-    if (!isConfigured()) return 0;
-    if (root === document) mountedBody = document.body;
-    let count = 0;
-    pruneLive();
-    hydrateFromPage(root);
-    within(root, listSelector()).forEach((el) => {
-      if (mountedLists.has(el)) return;
-      mountedLists.add(el);
-      count++;
-      const list = new ListScope(el);
-      liveLists.add(list);
-      el.addEventListener(`${cfg.prefix}:list-rendered`, (e) => mount(e.detail.container));
-      trackMarket(list.load());
-    });
-    within(root, sel("product")).forEach((el) => {
-      if (mountProduct(el)) count++;
-    });
-    if (within(root, `${sel("country-select")},${sel("country-bind")}`).length) {
-      loadPart("markets").then((m) => m.renderCountrySelects(root)).catch((err) => reportError(err, "markets"));
+  // src/page-market.ts
+  var configuredMarket = { country: void 0, language: void 0, locale: void 0 };
+  var lastPageHadOwnMarket = false;
+  function pageMarket() {
+    const meta2 = (name) => document.querySelector(`meta[name="${cfg.prefix}-page-${name}"]`)?.getAttribute("content") || void 0;
+    const country = toCountry(meta2("country"));
+    if (!country) return null;
+    return { country, language: toLanguage(meta2("language")) ?? void 0, locale: meta2("locale") };
+  }
+  async function visitorMarket() {
+    const markets = cfg.markets ?? {};
+    if (markets.detect === false) return null;
+    if (!markets.detect) return markets.remember === false ? null : readSavedMarket();
+    try {
+      return (await loadPart("markets")).detectMarket(markets);
+    } catch (error) {
+      reportError(error, "markets");
+      return null;
     }
-    if ((cfg.account?.clientId || cfg.account?.server) && (within(root, ["account-login", "account-bind", "account-link", "orders", "order", "addresses", "subscriptions", "profile-form", "address-form"].map((n) => `[${attr(n)}]`).join(",") + `,[${attr("show")}^="logged-"]`).length || /[?&]code=/.test(window.location.search) || hasAccountSession())) {
-      loadPart("account").then((m) => m.mountAccount(root)).catch((err) => reportError(err, "account"));
-    }
-    if (within(root, sel("search")).length) {
-      loadPart("search").then((m) => m.mountSearch(root)).catch((err) => reportError(err, "search"));
-    }
-    settleMarket();
-    Cart.render();
-    log(`mounted ${count} scope(s)`, root);
-    return count;
   }
-  function unmount() {
-    Cart.close();
-  }
-  function getScope(el) {
-    const root = el?.closest?.(sel("product"));
-    return root ? scopes.get(root) || null : null;
-  }
-  var controlsBound = false;
-  function bindControls() {
-    if (controlsBound) return;
-    controlsBound = true;
-    document.addEventListener("click", (e) => {
-      const t = e.target;
-      if (!t?.closest) return;
-      if (t.closest(sel("cart-open"))) {
-        e.preventDefault();
-        Cart.toggle();
-        return;
-      }
-      if (t.closest(sel("cart-close"))) {
-        e.preventDefault();
-        Cart.close();
-        return;
-      }
-      const clear = t.closest(sel("cart-clear"));
-      if (clear) {
-        e.preventDefault();
-        busy(clear, () => Cart.clear().catch((err) => reportError(err, "cart clear")));
-        return;
-      }
-      const checkout = t.closest(sel("checkout"));
-      if (checkout) {
-        e.preventDefault();
-        busy(checkout, () => Cart.checkout());
-        return;
-      }
-      const line = t.closest(dataKeySel());
-      if (line && line.closest(sel("cart-lines"))) {
-        const id = line.getAttribute(`data-${cfg.prefix}-key`);
-        const current = Cart.lines.find((l) => l.id === id);
-        const run = (fn) => {
-          e.preventDefault();
-          fn().catch((err) => reportError(err, "cart line"));
-        };
-        if (t.closest(sel("line-remove"))) {
-          line.classList.add("is-busy");
-          return run(() => Cart.removeLine(id));
-        }
-        if (current && t.closest(sel("line-plus"))) return run(() => Cart.changeQuantity(id, 1));
-        if (current && t.closest(sel("line-minus"))) return run(() => Cart.changeQuantity(id, -1));
-      }
-      const removeCode = t.closest(sel("discount-remove"));
-      if (removeCode) {
-        e.preventDefault();
-        const code = removeCode.closest(sel("discount-code"))?.getAttribute(attr("discount-code"));
-        if (code) Cart.removeDiscount(code).catch((err) => reportError(err, "discount"));
-        return;
-      }
-      const groupBtn = t.closest(sel("group-add"));
-      if (groupBtn) {
-        e.preventDefault();
-        busy(groupBtn, () => addGroup(groupBtn));
-      }
-    });
-    document.addEventListener("change", (e) => {
-      const t = e.target;
-      if (!t?.closest) return;
-      const lineEl = t.closest(dataKeySel());
-      const id = lineEl?.getAttribute(`data-${cfg.prefix}-key`);
-      const busyLine = (p, what) => {
-        lineEl.classList.add("is-busy");
-        lineEl.setAttribute("aria-busy", "true");
-        p.catch((err) => reportError(err, what));
-      };
-      if (id && t.matches(`input${sel("line", "quantity")}`)) {
-        busyLine(Cart.updateLine(id, parseInt(t.value, 10) || 0), "cart line");
-      } else if (id && t.matches(`select${sel("line-plan")}`)) {
-        busyLine(Cart.updateLine(id, { sellingPlanId: t.value || null }), "cart line plan");
-      } else if (t.matches(`select${sel("country-select")}`)) {
-        if (t.value) setCountry(t.value).catch((err) => reportError(err, "country"));
-      } else if (t.matches(sel("cart-note"))) {
-        Cart.setNote(t.value).catch((err) => reportError(err, "cart note"));
-      }
-    });
-    document.addEventListener("submit", (e) => {
-      const form = e.target.closest?.(sel("discount-form"));
-      if (!form) return;
-      e.preventDefault();
-      const input = form.querySelector(sel("discount-input")) || form.querySelector("input");
-      const code = input?.value.trim();
-      if (!code) return;
-      busy(form, async () => {
-        const mark = (bad) => {
-          form.classList.toggle("is-invalid", bad);
-          if (input) {
-            if (bad) input.setAttribute("aria-invalid", "true");
-            else input.removeAttribute("aria-invalid");
-          }
-        };
-        try {
-          await Cart.applyDiscount(code);
-          mark(false);
-          emit("discount-applied", { code }, form);
-          if (input) input.value = "";
-        } catch (err) {
-          mark(true);
-          if (err?.code === "INVALID_DISCOUNT") emit("discount-invalid", { code }, form);
-          else reportError(err, "discount");
-        }
-      });
-    }, true);
-    document.addEventListener("input", (e) => {
-      const f = e.target.closest?.(sel("discount-form"));
-      if (f) {
-        f.classList.remove("is-invalid");
-        e.target.removeAttribute?.("aria-invalid");
-      }
-    });
-    window.addEventListener("storage", (e) => {
-      if (cfg.domain && e.key?.startsWith(`${cfg.prefix}:`)) loadPart("extras").then((m) => m.onStorage(e)).catch(() => {
-      });
-    });
-    document.addEventListener(`${cfg.prefix}:variant-changed`, (e) => {
-      const root = e.target;
-      if (cfg.variantUrl || root.hasAttribute?.(attr("variant-url"))) loadPart("extras").then((m) => m.writeVariantUrl(root, e.detail)).catch(() => {
-      });
-    });
-    if (cfg.astro !== false) {
-      document.addEventListener("astro:page-load", () => (initPromise || Promise.resolve()).then(() => {
-        let target = pageMarket();
-        if (!target && onPageMarket) {
-          try {
-            target = JSON.parse(localStorage.getItem(`${cfg.prefix}:market:${cfg.domain}`) || "null");
-          } catch {
-            target = null;
-          }
-          target = target?.country ? target : baseMarket;
-        }
-        onPageMarket = Boolean(pageMarket());
-        const differs = target?.country && (String(target.country).toUpperCase() !== String(cfg.country || "").toUpperCase() || String(target.language || "").toUpperCase() !== String(cfg.language || "").toUpperCase());
-        if (differs) setCountry(target.country, { language: target.language ?? null, locale: target.locale, remember: false }).then(() => mount(document), () => mount(document));
-        else if (mountedBody !== document.body) mount(document);
-      }));
-      document.addEventListener("astro:before-swap", () => {
-        mountedBody = null;
-        unmount();
-      });
-    }
-    window.addEventListener("online", () => {
-      retryFailed();
-      liveLists.forEach((l) => {
-        if (l.root.getAttribute(attr("state")) === "error") l.load();
-      });
-    });
-    document.addEventListener("keydown", (e) => {
-      if (!Cart.isOpen()) return;
-      if (e.key === "Escape") {
-        Cart.close();
-        return;
-      }
-      if (e.key !== "Tab" || cfg.cartFocus === false) return;
-      const d = Cart.drawers().find((x) => x.classList.contains(cfg.cartDrawerOpenClass));
-      const f = d ? focusables(d) : [];
-      if (!f.length) return;
-      const first = f[0];
-      const last = f[f.length - 1];
-      if (!d.contains(document.activeElement) || e.shiftKey && document.activeElement === first || !e.shiftKey && document.activeElement === last) {
-        e.preventDefault();
-        (e.shiftKey ? last : first).focus();
-      }
-    });
-  }
-  function dataKeySel() {
-    return `[data-${cfg.prefix}-key]`;
-  }
-  var addGroup = (btn) => loadPart("extras").then((m) => m.addGroup(btn));
-  var analyticsQueue = null;
-  function init(overrides = {}) {
-    if (initPromise && !Object.keys(overrides).length) return initPromise;
-    configure({ ...window.TETHER_CONFIG || {}, ...overrides });
-    if (!isConfigured()) {
-      warn("TETHER_CONFIG is missing domain or token. Tether is idle.");
-      initPromise = Promise.resolve(null);
-      return initPromise;
-    }
-    bindControls();
-    if (cfg.observe) startObserver();
-    if (cfg.analytics && !analyticsQueue) {
-      analyticsQueue = [];
-      ["product-ready", "list-ready", "cart-updated", "cart-toggled", "checkout", "search"].forEach((n) => document.addEventListener(`${cfg.prefix}:${n}`, (e) => analyticsQueue.push(e)));
-      document.addEventListener("astro:page-load", () => analyticsQueue.push(new CustomEvent(`${cfg.prefix}:page`)));
-      loadPart("analytics").then((m) => m.startAnalytics(analyticsQueue)).catch((err) => reportError(err, "analytics"));
-    }
-    initPromise = applyMarket(overrides).then(() => Cart.init()).then(async (cart) => {
-      const want = cfg.country ? String(cfg.country).toUpperCase() : null;
-      if (cart && want && cart.buyerIdentity?.countryCode && cart.buyerIdentity.countryCode !== want) {
-        try {
-          cart = await Cart.setBuyerIdentity({ countryCode: want }, { create: false });
-        } catch (err) {
-          reportError(err, "cart country");
-        }
-      }
-      emit("ready", { cart });
-      return api;
-    });
-    return initPromise;
-  }
-  function pageMarket(doc = document) {
-    const get2 = (n) => doc.querySelector(`meta[name="${cfg.prefix}-page-${n}"]`)?.getAttribute("content") || void 0;
-    const country = get2("country");
-    return country ? { country: country.toUpperCase(), language: get2("language"), locale: get2("locale") } : null;
-  }
-  var baseMarket = null;
-  var onPageMarket = false;
-  async function applyMarket(overrides) {
-    const m = cfg.markets || {};
-    baseMarket = { country: cfg.country, language: cfg.language, locale: cfg.locale };
+  async function applyStartMarket(overrides) {
+    configuredMarket = { country: cfg.country, language: cfg.language, locale: cfg.locale };
     const page = pageMarket();
-    onPageMarket = Boolean(page);
+    lastPageHadOwnMarket = page !== null;
     if (page) {
       cfg.country = page.country;
-      cfg.language = page.language ? page.language.toUpperCase() : void 0;
+      cfg.language = page.language;
       if (page.locale) cfg.locale = page.locale;
       return;
     }
-    if (m.detect === false) return;
-    let market = null;
-    if (m.detect) {
-      try {
-        market = (await loadPart("markets")).detectMarket(m);
-      } catch (err) {
-        reportError(err, "markets");
-        return;
-      }
-    } else if (m.remember !== false) {
-      try {
-        market = JSON.parse(localStorage.getItem(`${cfg.prefix}:market:${cfg.domain}`) || "null");
-      } catch {
-      }
-      if (market && !/^[A-Z]{2}$/.test(market.country || "")) market = null;
-    }
+    const market = await visitorMarket();
     if (!market) return;
     if (market.country) cfg.country = market.country;
     if (market.language) cfg.language = market.language;
     if (market.locale && !overrides.locale) cfg.locale = market.locale;
     log("market", market);
   }
-  function hasAccountSession() {
-    try {
-      return Boolean(sessionStorage[`${cfg.prefix}:account:${cfg.domain}`] || localStorage[`${cfg.prefix}:account:${cfg.domain}`] || localStorage[`${cfg.prefix}:account-hint:${cfg.domain}`]);
-    } catch {
-      return false;
+  var sameCode = (a, b) => (a ?? "").toUpperCase() === (b ?? "").toUpperCase();
+  function marketForArrival() {
+    const page = pageMarket();
+    const leftOwnMarket = page === null && lastPageHadOwnMarket;
+    lastPageHadOwnMarket = page !== null;
+    const target = page ?? (leftOwnMarket ? readSavedMarket() ?? configuredMarket : null);
+    if (!target?.country) return null;
+    if (sameCode(target.country, cfg.country) && sameCode(target.language, cfg.language)) return null;
+    return { country: target.country, language: target.language, locale: target.locale };
+  }
+  function setCountry(code, options) {
+    return loadPart("markets").then((part) => part.setCountry(code, options));
+  }
+
+  // src/part-integrity.ts
+  var PART_INTEGRITY = { "tether.diagnose.js": "sha384-euwUnDXnDZd70Pud3pHrNgzBwk3Pm8mrQjusX12KVBUGxcD4Z1pI9swMKM3bcGba", "tether.markets.js": "sha384-UMKj62O7TqyF61RRZDs9CEpQLk49vKnk9tFaiSJhUfndcD1o/jCM9Spn5yjAFqQO", "tether.search.js": "sha384-FMneAYSGyeio3ZpsWldYhdu9fgPk2/vQ5h76dxS9wQSS/1LxMTdS+rEHOU2e+e5r", "tether.lists.js": "sha384-FuEVV6Lo81/xeAkcD1AGNnGAvfz8b9cq2qBIHDilIH3jtqE3GHAX9ogvNkjqSbM3", "tether.extras.js": "sha384-Hp4ITcajZpcqDnXoA4D84doONi3GvxBuU4HUvJg7ZwjcqY3Gm7tf5EMQWm93zfGE", "tether.account.js": "sha384-qRngYUoIRv70HIl8SfrPQGSeyFwR6OqX+Ca8VfY22Nl8W0ClpICNneDVpH3AZ+1Y", "tether.account-pages.js": "sha384-hUmXqgE+0NKlgihiMi5U+ju3Fd4ymlm+CQyHg5f8bxAufcJWzmBBRFCA7zxiZs3o", "tether.analytics.js": "sha384-QN/z0gk9w+S/2pT1oTFFSvHjv24AuTyuLgD02saRmRhCJyxCgzHGt6tjQvMCzv0a" };
+
+  // src/part-registry.ts
+  function isTetherInternals(value) {
+    return isRecord(value) && isRecord(value["__core"]) && isRecord(value["__parts"]);
+  }
+
+  // src/version.ts
+  var VERSION = "0.11.2";
+
+  // src/lazy-iife.ts
+  var coreModules = {
+    get "config.ts"() {
+      return [cfg, isConfigured, log, MARKET_SOURCES, parseMarkets, reportError, warn];
+    },
+    get "client.ts"() {
+      return [endpoint, gql, matches, orNull, shaped, TetherError, withTimeout];
+    },
+    get "dom.ts"() {
+      return [
+        ANALYTICS_EVENTS,
+        attr,
+        attributesFromJson,
+        busy,
+        emit,
+        formatDate,
+        formatMoney2,
+        get,
+        has,
+        hasTemplate,
+        integerAttribute,
+        isElement,
+        isField,
+        isOwnEvent,
+        notifyLayoutChanged,
+        parseJSONAttr,
+        productUrl2,
+        qsa,
+        repeat,
+        scoped,
+        sel,
+        setImage,
+        setStoreHtml,
+        setText,
+        show
+      ];
+    },
+    get "loader.ts"() {
+      return [clearProductCache, getProduct, normalizeProductKey, primeProduct, withProductFragment];
+    },
+    get "selling-plans.ts"() {
+      return [allPlans];
+    },
+    get "status.ts"() {
+      return [boundary, isNotFound, resolveProductKey, setScopeStatus];
+    },
+    get "cart.ts"() {
+      return [Cart];
+    },
+    get "product.ts"() {
+      return [scopes];
+    },
+    get "collection.ts"() {
+      return [listSelector];
+    },
+    get "mounting.ts"() {
+      return [liveLists, liveProducts, mountedProducts, mountProduct, pruneLive, within];
+    },
+    get "market-codes.ts"() {
+      return [toCountry, toLanguage];
+    },
+    get "page-market.ts"() {
+      return [setCountry];
+    },
+    get "shopify-values.ts"() {
+      return [isHttpsUrl, MAX_CONNECTION_SIZE];
+    },
+    // Parts that load other parts (account → account-pages) use this same loader.
+    get "lazy.ts"() {
+      return [loadPart];
+    }
+  };
+  var MINIFIED_SCRIPT = /\.min\.js(\?|$)/;
+  var coreScript = typeof document === "undefined" ? "" : document.currentScript?.getAttribute("src") ?? "";
+  var coreScriptUrl = coreScript ? new URL(coreScript, document.baseURI).href : "";
+  var JSDELIVR_ALIAS = /^(https:\/\/cdn\.jsdelivr\.net\/(gh|npm)\/@?[^/@]+\/[^/@]+)(@(latest|\d+(\.\d+)?))?\//;
+  function exactReleaseFolder(folder) {
+    return folder.replace(
+      JSDELIVR_ALIAS,
+      (_alias, path, source) => `${path}@${source === "gh" ? "v" : ""}${VERSION}/`
+    );
+  }
+  var parts = /* @__PURE__ */ new Map();
+  function partsFolder() {
+    if (cfg.partsUrl) return new URL(cfg.partsUrl, document.baseURI).href;
+    if (!coreScriptUrl) return null;
+    return exactReleaseFolder(coreScriptUrl.replace(/[^/]*$/, ""));
+  }
+  function applyIntegrity(script, integrity) {
+    script.integrity = integrity;
+    if (new URL(script.src).origin !== window.location.origin) script.crossOrigin = "anonymous";
+  }
+  function loadScript(name, folder, file, integrity) {
+    return new Promise((resolve, reject) => {
+      const url2 = `${folder.replace(/\/?$/, "/")}${file}`;
+      const script = document.createElement("script");
+      script.src = url2;
+      script.async = true;
+      applyIntegrity(script, integrity);
+      script.onload = () => {
+        const tether = Reflect.get(window, "Tether");
+        const part = isTetherInternals(tether) ? tether.__parts[name] : void 0;
+        if (part) {
+          resolve(part);
+          return;
+        }
+        parts.delete(name);
+        const problem = isTetherInternals(tether) ? "did not register" : "can't register: window.Tether is no longer this Tether script's, another script replaced it";
+        reject(new Error(`${url2} ${problem}`));
+      };
+      script.onerror = () => {
+        parts.delete(name);
+        reject(
+          new Error(
+            `Could not load ${url2}, or it is not the file built with this Tether script. Host the same release's files next to the Tether script or at partsUrl.`
+          )
+        );
+      };
+      document.head.appendChild(script);
+    });
+  }
+  function loadPart(name) {
+    let loading = parts.get(name);
+    if (!loading) {
+      const folder = partsFolder();
+      if (folder === null) {
+        return Promise.reject(
+          new Error(`The Tether script's own location is unknown, so its ${name} part can't be found: set partsUrl.`)
+        );
+      }
+      const suffix = MINIFIED_SCRIPT.test(coreScriptUrl) || !coreScriptUrl ? ".min" : "";
+      const file = `tether.${name}${suffix}.js`;
+      const integrity = PART_INTEGRITY[file];
+      if (integrity === void 0) {
+        return Promise.reject(new Error(`This Tether script was built without ${file}, so it can't load that part.`));
+      }
+      loading = loadScript(name, folder, file, integrity);
+      parts.set(name, loading);
+    }
+    return loading;
+  }
+
+  // src/collection.ts
+  var listSelector = () => `${sel("collection")},${sel("products")},${sel("recommendations")}`;
+  function mountedList(root) {
+    setScopeStatus(root, "loading");
+    return {
+      root,
+      load: () => loadPart("lists").then((part) => part.loadList(root)).catch((error) => {
+        setScopeStatus(root, "error", error);
+        reportError(error, "lists");
+      })
+    };
+  }
+
+  // src/analytics-queue.ts
+  var PAGE_MOUNT = "page-mount";
+  var PAGE_LEFT = "page-left";
+  function queueAnalyticsEvents(load2) {
+    const queue = [];
+    const bodies = /* @__PURE__ */ new WeakMap();
+    const landing = document.body;
+    const queuePageLoad = (event) => {
+      bodies.set(event, document.body);
+      queue.push(event);
+    };
+    const listening = new window.AbortController();
+    const options = { signal: listening.signal };
+    ANALYTICS_EVENTS.forEach((name) => {
+      document.addEventListener(`${cfg.prefix}:${name}`, (event) => queue.push(event), options);
+    });
+    document.addEventListener("astro:page-load", queuePageLoad, options);
+    load2().then((part) => part.startAnalytics(queue, bodies, landing)).catch((error) => {
+      listening.abort();
+      queue.length = 0;
+      queue.push = () => 0;
+      reportError(error, "analytics");
+    });
+    return queue;
+  }
+
+  // src/account-marks.ts
+  var hintKey = () => `${cfg.prefix}:account-hint:${cfg.domain}`;
+  function removeFromBothAreas(key) {
+    removeStored(key, "sessionStorage");
+    removeStored(key, "localStorage");
+  }
+  function forgetBrowserModeTokens() {
+    removeFromBothAreas(`${cfg.prefix}:account:${cfg.domain}`);
+    removeFromBothAreas(`${cfg.prefix}:account-login:${cfg.domain}`);
+  }
+  var isLoginOutcome = (value) => value === "in" || value === "expired" || value === "error";
+
+  // src/part-use.ts
+  function withPart(name, use) {
+    reportFailure(loadPart(name).then(use), name);
+  }
+
+  // src/account-api.ts
+  var ACCOUNT_ATTRIBUTES = [
+    "account-login",
+    "account-bind",
+    "account-link",
+    "orders",
+    "order",
+    "addresses",
+    "subscriptions",
+    "profile-form",
+    "address-form"
+  ];
+  var accountSelector = () => [...ACCOUNT_ATTRIBUTES.map((name) => `[${attr(name)}]`), `[${attr("show")}^="logged-"]`].join(",");
+  function hasLoginHint() {
+    return Boolean(getStored(hintKey()));
+  }
+  function mountAccountIfUsed(root) {
+    if (!cfg.account) return;
+    const needed = within(root, accountSelector()).length > 0 || isLoginOutcome(new URLSearchParams(window.location.search).get("account")) || hasLoginHint();
+    if (!needed) return;
+    withPart("account", (part) => part.mountAccount(root));
+  }
+  function fromPart(name) {
+    return (...args) => loadPart("account").then((part) => {
+      const call = part[name];
+      return call(...args);
+    });
+  }
+  var accountApi = {
+    login: fromPart("login"),
+    logout: fromPart("logout"),
+    isLoggedIn: fromPart("isLoggedIn"),
+    customer: fromPart("customer"),
+    orders: fromPart("orders"),
+    order: fromPart("order"),
+    updateProfile: fromPart("updateProfile"),
+    addresses: fromPart("addresses"),
+    saveAddress: fromPart("saveAddress"),
+    deleteAddress: fromPart("deleteAddress"),
+    subscriptions: fromPart("subscriptions"),
+    subscriptionAction: fromPart("subscriptionAction"),
+    requestReturn: fromPart("requestReturn"),
+    render: fromPart("render"),
+    mountAccount: fromPart("mountAccount")
+  };
+
+  // src/controls/cart-controls.ts
+  var lineKeyAttribute = () => `data-${cfg.prefix}-key`;
+  function lineOf(target) {
+    const line = target.closest(`[${lineKeyAttribute()}]`);
+    const id = line?.getAttribute(lineKeyAttribute());
+    return line && id ? { line, id } : null;
+  }
+  function onLineClick(event, target) {
+    const found = lineOf(target);
+    if (!found?.line.closest(sel("cart-lines"))) return;
+    const { line, id } = found;
+    if (target.closest(sel("line-remove"))) {
+      event.preventDefault();
+      line.classList.add("is-busy");
+      reportFailure(Cart.removeLine(id), "cart line");
+      return;
+    }
+    const delta = lineDelta(target);
+    if (!delta || !Cart.lines.some((candidate) => candidate.id === id)) return;
+    event.preventDefault();
+    reportFailure(Cart.changeQuantity(id, delta), "cart line");
+  }
+  function lineDelta(target) {
+    if (target.closest(sel("line-plus"))) return 1;
+    if (target.closest(sel("line-minus"))) return -1;
+    return 0;
+  }
+  function onClick2(event) {
+    const { target } = event;
+    if (!isElement(target)) return;
+    if (target.closest(sel("cart-open"))) {
+      event.preventDefault();
+      Cart.toggle();
+      return;
+    }
+    if (target.closest(sel("cart-close"))) {
+      event.preventDefault();
+      Cart.close();
+      return;
+    }
+    const clear = target.closest(sel("cart-clear"));
+    if (clear) {
+      event.preventDefault();
+      void busy(
+        clear,
+        () => Cart.clear().catch((error) => {
+          reportError(error, "cart clear");
+        })
+      );
+      return;
+    }
+    const checkout2 = target.closest(sel("checkout"));
+    if (checkout2) {
+      event.preventDefault();
+      void busy(checkout2, () => Cart.checkout());
+      return;
+    }
+    onLineClick(event, target);
+  }
+  function showLineBusy(line, change, context) {
+    line.classList.add("is-busy");
+    line.setAttribute("aria-busy", "true");
+    reportFailure(change, context);
+  }
+  function onQuantityInput(input, { line, id }) {
+    const typed = input.value.trim();
+    if (INTEGER_TEXT.test(typed)) {
+      showLineBusy(line, Cart.updateLine(id, Number(typed)), "cart line");
+      return;
+    }
+    const current = Cart.lines.find((candidate) => candidate.id === id);
+    if (current) input.value = String(Cart.quantityOf(current));
+  }
+  function onChange2(event) {
+    const { target } = event;
+    if (!isElement(target)) return;
+    const found = lineOf(target);
+    if (found && isInput(target) && target.matches(sel("line", "quantity"))) {
+      onQuantityInput(target, found);
+    } else if (found && isSelect(target) && target.matches(sel("line-plan"))) {
+      showLineBusy(found.line, Cart.updateLine(found.id, { sellingPlanId: target.value || null }), "cart line plan");
+    } else if (isField(target) && target.matches(sel("cart-note"))) {
+      reportFailure(Cart.setNote(target.value), "cart note");
     }
   }
-  var accountApi = new Proxy({}, { get: (_, n) => (...a) => loadPart("account").then((m) => m[n](...a)) });
-  function setCountry(code, opts) {
-    return loadPart("markets").then((m) => m.setCountry(code, opts));
+  function onKeydown2(event) {
+    if (!Cart.isOpen()) return;
+    if (event.key === "Escape") {
+      Cart.close();
+      return;
+    }
+    trapFocus(event);
+  }
+  function bindCartControls() {
+    document.addEventListener("click", onClick2);
+    document.addEventListener("change", onChange2);
+    document.addEventListener("keydown", onKeydown2);
+  }
+
+  // src/controls/discount.ts
+  function codeInputOf(form) {
+    const input = form.querySelector(sel("discount-input")) ?? form.querySelector("input");
+    return input && isInput(input) ? input : null;
+  }
+  function onSubmit(event) {
+    const { target } = event;
+    const form = isElement(target) ? target.closest(sel("discount-form")) : null;
+    if (!form) return;
+    event.preventDefault();
+    const input = codeInputOf(form);
+    const code = input?.value.trim();
+    if (!code) return;
+    reportFailure(
+      busy(form, () => loadPart("extras").then((part) => part.applyDiscountCode(form, input, code))),
+      "discount"
+    );
+  }
+  function onInput(event) {
+    const { target } = event;
+    if (!isElement(target)) return;
+    const form = target.closest(sel("discount-form"));
+    if (!form) return;
+    form.classList.remove("is-invalid");
+    target.removeAttribute("aria-invalid");
+  }
+  function onClick3(event) {
+    const { target } = event;
+    const remove = isElement(target) ? target.closest(sel("discount-remove")) : null;
+    if (!remove) return;
+    event.preventDefault();
+    const code = remove.closest(sel("discount-code"))?.getAttribute(attr("discount-code"));
+    if (!code) return;
+    reportFailure(Cart.removeDiscount(code), "discount");
+  }
+  function bindDiscountControls() {
+    document.addEventListener("submit", onSubmit, true);
+    document.addEventListener("input", onInput);
+    document.addEventListener("click", onClick3);
+  }
+
+  // src/controls/extras.ts
+  var addGroup = (button) => loadPart("extras").then((part) => part.addGroup(button));
+  function onClick4(event) {
+    const { target } = event;
+    const button = isElement(target) ? target.closest(sel("group-add")) : null;
+    if (!button) return;
+    event.preventDefault();
+    reportFailure(
+      busy(button, () => addGroup(button)),
+      "extras"
+    );
+  }
+  function onStorage(event) {
+    const followed = [null, cfg.storageKey, seenKey(), storageKey()];
+    if (!cfg.domain || !followed.includes(event.key)) return;
+    withPart("extras", (part) => {
+      part.onStorage(event);
+    });
+  }
+  function onVariantChanged(event) {
+    if (!isOwnEvent(event, "variant-changed")) return;
+    const { target } = event;
+    if (!isElement(target)) return;
+    if (!cfg.variantUrl && !target.hasAttribute(attr("variant-url"))) return;
+    withPart("extras", (part) => {
+      part.writeVariantUrl(target, event.detail);
+    });
+  }
+  function bindExtrasControls() {
+    document.addEventListener("click", onClick4);
+    window.addEventListener("storage", onStorage);
+    document.addEventListener(`${cfg.prefix}:variant-changed`, onVariantChanged);
+  }
+
+  // src/controls/navigation.ts
+  var mountedBody = null;
+  function rememberDocumentMount() {
+    mountedBody = document.body;
+  }
+  async function onPageLoad(hooks) {
+    await hooks.ready();
+    const target = marketForArrival();
+    if (!target) {
+      if (mountedBody !== document.body) hooks.mount(document);
+      return;
+    }
+    try {
+      await setCountry(target.country, { language: target.language ?? null, locale: target.locale, remember: false });
+    } catch (error) {
+      reportError(error, "country");
+    }
+    hooks.mount(document);
+  }
+  function bindAstroRouter(hooks) {
+    document.addEventListener("astro:page-load", () => {
+      reportFailure(onPageLoad(hooks), "page mount");
+    });
+    document.addEventListener("astro:before-swap", () => {
+      mountedBody = null;
+      hooks.unmount();
+    });
+  }
+  function onOnline() {
+    retryFailed();
+    liveLists.forEach((list) => {
+      if (list.root.getAttribute(attr("state")) === "error") void list.load();
+    });
+  }
+  function bindNavigation(hooks) {
+    if (cfg.astro) bindAstroRouter(hooks);
+    window.addEventListener("online", onOnline);
+  }
+
+  // src/index.ts
+  var OBSERVE_DEBOUNCE_MS = 50;
+  function pageConfig() {
+    const config = pageGlobal("TETHER_CONFIG");
+    return typeof config === "object" && config !== null ? Object.fromEntries(Object.entries(config)) : {};
+  }
+  var initPromise = null;
+  var observer = null;
+  var analyticsQueue = null;
+  var controlsBound = false;
+  function mountLists(root) {
+    let count = 0;
+    within(root, listSelector()).forEach((el) => {
+      if (mountedLists.has(el)) return;
+      mountedLists.add(el);
+      count++;
+      const list = mountedList(el);
+      liveLists.add(list);
+      el.addEventListener(`${cfg.prefix}:list-rendered`, (event) => {
+        if (isOwnEvent(event, "list-rendered")) mountRoot(event.detail.container);
+      });
+      void trackMarket(list.load());
+    });
+    return count;
+  }
+  function mountParts(root) {
+    if (within(root, `${sel("country-select")},${sel("country-bind")}`).length) {
+      withPart("markets", (part) => part.renderCountrySelects(root));
+    }
+    mountAccountIfUsed(root);
+    if (within(root, sel("search")).length) {
+      withPart("search", (part) => {
+        part.mountSearch(root);
+      });
+    }
+  }
+  function mountWithin(root) {
+    let count = mountLists(root);
+    within(root, sel("product")).forEach((el) => {
+      if (mountProduct(el)) count++;
+    });
+    mountParts(root);
+    return count;
+  }
+  function mount(root = document) {
+    if (!isConfigured()) return 0;
+    if (root === document) rememberDocumentMount();
+    analyticsQueue?.push(new CustomEvent(PAGE_MOUNT, { detail: root }));
+    return mountRoot(root);
+  }
+  function mountRoot(root) {
+    pruneLive();
+    hydrateFromPage(root.ownerDocument ?? document);
+    const count = mountWithin(root);
+    settleMarket();
+    Cart.render();
+    log(`mounted ${count} scope(s)`, root);
+    return count;
+  }
+  function mountAdded(added) {
+    const roots = added.filter(
+      (root) => root.isConnected && !added.some((other) => other !== root && other.contains(root))
+    );
+    if (!roots.length || !isConfigured()) return;
+    pruneLive();
+    roots.forEach((root) => {
+      hydrateFromPage(root);
+    });
+    const count = roots.reduce((sum, root) => sum + mountWithin(root), 0);
+    settleMarket();
+    Cart.render();
+    log(`mounted ${count} scope(s) in ${roots.length} added element(s)`);
+  }
+  function unmount() {
+    analyticsQueue?.push(new Event(PAGE_LEFT));
+    Cart.close();
+  }
+  function getScope(el) {
+    const root = el?.closest(sel("product"));
+    return root ? scopes.get(root) ?? null : null;
+  }
+  function bindControls() {
+    if (controlsBound) return;
+    controlsBound = true;
+    bindCartControls();
+    bindDiscountControls();
+    bindExtrasControls();
+    bindNavigation({ ready: () => initPromise ?? Promise.resolve(null), mount, unmount: Cart.close });
+  }
+  async function cartInPageMarket(cart) {
+    const country = cfg.country;
+    const cartCountry = cart?.buyerIdentity.countryCode;
+    if (!country || !cartCountry || cartCountry === country) return cart;
+    try {
+      return await Cart.setBuyerIdentity({ countryCode: country }, { create: false });
+    } catch (error) {
+      reportError(error, "cart country");
+      return cart;
+    }
+  }
+  function init(overrides = {}) {
+    if (initPromise && !Object.keys(overrides).length) return initPromise;
+    configure({ ...pageConfig(), ...overrides });
+    if (!isConfigured()) {
+      warn("TETHER_CONFIG is missing domain or token. Tether is idle.");
+      initPromise = Promise.resolve(null);
+      return initPromise;
+    }
+    forgetBrowserModeTokens();
+    bindControls();
+    if (cfg.observe) startObserver();
+    if (cfg.analytics) analyticsQueue ?? (analyticsQueue = queueAnalyticsEvents(() => loadPart("analytics")));
+    initPromise = applyStartMarket(overrides).then(() => Cart.init()).then(cartInPageMarket).then((cart) => {
+      emit("ready", { cart });
+      return api;
+    });
+    return initPromise;
   }
   function startObserver() {
     if (observer || typeof MutationObserver === "undefined") return;
-    let t = null;
-    const queued = /* @__PURE__ */ new Set();
-    observer = new MutationObserver((muts) => {
-      muts.forEach((m) => m.addedNodes.forEach((n) => {
-        if (n.nodeType === 1) queued.add(n);
-      }));
-      clearTimeout(t);
-      t = setTimeout(() => {
-        queued.forEach((n) => {
-          if (n.isConnected) mount(n);
+    let timer;
+    const queued2 = /* @__PURE__ */ new Set();
+    observer = new MutationObserver((mutations) => {
+      mutations.forEach((mutation) => {
+        mutation.addedNodes.forEach((node) => {
+          if (isElement(node)) queued2.add(node);
         });
-        queued.clear();
-      }, 50);
+      });
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        const added = [...queued2];
+        queued2.clear();
+        mountAdded(added);
+      }, OBSERVE_DEBOUNCE_MS);
     });
     observer.observe(document.body, { childList: true, subtree: true });
   }
-  var api = {
+  var detectMarket = (markets) => loadPart("markets").then((part) => part.detectMarket(markets ?? cfg.markets));
+  var getProducts = (query2) => loadPart("lists").then((part) => part.getProducts(query2));
+  var getRecommendations = (product, intent) => loadPart("lists").then((part) => part.getRecommendations(product, intent));
+  var getLocalization = () => loadPart("markets").then((part) => part.getLocalization());
+  var diagnose = (options) => loadPart("diagnose").then((part) => part.diagnose({ ...options, version: VERSION }));
+  function on(name, listener) {
+    const type = `${cfg.prefix}:${name}`;
+    const handler = (event) => {
+      if (isOwnEvent(event, name)) listener(event.detail, event);
+    };
+    document.addEventListener(type, handler);
+    return () => {
+      document.removeEventListener(type, handler);
+    };
+  }
+  var publicApi = {
     VERSION,
     init,
     mount,
     unmount,
+    /** The live config, read-only. */
     get config() {
-      return cfg;
+      return configView;
     },
     get ready() {
-      return initPromise || Promise.resolve(null);
+      return initPromise ?? Promise.resolve(null);
     },
-    query: gql,
+    query,
     withContext,
     cart: Cart,
     getProduct,
@@ -2598,31 +4245,32 @@
     primeProduct,
     normalizeProductKey,
     clearProductCache,
-    formatMoney,
+    formatMoney: formatMoney2,
     imageUrl,
     plans: selling_plans_exports,
     TetherError,
     resolveProductKey,
     setCountry,
-    detectMarket: (markets) => loadPart("markets").then((m) => m.detectMarket(markets || cfg.markets)),
-    getLocalization: () => loadPart("markets").then((m) => m.getLocalization()),
-    diagnose: (opts) => loadPart("diagnose").then((m) => m.diagnose({ ...opts, version: VERSION })),
-    __core: coreModules,
-    __parts: {},
-    on(name, fn) {
-      const h = (e) => fn(e.detail, e);
-      document.addEventListener(`${cfg.prefix}:${name}`, h);
-      return () => document.removeEventListener(`${cfg.prefix}:${name}`, h);
-    }
+    detectMarket,
+    getLocalization,
+    diagnose,
+    on
   };
+  var internals = { __core: coreModules, __parts: {} };
+  var api = Object.assign(publicApi, internals);
   var index_default = api;
-  if (typeof window !== "undefined" && typeof document !== "undefined") {
-    window.Tether = api;
-    const auto = window.TETHER_CONFIG && window.TETHER_CONFIG.autoMount !== false && !window.TETHER_INTEGRATION;
-    if (auto) {
-      const start = () => init().then(() => mount(document));
-      if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", start, { once: true });
-      else start();
-    }
+  function autoStart() {
+    Reflect.set(window, "Tether", api);
+    const config = pageGlobal("TETHER_CONFIG");
+    if (!config || field(config, "autoMount") === false || pageGlobal("TETHER_INTEGRATION")) return;
+    const start = () => {
+      reportFailure(
+        init().then(() => mount(document)),
+        "init"
+      );
+    };
+    if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", start, { once: true });
+    else start();
   }
+  if (typeof window !== "undefined" && typeof document !== "undefined") autoStart();
 })();

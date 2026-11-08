@@ -1,56 +1,75 @@
 {
   "name": "@occluze/tether",
-  "version": "0.6.7",
+  "version": "0.11.2",
   "description": "Free, open-source alternative to Smootify and Storesynk (Shopyflow): Shopify products, cart and subscriptions in Webflow with HTML attributes. Optional Shopify to Webflow CMS sync.",
   "type": "module",
   "main": "dist/esm/index.js",
   "module": "dist/esm/index.js",
   "exports": {
     ".": {
-      "types": "./types/index.d.ts",
+      "types": "./dist/types/src/index.d.ts",
       "default": "./dist/esm/index.js"
     },
     "./server": {
-      "types": "./types/server.d.ts",
+      "types": "./dist/types/src/server.d.ts",
       "default": "./dist/esm/server.js"
     },
     "./astro": {
-      "types": "./types/astro.d.ts",
+      "types": "./dist/types/src/astro.d.ts",
       "default": "./dist/esm/astro.js"
     },
     "./presets/barba": {
-      "types": "./types/barba.d.ts",
+      "types": "./dist/types/src/presets/barba.d.ts",
       "default": "./dist/presets/barba.esm.js"
     },
-    "./dist/*": "./dist/*"
+    "./dist/tether.*": "./dist/tether.*"
   },
   "files": [
     "dist",
-    "src",
     "LICENSE",
-    "README.md",
-    "types/index.d.ts",
-    "types/barba.d.ts",
-    "types/server.d.ts",
-    "types/astro.d.ts"
+    "README.md"
   ],
   "scripts": {
-    "build": "node scripts/build.mjs",
-    "dev": "node scripts/build.mjs --watch",
-    "test": "node --test test/*.test.js server/test/*.test.js && npm run test:types",
-    "smoke": "node scripts/smoke.mjs",
-    "pretest": "node scripts/build.mjs",
-    "presmoke": "node scripts/build.mjs",
-    "test:types": "tsc -p types/tsconfig.json",
-    "release": "node scripts/release.mjs",
-    "e2e:build": "npm run build && cd examples/astro && (test -f .env || cp .env.example .env) && npm install --no-audit --no-fund && npm install --no-save ../.. && npx astro build",
-    "e2e": "npm run e2e:build && playwright test -c e2e/playwright.config.js"
+    "build": "node --experimental-strip-types scripts/build.ts",
+    "dev": "node --experimental-strip-types scripts/build.ts --watch",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint": "eslint .",
+    "typecheck": "tsc -b",
+    "knip": "knip",
+    "lint:workflows": "node --experimental-strip-types scripts/lint-workflows.ts",
+    "deps": "depcruise --config .config/dependency-cruiser.cjs src server/src server/bin server/scripts scripts",
+    "check": "npm run format:check && npm run lint && npm run typecheck && npm run knip && npm run deps && npm test",
+    "prepare": "lefthook install",
+    "test": "node --experimental-strip-types --import ./scripts/test-leaks.ts --test --test-timeout=300000 --test-force-exit --test-reporter=spec --test-reporter-destination=stdout --test-reporter=./scripts/test-leaks.ts --test-reporter-destination=stderr test/*.test.js server/test/*.test.js && npm run test:types",
+    "test:types": "tsc -p test/types/tsconfig.json",
+    "smoke": "node --experimental-strip-types scripts/smoke.ts",
+    "pretest": "node --experimental-strip-types scripts/build.ts --out .test-dist",
+    "presmoke": "node --experimental-strip-types scripts/build.ts --out .test-dist",
+    "release": "node --experimental-strip-types scripts/release.ts",
+    "e2e:build": "npm run build && node --experimental-strip-types scripts/e2e-build.ts && cd examples/astro && npm install --no-save --no-audit --no-fund --ignore-scripts ../.. && npx astro build",
+    "e2e": "npm run e2e:build && playwright test -c test/e2e/playwright.config.js"
   },
   "devDependencies": {
-    "@playwright/test": "^1.64.1",
-    "esbuild": "^0.25.0",
-    "jsdom": "^26.0.0",
-    "typescript": "^5.9.3"
+    "@eslint-community/eslint-plugin-eslint-comments": "4.8.1",
+    "@eslint/js": "10.0.1",
+    "@playwright/test": "1.64.1",
+    "@tsconfig/strictest": "2.0.8",
+    "@types/jsdom": "21.1.7",
+    "@types/node": "24.19.2",
+    "dependency-cruiser": "18.7.2",
+    "esbuild": "0.25.12",
+    "eslint": "10.14.0",
+    "eslint-config-prettier": "10.1.8",
+    "globals": "17.14.0",
+    "jsdom": "26.1.0",
+    "knip": "6.44.1",
+    "lefthook": "2.2.2",
+    "prettier": "3.9.10",
+    "terser": "5.36.0",
+    "typescript": "npm:@typescript/typescript6@6.0.2",
+    "typescript-eslint": "8.72.1",
+    "yaml": "2.9.1"
   },
   "license": "MIT",
   "author": {
@@ -91,7 +110,7 @@
   "publishConfig": {
     "access": "public"
   },
-  "types": "types/index.d.ts",
+  "types": "dist/types/src/index.d.ts",
   "peerDependencies": {
     "astro": ">=4"
   },
@@ -99,5 +118,62 @@
     "astro": {
       "optional": true
     }
+  },
+  "engines": {
+    "node": ">=22.18"
+  },
+  "prettier": {
+    "printWidth": 120,
+    "singleQuote": true,
+    "trailingComma": "all",
+    "overrides": [
+      {
+        "files": "*.md",
+        "options": {
+          "embeddedLanguageFormatting": "off"
+        }
+      },
+      {
+        "files": [
+          "CHANGELOG.md",
+          ".changes/*.md"
+        ],
+        "options": {
+          "proseWrap": "always",
+          "printWidth": 100
+        }
+      }
+    ]
+  },
+  "knip": {
+    "entry": [
+      "src/index.ts",
+      "src/server.ts",
+      "src/astro.ts",
+      "src/presets/barba.ts",
+      "src/parts/*.ts",
+      "src/lazy-iife.ts",
+      "server/src/entry.{js,ts}",
+      "server/src/index.ts",
+      "server/bin/tether-sync.{js,ts}",
+      "server/scripts/*.{mjs,ts}",
+      "scripts/*.ts",
+      "test/**/*.js",
+      "server/test/**/*.js",
+      "test/e2e/*.{js,mjs}"
+    ],
+    "project": [
+      "src/**/*.ts",
+      "server/src/**/*.{js,ts}",
+      "server/bin/*.{js,ts}",
+      "server/scripts/*.{mjs,ts}",
+      "scripts/*.ts"
+    ],
+    "ignoreBinaries": [
+      "tsc"
+    ]
+  },
+  "overrides": {
+    "minimatch": "11.0.5"
   }
 }

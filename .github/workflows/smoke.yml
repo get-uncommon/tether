@@ -4,61 +4,91 @@
 #   TETHER_DOMAIN, TETHER_TOKEN   a public Storefront token of your test store
 #                                 (without them it runs against Shopify's public demo store)
 # Cost: ~1-2 minutes a run, weekly plus per push to main. Free on public repositories.
+#
+# The `smoke` job installs the dependencies and runs their code, so it can only read the repository, and gets no
+# dependency cache another run wrote. The store's secrets reach only the two smoke steps, not the install or the
+# tests. The `report` job, which can write issues, checks nothing out and installs nothing: it reads only the smoke
+# job's outputs.
 name: smoke
 
 on:
   schedule:
-    - cron: '17 6 * * 1'   # Mondays 06:17 UTC
+    - cron: '17 6 * * 1' # Mondays 06:17 UTC
   push:
     branches: [main]
   workflow_dispatch:
 
-permissions:
-  contents: read
-  issues: write
+permissions: {}
 
+# One group per trigger: a push or a manual run cancels an older run of its own kind, never the weekly one, which
+# would then report nothing.
 concurrency:
-  group: weekly-smoke
+  group: smoke-${{ github.event_name }}
   cancel-in-progress: true
 
 jobs:
   smoke:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    env:
-      TETHER_DOMAIN: ${{ secrets.TETHER_DOMAIN }}
-      TETHER_TOKEN: ${{ secrets.TETHER_TOKEN }}
+    permissions:
+      contents: read
+    outputs:
+      pinned: ${{ steps.versions.outputs.pinned }}
+      next: ${{ steps.versions.outputs.next }}
+      pinned-outcome: ${{ steps.pinned.outcome }}
+      next-outcome: ${{ steps.next.outcome }}
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: 22
-          cache: npm
+          package-manager-cache: false
+      # test/upgrade-from-released.test.js installs this tree into copies made from release tags, and fails when a
+      # release's updater is not among them: every release tag, so a new one can't be left out here.
+      - run: git fetch --depth=1 --no-tags origin '+refs/tags/v*:refs/tags/v*'
       - run: npm ci
       - name: Unit tests
         run: npm test
       - name: API versions
         id: versions
         run: |
-          echo "pinned=$(node scripts/api-version.mjs)" >> "$GITHUB_OUTPUT"
-          echo "next=$(node scripts/api-version.mjs --next)" >> "$GITHUB_OUTPUT"
+          echo "pinned=$(node --experimental-strip-types scripts/api-version.ts)" >> "$GITHUB_OUTPUT"
+          echo "next=$(node --experimental-strip-types scripts/api-version.ts --next)" >> "$GITHUB_OUTPUT"
       - name: Smoke (pinned ${{ steps.versions.outputs.pinned }})
         id: pinned
+        env:
+          TETHER_DOMAIN: ${{ secrets.TETHER_DOMAIN }}
+          TETHER_TOKEN: ${{ secrets.TETHER_TOKEN }}
         run: npm run smoke
       - name: Smoke (next ${{ steps.versions.outputs.next }})
         id: next
         if: always() && steps.versions.outcome == 'success'
-        run: TETHER_API_VERSION=${{ steps.versions.outputs.next }} npm run smoke
+        env:
+          TETHER_DOMAIN: ${{ secrets.TETHER_DOMAIN }}
+          TETHER_TOKEN: ${{ secrets.TETHER_TOKEN }}
+          TETHER_API_VERSION: ${{ steps.versions.outputs.next }}
+        run: npm run smoke
 
+  report:
+    needs: smoke
+    if: always() && (needs.smoke.result == 'success' || needs.smoke.result == 'failure')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    steps:
       - name: Open or update an issue
-        if: failure()
+        if: needs.smoke.result == 'failure'
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          PINNED: ${{ steps.versions.outputs.pinned }}
-          NEXT: ${{ steps.versions.outputs.next }}
-          PINNED_OUTCOME: ${{ steps.pinned.outcome }}
-          NEXT_OUTCOME: ${{ steps.next.outcome }}
+          PINNED: ${{ needs.smoke.outputs.pinned }}
+          NEXT: ${{ needs.smoke.outputs.next }}
+          PINNED_OUTCOME: ${{ needs.smoke.outputs.pinned-outcome }}
+          NEXT_OUTCOME: ${{ needs.smoke.outputs.next-outcome }}
         run: |
           title="Smoke test failing"
           body="Run: $RUN_URL
@@ -66,7 +96,7 @@ jobs:
           - pinned API $PINNED: $PINNED_OUTCOME
           - next API $NEXT: $NEXT_OUTCOME
 
-          If only the next version fails, read the Storefront API release notes and fix Tether before bumping apiVersion. If the pinned version fails, the store, token or Shopify changed: run Tether.diagnose() on the site."
+          If only the next version fails, read the Storefront API release notes and fix Tether before bumping apiVersion. If the pinned version fails, the store, token or Shopify changed: run Tether.diagnose() on the site. If neither ran, the unit tests failed: see the run."
           gh label create smoke-failure --color B60205 --force >/dev/null 2>&1 || true
           num=$(gh issue list --state open --label smoke-failure --json number --jq '.[0].number')
           if [ -n "$num" ]; then
@@ -76,9 +106,10 @@ jobs:
           fi
 
       - name: Close the issue once it passes again
-        if: success()
+        if: needs.smoke.result == 'success'
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           gh issue list --state open --label smoke-failure --json number --jq '.[].number' | while read -r num; do

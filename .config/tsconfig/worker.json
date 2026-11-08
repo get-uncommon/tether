@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  // The Cloudflare Worker: the Web Worker global scope that Workers implement, with no DOM and no Node.
+  "extends": "./base.json",
+  "compilerOptions": {
+    "tsBuildInfoFile": "../../node_modules/.cache/tsc/worker.tsbuildinfo",
+    "lib": ["ES2023", "WebWorker"]
+  },
+  "include": ["../../server/src/**/*.ts"],
+  "exclude": ["../../server/src/node.ts"]
+}

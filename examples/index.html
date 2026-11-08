@@ -1,150 +1,263 @@
 <!doctype html>
 <html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Tether example</title>
-<script>
-  // Point this at your own (dev) store. ?domain=...&token=... in the URL overrides it.
-  const q = new URLSearchParams(location.search);
-  window.TETHER_CONFIG = {
-    domain: q.get('domain') || 'hydrogen-preview.myshopify.com',
-    token: q.get('token') || '3b580e70970c4528da70c98e097c2fa0', // Shopify's public demo token
-    country: q.get('country') || 'NL',
-    locale: 'nl-NL',
-    productPath: '?product={handle}',
-    debug: true,
-  };
-</script>
-<script src="../dist/tether.js" defer></script>
-<style>
-  * { box-sizing: border-box; }
-  body { font: 15px/1.4 system-ui, sans-serif; margin: 0; padding: 24px; max-width: 1100px; margin-inline: auto; color: #111; }
-  header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
-  button { font: inherit; padding: 8px 12px; border: 1px solid #111; background: #fff; cursor: pointer; border-radius: 6px; }
-  button.is-selected, button[aria-pressed="true"] { background: #111; color: #fff; }
-  button.is-unavailable { opacity: .35; }
-  button:disabled { opacity: .4; cursor: not-allowed; }
-  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 16px; }
-  .card img, .pdp img { width: 100%; aspect-ratio: 1; object-fit: cover; background: #eee; border-radius: 8px; }
-  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 8px 0; }
-  .pdp { display: grid; grid-template-columns: 1fr 1fr; gap: 32px; margin: 32px 0; padding: 24px; border: 1px solid #ddd; border-radius: 12px; }
-  .muted { color: #777; }
-  [tether-state="loading"] { opacity: .5; }
-  [tether-cart-drawer] { position: fixed; inset: 0 0 0 auto; width: min(420px, 100%); background: #fff; border-left: 1px solid #ddd;
-    padding: 24px; transform: translateX(100%); transition: transform .3s; overflow: auto; z-index: 10; }
-  [tether-cart-drawer].is-open { transform: none; }
-  .line { display: grid; grid-template-columns: 64px 1fr auto; gap: 12px; padding: 12px 0; border-bottom: 1px solid #eee; }
-  .line img { width: 64px; height: 64px; object-fit: cover; border-radius: 6px; }
-  .badge { font-size: 12px; background: #e7f5e9; color: #146c2e; padding: 2px 6px; border-radius: 4px; }
-</style>
-</head>
-<body>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Tether example</title>
+    <script>
+      // Point this at your own (dev) store. ?domain=...&token=... in the URL overrides it.
+      const q = new URLSearchParams(location.search);
+      window.TETHER_CONFIG = {
+        domain: q.get('domain') || 'hydrogen-preview.myshopify.com',
+        token: q.get('token') || '3b580e70970c4528da70c98e097c2fa0', // Shopify's public demo token
+        country: q.get('country') || 'NL',
+        locale: 'nl-NL',
+        productPath: '?product={handle}',
+        debug: true,
+      };
+    </script>
+    <script src="../dist/tether.js" defer></script>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        font:
+          15px/1.4 system-ui,
+          sans-serif;
+        margin: 0;
+        padding: 24px;
+        max-width: 1100px;
+        margin-inline: auto;
+        color: #111;
+      }
+      header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 24px;
+      }
+      button {
+        font: inherit;
+        padding: 8px 12px;
+        border: 1px solid #111;
+        background: #fff;
+        cursor: pointer;
+        border-radius: 6px;
+      }
+      button.is-selected,
+      button[aria-pressed='true'] {
+        background: #111;
+        color: #fff;
+      }
+      button.is-unavailable {
+        opacity: 0.35;
+      }
+      button:disabled {
+        opacity: 0.4;
+        cursor: not-allowed;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+        gap: 16px;
+      }
+      .card img,
+      .pdp img {
+        width: 100%;
+        aspect-ratio: 1;
+        object-fit: cover;
+        background: #eee;
+        border-radius: 8px;
+      }
+      .row {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        align-items: center;
+        margin: 8px 0;
+      }
+      .pdp {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 32px;
+        margin: 32px 0;
+        padding: 24px;
+        border: 1px solid #ddd;
+        border-radius: 12px;
+      }
+      .muted {
+        color: #777;
+      }
+      [tether-state='loading'] {
+        opacity: 0.5;
+      }
+      [tether-cart-drawer] {
+        position: fixed;
+        inset: 0 0 0 auto;
+        width: min(420px, 100%);
+        background: #fff;
+        border-left: 1px solid #ddd;
+        padding: 24px;
+        transform: translateX(100%);
+        transition: transform 0.3s;
+        overflow: auto;
+        z-index: 10;
+      }
+      [tether-cart-drawer].is-open {
+        transform: none;
+      }
+      .line {
+        display: grid;
+        grid-template-columns: 64px 1fr auto;
+        gap: 12px;
+        padding: 12px 0;
+        border-bottom: 1px solid #eee;
+      }
+      .line img {
+        width: 64px;
+        height: 64px;
+        object-fit: cover;
+        border-radius: 6px;
+      }
+      .badge {
+        font-size: 12px;
+        background: #e7f5e9;
+        color: #146c2e;
+        padding: 2px 6px;
+        border-radius: 4px;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <strong>Tether example store</strong>
+      <button tether-cart-open>Cart (<span tether-cart-count>0</span>)</button>
+    </header>
 
-<header>
-  <strong>Tether example store</strong>
-  <button tether-cart-open>Cart (<span tether-cart-count>0</span>)</button>
-</header>
-
-<!-- Product page: in Webflow this is the CMS template, tether-product bound to the handle field -->
-<section class="pdp" id="pdp" tether-product="">
-  <img tether-bind="variant-image" max-width="900" alt="">
-  <div>
-    <p class="muted" tether-bind="vendor"></p>
-    <h1 tether-bind="title"></h1>
-    <p>
-      <strong tether-bind="price"></strong>
-      <s class="muted" tether-bind="compare-at-price"></s>
-      <span class="badge" tether-show="has-savings">Save <span tether-bind="subscription-savings"></span></span>
-    </p>
-
-    <div tether-option-list="Size" class="row"><button></button></div>
-    <div tether-option-list="Color" class="row"><button></button></div>
-    <div tether-option-list="Material" class="row"><button></button></div>
-
-    <!-- Subscriptions: only visible when the product has selling plans -->
-    <div tether-show="subscription-available">
-      <div class="row">
-        <button tether-purchase="one-time" tether-show="one-time-available">One-time · <span tether-bind="one-time-price"></span></button>
-        <button tether-purchase="subscription">Subscribe · <span tether-bind="subscription-price"></span></button>
-      </div>
-      <div class="row" tether-show="subscription-selected" tether-plan-list>
-        <button><span tether-plan-bind="name"></span> (<span tether-plan-bind="price"></span>)</button>
-      </div>
-    </div>
-
-    <div class="row">
-      <button tether-qty-minus>−</button><input tether-qty type="number" value="1" min="1" style="width:60px">
-      <button tether-qty-plus>+</button>
-    </div>
-    <div class="row">
-      <input tether-line-attribute="Gift message" placeholder="Gift message (optional)">
-    </div>
-    <button tether-add-to-cart tether-adding-text="Adding…" tether-soldout-text="Sold out" tether-subscribe-text="Subscribe now">
-      <span tether-add-label>Add to cart</span>
-    </button>
-    <p class="muted" tether-show="low-stock">Only a few left</p>
-    <div tether-bind="description"></div>
-  </div>
-</section>
-
-<!-- Product list: in Webflow this can be a static div or a CMS collection list -->
-<section tether-products="" tether-limit="8" tether-sort="BEST_SELLING">
-  <h2>Products</h2>
-  <div class="grid" tether-list>
-    <div class="card">
-      <a tether-bind="link"><img tether-bind="featured-image" max-width="500" alt=""></a>
-      <p><strong tether-bind="title"></strong><br><span tether-bind="price"></span></p>
-      <button tether-add-to-cart tether-soldout-text="Sold out" tether-adding-text="…"><span tether-add-label>Quick add</span></button>
-    </div>
-  </div>
-  <p><button tether-load-more>Load more</button></p>
-</section>
-
-<!-- Cart drawer: outside the page container, so it survives Barba transitions -->
-<aside tether-cart-drawer aria-hidden="true">
-  <div class="row" style="justify-content:space-between"><strong>Cart</strong><button tether-cart-close>Close</button></div>
-
-  <p tether-show="cart-empty" class="muted">Your cart is empty.</p>
-
-  <div tether-cart-lines>
-    <div class="line">
-      <img tether-line="image" max-width="200" alt="">
+    <!-- Product page: in Webflow this is the CMS template, tether-product bound to the handle field -->
+    <section class="pdp" id="pdp" tether-product="">
+      <img tether-bind="variant-image" max-width="900" alt="" />
       <div>
-        <strong tether-line="title"></strong><br>
-        <span class="muted" tether-line="variant-title"></span>
-        <span class="badge" tether-line-show="subscription"><span tether-line="plan"></span></span><br>
-        <select tether-line-plan tether-one-time-label="One-time"></select>
-        <div class="muted" tether-line="attribute:Gift message"></div>
+        <p class="muted" tether-bind="vendor"></p>
+        <h1 tether-bind="title"></h1>
+        <p>
+          <strong tether-bind="price"></strong>
+          <s class="muted" tether-bind="compare-at-price"></s>
+          <span class="badge" tether-show="has-savings">Save <span tether-bind="subscription-savings"></span></span>
+        </p>
+
+        <div tether-option-list="Size" class="row"><button></button></div>
+        <div tether-option-list="Color" class="row"><button></button></div>
+        <div tether-option-list="Material" class="row"><button></button></div>
+
+        <!-- Subscriptions: only visible when the product has selling plans -->
+        <div tether-show="subscription-available">
+          <div class="row">
+            <button tether-purchase="one-time" tether-show="one-time-available">
+              One-time · <span tether-bind="one-time-price"></span>
+            </button>
+            <button tether-purchase="subscription">Subscribe · <span tether-bind="subscription-price"></span></button>
+          </div>
+          <div class="row" tether-show="subscription-selected" tether-plan-list>
+            <button><span tether-plan-bind="name"></span> (<span tether-plan-bind="price"></span>)</button>
+          </div>
+        </div>
+
         <div class="row">
-          <button tether-line-minus>−</button><span tether-line="quantity"></span><button tether-line-plus>+</button>
-          <button tether-line-remove>Remove</button>
+          <button tether-qty-minus>−</button><input tether-qty type="number" value="1" min="1" style="width: 60px" />
+          <button tether-qty-plus>+</button>
+        </div>
+        <div class="row">
+          <input tether-line-attribute="Gift message" placeholder="Gift message (optional)" />
+        </div>
+        <button
+          tether-add-to-cart
+          tether-adding-text="Adding…"
+          tether-soldout-text="Sold out"
+          tether-subscribe-text="Subscribe now"
+        >
+          <span tether-add-label>Add to cart</span>
+        </button>
+        <p class="muted" tether-show="low-stock">Only a few left</p>
+        <div tether-bind="description"></div>
+      </div>
+    </section>
+
+    <!-- Product list: in Webflow this can be a static div or a CMS collection list -->
+    <section tether-products="" tether-limit="8" tether-sort="BEST_SELLING">
+      <h2>Products</h2>
+      <div class="grid" tether-list>
+        <div class="card">
+          <a tether-bind="link"><img tether-bind="featured-image" max-width="500" alt="" /></a>
+          <p><strong tether-bind="title"></strong><br /><span tether-bind="price"></span></p>
+          <button tether-add-to-cart tether-soldout-text="Sold out" tether-adding-text="…">
+            <span tether-add-label>Quick add</span>
+          </button>
         </div>
       </div>
-      <strong tether-line="line-total"></strong>
-    </div>
-  </div>
+      <p><button tether-load-more>Load more</button></p>
+    </section>
 
-  <div tether-show="cart-filled">
-    <form tether-discount-form class="row"><input tether-discount-input placeholder="Discount code"><button>Apply</button></form>
-    <div tether-cart-discounts class="row"><span class="badge"><span tether-discount="code"></span> <a href="#" tether-discount-remove>×</a></span></div>
-    <textarea tether-cart-note placeholder="Order note" style="width:100%"></textarea>
-    <p class="row" style="justify-content:space-between"><span>Subtotal</span><strong tether-cart-subtotal></strong></p>
-    <p class="muted" tether-show="cart-has-subscription">Contains a subscription. You can manage it from your account.</p>
-    <button tether-checkout style="width:100%">Checkout</button>
-    <p><button tether-cart-clear>Clear cart</button> <a tether-account-link>My account</a></p>
-  </div>
-</aside>
+    <!-- Cart drawer: outside the page container, so it survives Barba transitions -->
+    <aside tether-cart-drawer aria-hidden="true">
+      <div class="row" style="justify-content: space-between">
+        <strong>Cart</strong><button tether-cart-close>Close</button>
+      </div>
 
-<script>
-  // Demo only: pick the product from ?product=handle, or the first product in the list.
-  document.addEventListener('tether:list-ready', (e) => {
-    const pdp = document.getElementById('pdp');
-    if (pdp.getAttribute('tether-product')) return;
-    const handle = new URLSearchParams(location.search).get('product') || e.detail.products[0]?.handle;
-    pdp.setAttribute('tether-product', handle);
-    Tether.mount(pdp);
-  }, { once: true });
-</script>
-</body>
+      <p tether-show="cart-empty" class="muted">Your cart is empty.</p>
+
+      <div tether-cart-lines>
+        <div class="line">
+          <img tether-line="image" max-width="200" alt="" />
+          <div>
+            <strong tether-line="title"></strong><br />
+            <span class="muted" tether-line="variant-title"></span>
+            <span class="badge" tether-line-show="subscription"><span tether-line="plan"></span></span><br />
+            <select tether-line-plan tether-one-time-label="One-time"></select>
+            <div class="muted" tether-line="attribute:Gift message"></div>
+            <div class="row">
+              <button tether-line-minus>−</button><span tether-line="quantity"></span
+              ><button tether-line-plus>+</button>
+              <button tether-line-remove>Remove</button>
+            </div>
+          </div>
+          <strong tether-line="line-total"></strong>
+        </div>
+      </div>
+
+      <div tether-show="cart-filled">
+        <form tether-discount-form class="row">
+          <input tether-discount-input placeholder="Discount code" /><button>Apply</button>
+        </form>
+        <div tether-cart-discounts class="row">
+          <span class="badge"><span tether-discount="code"></span> <a href="#" tether-discount-remove>×</a></span>
+        </div>
+        <textarea tether-cart-note placeholder="Order note" style="width: 100%"></textarea>
+        <p class="row" style="justify-content: space-between">
+          <span>Subtotal</span><strong tether-cart-subtotal></strong>
+        </p>
+        <p class="muted" tether-show="cart-has-subscription">
+          Contains a subscription. You can manage it from your account.
+        </p>
+        <button tether-checkout style="width: 100%">Checkout</button>
+        <p><button tether-cart-clear>Clear cart</button> <a tether-account-link>My account</a></p>
+      </div>
+    </aside>
+
+    <script>
+      // Demo only: pick the product from ?product=handle, or the first product in the list.
+      document.addEventListener(
+        'tether:list-ready',
+        (e) => {
+          const pdp = document.getElementById('pdp');
+          if (pdp.getAttribute('tether-product')) return;
+          const handle = new URLSearchParams(location.search).get('product') || e.detail.products[0]?.handle;
+          pdp.setAttribute('tether-product', handle);
+          Tether.mount(pdp);
+        },
+        { once: true },
+      );
+    </script>
+  </body>
 </html>

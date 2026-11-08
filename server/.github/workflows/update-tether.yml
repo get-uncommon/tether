@@ -1,7 +1,18 @@
 # Keeps this deployed copy of tether-sync up to date, like a jsDelivr version range.
-# Set the range in the TETHER_VERSION file: `0.3` (patches only, default), `0.3.3` (pinned) or `latest`.
+# Set the range in the TETHER_VERSION file: `X.Y` (that minor version's fixes only; a new copy starts on its own),
+# `X.Y.Z` (pinned) or `latest` (every release, including a new 0.x minor, which can break the copy).
 # Runs every Monday, or now: Actions -> Update Tether -> Run workflow. Cloudflare redeploys on the push.
 # Only the code changes; tether-sync.config.js, wrangler.jsonc and TETHER_VERSION are kept.
+#
+# The new release's code runs (its tests) only in the `update` job, whose token can read this repository and nothing
+# more. The `publish` job runs none of that code: it applies the tested change and pushes it. The change is uploaded,
+# and its sha256 recorded as a job output, before the tests run, and `publish` applies it only when the hash matches,
+# so what the tests write can't reach the commit.
+# Actions are pinned by commit, so a moved tag can't change what runs here.
+#
+# An update never replaces this file (GitHub doesn't let the workflow's token change it). A release that needs a new
+# version of it raises the revision below, and the updater then warns that it has to be copied in once, by hand.
+# Tether workflow revision: 3
 name: Update Tether
 
 on:
@@ -9,18 +20,18 @@ on:
     - cron: '23 5 * * 1'
   workflow_dispatch:
 
-permissions:
-  contents: write
-  actions: write   # to keep this schedule alive (below)
+permissions: {}
 
 concurrency:
   group: update-tether
   cancel-in-progress: false
 
 jobs:
-  update:
+  keep-alive:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 5
+    permissions:
+      actions: write
     steps:
       # GitHub switches off scheduled workflows in public repos after 60 days without activity.
       # Re-enabling the workflow through the API resets that, so updates never silently stop.
@@ -28,31 +39,81 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh api -X PUT "repos/$GITHUB_REPOSITORY/actions/workflows/update-tether.yml/enable" || echo "could not re-enable (fine for private repos)"
-      - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
+
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.up.outputs.version }}
+      patch-sha256: ${{ steps.record.outputs.sha256 }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: 22
+      # `shell: bash` runs with pipefail, so a failed update fails the job instead of passing through `tee`.
       - name: Find and apply the newest matching release
         id: up
+        shell: bash
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           node scripts/update-tether.mjs | tee update.log
           echo "version=$(grep '^updated=' update.log | tail -1 | cut -d= -f2)" >> "$GITHUB_OUTPUT"
           rm update.log
+      # Recorded and uploaded before the tests run, so nothing the tests write ends up in the commit.
+      - name: Record the change
+        id: record
+        if: steps.up.outputs.version != ''
+        shell: bash
+        run: |
+          git add -A
+          git diff --cached --binary > "$RUNNER_TEMP/update.patch"
+          echo "sha256=$(sha256sum "$RUNNER_TEMP/update.patch" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        if: steps.up.outputs.version != ''
+        with:
+          name: tether-update
+          path: ${{ runner.temp }}/update.patch
+          if-no-files-found: error
+          retention-days: 1
       - name: Test the new version before it goes live
         if: steps.up.outputs.version != ''
+        shell: bash
         run: |
           node --test test/*.test.js
           node -e "import('./src/entry.js').then(() => console.log('entry ok'))"
-      - name: Commit (Cloudflare deploys it)
-        if: steps.up.outputs.version != ''
+
+  publish:
+    needs: update
+    if: needs.update.outputs.version != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+        with:
+          name: tether-update
+          path: ${{ runner.temp }}
+      - name: Commit and push (Cloudflare deploys it)
+        shell: bash
         env:
-          VERSION: ${{ steps.up.outputs.version }}
+          VERSION: ${{ needs.update.outputs.version }}
+          PATCH_SHA256: ${{ needs.update.outputs.patch-sha256 }}
+          GH_TOKEN: ${{ github.token }}
         run: |
+          echo "$PATCH_SHA256  $RUNNER_TEMP/update.patch" | sha256sum --check --strict
+          git apply --index "$RUNNER_TEMP/update.patch"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
           git commit -m "Update Tether to v$VERSION"
-          git push
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "HEAD:${GITHUB_REF_NAME}"
           echo "### Updated to v$VERSION" >> "$GITHUB_STEP_SUMMARY"

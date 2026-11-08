@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  // One program per runtime, so each file sees only the globals of where it runs (`npm run typecheck` builds them all;
+  // editors and ESLint find a file's program through these references).
+  "files": [],
+  "references": [
+    { "path": "./.config/tsconfig/browser.json" },
+    { "path": "./.config/tsconfig/node.json" },
+    { "path": "./.config/tsconfig/worker.json" },
+    { "path": "./.config/tsconfig/worker-node.json" },
+    { "path": "./.config/tsconfig/test.json" },
+    { "path": "./.config/tsconfig/e2e.json" }
+  ]
+}

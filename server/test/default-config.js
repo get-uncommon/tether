@@ -5,20 +5,20 @@
 // Secrets never go in this file.
 export default {
   shopify: {
-    domain: '',                       // or SHOPIFY_DOMAIN, e.g. your-store.myshopify.com
+    domain: '', // or SHOPIFY_DOMAIN, e.g. your-store.myshopify.com
     apiVersion: '2026-07',
     // inventory: true,               // needed to map totalInventory (add the read_inventory scope)
     // query: 'status:active',        // limit `import` (disables --prune)
   },
   webflow: {
-    collectionId: '',                 // or WEBFLOW_COLLECTION_ID
-    perMinute: 50,                    // 60/min on Starter/Basic plans, 120 on CMS/Business
-    publish: true,                    // publish items right away (false: they go live on the next site publish)
-    skipMissingFields: true,          // mapped fields that don't exist in the collection are left out
+    collectionId: '', // or WEBFLOW_COLLECTION_ID
+    perMinute: 50, // 60/min on Starter/Basic plans, 120 on CMS/Business
+    publish: true, // publish items right away (false: they go live on the next site publish)
+    skipMissingFields: true, // mapped fields that don't exist in the collection are left out
   },
   match: {
-    idField: 'shopify-id',            // Plain text field in the collection that stores the Shopify product id
-    bySlug: true,                     // adopt existing items whose slug equals the Shopify handle
+    idField: 'shopify-id', // Plain text field in the collection that stores the Shopify product id
+    bySlug: true, // adopt existing items whose slug equals the Shopify handle
   },
   // Webflow field slug: Shopify source. Sources: any key of the normalized product
   // (title, handle, legacyId, description, descriptionHtml, vendor, productType, tags, tagsText,
@@ -46,14 +46,14 @@ export default {
   },
   // Written when the item is created, never overwritten afterwards, so editors can change them in Webflow.
   webflowOwned: ['description'],
-  onDelete: 'archive',   // product deleted in Shopify: 'archive' | 'delete' | 'unpublish'
-  inactive: 'archive',   // product set to draft/archived: 'archive' | 'unpublish' | 'keep'
+  onDelete: 'archive', // product deleted in Shopify: 'archive' | 'delete' | 'unpublish'
+  inactive: 'archive', // product set to draft/archived: 'archive' | 'unpublish' | 'keep'
   reconcile: {
-    maxChangesPerRun: 20,    // Webflow writes per run
-    maxProductsPerRun: 200,  // products checked per run (1 KV read each)
-    maxPagesPerRun: 10,      // Shopify pages per run
-    overlapMinutes: 5,       // re-read the end of the last window (Shopify's search index lags)
-    lookbackMinutes: 60,     // first reconcile without a cursor looks back this far
+    maxChangesPerRun: 20, // Webflow writes per run
+    maxProductsPerRun: 200, // products checked per run (1 KV read each)
+    maxPagesPerRun: 10, // Shopify pages per run
+    overlapMinutes: 5, // re-read the end of the last window (Shopify's search index lags)
+    lookbackMinutes: 60, // first reconcile without a cursor looks back this far
     // A Worker also stops at MAX_SUBREQUESTS (env, default 45) and continues next run.
   },
 };

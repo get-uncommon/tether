@@ -1,0 +1,21 @@
+{
+  // The consumer check (npm run test:types): check.ts uses the package the way the docs show, against the
+  // declarations generated into .test-dist/ by the test build, under a site's own strict settings.
+  "compilerOptions": {
+    "strict": true,
+    "noEmit": true,
+    "target": "es2022",
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "lib": ["es2022", "dom", "dom.iterable"],
+    "types": [],
+    "skipLibCheck": false,
+    "paths": {
+      "@occluze/tether": ["../../.test-dist/types/src/index.d.ts"],
+      "@occluze/tether/server": ["../../.test-dist/types/src/server.d.ts"],
+      "@occluze/tether/astro": ["../../.test-dist/types/src/astro.d.ts"],
+      "@occluze/tether/presets/barba": ["../../.test-dist/types/src/presets/barba.d.ts"]
+    }
+  },
+  "files": ["check.ts"]
+}

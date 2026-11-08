@@ -24,17 +24,40 @@ cron ───▶ reconcile (updated_at ≥ cursor)┘                     └�
 - The hash is stored only once the item is **published**, so a failed publish is retried.
 - Reconcile stops at the first budget it reaches: `maxChangesPerRun` Webflow writes,
   `maxProductsPerRun` products, `maxPagesPerRun` Shopify pages, or the Worker's subrequest limit.
-  It saves its exact position (page and offset) and continues there next run, so a bulk edit of
-  thousands of products spreads over several runs instead of failing. Each window overlaps the
-  previous one by `overlapMinutes` (Shopify's search index lags a little behind updates).
-- Failed products, including failed webhooks, are retried on the next runs (up to 5 times).
+  It saves the cursor of the last product it did and continues right after it next run, so a bulk
+  edit of thousands of products spreads over several runs instead of failing. Each window overlaps
+  the previous one by `overlapMinutes` (Shopify's search index lags a little behind updates).
+- Failed products, including failed webhooks, go on a retry list. The next run tries a failed
+  product again, then 10 and 30 minutes later, then every hour, and the sync gives up on it (and
+  logs `giving up on product <id>`) at its first failure once it has failed for a day and at least
+  5 times. So an outage of Webflow or Shopify that lasts hours loses no update or deletion: each is
+  applied within an hour of the end. A webhook that fails for a product already on the list starts
+  its day again, so a deletion never inherits the failures of an earlier update. A failed webhook
+  is stored under a KV key of its own, so a reconcile running at that moment can't overwrite it;
+  the next reconcile takes it into the list. These keys are bounded: a Worker instance writes no
+  new key for a product while its last one is still waiting (it reads that key to check, except
+  for a `products/delete`, which is always stored), a reconcile takes in at most 100 keys and
+  deletes each, a product's duplicates included, so a bigger backlog drains over the next runs, and
+  KV drops a key no reconcile took in after 30 days. A deleted product only reaches Webflow through
+  its webhook or this list: the reconcile's cursor finds updated products, never deleted ones. If
+  the failure can't be stored either (KV down or out of writes for the day), the Worker logs `retry
+not queued` and the item stays until you remove it, or until `tether-sync import --prune` from
+  the Node CLI.
 - Webflow slugs are unique, so two runs creating the same product at once (Shopify sends
   `products/create` and `products/update` together) can't make a duplicate: the second one gets
   a conflict, finds the first one's item and updates it.
 - Product pages are sized to stay under Shopify's 1,000-point query cost limit (25 variants and
   10 images per product by default), and shrink automatically if Shopify still refuses.
 - The client-credentials token (24h) and the Webflow item index (`match.indexTtlMinutes`, a day)
-  are cached in the store, so a run doesn't spend requests on them.
+  are cached in the store, so a run doesn't spend requests on them. Listing the index costs one
+  request per 100 items. A run that needs it stops listing when its subrequests run out, stores
+  the pages it has, and the next run continues from there; a webhook lists at most 15 pages (1,500
+  items, about 18 seconds at 50 requests a minute, inside the Worker's 30 seconds after answering)
+  and leaves its product to the next reconcile when the index needs more. A stopped listing is
+  continued for a day (or `match.indexTtlMinutes`, when longer), however short the TTL. A Worker
+  run on the free plan lists about 3,700 items, so with a TTL shorter than the listing takes, the
+  index is stale as soon as it is complete: the run that completes it uses it, and the next one
+  lists again. `/check` warns below 60 minutes.
 
 ## Setup
 
@@ -45,21 +68,21 @@ Webflow derives the slug from the field name, so naming a field "Compare at pric
 `compare-at-price`. Fields you don't create are skipped (`webflow.skipMissingFields`), so a
 collection with only Name, Slug and Shopify ID works.
 
-| Field name | Slug | Type | From Shopify |
-|---|---|---|---|
-| Name, Slug | `name`, `slug` | built in | title, handle (so `productPath: '/product'` in Tether keeps working) |
-| **Shopify ID** | `shopify-id` | Plain text | product id: **required**, how items are matched |
-| Shopify handle | `shopify-handle` | Plain text | handle (bind `tether-product` to it) |
-| Description | `description` | Rich text | description HTML, **Webflow-owned**: set once, then edited in Webflow |
-| Price | `price` | Number | lowest variant price |
-| Compare at price | `compare-at-price` | Number | only when on sale |
-| Main image | `main-image` | Image | featured image |
-| Gallery | `gallery` | Multi-image | all images |
-| Vendor | `vendor` | Plain text | |
-| Product type | `product-type` | Plain text | |
-| Tags | `tags` | Plain text | comma-separated |
-| SKU | `sku` | Plain text | first variant |
-| Available | `available` | Switch | any variant in stock |
+| Field name       | Slug               | Type        | From Shopify                                                          |
+| ---------------- | ------------------ | ----------- | --------------------------------------------------------------------- |
+| Name, Slug       | `name`, `slug`     | built in    | title, handle (so `productPath: '/product'` in Tether keeps working)  |
+| **Shopify ID**   | `shopify-id`       | Plain text  | product id: **required**, how items are matched                       |
+| Shopify handle   | `shopify-handle`   | Plain text  | handle (bind `tether-product` to it)                                  |
+| Description      | `description`      | Rich text   | description HTML, **Webflow-owned**: set once, then edited in Webflow |
+| Price            | `price`            | Number      | lowest variant price                                                  |
+| Compare at price | `compare-at-price` | Number      | only when on sale                                                     |
+| Main image       | `main-image`       | Image       | featured image                                                        |
+| Gallery          | `gallery`          | Multi-image | all images                                                            |
+| Vendor           | `vendor`           | Plain text  |                                                                       |
+| Product type     | `product-type`     | Plain text  |                                                                       |
+| Tags             | `tags`             | Plain text  | comma-separated                                                       |
+| SKU              | `sku`              | Plain text  | first variant                                                         |
+| Available        | `available`        | Switch      | any variant in stock                                                  |
 
 Bind `tether-product` on the template page to the slug (or `shopify-handle`) and Tether takes care
 of variants, live prices and the cart.
@@ -69,12 +92,12 @@ Find the collection id in the collection settings, or with
 
 ### 2. Tokens
 
-| Secret | Where | Scopes |
-|---|---|---|
-| `WEBFLOW_TOKEN` | Webflow → Site settings → Apps & integrations → API access → generate a site token | **CMS: read and write** |
-| `SHOPIFY_CLIENT_ID` + `SHOPIFY_CLIENT_SECRET` | Shopify **Dev Dashboard** → create an app, install it on your store | `read_products` (+ `read_inventory` if you map inventory) |
-| or `SHOPIFY_ADMIN_TOKEN` | an existing admin-created custom app (`shpat_…`) | same |
-| `SHOPIFY_WEBHOOK_SECRET` | defaults to `SHOPIFY_CLIENT_SECRET` (app webhooks are signed with it). For webhooks created under Settings → Notifications, use the key shown there | |
+| Secret                                        | Where                                                                                                                                               | Scopes                                                    |
+| --------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
+| `WEBFLOW_TOKEN`                               | Webflow → Site settings → Apps & integrations → API access → generate a site token                                                                  | **CMS: read and write**                                   |
+| `SHOPIFY_CLIENT_ID` + `SHOPIFY_CLIENT_SECRET` | Shopify **Dev Dashboard** → create an app, install it on your store                                                                                 | `read_products` (+ `read_inventory` if you map inventory) |
+| or `SHOPIFY_ADMIN_TOKEN`                      | an existing admin-created custom app (`shpat_…`)                                                                                                    | same                                                      |
+| `SHOPIFY_WEBHOOK_SECRET`                      | defaults to `SHOPIFY_CLIENT_SECRET` (app webhooks are signed with it). For webhooks created under Settings → Notifications, use the key shown there |                                                           |
 
 With client id + secret the sync uses Shopify's **client credentials grant**: it requests an
 Admin token (valid ~24h) and refreshes it automatically. This works for apps installed on a store
@@ -156,6 +179,8 @@ field) and prints how a sample product would be written. `--offline` skips the A
 prints the report. It never prints secret values.
 
 State (product → item id + hash, and the reconcile cursor) lives in `.tether-sync-state.json`.
+`serve` and a cron `reconcile` can share it: each write takes `.tether-sync-state.json.lock`
+first, and a lock older than 30 seconds, left by a process that died, is taken over.
 Losing it is harmless: the next run matches items by `shopify-id` again and rewrites each item once.
 
 A large first import runs at the throttle speed: 50 requests/minute ≈ 45 products/minute.
@@ -177,9 +202,10 @@ first deploy), the cron (every 10 minutes) and the entry point. The secrets the 
 are listed in [`.dev.vars.example`](../.dev.vars.example); for local `npx wrangler dev`, copy it to
 `.dev.vars`.
 
-Routes: `POST /webhooks/shopify`, `GET /check` (and `/`), `GET /health`, `POST /reconcile` (needs
-`Authorization: Bearer $SYNC_SECRET`; `?since=all` imports everything, continued by the cron). Every run counts its outgoing requests and stops in time:
-`MAX_SUBREQUESTS` (default 45, for the free plan's 50) can be raised on a paid plan. The Worker keeps its own state in KV. The first import runs from the Worker
+Routes: `POST /webhooks/shopify`, `GET /check` (and `/`), `GET /health` (`{ ok: true }`), `POST /reconcile` (needs
+`Authorization: Bearer $SYNC_SECRET`; `?since=all` imports everything, continued by the cron).
+`/check` with the same header gives the full report, with the running version; without it, only each step's title and level. Every run counts its outgoing requests and stops in time:
+`MAX_SUBREQUESTS` (default 45, for the free plan's 50) can be raised on a paid plan. The Worker keeps its own state in KV: without the `TETHER_SYNC` binding, `POST /reconcile` answers 503, the cron run fails, and `/check` (with the secret) warns, or reports an error when customer accounts are on. The first import runs from the Worker
 (`POST /reconcile?since=all`), or from the Node CLI: either way items are matched by `shopify-id`, so
 nothing is duplicated.
 
@@ -192,21 +218,39 @@ The Node CLI runs on any host with cron.
 ### 6. Shopify webhooks
 
 The Worker registers `products/create`, `products/update` and `products/delete` through the app on
-its first `POST /reconcile` (signed with the app's client secret, so no extra key). On a Node host,
+each `POST /reconcile` that finds one missing (signed with the app's client secret, so no extra key).
+Shopify deletes a subscription whose deliveries keep failing; when `/check` reports one missing, the
+same `POST /reconcile` brings it back. On a Node host,
 run `tether-sync webhooks https://your-host` once. Webhooks you create yourself under Settings →
 Notifications also work: put their signing key in `SHOPIFY_WEBHOOK_SECRET`. The endpoint answers within Shopify's 5-second limit
-and does the work afterwards. A failed webhook is picked up by the next reconcile.
+and does the work afterwards. A failed webhook is picked up by the next reconcile. Bodies over
+1 MB are refused (413), and a delivery Shopify sends again with the same `X-Shopify-Webhook-Id` is
+dropped (per Worker instance, without a KV write). A replay later only makes the sync read the
+product again: it writes only what changed. One exception: with `onDelete: 'delete'` a deleted
+product's stored state goes with its item, so a repeated `products/delete` that still finds the
+item in the cached item index tries the delete again (two Webflow requests, both answered "not
+found") and stores the index without it (one KV write and one KV delete).
 
 ## Costs on free tiers
 
 Check current pricing pages before relying on this; these were the published limits in late 2026.
 
-| Service | Free tier | What the sync uses |
-|---|---|---|
-| Cloudflare Workers | 100,000 requests/day, 10 ms CPU per run, 50 subrequests per run, 5 cron triggers per account | 1 request per webhook; a cron every 10 min = 144 runs/day. Waiting on APIs doesn't count as CPU. A run stops at 45 subrequests and resumes next time |
-| Cloudflare KV | 100,000 reads/day, 1,000 writes/day | 1 read per product checked; writes only when something changed: 1–2 per changed product, the cursor when it moves, the item index and the Shopify token about once a day. A quiet store writes ~0 |
-| Shopify Admin API | included in every plan | 1 query per webhook, 1 per ~19 products per reconcile |
-| Webflow Data API | included with a site plan; 60 requests/min (Starter/Basic), 120 (CMS/eCommerce/Business) | ~1–2 per changed product, publishes batched per 100 |
+| Service            | Free tier                                                                                                              | What the sync uses                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Cloudflare Workers | 100,000 requests/day, 10 ms CPU per run, 50 subrequests per run, 5 cron triggers per account                           | 1 request per webhook; a cron every 10 min = 144 runs/day. Waiting on APIs doesn't count as CPU. A run stops at 45 subrequests and resumes next time                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| Cloudflare KV      | 100,000 reads/day, 1,000 writes/day, 1,000 deletes/day, 1,000 lists/day; 1,000 operations per invocation on every plan | 1 read per product checked and 1 list per reconcile run (144/day); writes only when something changed: 1–2 per changed product, the cursor when it moves, 1 per failed webhook (none while the product's last one waits; checking costs a read), the retry list in a run that changes it (about 25 times a day while a product keeps failing), the item index and the Shopify token about once a day; 1 delete per failed webhook the reconcile takes in. A quiet store's sync writes ~0, but customer accounts share the same 1,000 writes: each login, token refresh and logout writes one. When the day's writes run out, logins fail until 00:00 UTC. A reconcile run uses at most 533 operations, 573 deploy-only (below) |
+| Shopify Admin API  | included in every plan                                                                                                 | 1 query per webhook, 1 per ~19 products per reconcile                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| Webflow Data API   | included with a site plan; 60 requests/min (Starter/Basic), 120 (CMS/eCommerce/Business)                               | ~1–2 per changed product, publishes batched per 100                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+
+Cloudflare fails a KV call past an invocation's 1,000th on every plan, so a reconcile run stays
+well below: with the default settings it uses at most 533 KV operations, or 573 with only a deploy
+hook. That is 18 for its cursor, window position, retry list, item index, Shopify token, deploy hook
+and webhook registration, 201 for at most 100 failed webhooks' keys (one list, then a read and a
+delete each), a read for each of the `maxProductsPerRun` products checked, and 3 (a read and two
+writes) for each product or retry the run's subrequests can take as far as Shopify or Webflow.
+Deploy-only, a changed product makes no request, so each of up to `maxChangesPerRun` changes adds
+its two writes on top. Raising `maxProductsPerRun` or `MAX_SUBREQUESTS` raises the total, and
+deploy-only so does `maxChangesPerRun`; `/check` warns when it can pass 1,000.
 
 The real limit is usually Webflow's **CMS item count** for your site plan, not the API.
 On the free plan a run handles roughly 15–20 changed products (each is an update plus its share of

@@ -1,72 +1,88 @@
-// src/presets/barba.js
-var LINE_DURATION = 0.3;
+// src/presets/barba.ts
+var LINE_DURATION_SECONDS = 0.3;
+var collapsed = () => ({
+  height: 0,
+  paddingTop: 0,
+  paddingBottom: 0,
+  borderBottomWidth: 0,
+  opacity: 0,
+  overflow: "hidden"
+});
+var ANIMATED_PROPS = "height,paddingTop,paddingBottom,borderBottomWidth,opacity,overflow";
 var reducedMotion = () => typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+var GETTER_OPTIONS = ["gsap", "lenis", "scrollTrigger"];
+function checkGetters(options) {
+  for (const name of GETTER_OPTIONS) {
+    const option = options[name];
+    if (option !== void 0 && option !== null && typeof option !== "function") {
+      throw new TypeError(`barbaPreset: ${name} must be a function that returns it, such as () => ${name}`);
+    }
+  }
+}
+function callIfPresent(target, method) {
+  if (typeof target !== "object" && typeof target !== "function" || target === null) return;
+  const fn = Reflect.get(target, method);
+  if (typeof fn === "function") fn.call(target);
+}
+var isGsap = (value) => typeof value === "object" && value !== null && typeof Reflect.get(value, "fromTo") === "function" && typeof Reflect.get(value, "to") === "function";
 function barbaPreset(options = {}) {
+  checkGetters(options);
   const {
-    gsap = () => window.gsap,
+    gsap = () => Reflect.get(window, "gsap"),
     lenis = null,
-    scrollTrigger = () => window.ScrollTrigger,
+    scrollTrigger = () => Reflect.get(window, "ScrollTrigger"),
     lockScroll = null,
     unlockScroll = null,
     onResize = null,
     onValueChange = null,
     animateLines = true,
-    lineDuration = LINE_DURATION
+    lineDuration = LINE_DURATION_SECONDS
   } = options;
-  const get = (v) => typeof v === "function" ? v() : v;
   let locked = false;
-  const canAnimate = (node) => animateLines && get(gsap) && !reducedMotion() && node.offsetHeight > 0;
+  const animator = (node) => {
+    if (!animateLines || reducedMotion() || node.offsetHeight <= 0) return null;
+    const animation = gsap();
+    return isGsap(animation) ? animation : null;
+  };
   return {
     autoMount: false,
     onLayoutChange() {
-      get(lenis)?.resize?.();
-      get(scrollTrigger)?.refresh?.();
+      callIfPresent(lenis?.(), "resize");
+      callIfPresent(scrollTrigger(), "refresh");
     },
     onCartOpen(drawers) {
-      if (!locked && typeof lockScroll === "function" && drawers[0]) {
-        lockScroll(drawers[0]);
-        locked = true;
-      }
+      const drawer = drawers[0];
+      if (locked || !lockScroll || !drawer) return;
+      lockScroll(drawer);
+      locked = true;
     },
     onCartClose() {
-      if (locked && typeof unlockScroll === "function") unlockScroll();
+      if (locked && unlockScroll) unlockScroll();
       locked = false;
     },
     onLineEnter(node) {
-      const g = get(gsap);
-      if (!canAnimate(node)) return;
-      const st = getComputedStyle(node);
-      g.fromTo(node, {
-        height: 0,
-        paddingTop: 0,
-        paddingBottom: 0,
-        borderBottomWidth: 0,
-        opacity: 0,
-        overflow: "hidden"
-      }, {
+      const animation = animator(node);
+      if (!animation) return;
+      const style = getComputedStyle(node);
+      animation.fromTo(node, collapsed(), {
         height: node.offsetHeight,
-        paddingTop: st.paddingTop,
-        paddingBottom: st.paddingBottom,
-        borderBottomWidth: st.borderBottomWidth,
+        paddingTop: style.paddingTop,
+        paddingBottom: style.paddingBottom,
+        borderBottomWidth: style.borderBottomWidth,
         opacity: 1,
         duration: lineDuration,
-        clearProps: "height,paddingTop,paddingBottom,borderBottomWidth,opacity,overflow",
+        clearProps: ANIMATED_PROPS,
         onComplete: () => onResize?.()
       });
     },
     onLineLeave(node, done) {
-      const g = get(gsap);
-      if (!canAnimate(node)) {
+      const animation = animator(node);
+      if (!animation) {
         done();
         return;
       }
-      g.to(node, {
-        height: 0,
-        paddingTop: 0,
-        paddingBottom: 0,
-        borderBottomWidth: 0,
-        opacity: 0,
-        overflow: "hidden",
+      animation.to(node, {
+        ...collapsed(),
         duration: lineDuration,
         onComplete: () => {
           done();
@@ -74,7 +90,7 @@ function barbaPreset(options = {}) {
         }
       });
     },
-    onValueChange: typeof onValueChange === "function" ? onValueChange : null
+    onValueChange
   };
 }
 var barba_default = barbaPreset;

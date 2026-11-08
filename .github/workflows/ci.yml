@@ -1,0 +1,90 @@
+# The gate (`npm run check`: Prettier, ESLint, tsc, Knip, dependency-cruiser, the tests) on every pull request and
+# every push to main or a `release/X.Y` branch, on the oldest Node the package supports (`engines`) and the current
+# one. lefthook runs it locally too, but a hook can be skipped and a pull request from a fork never runs it.
+# `npm run release` needs this workflow to have passed on the commit it releases, and runs only a sanity check itself;
+# `release-rehearsal.yml` runs the gate at the next versions on pull requests.
+#
+# The `workflows` job lints Tether's own workflows and the one the sync Worker ships with `scripts/lint-workflows.ts`,
+# which lefthook also runs before each push: actionlint, shellcheck and zizmor at the exact versions in
+# `.config/workflow-linters.json`, each download checked against its sha256 there. It installs no dependency.
+#
+# The `dist` job fails a pull request with a commit that changes dist/, which only a release commit (`Tether X.Y.Z`,
+# made by `npm run release`, changing only the release's files) does: dist/ is what the last release built, and a
+# release rebuilds it. `scripts/dist-commits.ts` has the rule, merges included.
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main, 'release/**']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['22.18', '24']
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: ${{ matrix.node }}
+          # No dependency cache: CI also runs on main and release/** pushes, whose cache a pull request could poison.
+          package-manager-cache: false
+      # test/upgrade-from-released.test.js installs this tree into copies made from release tags, and fails when a
+      # release's updater is not among them: every release tag, so a new one can't be left out here.
+      - run: git fetch --depth=1 --no-tags origin '+refs/tags/v*:refs/tags/v*'
+      - run: npm ci
+      # Any advisory against a dependency, dev-only included, fails the run: fix it with an update or an override.
+      - run: npm audit --audit-level=low
+      - run: npm run check
+
+  workflows:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: '22.18'
+          package-manager-cache: false
+      # The token lets zizmor check that each pinned commit belongs to its action's repository.
+      - name: actionlint, shellcheck and zizmor
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node --experimental-strip-types scripts/lint-workflows.ts
+
+  dist:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # The whole history without file contents: the guard reads commits and trees, and package.json only of a commit
+      # that changes dist/, which git then fetches.
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          filter: blob:none
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: '22.18'
+          package-manager-cache: false
+      - name: No commit but a release changes dist/
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: node --experimental-strip-types scripts/dist-guard.ts "$BASE_SHA" "$HEAD_SHA"

@@ -32,10 +32,10 @@ One static Webflow page can show any Shopify product, so products don't need a C
 window.TETHER_CONFIG = { …, productPath: '/product?handle={handle}' };  // every tether-bind="link" points here
 ```
 
-| Value | Reads |
-|---|---|
-| `url:handle` | `?handle=` (any parameter works: `url:p` reads `?p=`) |
-| `url:path` | the last path segment: `/shop/coffee-box` → `coffee-box` (needs a host that serves one page for every path, e.g. a Cloudflare rewrite; Webflow alone 404s) |
+| Value        | Reads                                                                                                                                                      |
+| ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `url:handle` | `?handle=` (any parameter works: `url:p` reads `?p=`)                                                                                                      |
+| `url:path`   | the last path segment: `/shop/coffee-box` → `coffee-box` (needs a host that serves one page for every path, e.g. a Cloudflare rewrite; Webflow alone 404s) |
 
 `productPath` templates: `{handle}` and `{id}` (numeric product id), e.g. `/product?handle={handle}`.
 `tether-page-title` sets `document.title` (`{title}`, `{vendor}`, `{type}`).
@@ -50,13 +50,13 @@ Every product scope and product list gets `tether-state="loading | ready | error
 it also gets `tether-error="not-found"` or an error code (`NETWORK`, `HTTP_401`, …).
 Inside a scope, `tether-show` follows the state:
 
-| `tether-show` | Visible when |
-|---|---|
-| `loading` | waiting for Shopify |
-| `ready` | the product/list rendered |
-| `not-found` | the handle doesn't exist, isn't published to the Headless channel, or the URL has no handle |
-| `error` | Shopify couldn't be reached or refused the request (bad token, outage, network) |
-| `cart-error` | (outside products) the last cart action failed; hidden again after the next one succeeds |
+| `tether-show` | Visible when                                                                                |
+| ------------- | ------------------------------------------------------------------------------------------- |
+| `loading`     | waiting for Shopify                                                                         |
+| `ready`       | the product/list rendered                                                                   |
+| `not-found`   | the handle doesn't exist, isn't published to the Headless channel, or the URL has no handle |
+| `error`       | Shopify couldn't be reached or refused the request (bad token, outage, network)             |
+| `cart-error`  | (outside products) the last cart action failed; hidden again after the next one succeeds    |
 
 Give the `error` / `not-found` blocks a class with `display: none` in Webflow, so they stay hidden
 if JavaScript doesn't run at all. Tether shows them when needed (as `block`, or the value of
@@ -150,7 +150,8 @@ Markets have to be set up in Shopify (Settings → Markets) for prices and curre
 
 Set `autoMount: false`, call `Tether.init()` once, and `Tether.mount(container)` for every new
 page container. Keep the cart drawer outside the container. Call `Tether.unmount()` when leaving
-a page (it closes the drawer).
+a page (it closes the drawer); the container mounted with it, before or after, is a new page
+for [analytics](analytics.md).
 
 ```js
 import Tether from "@occluze/tether";
@@ -166,14 +167,19 @@ Tether.init({
   }),
 });
 
+barba.hooks.beforeLeave(() => Tether.unmount());
 barba.hooks.beforeEnter(({ next }) => Tether.mount(next.container));
-barba.hooks.afterLeave(() => Tether.unmount());
 // Barba's first load only runs once(): mount there too.
+
+// Swup (#swup is its default container):
+swup.hooks.on('visit:start', () => Tether.unmount());
+swup.hooks.on('content:replace', () => Tether.mount(document.querySelector('#swup')));
 ```
 
 With Barba, mount in `beforeEnter` (and in `once()` for the first load) rather than
-`afterEnter`, so products load during the transition. With `sync: true` the old and new
-containers exist at the same time, so always pass the container, never `document`.
+`afterEnter`, so products load during the transition, and unmount in `beforeLeave`, which runs
+before `beforeEnter` with or without `sync: true`. With `sync: true` the old and new containers
+exist at the same time, so always pass the container, never `document`.
 
 Markup written for an older `wfs-*` prefix keeps working with `prefix: 'wfs'`.
 
@@ -186,25 +192,50 @@ Markup written for an older `wfs-*` prefix keeps working with `prefix: 'wfs'`.
 
 ### Product scope
 
-| Attribute | Value | |
-|---|---|---|
-| `tether-product` | handle, numeric id, gid, product URL, `url:handle` or `url:path` | Root of a product. Bind to the CMS handle field, or read it from the URL |
-| `tether-page-title` | e.g. `{title} \| Shop` | Sets the page title when the product loads |
-| `tether-variant` | variant id | Preselect a variant (`?variant=` in the URL also works) |
-| `tether-quantity` | number | Start quantity (allows 0, for build-a-box) |
-| `tether-bind` | see below | Fill text / image / link |
-| `tether-option-list` | option name, e.g. `Size` | Repeater: first child is the button template. An empty template gets the value as text; or put `tether-bind="option-value"` (and `tether-bind="swatch"`) inside it. `tether-hide-single` hides the list when there's only one value |
-| `select[tether-option]` | option name | Native select for an option |
-| `select[tether-variant-select]` | | One select with all variants |
-| `tether-option-selected` | option name | Shows the selected value |
-| `tether-qty`, `tether-qty-plus`, `tether-qty-minus` | | Quantity input and buttons |
-| `tether-line-attribute` | key | Input/checkbox whose value goes on the cart line (engraving, gift note) |
-| `tether-line-attributes` | JSON | Fixed line attributes, e.g. `{"_source":"pdp"}` |
-| `tether-add-to-cart` | | Button. Optional `tether-adding-text` (while adding), `tether-soldout-text` (sold-out variant), `tether-subscribe-text` (a plan is selected), inner `[tether-add-label]` for the text. In React/JSX write value-less attributes as `tether-add-to-cart=""` |
-| `tether-variant-url` | | On a scope: `?variant=` follows the choice (shareable links). Global: `variantUrl: true` for the page's main product |
-| `tether-show` | condition | Shows/hides, see conditions |
+| Attribute                                           | Value                                                            |                                                                                                                                                                                                                                                            |
+| --------------------------------------------------- | ---------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `tether-product`                                    | handle, numeric id, gid, product URL, `url:handle` or `url:path` | Root of a product. Bind to the CMS handle field, or read it from the URL                                                                                                                                                                                   |
+| `tether-page-title`                                 | e.g. `{title} \| Shop`                                           | Sets the page title when the product loads                                                                                                                                                                                                                 |
+| `tether-variant`                                    | variant id                                                       | Preselect a variant (`?variant=` in the URL also works)                                                                                                                                                                                                    |
+| `tether-quantity`                                   | number                                                           | Start quantity (allows 0, for build-a-box)                                                                                                                                                                                                                 |
+| `tether-bind`                                       | see below                                                        | Fill text / image / link                                                                                                                                                                                                                                   |
+| `tether-option-list`                                | option name, e.g. `Size`                                         | Repeater: first child is the button template. An empty template gets the value as text; or put `tether-bind="option-value"` (and `tether-bind="swatch"`) inside it. `tether-hide-single` hides the list when there's only one value                        |
+| `select[tether-option]`                             | option name                                                      | Native select for an option                                                                                                                                                                                                                                |
+| `select[tether-variant-select]`                     |                                                                  | One select with all variants                                                                                                                                                                                                                               |
+| `tether-option-selected`                            | option name                                                      | Shows the selected value                                                                                                                                                                                                                                   |
+| `tether-qty`, `tether-qty-plus`, `tether-qty-minus` |                                                                  | Quantity input and buttons                                                                                                                                                                                                                                 |
+| `tether-line-attribute`                             | key                                                              | Input/checkbox whose value goes on the cart line (engraving, gift note)                                                                                                                                                                                    |
+| `tether-line-attributes`                            | JSON                                                             | Fixed line attributes, e.g. `{"_source":"pdp"}`                                                                                                                                                                                                            |
+| `tether-add-to-cart`                                |                                                                  | Button. Optional `tether-adding-text` (while adding), `tether-soldout-text` (sold-out variant), `tether-subscribe-text` (a plan is selected), inner `[tether-add-label]` for the text. In React/JSX write value-less attributes as `tether-add-to-cart=""` |
+| `tether-variant-url`                                |                                                                  | On a scope: `?variant=` follows the choice (shareable links). Global: `variantUrl: true` for the page's main product                                                                                                                                       |
+| `tether-show`                                       | condition                                                        | Shows/hides, see conditions                                                                                                                                                                                                                                |
 
-`tether-bind` values: `title`, `description` (HTML), `description-text`, `vendor`, `type`,
+`tether-bind` values: `title`, `description` (the HTML written in Shopify, through an allow-list:
+text formatting, lists, tables, images, links, inline `style` and video embeds stay; scripts, event
+handlers, `javascript:` links, `<style>` blocks, form fields, `id`s and `class`es (so a description
+can't borrow your overlay or modal classes) are removed; other elements are unwrapped, so their text
+stays; inline styles lose `position`, `top`/`right`/`bottom`/`left`/`inset`, `z-index`, transforms
+(`transform`, `translate`, `rotate`, `scale`), `offset-*`, `-webkit-box-reflect`, negative
+margins, values in viewport units (`100vw`) and any value with `url(`, so a description can't be
+laid over the page or load from elsewhere. Negative `letter-spacing` and `word-spacing` stay down to
+`-4px` or `-0.25em` (tight tracking such as `-0.02em` looks as written), and a negative
+`text-indent` down to `-40px`; a value beyond that, in another unit, or with `var()`/`calc()` is
+removed.
+Outlines, `box-shadow`, `text-shadow`, `filter`, border-image and mask-border outsets, text
+decoration (thickness and underline offset included) and `-webkit-text-stroke` paint beyond the
+element, so they are kept only while every number in them, apart from colours and colour filters (`brightness()`, `opacity()`,
+`hue-rotate()` and the like), is a `px` length of
+at most 40px or zero: one in `em`, `%`, any other unit or none (`border-image-outset: 2`), or with
+`var()`/`calc()`, removes the declaration (`box-shadow: 0 0 1em #0003` goes; write
+`0 0 16px #0003`). Content wider than the element still overflows beside it, as in any HTML (Tether doesn't
+clip it, which would cut off wide tables and embeds); add `contain: paint` to the element in your
+own CSS if you want it clipped;
+iframes are kept only from YouTube (`www.youtube.com`, `www.youtube-nocookie.com`), Vimeo
+(`player.vimeo.com`), Loom (`www.loom.com`), Wistia (`fast.wistia.net`) and the origins in the
+`embedOrigins` option, never from the site's own origin, run sandboxed, and may only ask for
+`autoplay`, `encrypted-media`, `picture-in-picture`, `fullscreen`, `clipboard-write`,
+`accelerometer`, `gyroscope` and `web-share`; links that open a new tab get
+`rel="noopener noreferrer"`), `description-text`, `vendor`, `type`,
 `handle`, `published-at`, `price`, `total-price`, `compare-at-price`, `unit-price`, `min-price`,
 `max-price`, `discount-percentage`, `discount-amount`, `variant-title`, `variant-id`, `sku`,
 `barcode`, `stock`, `quantity`, `featured-image`, `variant-image`, `image:N` (nth image), `images` (repeater), `tags`
@@ -214,10 +245,14 @@ Markup written for an older `wfs-*` prefix keeps working with `prefix: 'wfs'`.
 Images accept `max-width`, `max-height`, `crop` for Shopify CDN resizing (or, as valid HTML,
 `tether-max-width` / `data-max-width`, and the same for the others).
 
-Classes Tether sets: option buttons get `is-selected` (+ `aria-pressed`) and `is-unavailable` when no
-available variant has that value with the other choices. Clicking an unavailable value picks the
-closest variant that has it and keeps the other choices where possible; a value no variant has is
-ignored. Add-to-cart gets `is-disabled` (+ `aria-disabled`, `disabled`) when the variant is sold out.
+Classes Tether sets: option buttons get `is-selected` (+ `aria-pressed`; a link or `div` option
+also gets `role="button"` and, without its own `tabindex`, `tabindex="0"`, and Enter and Space press it;
+a radio or checkbox is `checked` instead) and `is-unavailable` when no available variant has that value with the other
+choices. Clicking an unavailable value picks the closest variant that has it and keeps the other choices where possible;
+a value no variant has is ignored. Because it still works, an unavailable value is not `aria-disabled`: screen readers
+hear "Unavailable" as its description, through `aria-describedby="tether-unavailable"` (added to its own ids) on a
+`hidden` note Tether adds to the page, so nothing changes on screen. To say it in your store's language, put your own
+element with `id="tether-unavailable"` on the page, for example `<span id="tether-unavailable" hidden>Ausverkauft</span>`. Add-to-cart gets `is-disabled` (+ `aria-disabled`, `disabled`) when the variant is sold out.
 The variant first selected is the one in `?variant=` / `tether-variant`, else the first available one.
 Cards: `price` is that variant's price; `min-price` shows "from" prices.
 
@@ -226,13 +261,13 @@ Cards: `price` is that variant's price; `min-price` shows "from" prices.
 Create a selling plan in your subscription app (Shopify Subscriptions, Recharge, …) and add the
 product to it. Tether reads the plans via the Storefront API.
 
-| Attribute | |
-|---|---|
-| `tether-purchase="one-time"` / `"subscription"` | Toggle buttons (or radios). `select[tether-purchase]` also works |
+| Attribute                                                               |                                                                                                                         |
+| ----------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `tether-purchase="one-time"` / `"subscription"`                         | Toggle buttons (or radios). `select[tether-purchase]` also works                                                        |
 | `tether-plan-list` (value: group name, or empty / `all` for every plan) | Repeater of plans. Inside: `tether-plan-bind="name \| description \| price \| savings \| savings-amount \| adjustment"` |
-| `select[tether-plan]` | Select with "One-time purchase" + plans. `tether-one-time-label` sets the label |
-| `tether-default-purchase="subscription"` | On the product root. Global: `defaultPurchase` |
-| `tether-default-plan="Every month"` | Plan id, name or option value. `?selling_plan=` in the URL also works |
+| `select[tether-plan]`                                                   | Select with "One-time purchase" + plans. `tether-one-time-label` sets the label                                         |
+| `tether-default-purchase="subscription"`                                | On the product root. Global: `defaultPurchase`                                                                          |
+| `tether-default-plan="Every month"`                                     | Plan id, name or option value. `?selling_plan=` in the URL also works                                                   |
 
 Binds: `price` follows the selected mode. Also `one-time-price`, `subscription-price`,
 `subscription-savings` (`10%`, `10 %` in German/French), `subscription-savings-amount`,
@@ -245,8 +280,9 @@ Products that can only be bought on a subscription (`requiresSellingPlan`): the 
 refused by Shopify.
 
 The product root gets class `is-subscription` and `tether-purchase-mode`. Selected buttons get
-`is-selected` + `aria-pressed`. Plans the current variant can't use get `is-unavailable`, and
-Tether switches to a plan the variant does have.
+`is-selected` + `aria-pressed`, as options do. Plans the current variant can't use get
+`is-unavailable` (+ `aria-disabled`: choosing one changes nothing), and Tether switches to a plan the
+variant does have.
 
 ### Conditions (`tether-show`)
 
@@ -258,7 +294,8 @@ needs the inventory permission), `plenty-in-stock` (in stock, not low), `on-sale
 
 Cart (outside product scopes): `cart-empty`, `cart-filled`, `cart-has-subscription`,
 `cart-no-subscription`, `cart-has-discount`, `cart-error`, `cart-warning` (Shopify changed the
-last request, e.g. less stock than asked; the message goes in `[tether-cart-warning]`).
+last request, e.g. less stock than asked; the message goes in `[tether-cart-warning]`, which gets
+`role="status"` unless it has a role of its own, so screen readers announce it).
 
 State (products and lists): `loading`, `ready`, `error`, `not-found` (see above).
 
@@ -281,13 +318,39 @@ loses to it.
 </div>
 ```
 
+`tether-limit` is how many products the list shows, 1 to 250 (`collectionFirst` without it).
 `tether-products="tag:coffee"` uses Shopify search syntax instead of a collection.
 `tether-products="url:q"` searches for the page's `?q=`: a search results page on a static site.
+Without a `?q=`, or with an empty one, it lists all products; with `tether-empty-query="none"` (or the
+`emptyQuery: 'none'` option) it lists none and asks Shopify nothing, so `tether-show="list-empty"`
+shows, until a page with a search. `tether-empty-query="all"` keeps all products where the option is
+`'none'`; another value warns in the console and uses the option.
 `tether-recommendations="<handle>"` lists related products (`url:handle` on a dynamic product page;
 empty inside a `tether-product`: that product). `tether-products=""` lists all products. Search
 syntax caveat: Shopify matches words loosely, so `handle:a OR handle:b` can return other products, and
-search only covers the store's default language. `tether-sort` takes the Shopify
-sort keys (`BEST_SELLING`, `PRICE`, `CREATED`, `TITLE`, …), with `tether-reverse="true"`.
+search only covers the store's default language. `tether-sort` takes Shopify's sort keys, with
+`tether-reverse="true"`: a collection takes `BEST_SELLING`, `COLLECTION_DEFAULT`, `CREATED`, `ID`,
+`MANUAL`, `PRICE`, `RELEVANCE` and `TITLE`; a `tether-products` search takes `BEST_SELLING`,
+`CREATED_AT` (or `CREATED`), `ID`, `PRICE`, `PRODUCT_TYPE`, `RELEVANCE`, `TITLE`, `UPDATED_AT` and
+`VENDOR`. Another key warns in the console and leaves Shopify's default order.
+Lists, and `Tether.getProducts()` and `Tether.getRecommendations()`, are an optional part (3 KB) that
+loads with a page's first list. A list shows its loading state at once, but its first query waits
+for that file, one more request on the way to the first cards. On a script-tag page where the list
+is the main content, such as a collection page, preload it from the exact release the core loads its
+parts from, with the file's [`integrity`](https://www.srihash.org/) hash:
+
+```html
+<link
+  rel="preload"
+  as="script"
+  href="https://cdn.jsdelivr.net/gh/ravi-klaassens/tether@vX.Y.Z/dist/tether.lists.min.js"
+  integrity="sha384-…"
+  crossorigin="anonymous"
+/>
+```
+
+A core on `@X.Y` loads its parts from its own `@vX.Y.Z`, so such a preload names the release the
+core is on, and is updated with it: a preload of another release is downloaded for nothing.
 
 Using Webflow CMS lists instead? Put `tether-product` on each CMS item, bound to the handle.
 
@@ -305,11 +368,11 @@ Using Webflow CMS lists instead? Put `tether-product` on each CMS item, bound to
 </form>
 ```
 
-Shopify's predictive search, in its own optional part (2 KB) that loads only on pages with
+Shopify's predictive search, in its own optional part (3 KB) that loads only on pages with
 `tether-search`. Each list's first child is the template; lists without results are hidden. The
 root gets `is-open` and `tether-search-state` (`loading`, `ready`, `empty`, `error`); the input is
-a combobox (arrow keys, Enter, Escape) for screen readers. `tether-search-limit` (default 6),
-`tether-search-min` (characters, default 2). Event: `tether:search`.
+a combobox (arrow keys, Enter, Escape) for screen readers. `tether-search-limit` (results of each kind,
+1 to 10, default 6), `tether-search-min` (characters, at least 1, default 2). Event: `tether:search`.
 
 ### Bundles / build-a-box
 
@@ -329,24 +392,29 @@ products.)
 
 Place these anywhere, typically in a drawer outside the Barba container.
 
-| Attribute | |
-|---|---|
-| `tether-cart-drawer` | Gets `is-open` (`cartDrawerOpenClass`), dialog semantics, focus handling; closed it's `aria-hidden` and `inert`. Value `manual` = never auto-opened. `tether-cart-label` sets its label (default "Cart") |
-| `tether-cart-open` (toggles), `tether-cart-close` | Esc also closes |
-| `tether-cart-count`, `tether-cart-subtotal`, `tether-cart-total`, `tether-cart-checkout-charge` | |
-| `tether-cart-lines` | Keyed repeater; the first child is the line template |
-| `tether-line` | `warning` (Shopify's note on this line), `title`, `variant-title`, `options`, `vendor`, `sku`, `price`, `compare-at-price`, `line-total`, `line-subtotal`, `quantity` (text or input), `image`, `url`, `plan`, `plan-description`, `components`, `attribute:<key>` |
-| `tether-line-plus`, `tether-line-minus`, `tether-line-remove` | Quick clicks add up; the new quantity shows at once and the line gets `is-busy` / `aria-busy` until Shopify answers |
-| `select[tether-line-plan]` | Change frequency or switch to one-time, inside the cart |
-| `tether-line-show` | `subscription`, `one-time`, `on-sale`, `has-components`, `warning`. Lines with a warning get `is-warning` |
-| `tether-discount-form` + `tether-discount-input` | A `<form>` with the input and a submit button. A bad code: `is-invalid` on the form, `aria-invalid` on the input, the code isn't kept; show your message with CSS (`.is-invalid .msg`) or on `tether:discount-invalid` |
-| `tether-cart-discounts` | Repeater with `tether-discount="code"` and `tether-discount-remove` |
-| `textarea[tether-cart-note]` | Order note |
-| `tether-checkout` | Goes to Shopify checkout (`checkoutTarget: '_blank'` for a new tab) |
-| `tether-cart-clear` | |
-| `tether-account-link` | Link to Shopify customer accounts (orders + subscription portal) |
-| `select[tether-country-select]` | Country selector (Shopify Markets). `tether-country-label="{name} ({currency})"` |
-| `tether-country-bind` | `name`, `code`, `currency`, `symbol` of the current country |
+| Attribute                                                                                       |                                                                                                                                                                                                                                                                    |
+| ----------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `tether-cart-drawer`                                                                            | Gets `is-open` (`cartDrawerOpenClass`), dialog semantics, focus handling; closed it's `aria-hidden` and `inert`. Value `manual`: the site opens it (below). `tether-cart-label` sets its label (default "Cart")                                                    |
+| `tether-cart-open` (toggles), `tether-cart-close`                                               | Esc also closes                                                                                                                                                                                                                                                    |
+| `tether-cart-count`, `tether-cart-subtotal`, `tether-cart-total`, `tether-cart-checkout-charge` |                                                                                                                                                                                                                                                                    |
+| `tether-cart-lines`                                                                             | Keyed repeater; the first child is the line template                                                                                                                                                                                                               |
+| `tether-line`                                                                                   | `warning` (Shopify's note on this line), `title`, `variant-title`, `options`, `vendor`, `sku`, `price`, `compare-at-price`, `line-total`, `line-subtotal`, `quantity` (text or input), `image`, `url`, `plan`, `plan-description`, `components`, `attribute:<key>` |
+| `tether-line-plus`, `tether-line-minus`, `tether-line-remove`                                   | Quick clicks add up; the new quantity shows at once and the line gets `is-busy` / `aria-busy` until Shopify answers                                                                                                                                                |
+| `select[tether-line-plan]`                                                                      | Change frequency or switch to one-time, inside the cart                                                                                                                                                                                                            |
+| `tether-line-show`                                                                              | `subscription`, `one-time`, `on-sale`, `has-components`, `warning`. Lines with a warning get `is-warning`                                                                                                                                                          |
+| `tether-discount-form` + `tether-discount-input`                                                | A `<form>` with the input and a submit button. A bad code: `is-invalid` on the form, `aria-invalid` on the input, the code isn't kept; show your message with CSS (`.is-invalid .msg`) or on `tether:discount-invalid`                                             |
+| `tether-cart-discounts`                                                                         | Repeater with `tether-discount="code"` and `tether-discount-remove`                                                                                                                                                                                                |
+| `textarea[tether-cart-note]`                                                                    | Order note                                                                                                                                                                                                                                                         |
+| `tether-checkout`                                                                               | Goes to Shopify checkout (`checkoutTarget: '_blank'` for a new tab)                                                                                                                                                                                                |
+| `tether-cart-clear`                                                                             |                                                                                                                                                                                                                                                                    |
+| `tether-account-link`                                                                           | Links to Shopify's own account pages: the account, or `="subscriptions"` (`account.subscriptionsUrl`) and `="payment"` (`account.paymentUrl`) for what stays with Shopify ([accounts](accounts.md))                                                                |
+| `select[tether-country-select]`                                                                 | Country selector (Shopify Markets). `tether-country-label="{name} ({currency})"`                                                                                                                                                                                   |
+| `tether-country-bind`                                                                           | `name`, `code`, `currency`, `symbol` of the current country                                                                                                                                                                                                        |
+
+A `tether-cart-drawer="manual"` drawer is opened by the site: its own interaction adds the open
+class, and Tether follows the class (ARIA, `inert`, focus, `tether:cart-toggled`).
+`Tether.cart.open()`, `tether-cart-open` and an add to cart leave it closed; Esc,
+`tether-cart-close` and `Tether.cart.close()` close it by removing the class.
 
 ---
 
@@ -372,49 +440,193 @@ Tether.cart.updateLine(lineId, { sellingPlanId: null });  // to one-time
 Tether.cart.changeQuantity(lineId, +1);           // your own +/- buttons: quick clicks add up
 Tether.cart.removeLine(lineId); Tether.cart.clear();
 Tether.cart.setNote('…'); Tether.cart.setAttributes({ source: 'quiz' });
-await Tether.cart.applyDiscount('WELCOME10');    // rejects with code INVALID_DISCOUNT (and drops it)
+await Tether.cart.applyDiscount('WELCOME10');    // rejects with code INVALID_DISCOUNT (and drops it); a blank code rejects unsent
 Tether.cart.removeDiscount('WELCOME10'); Tether.cart.setDiscountCodes(['A', 'B']);
 Tether.cart.setBuyerIdentity({ countryCode: 'DE' });
-Tether.cart.warnings;                             // [{ code, message, target }] from the last change
-Tether.cart.open(); Tether.cart.checkout();      // open/close also work without a drawer (state for subscribe)
+Tether.cart.warnings;                             // [{ code, message, target }] from the last change (a copy)
+Tether.cart.open(); Tether.cart.checkout();      // open/close also work without a drawer; checkout() answers the URL
 Tether.cart.subscribe((cart, { count, open, loaded, warnings }) => {});  // your own cart UI
+Tether.cart.setCheckoutResolver(async () => url);  // a logged-in checkout URL (the account part sets it); null clears
+await Tether.cart.init();                         // load the saved cart again, after the changes already queued
 
 const p = await Tether.getProduct('coffee-box');  // batched + cached
 const { products, pageInfo } = await Tether.getProducts({ collection: 'coffee', first: 12 });
-Tether.getScope(el).selectPlan('Every month');
+const scope = Tether.getScope(el);
+scope.selectPlan('Every month'); scope.setPurchase('one-time');
+scope.purchase;  // { kind: 'subscription', planId } or { kind: 'one-time', offeredPlanId }
+scope.selected; scope.variant; scope.quantity;  // read-only, like every field: the methods change them
 
-Tether.query(`query { shop { name } }`);          // anything else in the Storefront API
+Tether.query(`query { shop { name } }`);          // anything else in the Storefront API: `data`, as an object to check
 Tether.plans.planSavings(variant, planId);        // selling plan helpers
 
 Tether.on('cart-updated', ({ cart }) => {});
 await Tether.diagnose();                          // what's wrong on this page (see Troubleshooting)
 await Tether.setCountry('DE');                    // switch market (see Markets)
+Tether.config.locale;                             // the live config, read-only: Tether.init(options) changes it
+Tether.cart.forgetSaved();                       // forget this device's cart: the page shows an empty one
 ```
 
 Events (on `document`, prefixed `tether:`): `ready`, `product-ready`, `variant-changed`,
 `product-added`, `added`, `group-added`, `cart-updated`, `cart-toggled`, `checkout`,
-`list-ready`, `discount-applied`, `discount-invalid`, `layout-changed`, `product-not-found`,
-`product-updated`, `country-changed`, `cart-error`, `cart-warning`, `error`.
+`list-ready`, `list-rendered`, `discount-applied`, `discount-invalid`, `layout-changed`, `product-not-found`,
+`product-updated`, `country-changed`, `cart-error`, `cart-warning`, `search`, `error`, and with
+[accounts](accounts.md#events) `account-login`, `account-logout`, `account-error`, `account-updated`.
+`Tether.on(name, fn)` takes only these names, and calls `fn` only for the events Tether dispatched:
+another script's `tether:cart-updated`, whatever its detail, doesn't reach it. A plain
+`document.addEventListener('tether:…')` hears every event of that name, so check its detail yourself.
+
+`cart-updated` carries `{ cart, reason }`, and `reason` (the `CartUpdateReason` type) is one of:
+
+| `reason`                                           | When                                                                                                                             |
+| -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `load`                                             | the saved cart loaded, failed to load, was loaded again after an unclear failure, or was forgotten (`Tether.cart.forgetSaved()`) |
+| `add`, `update`, `remove`                          | Shopify answered an add, a line change or a removal                                                                              |
+| `note`, `attributes`, `discount`, `buyer-identity` | Shopify answered `setNote`, `setAttributes`, a discount change or `setBuyerIdentity`                                             |
+| `pending`                                          | a quick `+`/`-` click shows its quantity before Shopify has it                                                                   |
+| `settled`                                          | the last request of those clicks is done                                                                                         |
+
+A cart UI that redraws on every `cart-updated` can skip `pending` and `settled` when it only cares
+about what Shopify has.
 
 ## Config
 
-See [`src/config.js`](../src/config.js) for every option with comments. The ones you'll use most:
-`domain`, `token`, `country`, `language`, `locale`, `markets`, `productPath` (supports `{handle}`),
-`metafields`, `defaultPurchase`, `checkoutTarget`, `autoMount`, `observe` (auto-mount nodes added
-later, e.g. Finsweet load-more; off by default, or call `Tether.mount(el)` yourself: mounting twice
-does nothing), `lowStock`, `variantUrl`, `warningText` (your text for Shopify's cart warnings, e.g.
-translated by `code`), `prefix`, and the hooks `onLayoutChange`, `onCartOpen`,
-`onCartClose`, `onLineEnter`, `onLineLeave`, `onValueChange`, `onError`, `cartFocus` (keyboard focus
-in the cart drawer, on by default) and `partsUrl` (folder of the optional parts when self-hosting).
+Every `window.TETHER_CONFIG` key, which `Tether.init(options)` takes too, with its default. The
+server helpers (`createStorefront()`, and `shop.config.js` with [Astro](astro.md)) read the same keys.
 
-**Optional parts.** `Tether.diagnose()` and markets (`markets.detect`, `tether-country-select`,
-`Tether.setCountry()`) live in separate files that load on first use: `tether.diagnose.min.js` and
-`tether.markets.min.js` next to the main script (jsDelivr serves them from the same folder), or split
-chunks in a bundler. `Tether.detectMarket()` and `Tether.getLocalization()` return promises.
+| Option                     | Default                    | What it does                                                                                                                                                                                                              |
+| -------------------------- | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `domain`                   | none                       | The store's domain (`your-shop.myshopify.com`); `https://` and a path are stripped. Required                                                                                                                              |
+| `token`                    | none                       | The public Storefront API access token (Headless channel). Required                                                                                                                                                       |
+| `apiVersion`               | `'2026-07'`                | The Shopify API version (see [Troubleshooting](#troubleshooting-and-handover))                                                                                                                                            |
+| `country`                  | none                       | The market's country (`'NL'`), for prices and currency ([Markets](#markets-and-localization))                                                                                                                             |
+| `language`                 | none                       | The market's language (`'NL'`, `'pt-BR'`), for translations                                                                                                                                                               |
+| `locale`                   | the browser's              | An `Intl` locale (`'nl-NL'`) for money and dates                                                                                                                                                                          |
+| `markets`                  | `null`                     | Where the visitor's market comes from ([Markets](#markets-and-localization), and the `markets.*` rows below)                                                                                                              |
+| `prefix`                   | `'tether'`                 | The attribute and event prefix: `'shop'` reads `shop-product` and sends `shop:cart-updated`. Lowercase letters, digits and `-`                                                                                            |
+| `productPath`              | `'/product'`               | Product links: a folder (`/product/<handle>`) or a template with `{handle}` or `{id}` (`/shop?p={handle}`)                                                                                                                |
+| `collectionPath`           | `'/collection'`            | The folder of collection links in [search results](#search-as-you-type)                                                                                                                                                   |
+| `metafields`               | `[]`                       | Product metafields to fetch: `'namespace.key'` or `{ namespace, key }`                                                                                                                                                    |
+| `embedOrigins`             | `[]`                       | More origins a description's iframes may load from, besides the built-in video players: `['https://video.example']`. Whatever such an origin serves is shown in the description, so add only hosts whose embeds you trust |
+| `imagesFirst`              | `25`                       | Images fetched per product, 1 to 250                                                                                                                                                                                      |
+| `variantsFirst`            | `100`                      | Variants fetched per product, 1 to 250                                                                                                                                                                                    |
+| `sellingPlanGroupsFirst`   | `10`                       | Selling plan groups fetched per product, 1 to 250                                                                                                                                                                         |
+| `sellingPlansFirst`        | `25`                       | Selling plans fetched per group, and plan allocations per variant, 1 to 250                                                                                                                                               |
+| `collectionFirst`          | `24`                       | Products per page of a [product list](#product-lists) without `tether-limit`, 1 to 250                                                                                                                                    |
+| `emptyQuery`               | `'all'`                    | What a `tether-products="url:q"` list shows while its parameter is missing or empty: `'all'` products, or `'none'` (its `list-empty` state, with no request); `tether-empty-query` on a list overrides it                 |
+| `retries`                  | `2`                        | How often a failed request is sent again (see **Retries** below)                                                                                                                                                          |
+| `requestTimeout`           | `15000`                    | Milliseconds a Storefront API or account Worker request may take, its whole answer included, before it fails as a network error, in every supported browser; `0` sets no limit (see **Retries** below)                    |
+| `maxAge`                   | `60`                       | Seconds a Shopify answer may be cached; `0` leaves it to Shopify, which can be hours                                                                                                                                      |
+| `revalidate`               | `true`                     | Refreshes server-rendered products once in the background (see **Server-rendered products** below)                                                                                                                        |
+| `storageKey`               | `'<prefix>:cart:<domain>'` | The `localStorage` key of the cart id                                                                                                                                                                                     |
+| `cartDrawerOpenClass`      | `'is-open'`                | The class an open cart drawer gets: one class name, without spaces                                                                                                                                                        |
+| `openCartOnAdd`            | `true`                     | Opens the cart drawer after an add to cart                                                                                                                                                                                |
+| `cartFocus`                | `true`                     | Moves keyboard focus into the open cart drawer, keeps Tab inside it and returns focus on close (a closed drawer is `inert` either way)                                                                                    |
+| `checkoutTarget`           | `'_self'`                  | `'_blank'` opens checkout in a new tab                                                                                                                                                                                    |
+| `defaultPurchase`          | `'one-time'`               | `'subscription'` starts a product with selling plans on its first plan ([Subscriptions](#subscriptions))                                                                                                                  |
+| `variantUrl`               | `false`                    | `?variant=` follows the visitor's choice on the page's main product                                                                                                                                                       |
+| `lowStock`                 | `5`                        | `tether-show="low-stock"` at this many or fewer (needs inventory access)                                                                                                                                                  |
+| `searchDelay`              | `150`                      | Milliseconds [search as you type](#search-as-you-type) waits after the last keystroke                                                                                                                                     |
+| `autoMount`                | `true`                     | Mounts the page on `DOMContentLoaded`; with `false`, call `Tether.mount()` yourself                                                                                                                                       |
+| `observe`                  | `false`                    | Mounts elements added later (Finsweet load more, filters); without it, call `Tether.mount(el)`: mounting twice does nothing                                                                                               |
+| `astro`                    | `true`                     | Mounts on Astro's `astro:page-load` and closes the cart on navigation                                                                                                                                                     |
+| `partsUrl`                 | `null`                     | The folder of the optional parts when you host them yourself: https or on your own site (see **Pinning a release** below). Without it they load beside the core                                                           |
+| `analytics`                | `null`                     | GA4/GTM, Shopify's and your own analytics ([analytics](analytics.md), and the `analytics.*` rows below)                                                                                                                   |
+| `account`                  | `null`                     | Customer accounts through the Worker ([accounts](accounts.md), and the `account.*` rows below)                                                                                                                            |
+| `warningText`              | `null`                     | `(warning) => text`: your text for one of Shopify's cart warnings, translated by `warning.code` for instance; returning nothing keeps Shopify's, and so does an error it throws, which goes to `onError`                  |
+| `formatMoney`              | `null`                     | `(money, locale) => text`: your money format, in place of `Intl` with `locale`; an error it throws goes to `onError` and the price shows in that built-in format                                                          |
+| `onLayoutChange`           | `null`                     | `(reason) => {}` after renders changed the page's height; without it, `ScrollTrigger.refresh()` when GSAP's ScrollTrigger is on the page. An error it throws goes to `onError`                                            |
+| `onCartOpen`               | `null`                     | `(drawers) => {}` after the cart drawer opened; an error it throws goes to `onError`, and the cart still opens                                                                                                            |
+| `onCartClose`              | `null`                     | `(drawers) => {}` after it closed; an error it throws goes to `onError`, and the cart still closes                                                                                                                        |
+| `onLineEnter`              | `null`                     | `(node) => {}` for a new cart line, to animate it in; an error it throws goes to `onError`                                                                                                                                |
+| `onLineLeave`              | `null`                     | `(node, done) => {}` for a removed cart line: animate it out, then call `done()`; an error it throws goes to `onError`, and the line is removed                                                                           |
+| `onValueChange`            | `null`                     | `(element, previousText) => {}` when a bound value's text changes, to animate it; an error it throws goes to `onError`                                                                                                    |
+| `onError`                  | `null`                     | `(error, context) => {}` for every failure that reaches the visitor; an `Error` one of the hooks above throws is reported once per page load for each message (up to 100 messages), anything else it throws every time    |
+| `debug`                    | `false`                    | Logs Tether's steps, such as retries, in the console                                                                                                                                                                      |
+| `markets.detect`           | the saved choice only      | `true` reads every source, a list (`['saved', 'server', 'webflow']`) only those, `false` none                                                                                                                             |
+| `markets.locales`          | none                       | Webflow locale (subdirectory or `<html lang>`) to `{ country, language, locale }`                                                                                                                                         |
+| `markets.cookie`           | `'tether_country'`         | The cookie your server sets with the visitor's country                                                                                                                                                                    |
+| `markets.remember`         | `true`                     | Remembers the visitor's own choice (`tether-country-select`, `Tether.setCountry()`)                                                                                                                                       |
+| `markets.strict`           | `false`                    | With `locales`: an `<html lang>` that isn't in the map gives no market                                                                                                                                                    |
+| `analytics.dataLayer`      | off                        | GA4/GTM events: `true` into `window.dataLayer`, a name into that global array                                                                                                                                             |
+| `analytics.shopify`        | off                        | Shopify's own analytics: `true` or `{ consent, proxy }` ([analytics](analytics.md))                                                                                                                                       |
+| `analytics.onEvent`        | none                       | `(name, data) => {}` for every analytics event                                                                                                                                                                            |
+| `account.server`           | none                       | The Worker's account routes: a path on your site (`'/_tether/account'`) or an https URL. Without it accounts are off                                                                                                      |
+| `account.orderUrl`         | Shopify's order page       | Your own order page, with `{id}` for the numeric order id                                                                                                                                                                 |
+| `account.subscriptionsUrl` | the shop's `/account`      | Shopify's subscription management page                                                                                                                                                                                    |
+| `account.paymentUrl`       | `subscriptionsUrl`         | A separate page for payment methods                                                                                                                                                                                       |
+| `account.logoutUrl`        | the home page              | Where Shopify sends the visitor after logout                                                                                                                                                                              |
+| `account.locale`           | the language of `locale`   | The language of Shopify's login pages (`'nl'`)                                                                                                                                                                            |
+| `account.navigate`         | `location.assign`          | `(url) => {}` in place of the login redirect, to open it in a popup for instance                                                                                                                                          |
+
+**Retries (`retries`, default 2).** A query that failed on the network, with a 429 or 5xx, or with
+Shopify's `THROTTLED` or `INTERNAL_SERVER_ERROR` is sent again, up to `retries` times. A mutation,
+add to cart and every other cart change included, is sent again only after a 429 or `THROTTLED`,
+which Shopify answers without running it: after a network error or a server error Shopify may
+already have applied it, so Tether doesn't send it twice, and a failed cart change loads the cart
+again to show what Shopify has. The first retry waits 300 ms (500 ms after `THROTTLED`), and each
+later one twice as long as the one before, up to 30 seconds. `retries` can be at most 10: a larger
+number logs a warning and 10 is used.
+
+A request that has no complete answer after `requestTimeout` milliseconds (15 seconds by default)
+is stopped and counts as a network error (`NETWORK`): a query is sent again, a cart change isn't,
+and the cart is loaded again. So a connection that stalls fails the change with `tether:cart-error`
+instead of holding every cart change behind it. `requestTimeout` and `searchDelay` go up to
+2147483647 (about 24 days), the longest delay a browser's timer keeps: a longer one would fire at
+once, so it logs a warning and 2147483647 is used.
+
+**Validation.** Every option is checked once, when Tether starts. An option Tether doesn't know (a
+typo such as `openCartOnAd`) logs a warning and is left out. A value it can't use logs a
+warning in the console and falls back to the default (or is left out): `apiVersion` must be a
+quarterly version (`2026-07`; `unstable` works, with a warning), `domain` a host name (`https://` and
+a path are stripped), `locale` a locale `Intl` accepts, `country` and `language` codes Shopify
+knows (written as you like: `'de'` becomes `DE`, `'pt-br'` becomes `PT_BR`), and the `account` URLs
+a path on your site or an https URL (http only on localhost). So is `partsUrl` (or an http URL on the
+page's own origin); one elsewhere is left out, and the parts load beside the core. Each
+`embedOrigins` entry must be an https origin alone (no path or query); any other entry is left out.
+A count above its maximum (`retries` above 10, a list size such as `imagesFirst` above 250) warns and
+uses the maximum; the count attributes (`tether-limit`, `tether-search-limit`, `tether-search-min`)
+follow the same rules, with one warning per element.
+
+**Server-rendered products.** The products in a `<script type="application/json" data-tether-hydrate>`
+tag (`shop.hydrate()`) are shown without a request, prices included, until the background refresh
+replaces them. The tag is trusted as part of the page, like its other HTML and scripts: it is written
+by the site's own build, and whoever can add one to a page can already add a script. An entry
+missing the lists and prices a render walks (a truncated or hand-written tag) is skipped, and that
+product loads from Shopify instead. `Tether.mount()` reads every tag in the document; with `observe`,
+the elements added later are read and mounted on their own, once per burst of additions.
+
+**Pinning a release.** A minor line in the URL, like the README's
+[script tag](../README.md#install) (`@X.Y`), takes every X.Y.Z fix automatically,
+which is what most sites want. To pin exactly what runs, load a fixed release (`@vX.Y.Z`, a tag from
+the [Releases](https://github.com/ravi-klaassens/tether/releases)) and add the file's
+[`integrity`](https://www.srihash.org/) hash to the script tag (an `integrity` hash on `@X.Y` breaks
+with the next fix). The optional parts load from the core's own release folder, or from
+`partsUrl`: a core loaded through a jsDelivr alias (`@X.Y`, `@latest` or no version) loads them from
+its exact release (`@vX.Y.Z`, or `@X.Y.Z` for npm), so a cached core never meets a newer part. They
+are always checked against hashes built into the core, so a core runs only the parts of its own
+release. A `partsUrl` therefore has to serve the files of the same release as the core: upload the
+whole folder of that release (every `tether.*.js` from its GitHub Release or `dist/`) and replace it
+together with the core. The browser refuses a part from another release, so it fails to load.
+Parts on another origin than the page load with CORS (jsDelivr sends the headers; your own host must
+too), and a `partsUrl` has to be https or on your own site.
+
+**Optional parts.** These live in separate files that load on first use, next to the main script
+(jsDelivr serves them from the same folder) or at `partsUrl`, and as split chunks in a bundler:
+`tether.lists.min.js` (product lists, `Tether.getProducts()`, `Tether.getRecommendations()`),
+`tether.search.min.js` (search as you type), `tether.markets.min.js` (`markets.detect`,
+`tether-country-select`, `Tether.setCountry()`), `tether.extras.min.js` (bundles, `?variant=`, the
+discount form), `tether.account.min.js` and `tether.account-pages.min.js` (customer accounts),
+`tether.analytics.min.js` (analytics) and `tether.diagnose.min.js` (`Tether.diagnose()`). So
+`Tether.getProducts()`, `Tether.getRecommendations()`, `Tether.detectMarket()` and
+`Tether.getLocalization()` return promises. The script build finds its folder from its own
+`<script src>`: a core bundled into another file, inlined, or loaded with `type="module"` sets
+`partsUrl` to a folder with the same release's parts.
 
 **Accessibility.** The cart drawer gets `role="dialog"`, `aria-modal` and a label (`tether-cart-label`
 to change it); opening moves focus into it, Tab stays inside, Escape closes it and returns focus.
-Cart buttons get `aria-expanded`, unavailable add-to-cart buttons `aria-disabled`.
+Closed, it is `aria-hidden` and `inert`. Cart buttons get `aria-expanded`; unavailable add-to-cart
+buttons get `aria-disabled`, and unavailable option values `aria-describedby="tether-unavailable"`
+(see Product scope).
 
 **Connection loss.** Products and lists that failed to load try again when the browser is back online.
 
@@ -434,8 +646,10 @@ metafield binds missing from `config.metafields`. It returns the same report as 
 
 **Error reporting (`onError`)**: every failure that reaches the visitor (product or list that
 didn't load, add to cart, cart actions, discount codes) goes through `onError(error, context)`.
-Errors are `TetherError`s with `code` (`NOT_FOUND`, `NETWORK`, `HTTP_401`, `NOT_CONFIGURED`, …),
-`status`, `errors` (GraphQL) and `userErrors` (cart). For Sentry:
+Errors are `TetherError`s with `code` (`NOT_FOUND`, `NETWORK`, `HTTP_401`, `NOT_CONFIGURED`,
+`INVALID_COUNTRY`, `INVALID_DISCOUNT`, `INVALID_RESPONSE` for a 2xx answer that isn't valid
+GraphQL, `SERVER_ERROR` for a 2xx answer with Shopify's `INTERNAL_SERVER_ERROR` or, for a mutation,
+GraphQL errors without `data`; accounts add [their own](accounts.md#errors)), `status`, `errors` (GraphQL) and `userErrors` (cart). For Sentry:
 
 ```js
 window.TETHER_CONFIG = {
@@ -458,20 +672,19 @@ is still supported, and warns from 3 months before retirement with the version t
 `tether-sync check` refuses a non-dated version for the sync. To upgrade:
 
 1. Read the Storefront API release notes for the versions in between (shopify.dev → API versioning).
-2. `TETHER_API_VERSION=$(node scripts/api-version.mjs --next) npm run smoke` (and against your dev
+2. `TETHER_API_VERSION=$(node scripts/api-version.ts --next) npm run smoke` (and against your dev
    store with `TETHER_DOMAIN`/`TETHER_TOKEN`) to check every Tether query against the next version.
-3. Bump `apiVersion` in `src/config.js` (and `DEFAULT_API_VERSION` in `server/src/shopify.js` for the
-   sync), run `npm test`, release. Sites can also set `apiVersion` in `TETHER_CONFIG` themselves.
+3. Bump the versions in `server/src/shared/api-versions.ts` (the browser script's default and the
+   Worker's both come from there), run `npm test`, release. Sites can also set `apiVersion` in
+   `TETHER_CONFIG` themselves.
 
 **Weekly check.** [`.github/workflows/smoke.yml`](../.github/workflows/smoke.yml) runs `npm test` and the
-smoke test against the pinned *and* the next quarterly API version, every Monday and on every push
+smoke test against the pinned _and_ the next quarterly API version, every Monday and on every push
 to `main`. When something fails it opens an issue (label `smoke-failure`), or comments on the open
 one. In a fork, enable Actions on the fork's Actions tab. Optionally add the repository secrets
 `TETHER_DOMAIN` and `TETHER_TOKEN` (a public Storefront token of your test store) to test your own
 store, selling plans included; without them it uses Shopify's public demo store. A run takes
 1–2 minutes, and Actions minutes are free on public repositories.
-
-Run `npm test` and `npm run smoke` before every release; the smoke test needs no setup.
 
 ---
 
@@ -485,24 +698,113 @@ npm test          # unit tests: client (jsdom, mocked Storefront API) + server/ 
 npm run smoke     # live test against a real store (default: Shopify's public demo store)
 TETHER_DOMAIN=x.myshopify.com TETHER_TOKEN=... npm run smoke   # your dev store, incl. selling plans
 TETHER_API_VERSION=2026-10 npm run smoke                        # try a newer Shopify API version
-node scripts/api-version.mjs --next                             # the next quarterly version
+node scripts/api-version.ts --next                             # the next quarterly version
 ```
 
-**Releases:** write the `## X.Y.Z` section in `CHANGELOG.md`, then
+**Releases:** the notes of the next release are note files in `.changes/`, one per change, which
+each pull request adds: `.changes/<short-slug>.md`, holding that change's CHANGELOG bullets and no
+heading. `CHANGELOG.md` itself has only released sections. Then
 
 ```bash
-npm run release -- 0.4.1 --push
+npm run release -- X.Y.Z --push
 ```
 
-It bumps the version everywhere (packages, `VERSION`, the sync, README pins, `server/TETHER_VERSION`
-for a new minor), builds, runs the tests and the live smoke test, commits, tags and pushes. The
-`release` workflow then publishes to npm with provenance (npm trusted publishing, no token in the
-repo) and creates the GitHub Release with the files. jsDelivr serves the tag immediately, and
-deployed sync Workers pick it up through their Update Tether action within their range.
+It first checks that the `ci` workflow passed on GitHub for the commit it releases (through `gh`,
+which must be logged in), and that `.changes/` has note files. It bumps the version everywhere
+(packages, `VERSION`, the sync, README pins, `server/TETHER_VERSION` for a new minor), moves the
+note files into a new `## X.Y.Z (YYYY-MM-DD)` section at the top of `CHANGELOG.md`, dated with the
+day on the release machine's clock in its own time zone, and deletes them. The section lists the
+files by the first word of each one's first bullet (Breaking, then Security, then Fix, then every
+other kind, then Repository), and by file name within a kind; a file's bullets stay together. It
+then builds, refuses a release commit that changes anything else, runs the versions test and the
+live smoke test, commits, tags and pushes. The push goes through the pre-push hook, which for a push
+with a new tag runs `npm run check` and `npm run lint:workflows` locally: a release takes as long as
+that gate, and when the hook fails, nothing is pushed and the release says so. The release itself
+doesn't run the gate at the new version: a test that fails only at a new version is caught on the
+pull request by the `release-rehearsal` workflow, which writes the next minor and the next patch
+version into a worktree with the release's own rewrite
+(`node scripts/release.ts --rewrite-only X.Y.Z <folder>`) and runs `npm run check` there. It runs
+on every pull request but one that changes only `.claude/`, `LICENSE` or `.git-blame-ignore-revs`,
+files the gate doesn't read.
 
-## Subscriptions: what Shopify handles, not Tether
+So the release also checks, through `gh`, that the rehearsal passed for the newest commit that
+changes a file the gate reads: on that commit itself, or on the head of the pull request that merged
+it. A commit pushed without a pull request (a release commit included) has no rehearsal run, and
+the release refuses until a pull request brings a change, or until you rehearse it yourself, in a
+worktree at the version you release, and pass `--rehearsed`:
 
-Tether gets the subscription into the cart with the right plan. After that it's all Shopify:
-checkout, the recurring charge, the contract, and the customer portal (skip, pause, swap,
-cancel) in the subscription app / Shopify customer accounts. Test those flows in a Shopify dev
-store with payments in test mode.
+```bash
+git worktree add --detach ../tether-rehearsal HEAD
+node --experimental-strip-types scripts/release.ts --rewrite-only X.Y.Z ../tether-rehearsal
+cd ../tether-rehearsal && npm ci && npm run check
+cd - && npm run release -- X.Y.Z --push --rehearsed
+```
+
+A released section stays as its tag has it, since the GitHub Release's notes are cut from the tag:
+`test/changelog.test.js` fails when a section in `CHANGELOG.md` differs from the same section in
+`git show vX.Y.Z:CHANGELOG.md`, for every release tag in the checkout (CI fetches them all), and when
+a heading isn't `## X.Y.Z (YYYY-MM-DD)`. A branch that was open across a release merges it
+cleanly: the release deleted only the note files it released, and the branch's own note files are
+other files, so they stay in `.changes/` for the next release.
+
+The `release` workflow then runs on the tag, in this order:
+
+1. It refuses a tag whose commit isn't in main's history (deployed sync Workers install only
+   those), or, when the tag's `release/X.Y` branch exists, isn't on that branch.
+2. It checks that the committed `dist/` is a fresh build, and runs the gate and the smoke test again.
+3. It creates the GitHub Release, with the browser scripts and `tether-server-X.Y.Z.tar.gz`, the
+   sync Worker's `server/` folder, attested by the workflow. Deployed sync Workers install only that
+   file, and pick the release up through their Update Tether action within their range. The ES
+   module build (`tether.esm.js` and `esm/`) is left out of the Release: bundlers take it from npm.
+4. It publishes to npm with provenance (npm trusted publishing, no token in the repo). It comes
+   after the GitHub Release, so a failed publish doesn't hold back the Workers, and can be run again
+   on its own.
+5. It purges jsDelivr's alias URLs of the release's files (`@X.Y`, and for the newest release `@X`,
+   `@latest` and no version): the `gh/` ones once the GitHub Release exists, the `npm/` ones once
+   npm has the version. A failed purge warns; the alias then updates when jsDelivr's cache of it
+   expires, within 7 days.
+
+Exact URLs (`@vX.Y.Z`, and `@X.Y.Z` on npm) work as soon as the tag and the npm version exist; alias
+URLs serve the new release once they are purged.
+
+With `--push`, `npm run release` then waits up to 20 minutes for npm to have the version and locks
+the Astro starter on it (its range and its lockfile, in one commit it pushes to main), so `npm ci`
+works in the starter and in projects made from it. When main moved during the wait, that commit goes
+on top of main as it is then, from a detached checkout of `origin/main`. When npm takes longer, or
+the starter can't be locked (main moved to another minor version, or GitHub refused the push), it
+says the release is done and prints the command that does that step alone:
+`npm run release -- X.Y.Z --starter --push`. A maintenance release leaves main's starter alone.
+
+**Maintenance releases:** a fix for an older minor line X.Y is released from its branch
+`release/X.Y`, made once from that line's last tag (`git push origin vX.Y.Z:refs/heads/release/X.Y`)
+and given these files from main, since a tag runs the workflow at its own commit and a push to the
+branch runs its own `ci.yml`, whose passing run the release needs:
+
+- `scripts/release.ts` and the scripts it imports: `scripts/changelog.ts`,
+  `scripts/github-runs.ts`, `scripts/installed-packages.ts`, `scripts/main-history.ts`,
+  `scripts/release-starter.ts`, `scripts/release-steps.ts`, `scripts/release-tooling.ts`,
+  `scripts/release-version.ts` and `scripts/versions.ts`;
+- `.github/workflows/release.yml`, `.github/workflows/ci.yml` and
+  `.github/workflows/release-rehearsal.yml`;
+- the scripts those workflows run, and what they import: `scripts/dist-guard.ts`,
+  `scripts/dist-commits.ts`, `scripts/lint-workflows.ts` and `.config/workflow-linters.json`.
+
+`npm run release` checks for these first, and for the packages and npm scripts they need, and names
+every one the branch lacks, with the `git checkout origin/main -- …` that copies the files. Check
+out `origin/release/X.Y`, copy them, put the notes in its `.changes/` (and remove the
+`## Unreleased` heading that a branch made from an older tag has) and run the same command. The
+script also records the release commit in main's history, by a merge commit that changes only
+main's `CHANGELOG.md`, which gets the release's section, and `.changes/`, which loses the note files
+the release commit deleted, so a fix picked from main isn't released again by main's next release.
+It pushes the branch, main and the tag together. The release isn't GitHub's latest
+release, and goes to npm under the `latest-X.Y` dist-tag instead of `latest`.
+
+## Subscriptions after checkout
+
+Tether gets the subscription into the cart with the right plan. Checkout, the recurring charge and
+the contract are Shopify's. With [customer accounts](accounts.md) through your Worker, customers
+skip, unskip, pause, resume and cancel a subscription on your own pages
+([how](accounts.md#on-your-own-site-order-pages-profile-addresses-subscriptions-returns)). Everything
+else, such as swapping a product or changing the card, stays in your subscription app's portal in
+Shopify customer accounts, and so does all of it without accounts. Test those flows in a Shopify
+dev store with payments in test mode.

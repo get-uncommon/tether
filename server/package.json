@@ -1,22 +1,22 @@
 {
   "name": "@occluze/tether-sync",
-  "version": "0.6.7",
+  "version": "0.11.2",
   "private": true,
   "description": "Shopify -> Webflow CMS sync for Tether: webhooks, reconcile cron and initial import. Runs as a Cloudflare Worker or a Node CLI.",
   "type": "module",
   "bin": {
-    "tether-sync": "bin/tether-sync.js"
+    "tether-sync": "bin/tether-sync.ts"
   },
   "exports": {
-    ".": "./src/index.js",
-    "./worker": "./src/worker.js"
+    ".": "./src/index.ts",
+    "./worker": "./src/worker.ts"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22.18"
   },
   "scripts": {
-    "test": "node --test test/*.test.js",
-    "check": "node bin/tether-sync.js check",
+    "test": "node --experimental-strip-types --test test/*.test.js",
+    "check": "node --experimental-strip-types bin/tether-sync.ts check",
     "deploy": "wrangler deploy"
   },
   "license": "MIT",

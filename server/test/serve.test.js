@@ -2,38 +2,134 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { connect } from 'node:net';
-import { serve } from '../src/node.js';
+import { serve } from '../src/node.ts';
+import { waitFor } from './mocks.js';
 
 const quiet = { info() {}, warn() {}, error() {} };
-const app = { sync: {}, webhookSecret: 'x'.repeat(32), webhookSecrets: [], config: { shopify: { domain: 'shop.myshopify.com' } }, store: null };
-const raw = (port, text, { abortAfter } = {}) => new Promise((resolve) => {
-  const s = connect(port, '127.0.0.1', () => {
-    s.write(text);
-    if (abortAfter) setTimeout(() => { s.destroy(); resolve(''); }, abortAfter);
+const neverSyncs = () => Promise.reject(new Error('no webhook here is signed'));
+/** @type {Parameters<typeof serve>[0]} */
+const app = {
+  sync: { syncById: neverSyncs, queueRetry: neverSyncs },
+  webhookSecrets: ['x'.repeat(32)],
+  config: { shopify: { domain: 'shop.myshopify.com' } },
+  store: null,
+};
+/**
+ * @param {number} port
+ * @param {string} text
+ * @param {{ abortWhen?: () => Promise<void> }} [options] `abortWhen` settles when the client is to disconnect.
+ * @returns {Promise<string>}
+ */
+const raw = (port, text, { abortWhen } = {}) =>
+  new Promise((resolve, reject) => {
+    const socket = connect(port, '127.0.0.1', () => {
+      socket.write(text);
+      if (abortWhen)
+        void abortWhen().then(() => {
+          socket.destroy();
+          resolve('');
+        });
+    });
+    let out = '';
+    socket.setTimeout(10_000, () => {
+      socket.destroy();
+      reject(new Error(`timed out after 10s waiting for the server to answer ${JSON.stringify(text.slice(0, 40))}`));
+    });
+    socket.on('data', (chunk) => {
+      out += String(chunk);
+    });
+    socket.on('end', () => {
+      resolve(out);
+    });
+    socket.on('error', () => {
+      resolve(out);
+    });
   });
-  let out = '';
-  s.on('data', (d) => { out += d; });
-  s.on('end', () => resolve(out));
-  s.on('error', () => resolve(out));
-});
+
+/**
+ * The server's side of each connection it accepts, so a test can wait for what the server has read.
+ *
+ * @param {import('node:net').Server} server
+ */
+function serverSockets(server) {
+  /** @type {import('node:net').Socket[]} */
+  const sockets = [];
+  server.on('connection', (socket) => sockets.push(socket));
+  return sockets;
+}
+
+/**
+ * Closes `server` and the connections it still holds, once both are closed.
+ *
+ * @param {import('node:http').Server} server
+ */
+async function closed(server) {
+  server.closeAllConnections();
+  await new Promise((resolve) => server.close(resolve));
+}
+
+/** @param {import('node:net').Server} server Listening on TCP, so its address is an AddressInfo. */
+function listening(server) {
+  const address = server.address();
+  assert.ok(address && typeof address === 'object');
+  return address;
+}
 
 test('serve: an aborted upload, a huge body and unknown paths do not crash or buffer', async () => {
   const server = await serve(app, { port: 0, host: '127.0.0.1', log: quiet, maxBody: 1024 });
-  const { port } = server.address();
+  const { port } = listening(server);
+  const sockets = serverSockets(server);
   try {
     // Client sends half a body and disconnects: the process keeps running.
-    await raw(port, 'POST /webhooks/shopify HTTP/1.1\r\nHost: x\r\nContent-Length: 1000\r\n\r\n0123456789', { abortAfter: 100 });
-    await new Promise((r) => setTimeout(r, 100));
-    const health = await fetch(`http://127.0.0.1:${port}/health`);
-    assert.equal(health.status, 200);
+    const halfUpload = 'POST /webhooks/shopify HTTP/1.1\r\nHost: x\r\nContent-Length: 1000\r\n\r\n0123456789';
+    await raw(port, halfUpload, {
+      abortWhen: () => waitFor(() => sockets[0]?.bytesRead === halfUpload.length, 'the server to read the half upload'),
+    });
+    const [aborted] = sockets;
+    assert.ok(aborted);
+    // Not events.once: the server's socket emits the parse error of the cut-off body before it closes.
+    if (!aborted.closed) await new Promise((resolve) => aborted.on('close', resolve));
+    // Raw requests, not fetch: fetch refuses some of the ports `listen(0)` can pick on Windows ("bad port").
+    const health = await raw(port, 'GET /health HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n');
+    assert.match(health, /^HTTP\/1\.1 200/);
     // Too large: refused before it is read.
-    const big = await raw(port, 'POST /webhooks/shopify HTTP/1.1\r\nHost: x\r\nConnection: close\r\nContent-Length: 999999\r\n\r\n');
+    const big = await raw(
+      port,
+      'POST /webhooks/shopify HTTP/1.1\r\nHost: x\r\nConnection: close\r\nContent-Length: 999999\r\n\r\n',
+    );
     assert.match(big, /^HTTP\/1\.1 413/);
     // Unknown path: answered without reading the body.
-    const other = await raw(port, 'POST /nope HTTP/1.1\r\nHost: x\r\nConnection: close\r\nContent-Length: 500000\r\n\r\nabc');
+    const other = await raw(
+      port,
+      'POST /nope HTTP/1.1\r\nHost: x\r\nConnection: close\r\nContent-Length: 500000\r\n\r\nabc',
+    );
     assert.match(other, /^HTTP\/1\.1 404/);
     // A webhook with a bad signature still gets its normal answer.
-    const bad = await fetch(`http://127.0.0.1:${port}/webhooks/shopify`, { method: 'POST', body: '{}', headers: { 'x-shopify-hmac-sha256': 'nope' } });
-    assert.equal(bad.status, 401);
-  } finally { server.close(); }
+    const bad = await raw(
+      port,
+      'POST /webhooks/shopify HTTP/1.1\r\nHost: x\r\nConnection: close\r\nX-Shopify-Hmac-Sha256: nope\r\nContent-Length: 2\r\n\r\n{}',
+    );
+    assert.match(bad, /^HTTP\/1\.1 401/);
+  } finally {
+    await closed(server);
+  }
+});
+
+test('serve logs the address it really listens on', async () => {
+  /** @type {unknown[]} */
+  const lines = [];
+  const log = { ...quiet, info: (/** @type {unknown} */ line) => lines.push(line) };
+  const local = await serve(app, { port: 0, host: '127.0.0.1', log });
+  const everywhere = await serve(app, { port: 0, log });
+  try {
+    assert.equal(lines[0], `tether-sync listening on http://127.0.0.1:${listening(local).port}/webhooks/shopify`);
+    const [, everywhereLine] = lines;
+    assert.ok(typeof everywhereLine === 'string');
+    assert.match(
+      everywhereLine,
+      /^tether-sync listening on every interface \((::|0\.0\.0\.0)\), e\.g\. http:\/\/localhost:\d+\//,
+    );
+  } finally {
+    await Promise.all([closed(local), closed(everywhere)]);
+  }
 });

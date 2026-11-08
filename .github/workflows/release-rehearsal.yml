@@ -1,0 +1,75 @@
+# The gate at the versions the next release can have. `npm run release` doesn't run the whole gate, and a test can fail
+# only once package.json says a new version, so a pull request that changes a file the gate reads runs it here first:
+# in a worktree that `scripts/release.ts --rewrite-only` writes the next minor (X.Y+1.0), and the next patch
+# (X.Y.Z+1), into, the same way the release does. Other pull requests and pushes to main skip it, which costs no
+# Actions minutes. `npm run release` reads these paths too, to find the newest commit a rehearsal has to have passed
+# on (scripts/github-runs.ts), and test/github-runs.test.js checks they cover every file the gate reads.
+name: release-rehearsal
+
+on:
+  pull_request:
+    paths:
+      - '.changes/**'
+      - '.config/**'
+      - '.github/**'
+      - 'dist/**'
+      - 'docs/**'
+      - 'examples/**'
+      - 'scripts/**'
+      - 'server/**'
+      - 'src/**'
+      - 'test/**'
+      - '.gitignore'
+      - '.prettierignore'
+      - 'AGENTS.md'
+      - 'CHANGELOG.md'
+      - 'CLAUDE.md'
+      - 'README.md'
+      - 'eslint.config.mjs'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'tsconfig.json'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-rehearsal-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rehearsal:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        bump: [minor, patch]
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: '22.18'
+          # No dependency cache: CI also runs on main and release/** pushes, whose cache a pull request could poison.
+          package-manager-cache: false
+      # test/upgrade-from-released.test.js installs the tree into copies made from every release tag. The worktree
+      # shares the checkout's tags.
+      - run: git fetch --depth=1 --no-tags origin '+refs/tags/v*:refs/tags/v*'
+      # The rewrite runs this checkout's scripts/release.ts, which imports packages (yaml): install them first.
+      - run: npm ci --ignore-scripts
+      - name: Write the next ${{ matrix.bump }} version into a worktree
+        shell: bash
+        env:
+          BUMP: ${{ matrix.bump }}
+        run: |
+          IFS=. read -r major minor patch <<< "$(node -p "require('./package.json').version")"
+          if [ "$BUMP" = minor ]; then next="$major.$((minor + 1)).0"; else next="$major.$minor.$((patch + 1))"; fi
+          git worktree add --detach "$RUNNER_TEMP/next" HEAD
+          node --experimental-strip-types scripts/release.ts --rewrite-only "$next" "$RUNNER_TEMP/next"
+          git -C "$RUNNER_TEMP/next" diff --stat
+      - run: npm ci
+        working-directory: ${{ runner.temp }}/next
+      - run: npm run check
+        working-directory: ${{ runner.temp }}/next

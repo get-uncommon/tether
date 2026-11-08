@@ -1,0 +1,198 @@
+/** The customer-account settings of the Worker, read once from its env. */
+
+import { STOREFRONT_API_VERSION } from '../shared/api-versions.ts';
+import type { CleanEnv } from '../env.ts';
+import { cleanEnv, MIN_SECRET_LENGTH } from '../env.ts';
+
+/** What the requests to Shopify need. */
+export interface ShopifyAccountSettings {
+  /** Customer Account API client id (Headless channel). */
+  clientId: string;
+  /** Only for a confidential client; `undefined` for a public one. */
+  clientSecret: string | undefined;
+  /** The store's domain, as a bare host name. */
+  shopDomain: string;
+  /** The public Storefront token, used to link carts; `undefined` when not set. */
+  storefrontToken: string | undefined;
+  /** Storefront API version for cart links. */
+  apiVersion: string;
+}
+
+/** How long a login lasts. `replaced`: ACCOUNT_SESSION_DAYS was set to something unusable, and `days` is used instead. */
+type SessionDays =
+  | { kind: 'as-set'; days: number }
+  | { kind: 'replaced'; days: number; raw: string; reason: 'not a whole number' | 'outside 1 to 90' };
+
+/**
+ * ACCOUNT_SECRET, the root of every sealing key. It must differ from SYNC_SECRET (the password for /reconcile and
+ * /check), so that password can't open customer sessions: `same-as-sync-secret` is refused like `missing`.
+ */
+type AccountSecret = { kind: 'set'; value: string } | { kind: 'missing' } | { kind: 'same-as-sync-secret' };
+
+export interface AccountSettings extends ShopifyAccountSettings {
+  /**
+   * The site's https origins as a browser's Origin header writes them (lower case, no default port, no trailing
+   * slash), the first being the site's home.
+   */
+  origins: string[];
+  /** The ACCOUNT_ORIGINS entries that are not an https origin alone, as written. */
+  invalidOrigins: string[];
+  secret: AccountSecret;
+  sessionDays: SessionDays;
+}
+
+/** Settings {@link accountProblems} finds no error in, flattened to what the routes use. */
+export interface ReadyAccountSettings extends ShopifyAccountSettings {
+  origins: [string, ...string[]];
+  secret: string;
+  sessionDays: number;
+}
+
+export interface AccountProblem {
+  severity: 'error' | 'warning';
+  message: string;
+  fix?: string;
+}
+
+const DEFAULT_SESSION_DAYS = 14;
+const MAX_SESSION_DAYS = 90;
+const WHOLE_NUMBER = /^\d+$/;
+/** A DNS host name: dot-separated labels of letters, digits and inner hyphens. */
+const HOST_NAME = /^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/i;
+
+function secretOf({ ACCOUNT_SECRET, SYNC_SECRET }: CleanEnv): AccountSecret {
+  if (ACCOUNT_SECRET === undefined) return { kind: 'missing' };
+  if (ACCOUNT_SECRET === SYNC_SECRET) return { kind: 'same-as-sync-secret' };
+  return { kind: 'set', value: ACCOUNT_SECRET };
+}
+
+/** @param raw ACCOUNT_SESSION_DAYS. */
+function sessionDaysOf(raw: string | undefined): SessionDays {
+  if (raw === undefined) return { kind: 'as-set', days: DEFAULT_SESSION_DAYS };
+  if (!WHOLE_NUMBER.test(raw)) {
+    return { kind: 'replaced', days: DEFAULT_SESSION_DAYS, raw, reason: 'not a whole number' };
+  }
+  const days = Number(raw);
+  if (days >= 1 && days <= MAX_SESSION_DAYS) return { kind: 'as-set', days };
+  return { kind: 'replaced', days: Math.max(1, Math.min(MAX_SESSION_DAYS, days)), raw, reason: 'outside 1 to 90' };
+}
+
+/**
+ * @param entry One entry of ACCOUNT_ORIGINS.
+ * @returns The origin as the browser's Origin header writes it, `null` unless the entry is an https origin with
+ *   nothing more than a trailing slash: a path, user name or query would never match a request.
+ */
+function httpsOrigin(entry: string): string | null {
+  try {
+    const url = new URL(entry);
+    return url.protocol === 'https:' && url.href === new URL(url.origin).href ? url.origin : null;
+  } catch {
+    // Not an absolute URL.
+    return null;
+  }
+}
+
+/** @param raw ACCOUNT_ORIGINS. */
+function originsOf(raw: string | undefined): Pick<AccountSettings, 'origins' | 'invalidOrigins'> {
+  const origins: string[] = [];
+  const invalidOrigins: string[] = [];
+  for (const entry of (raw ?? '').split(/[\s,]+/).filter(Boolean)) {
+    const origin = httpsOrigin(entry);
+    if (origin === null) invalidOrigins.push(entry);
+    else origins.push(origin);
+  }
+  return { origins, invalidOrigins };
+}
+
+/**
+ * @returns `null` when accounts are off (no ACCOUNT_CLIENT_ID).
+ */
+export function accountSettings(rawEnv: Record<string, unknown>): AccountSettings | null {
+  const env = cleanEnv(rawEnv);
+  if (!env.ACCOUNT_CLIENT_ID) return null;
+  return {
+    clientId: env.ACCOUNT_CLIENT_ID,
+    clientSecret: env.ACCOUNT_CLIENT_SECRET,
+    ...originsOf(env.ACCOUNT_ORIGINS),
+    shopDomain: (env.SHOPIFY_DOMAIN ?? '').replace(/^https?:\/\//, '').replace(/\/$/, ''),
+    storefrontToken: env.STOREFRONT_TOKEN,
+    secret: secretOf(env),
+    sessionDays: sessionDaysOf(env.ACCOUNT_SESSION_DAYS),
+    apiVersion: env.STOREFRONT_API_VERSION ?? STOREFRONT_API_VERSION,
+  };
+}
+
+/** The problems of the settings that are not about the secret. */
+function siteAndShopProblems(
+  settings: AccountSettings,
+  error: (message: string) => void,
+  warning: (message: string) => void,
+): void {
+  const { origins, invalidOrigins } = settings;
+  if (invalidOrigins.length) {
+    error(
+      `ACCOUNT_ORIGINS must be https origins without a path, e.g. https://shop.com, not ${invalidOrigins.join(', ')}`,
+    );
+  } else if (!origins.length) error('ACCOUNT_ORIGINS is missing: your site, e.g. https://shop.com');
+  if (!settings.shopDomain) error('SHOPIFY_DOMAIN is missing');
+  else if (!HOST_NAME.test(settings.shopDomain)) {
+    error('SHOPIFY_DOMAIN must be the store domain alone, e.g. your-store.myshopify.com');
+  }
+  const { sessionDays } = settings;
+  if (sessionDays.kind === 'replaced') {
+    warning(
+      `ACCOUNT_SESSION_DAYS "${sessionDays.raw}" is ${sessionDays.reason}: logins last ${String(sessionDays.days)} days`,
+    );
+  }
+  if (!settings.storefrontToken) {
+    warning(
+      "STOREFRONT_TOKEN (the public Storefront token) is missing: carts can't be linked, so checkout won't know the customer",
+    );
+  }
+}
+
+/** What stops accounts from working (`error`) or weakens them (`warning`). Empty when all is set. */
+export function accountProblems(settings: AccountSettings): AccountProblem[] {
+  const problems: AccountProblem[] = [];
+  const error = (message: string) => problems.push({ severity: 'error', message });
+  const warning = (message: string) => problems.push({ severity: 'warning', message });
+  siteAndShopProblems(settings, error, warning);
+  const fix =
+    `Add the Worker secret ACCOUNT_SECRET, a random string of at least ${String(MIN_SECRET_LENGTH)} characters ` +
+    '(e.g. `openssl rand -hex 24`), different from SYNC_SECRET. Changing it later logs every customer out once.';
+  switch (settings.secret.kind) {
+    case 'set':
+      break;
+    case 'missing':
+      problems.push({
+        severity: 'error',
+        message: 'ACCOUNT_SECRET is not set: customer sessions are encrypted with it, so accounts answer 503.',
+        fix,
+      });
+      break;
+    case 'same-as-sync-secret':
+      problems.push({
+        severity: 'error',
+        message:
+          'ACCOUNT_SECRET is the same as SYNC_SECRET, so anyone with the /check password could open customer sessions: accounts answer 503.',
+        fix,
+      });
+      break;
+  }
+  return problems;
+}
+
+/** The settings once nothing stops accounts from working, or the errors that do. */
+export function readyAccountSettings(
+  settings: AccountSettings,
+): { kind: 'ready'; settings: ReadyAccountSettings } | { kind: 'not-ready'; errors: AccountProblem[] } {
+  const errors = accountProblems(settings).filter((problem) => problem.severity === 'error');
+  const { origins, secret, sessionDays } = settings;
+  const [home, ...others] = origins;
+  // accountProblems reports each of these as an error, so they are only missing alongside one.
+  if (errors.length || home === undefined || secret.kind !== 'set') return { kind: 'not-ready', errors };
+  return {
+    kind: 'ready',
+    settings: { ...settings, origins: [home, ...others], secret: secret.value, sessionDays: sessionDays.days },
+  };
+}

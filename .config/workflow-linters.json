@@ -1,0 +1,65 @@
+{
+  "actionlint": {
+    "version": "1.7.12",
+    "platforms": {
+      "linux-x64": {
+        "file": "actionlint_1.7.12_linux_amd64.tar.gz",
+        "sha256": "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8"
+      },
+      "darwin-arm64": {
+        "file": "actionlint_1.7.12_darwin_arm64.tar.gz",
+        "sha256": "aba9ced2dee8d27fecca3dc7feb1a7f9a52caefa1eb46f3271ea66b6e0e6953f"
+      },
+      "darwin-x64": {
+        "file": "actionlint_1.7.12_darwin_amd64.tar.gz",
+        "sha256": "5b44c3bc2255115c9b69e30efc0fecdf498fdb63c5d58e17084fd5f16324c644"
+      },
+      "win32-x64": {
+        "file": "actionlint_1.7.12_windows_amd64.zip",
+        "sha256": "6e7241b51e6817ea6a047693d8e6fed13b31819c9a0dd6c5a726e1592d22f6e9"
+      }
+    }
+  },
+  "shellcheck": {
+    "version": "0.11.0",
+    "platforms": {
+      "linux-x64": {
+        "file": "shellcheck-v0.11.0.linux.x86_64.tar.gz",
+        "sha256": "b7af85e41cc99489dcc21d66c6d5f3685138f06d34651e6d34b42ec6d54fe6f6"
+      },
+      "darwin-arm64": {
+        "file": "shellcheck-v0.11.0.darwin.aarch64.tar.gz",
+        "sha256": "339b930feb1ea764467013cc1f72d09cd6b869ebf1013296ba9055ab2ffbd26f"
+      },
+      "darwin-x64": {
+        "file": "shellcheck-v0.11.0.darwin.x86_64.tar.gz",
+        "sha256": "c2c15e08df0e8fbc374c335b230a7ee958c313fa5714817a59aa59f1aa594f51"
+      },
+      "win32-x64": {
+        "file": "shellcheck-v0.11.0.zip",
+        "sha256": "8a4e35ab0b331c85d73567b12f2a444df187f483e5079ceffa6bda1faa2e740e"
+      }
+    }
+  },
+  "zizmor": {
+    "version": "1.31.1",
+    "platforms": {
+      "linux-x64": {
+        "file": "zizmor-1.31.1-py3-none-manylinux_2_28_x86_64.whl",
+        "sha256": "58e878eb2dbd2c6183c105e1ac28c14f7dd1eca44a783f1fe2a69647d012c410"
+      },
+      "darwin-arm64": {
+        "file": "zizmor-1.31.1-py3-none-macosx_11_0_arm64.whl",
+        "sha256": "4a70ee3c2721122aff04d5bbad5e448d15384f45de2ecb3c9493fe9dac2bc95f"
+      },
+      "darwin-x64": {
+        "file": "zizmor-1.31.1-py3-none-macosx_10_12_x86_64.whl",
+        "sha256": "9696d3c10919a3a2eb086c102f1bc10717f53ef3700a0d6c55a709c274995476"
+      },
+      "win32-x64": {
+        "file": "zizmor-1.31.1-py3-none-win_amd64.whl",
+        "sha256": "3b35b393e8d437e275c7e399047c9892ccc290f3fc5e6aeb9f65a5d3b2a470e0"
+      }
+    }
+  }
+}

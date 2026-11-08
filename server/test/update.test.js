@@ -1,16 +1,62 @@
 // The updater a deployed copy runs (scripts/update-tether.mjs).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, cp, readFile, writeFile, mkdir } from 'node:fs/promises';
+import { cp, readFile, readdir, writeFile, mkdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { pickVersion } from '../scripts/update-tether.mjs';
+import { fileURLToPath } from 'node:url';
+import { parseJson, stringAt, tempFolder } from './mocks.js';
+import {
+  listTags,
+  newestPublished,
+  outsideRangeWarning,
+  releaseCommit,
+  releasesInRange,
+} from '../scripts/update-tether.ts';
+import {
+  GitHubError,
+  fetchSignedRelease,
+  releaseAssetName,
+  releaseAssetUrl,
+  verifyAttestation,
+} from '../scripts/release-asset.ts';
+import {
+  reportWorkflow,
+  SHIPPED_REVISION,
+  workflowRevision,
+  workflowRevisionAt,
+  workflowState,
+  WORKFLOW_PATH,
+} from '../scripts/workflow-check.ts';
 
-const WORKFLOW_HASH = 'a369c8e1628b'; // change only together with a plan for existing copies
+/** The type-stripping flag this run was started with (Node before 22.18 needs it), passed on to the updater. */
+const NODE_FLAGS = process.execArgv.filter((flag) => flag === '--experimental-strip-types');
+// execFileSync blocks the event loop, so no test timeout can end a child that hangs: each child has its own.
+const CHILD_TIMEOUT_MS = 60_000;
+
+/**
+ * Runs a copy's updater as its workflow does.
+ *
+ * @param {string} copy
+ * @param {string} from The release folder it installs.
+ * @param {NodeJS.ProcessEnv} [env]
+ * @returns What it printed.
+ */
+const runUpdater = (copy, from, env = process.env) =>
+  execFileSync(process.execPath, [...NODE_FLAGS, join(copy, 'scripts', 'update-tether.mjs'), '--from', from], {
+    encoding: 'utf8',
+    env,
+    timeout: CHILD_TIMEOUT_MS,
+  });
 
 const TAGS = ['v0.1.0', 'v0.2.0', 'v0.3.0', 'v0.3.1', 'v0.3.3', 'v0.3.2', 'v0.4.0', 'v1.0.0', 'not-a-version'];
+
+/**
+ * @param {string[]} tags
+ * @param {string} spec
+ */
+const pickVersion = (tags, spec) => releasesInRange(tags, spec)[0]?.join('.') ?? null;
 
 test('version ranges work like jsDelivr', () => {
   assert.equal(pickVersion(TAGS, '0.3'), '0.3.3');
@@ -20,43 +66,418 @@ test('version ranges work like jsDelivr', () => {
   assert.equal(pickVersion(TAGS, '0'), '0.4.0');
   assert.equal(pickVersion(TAGS, '0.9'), null);
   assert.throws(() => pickVersion(TAGS, '^0.3'), /TETHER_VERSION must be/);
+  assert.deepEqual(
+    releasesInRange(TAGS, '0.3').map((version) => version.join('.')),
+    ['0.3.3', '0.3.2', '0.3.1', '0.3.0'],
+    'newest first',
+  );
 });
 
-test('updating a copy replaces the code and keeps config, wrangler ids and TETHER_VERSION', async () => {
-  const root = new URL('..', import.meta.url).pathname;
-  const base = await mkdtemp(join(tmpdir(), 'tether-update-'));
+test('only v tags are releases: a tag without the v is never picked, since it could not be installed', () => {
+  assert.equal(pickVersion(['v0.6.0', '0.7.0'], 'latest'), '0.6.0');
+  assert.equal(pickVersion(['0.7.0'], '0.7'), null);
+});
+
+test('updating a copy replaces the code and keeps config, wrangler ids and TETHER_VERSION', async (t) => {
+  const root = fileURLToPath(new URL('..', import.meta.url));
+  const base = await tempFolder(t, 'tether-update-');
   const copy = join(base, 'copy');
   const release = join(base, 'release');
   // An "old" deployed copy: older version, customized mapping, Cloudflare's KV id.
   await mkdir(copy);
   await cp(join(root, 'scripts'), join(copy, 'scripts'), { recursive: true });
-  await mkdir(join(copy, 'src'));
+  await cp(join(root, 'src'), join(copy, 'src'), { recursive: true });
   await writeFile(join(copy, 'src', 'old.js'), 'old');
-  await writeFile(join(copy, 'package.json'), JSON.stringify({ name: '@occluze/tether-sync', version: '0.3.1' }));
-  await writeFile(join(copy, 'tether-sync.config.js'), 'export default { fields: { material: "metafield:custom.material" } };');
+  await writeFile(
+    join(copy, 'package.json'),
+    JSON.stringify({ name: '@occluze/tether-sync', version: '0.3.1', type: 'module' }),
+  );
+  await writeFile(
+    join(copy, 'tether-sync.config.js'),
+    'export default { fields: { material: "metafield:custom.material" } };',
+  );
   await writeFile(join(copy, 'wrangler.jsonc'), '{ "kv_namespaces": [{ "binding": "TETHER_SYNC", "id": "kv-123" }] }');
   await writeFile(join(copy, 'TETHER_VERSION'), '0.3\n');
   // The "new" release: this checkout.
-  await cp(root, release, { recursive: true, filter: (p) => !p.includes('node_modules') });
+  await cp(root, release, { recursive: true, filter: (source) => !source.includes('node_modules') });
 
-  const out = execFileSync('node', [join(copy, 'scripts', 'update-tether.mjs'), '--from', release], { encoding: 'utf8' });
-  const version = JSON.parse(await readFile(join(release, 'package.json'), 'utf8')).version;
+  const out = runUpdater(copy, release);
+  const version = stringAt(parseJson(await readFile(join(release, 'package.json'), 'utf8')), 'version');
   assert.match(out, new RegExp(`updated=${version.replace(/\./g, '\\.')}`));
   assert.ok(existsSync(join(copy, 'src', 'entry.js')), 'new code in place');
   assert.ok(!existsSync(join(copy, 'src', 'old.js')), 'old code removed');
-  assert.match(await readFile(join(copy, 'tether-sync.config.js'), 'utf8'), /metafield:custom\.material/, 'mapping kept');
+  assert.match(
+    await readFile(join(copy, 'tether-sync.config.js'), 'utf8'),
+    /metafield:custom\.material/,
+    'mapping kept',
+  );
   assert.match(await readFile(join(copy, 'wrangler.jsonc'), 'utf8'), /kv-123/, 'Cloudflare ids kept');
   assert.equal((await readFile(join(copy, 'TETHER_VERSION'), 'utf8')).trim(), '0.3');
-  assert.ok(!existsSync(join(copy, '.github')), 'workflow files are never touched (GitHub refuses that from an Action)');
+  assert.ok(
+    !existsSync(join(copy, '.github')),
+    'workflow files are never touched (GitHub refuses that from an Action)',
+  );
   assert.ok(existsSync(join(copy, 'scripts', 'update-tether.mjs')), 'the updater script updates itself');
+  assert.deepEqual(
+    (await readdir(copy)).filter((name) => name.startsWith('.tether-update-')),
+    [],
+    'the staging folder is removed',
+  );
 
-  const again = execFileSync('node', [join(copy, 'scripts', 'update-tether.mjs'), '--from', release], { encoding: 'utf8' });
+  const again = runUpdater(copy, release);
   assert.match(again, /up to date/);
+  assert.equal(workflowVersion(out), version, 'the workflow reads the new version');
+  assert.equal(workflowVersion(again), '', 'an empty version tells every workflow there is nothing to commit');
 });
 
-test('the shipped workflow stays identical, so copies made with any earlier version keep updating', async () => {
-  // Copies from 0.3.3/0.3.4 copied .github/ too: a changed workflow would block their next update.
-  const { createHash } = await import('node:crypto');
-  const wf = await readFile(new URL('../.github/workflows/update-tether.yml', import.meta.url));
-  assert.equal(createHash('sha256').update(wf).digest('hex').slice(0, 12), WORKFLOW_HASH);
+test('a copy without TETHER_VERSION takes the minor version it updated to, not the one it had', async (t) => {
+  const root = fileURLToPath(new URL('..', import.meta.url));
+  const base = await tempFolder(t, 'tether-update-');
+  const copy = join(base, 'copy');
+  const release = join(base, 'release');
+  await mkdir(copy);
+  await cp(join(root, 'scripts'), join(copy, 'scripts'), { recursive: true });
+  await cp(join(root, 'src'), join(copy, 'src'), { recursive: true });
+  await writeFile(join(copy, 'package.json'), JSON.stringify({ name: '@occluze/tether-sync', version: '0.0.1' }));
+  await cp(root, release, { recursive: true, filter: (source) => !source.includes('node_modules') });
+  const version = stringAt(parseJson(await readFile(join(release, 'package.json'), 'utf8')), 'version');
+
+  runUpdater(copy, release);
+  const minor = version.split('.').slice(0, 2).join('.');
+  assert.equal(await readFile(join(copy, 'TETHER_VERSION'), 'utf8'), `${minor}\n`);
+});
+
+test('a copy whose own version is outside its range is warned that the range never updates it', () => {
+  assert.equal(outsideRangeWarning([0, 6, 3], '0.6'), null);
+  assert.equal(outsideRangeWarning([0, 7, 2], 'latest'), null);
+  assert.match(
+    outsideRangeWarning([0, 7, 2], '0.6') ?? '',
+    /^::warning title=Tether version outside its range::this copy is 0\.7\.2, outside its TETHER_VERSION range 0\.6,/,
+  );
+});
+
+/**
+ * What every shipped workflow, old and new, takes from the script's output: the value of the last `updated=` line
+ * (`grep '^updated=' | tail -1 | cut -d= -f2`), empty when nothing changed.
+ *
+ * @param {string} output
+ */
+function workflowVersion(output) {
+  const lines = output.split(/\r?\n/).filter((line) => line.startsWith('updated='));
+  const last = lines.at(-1);
+  assert.ok(last, 'the output has an updated= line');
+  return last.split('=')[1];
+}
+
+test('a failed update exits non-zero, and --from without a folder is refused', () => {
+  const script = fileURLToPath(new URL('../scripts/update-tether.ts', import.meta.url));
+  assert.throws(
+    () =>
+      execFileSync(process.execPath, [...NODE_FLAGS, script, '--from'], {
+        encoding: 'utf8',
+        stdio: 'pipe',
+        timeout: CHILD_TIMEOUT_MS,
+      }),
+    /** @param {Error & import('node:child_process').SpawnSyncReturns<string>} error What execFileSync throws. */
+    (error) => error.status === 1 && error.stderr.includes('--from needs the folder'),
+  );
+});
+
+const SHA = 'a'.repeat(40);
+/**
+ * A fake GitHub API: path -> answer.
+ *
+ * @param {Record<string, unknown>} answers
+ * @returns {import('../scripts/release-asset.ts').GitHubGet}
+ */
+const github = (answers) => async (path) => {
+  if (!(path in answers)) throw new Error(`unexpected ${path}`);
+  return answers[path];
+};
+
+test('updater: reads every page of tags, with the commit each points at', async () => {
+  /**
+   * @param {number} from
+   * @param {number} count
+   */
+  const page = (from, count) =>
+    Array.from({ length: count }, (_, i) => ({ name: `v0.${from + i}.0`, commit: { sha: SHA } }));
+  const get = github({
+    '/repos/o/r/tags?per_page=100&page=1': page(0, 100),
+    '/repos/o/r/tags?per_page=100&page=2': page(100, 3),
+    '/repos/o/r/tags?per_page=100&page=3': [],
+  });
+  const tags = await listTags(get, 'o/r');
+  assert.equal(tags.length, 103);
+  assert.equal(
+    pickVersion(
+      tags.map((tag) => tag.name),
+      'latest',
+    ),
+    '0.102.0',
+    'the newest tag is past the first page',
+  );
+});
+
+test('updater: installs a tag only when its commit is on the default branch', async () => {
+  const tags = [{ name: 'v0.6.8', sha: SHA }];
+  /** @param {string} status How the tag's commit compares with the default branch. */
+  const answers = (status) =>
+    github({ '/repos/o/r': { default_branch: 'main' }, [`/repos/o/r/compare/${SHA}...main`]: { status } });
+  assert.equal(await releaseCommit(answers('ahead'), 'o/r', tags, '0.6.8'), SHA);
+  assert.equal(await releaseCommit(answers('identical'), 'o/r', tags, '0.6.8'), SHA);
+  await assert.rejects(releaseCommit(answers('diverged'), 'o/r', tags, '0.6.8'), /not on o\/r's main branch/);
+  await assert.rejects(releaseCommit(answers('behind'), 'o/r', tags, '0.6.8'), /not installed/);
+  await assert.rejects(releaseCommit(answers('ahead'), 'o/r', tags, '0.6.9'), /no tag/);
+});
+
+const RELEASE = { upstream: 'o/r', version: '0.7.1', sha: SHA };
+
+/** @typedef {Parameters<typeof verifyAttestation>[0]} RunCommand */
+
+/**
+ * A fake command runner: records each call and answers with `result`.
+ *
+ * @param {ReturnType<RunCommand>} result
+ */
+function fakeGh(result) {
+  /** @type {string[][]} */
+  const calls = [];
+  /** @type {RunCommand} */
+  const run = (command, args) => {
+    calls.push([command, ...args]);
+    return result;
+  };
+  return { run, calls };
+}
+
+test('release asset: found by its name on the GitHub Release of the tag', async () => {
+  const get = github({
+    '/repos/o/r/releases/tags/v0.7.1': {
+      assets: [
+        { name: 'tether.min.js', browser_download_url: 'https://x.test/tether.min.js' },
+        { name: releaseAssetName('0.7.1'), browser_download_url: 'https://x.test/server.tar.gz' },
+      ],
+    },
+  });
+  assert.equal(await releaseAssetUrl(get, 'o/r', '0.7.1'), 'https://x.test/server.tar.gz');
+});
+
+test('release asset: none while the Release is missing or lacks it; any other GitHub error is thrown', async () => {
+  /** @type {import('../scripts/release-asset.ts').GitHubGet} */
+  const missing = async (path) => {
+    throw new GitHubError(path, 404);
+  };
+  assert.equal(await releaseAssetUrl(missing, 'o/r', '0.7.1'), null);
+  const noAsset = github({ '/repos/o/r/releases/tags/v0.7.1': { assets: [] } });
+  assert.equal(await releaseAssetUrl(noAsset, 'o/r', '0.7.1'), null);
+  /** @type {import('../scripts/release-asset.ts').GitHubGet} */
+  const limited = async (path) => {
+    throw new GitHubError(path, 403);
+  };
+  await assert.rejects(releaseAssetUrl(limited, 'o/r', '0.7.1'), /GitHub \/repos\/o\/r\/releases\/tags\/v0\.7\.1: 403/);
+});
+
+test('updater: a tag whose Release has no signed asset yet is skipped with a warning, for the newest one that has', async (context) => {
+  const log = context.mock.method(console, 'log', () => {});
+  const get = github({
+    '/repos/o/r/releases/tags/v0.7.2': { assets: [] },
+    '/repos/o/r/releases/tags/v0.7.1': {
+      assets: [{ name: releaseAssetName('0.7.1'), browser_download_url: 'https://x.test/0.7.1.tar.gz' }],
+    },
+  });
+  const candidates = releasesInRange(['v0.7.2', 'v0.7.1'], '0.7');
+  assert.deepEqual(await newestPublished(get, 'o/r', candidates), {
+    version: '0.7.1',
+    assetUrl: 'https://x.test/0.7.1.tar.gz',
+  });
+  const warning = String(log.mock.calls[0]?.arguments[0]);
+  assert.match(
+    warning,
+    /^::warning title=[^:]+::v0\.7\.2 is tagged, but its GitHub Release has no tether-server-0\.7\.2\.tar\.gz/,
+  );
+  assert.equal(log.mock.callCount(), 1);
+  assert.equal(await newestPublished(get, 'o/r', releasesInRange(['v0.7.2'], '0.7')), null, 'nothing to install');
+});
+
+test('attestation: gh verifies the file against the upstream release workflow and the tag commit', () => {
+  const gh = fakeGh({ kind: 'exited', status: 0, output: 'Verification succeeded!' });
+  assert.deepEqual(verifyAttestation(gh.run, '/tmp/a.tgz', RELEASE, 'require'), { kind: 'verified' });
+  assert.deepEqual(gh.calls, [
+    [
+      'gh',
+      'attestation',
+      'verify',
+      '/tmp/a.tgz',
+      '--repo',
+      'o/r',
+      '--signer-workflow',
+      'o/r/.github/workflows/release.yml',
+      '--source-ref',
+      'refs/tags/v0.7.1',
+      '--source-digest',
+      SHA,
+    ],
+  ]);
+});
+
+test('attestation: a failed check is refused, even with --allow-unverified', () => {
+  const gh = fakeGh({ kind: 'exited', status: 1, output: 'no matching attestations' });
+  for (const policy of /** @type {const} */ (['require', 'allow-unverified'])) {
+    assert.throws(
+      () => verifyAttestation(gh.run, 'a.tgz', RELEASE, policy),
+      /failed its attestation check: not installed\nno matching attestations/,
+    );
+  }
+});
+
+test('attestation: without gh it refuses unless --allow-unverified is given', () => {
+  const gh = fakeGh({ kind: 'missing' });
+  assert.throws(
+    () => verifyAttestation(gh.run, 'a.tgz', RELEASE, 'require'),
+    /gh\) is not installed.*--allow-unverified/s,
+  );
+  assert.deepEqual(verifyAttestation(gh.run, 'a.tgz', RELEASE, 'allow-unverified'), { kind: 'unverified' });
+});
+
+/**
+ * A release archive laid out like the release workflow's: `tether-server-<version>/server/…`.
+ *
+ * @param {string} base The folder it is built in.
+ */
+async function releaseArchive(base) {
+  const build = join(base, 'build');
+  await mkdir(join(build, 'tether-server-0.7.1', 'server'), { recursive: true });
+  await writeFile(join(build, 'tether-server-0.7.1', 'server', 'package.json'), JSON.stringify({ version: '0.7.1' }));
+  const archive = join(base, 'built.tgz');
+  // Relative paths: Windows' tar reads `C:` in an absolute path as a remote host.
+  execFileSync('tar', ['-czf', 'built.tgz', '-C', 'build', 'tether-server-0.7.1'], {
+    cwd: base,
+    timeout: CHILD_TIMEOUT_MS,
+  });
+  return archive;
+}
+
+test('a signed release is unpacked only after its attestation verifies', async (t) => {
+  const base = await tempFolder(t, 'tether-signed-');
+  const archive = await releaseArchive(base);
+  const release = { ...RELEASE, assetUrl: 'https://x.test/a' };
+  /**
+   * @param {string} url
+   * @param {string} dir
+   */
+  const download = async (url, dir) => {
+    assert.equal(url, 'https://x.test/a');
+    const file = join(dir, 'release.tgz');
+    await cp(archive, file);
+    return file;
+  };
+  const refused = join(base, 'refused');
+  await mkdir(refused);
+  const failing = { download, run: fakeGh({ kind: 'exited', status: 1, output: 'bad' }).run };
+  await assert.rejects(fetchSignedRelease(failing, release, refused, 'require'), /attestation check/);
+  assert.ok(!existsSync(join(refused, 'server')), 'nothing unpacked');
+
+  const accepted = join(base, 'accepted');
+  await mkdir(accepted);
+  const passing = { download, run: fakeGh({ kind: 'exited', status: 0, output: '' }).run };
+  const server = await fetchSignedRelease(passing, release, accepted, 'require');
+  assert.equal(stringAt(parseJson(await readFile(join(server, 'package.json'), 'utf8')), 'version'), '0.7.1');
+});
+
+test('workflow revision: the line in the file, 1 without it', () => {
+  assert.equal(workflowRevision('name: Update Tether\n'), 1);
+  assert.equal(workflowRevision('# x\r\n# Tether workflow revision: 3\r\nname: y\r\n'), 3);
+});
+
+/**
+ * A folder holding a workflow file with `text`, or no workflow when `text` is null.
+ *
+ * @param {string} base
+ * @param {string} name
+ * @param {string | null} text
+ */
+async function withWorkflow(base, name, text) {
+  const dir = join(base, name);
+  await mkdir(join(dir, '.github', 'workflows'), { recursive: true });
+  if (text !== null) await writeFile(join(dir, WORKFLOW_PATH), text);
+  return dir;
+}
+
+test('workflow check: outdated only when the release ships a higher revision', async (t) => {
+  const base = await tempFolder(t, 'tether-workflow-');
+  const old = await withWorkflow(base, 'old', "on:\n  schedule:\n    - cron: '23 5 * * *'\n");
+  const same = await withWorkflow(base, 'same', 'name: Update Tether\n');
+  const newer = await withWorkflow(base, 'newer', '# Tether workflow revision: 2\n');
+  const none = await withWorkflow(base, 'none', null);
+  /** @param {string} release The release's folder. */
+  const against = async (release) => workflowState(old, await workflowRevisionAt(release));
+  assert.deepEqual(await against(newer), { kind: 'outdated', copy: 1, release: 2 });
+  assert.deepEqual(await against(same), { kind: 'current' }, 'an edited cron is not outdated');
+  assert.deepEqual(await against(none), { kind: 'not-compared' }, 'a release folder without the workflow');
+  assert.deepEqual(await workflowState(newer, 1), { kind: 'current' });
+  assert.deepEqual(await workflowState(none, 2), { kind: 'not-compared' }, 'a copy without Actions');
+});
+
+test('workflow check: an outdated workflow gets a GitHub warning and the manual step in the job summary', async (context) => {
+  const base = await tempFolder(context, 'tether-summary-');
+  const summary = join(base, 'summary.md');
+  const previous = process.env['GITHUB_STEP_SUMMARY'];
+  process.env['GITHUB_STEP_SUMMARY'] = summary;
+  context.after(() => {
+    if (previous === undefined) delete process.env['GITHUB_STEP_SUMMARY'];
+    else process.env['GITHUB_STEP_SUMMARY'] = previous;
+  });
+  const log = context.mock.method(console, 'log', () => {});
+  await reportWorkflow({ kind: 'current' }, '0.7.1', 'https://x.test');
+  assert.equal(log.mock.callCount(), 0);
+  assert.ok(!existsSync(summary));
+  await reportWorkflow({ kind: 'outdated', copy: 1, release: 2 }, '0.7.1', 'https://x.test/update-tether.yml');
+  const warning = String(log.mock.calls[0]?.arguments[0]);
+  assert.match(warning, /^::warning title=[^:]+::/);
+  assert.match(warning, /revision 1, Tether 0\.7\.1 ships revision 2/);
+  const step =
+    'Copy the Tether 0.7.1 workflow file (https://x.test/update-tether.yml) over .github/workflows/update-tether.yml ' +
+    'in this repository and commit it, once, by hand';
+  assert.ok(warning.includes(step), 'the warning gives the one-time manual step');
+  const summaryText = await readFile(summary, 'utf8');
+  assert.ok(summaryText.startsWith(`### Update the workflow file once\n\n${step}`), 'and so does the job summary');
+});
+
+test('an update run by its workflow warns when the copy needs the release workflow, and keeps the output contract', async (t) => {
+  const root = fileURLToPath(new URL('..', import.meta.url));
+  const base = await tempFolder(t, 'tether-outdated-');
+  const copy = join(base, 'copy');
+  const release = join(base, 'release');
+  await cp(root, release, { recursive: true, filter: (source) => !source.includes('node_modules') });
+  await cp(release, copy, { recursive: true });
+  await writeFile(join(copy, 'package.json'), JSON.stringify({ name: '@occluze/tether-sync', version: '0.3.1' }));
+  const copyWorkflow = await readFile(join(copy, WORKFLOW_PATH), 'utf8');
+  await writeFile(join(release, WORKFLOW_PATH), `# Tether workflow revision: 99\n${copyWorkflow}`);
+  const summary = join(base, 'summary.md');
+
+  const out = runUpdater(copy, release, { ...process.env, GITHUB_STEP_SUMMARY: summary });
+  assert.match(out, /^::warning title=Tether workflow file outdated::/m);
+  assert.match(await readFile(summary, 'utf8'), /Update the workflow file once/);
+  assert.equal(await readFile(join(copy, WORKFLOW_PATH), 'utf8'), copyWorkflow, 'the workflow file is never touched');
+  const version = stringAt(parseJson(await readFile(join(release, 'package.json'), 'utf8')), 'version');
+  assert.equal(workflowVersion(out), version);
+});
+
+test('an update run with nothing to install still warns while the copy has an older workflow', async (t) => {
+  const root = fileURLToPath(new URL('..', import.meta.url));
+  const base = await tempFolder(t, 'tether-current-');
+  const copy = join(base, 'copy');
+  await cp(root, copy, { recursive: true, filter: (source) => !source.includes('node_modules') });
+  await mkdir(join(copy, '.github', 'workflows'), { recursive: true });
+  await writeFile(join(copy, WORKFLOW_PATH), 'name: Update Tether\n');
+  const version = stringAt(parseJson(await readFile(join(copy, 'package.json'), 'utf8')), 'version');
+
+  const out = runUpdater(copy, copy, { ...process.env, GITHUB_STEP_SUMMARY: join(base, 'summary.md') });
+  assert.match(out, /up to date/);
+  assert.ok(
+    out.includes(`revision 1, Tether ${version} ships revision ${String(SHIPPED_REVISION)}`),
+    'a copy brought to this release by an older updater is told too',
+  );
+  assert.equal(workflowVersion(out), '');
 });

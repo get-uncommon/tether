@@ -1,0 +1,16 @@
+dist/
+# What an interrupted build leaves beside its output folder (scripts/replace-folder.ts).
+.dist-building-*/
+.test-dist-building-*/
+node_modules/
+package-lock.json
+examples/astro/.astro/
+test-results/
+playwright-report/
+# Copies of upstream skills and agents, pinned to a commit (.claude/skills/SOURCES.md): they stay byte for byte.
+.claude/skills/
+.claude/agents/
+# Deployed copies cannot update their own workflow, so it changes only on purpose (test/update-workflow.test.js), and
+# the fixture is v0.6.8's file byte for byte.
+server/.github/workflows/update-tether.yml
+test/workflows/
